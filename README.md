@@ -61,6 +61,15 @@ Pull requests are nice.
 
  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
+## MacOS Install (experimental)
+
+1. Download the Linux/Mac Tarbal file from: https://radegast.life/downloads/ and decompress it in a directory of your choice.
+2. Using Homebrew (https://brew.sh/) install the cask instead of the brew formula (the formula seems not to include the 32 bit code needed):
+  `brew cask install mono-mdk`
+3. Navigate to the directory you choosed in step 1, and launch the application with the --arch=32 option: 
+  `mono --arch=32 Radegast.exe`
+4. It will take a minute to start, but it should launch.
+
 ## Acknowledgments
 
 Based on SLeek
