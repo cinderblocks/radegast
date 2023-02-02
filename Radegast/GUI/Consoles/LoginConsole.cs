@@ -148,7 +148,7 @@ namespace Radegast
                 }
                 else
                 {
-                    var passwd = Utils.MD5(passTxt.Length > 16 
+                    var passwd = RadegastUtils.Utils.MD5(passTxt.Length > 16
                         ? passTxt.Substring(0, 16) : passTxt);
                     savedLogin.Password = passwd;
                     globalSettings["password"] = passwd;

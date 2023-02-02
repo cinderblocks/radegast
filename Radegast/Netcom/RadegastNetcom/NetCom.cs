@@ -265,8 +265,8 @@ namespace Radegast
             }
             else
             {
-                password = Utils.MD5(loginOptions.Password.Length > 16
-                    ? loginOptions.Password.Substring(0, 16) 
+                password = RadegastUtils.Utils.MD5(loginOptions.Password.Length > 16
+                    ? loginOptions.Password.Substring(0, 16)
                     : loginOptions.Password);
             }
 
