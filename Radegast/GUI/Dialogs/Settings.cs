@@ -125,6 +125,8 @@ namespace Radegast
 
             if (!s.ContainsKey("highlight_on_group_im")) s["highlight_on_group_im"] = true;
 
+            if (!s.ContainsKey("group_im_sound")) s["group_im_sound"] = true;
+
             if (!s.ContainsKey("av_name_link")) s["av_name_link"] = false;
 
             if (!s.ContainsKey("on_script_question"))
@@ -372,6 +374,12 @@ namespace Radegast
                     s["av_name_link"] = cbNameLinks.Checked;
                 };
             }
+
+            cbGroupIMSound.Checked = s["group_im_sound"];
+            cbGroupIMSound.CheckedChanged += (sender, e) =>
+            {
+                s["group_im_sound"] = cbGroupIMSound.Checked;
+            };
 
             cbShowScriptErrors.Checked = s["show_script_errors"];
             cbShowScriptErrors.CheckedChanged += (sender, e) =>
