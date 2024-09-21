@@ -693,7 +693,10 @@ namespace Radegast
                 return;
             }
 
-            instance.MediaManager.PlayUISound(UISounds.IM);
+            if (instance.GlobalSettings["group_im_sound"].AsBoolean())
+            {
+                instance.MediaManager.PlayUISound(UISounds.IM);
+            }
 
             Control active = FindFocusedControl(instance.MainForm);
 
