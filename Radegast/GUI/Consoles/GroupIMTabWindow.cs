@@ -47,7 +47,7 @@ namespace Radegast
             this.instance = instance;
             SessionId = session;
 
-            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Group, SessionId, sessionName);
+            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText, autoScrollCB), IMTextManagerType.Group, SessionId, sessionName);
 
             btnShow.Text = "Show";
             chatSplit.Panel2Collapsed = true;

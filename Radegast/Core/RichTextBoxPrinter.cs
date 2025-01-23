@@ -22,20 +22,31 @@ using System;
 using System.Text.RegularExpressions;
 using System.Drawing;
 using System.Windows.Forms;
+using OpenMetaverse.Packets;
 
 namespace Radegast
 {
     public class RichTextBoxPrinter : ITextPrinter
     {
+        [System.Runtime.InteropServices.DllImport("User32.dll")]
+        extern static int GetScrollPos(IntPtr hWnd, int nBar);
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
+
+        private const int SB_VERT = 1; // vertical scroll bar
+
         private RRichTextBox rtb;
+        private CheckBox autoScrollCB;
         private bool mono;
         private static readonly string urlRegexString = @"(https?://[^ \r\n]+)|(\[secondlife://[^ \]\r\n]* ?(?:[^\]\r\n]*)])|(secondlife://[^ \r\n]*)";
         Regex urlRegex;
         private SlUriParser uriParser;
 
-        public RichTextBoxPrinter(RRichTextBox textBox)
+        public RichTextBoxPrinter(RRichTextBox textBox, CheckBox autoscrollCB)
         {
             rtb = textBox;
+            autoScrollCB = autoscrollCB;
 
             // Are we running mono?
             mono = Type.GetType("Mono.Runtime") != null;
@@ -48,7 +59,6 @@ namespace Radegast
 
             uriParser = new SlUriParser();
             urlRegex = new Regex(urlRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
         }
 
         public void InsertLink(string text)
@@ -82,15 +92,24 @@ namespace Radegast
             // ...
             for (linePartIndex = 0; linePartIndex < lineParts.Length - 1; linePartIndex += 2)
             {
-                rtb.AppendText(lineParts[linePartIndex]);
+                AppendTextWithAntiScroll(lineParts[linePartIndex]);
                 Color c = ForeColor;
-                rtb.InsertLink(uriParser.GetLinkName(lineParts[linePartIndex + 1]), lineParts[linePartIndex+1]);
+                rtb.InsertLink(uriParser.GetLinkName(lineParts[linePartIndex + 1]), lineParts[linePartIndex + 1]);
                 ForeColor = c;
             }
+
             if (linePartIndex != lineParts.Length)
             {
-                rtb.AppendText(lineParts[linePartIndex]);
+                AppendTextWithAntiScroll(lineParts[linePartIndex]);
             }
+        }
+
+        private void AppendTextWithAntiScroll(string text)
+        {
+
+            int scrollPos = GetScrollPos(rtb.Handle, SB_VERT);
+            rtb.AppendText(text);
+            if (!autoScrollCB.Checked) SetScrollPos(rtb.Handle, SB_VERT, scrollPos, true);
         }
 
         #region ITextPrinter Members

@@ -75,6 +75,8 @@ namespace Radegast
             this.btnShow = new System.Windows.Forms.Button();
             this.pnlChatInput = new System.Windows.Forms.Panel();
             this.cbxInput = new Radegast.ChatInputBox();
+            this.autoScrollCB = new System.Windows.Forms.CheckBox();
+            ((System.ComponentModel.ISupportInitialize)(this.chatSplit)).BeginInit();
             this.chatSplit.Panel1.SuspendLayout();
             this.chatSplit.Panel2.SuspendLayout();
             this.chatSplit.SuspendLayout();
@@ -100,9 +102,9 @@ namespace Radegast
             // 
             this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSend.Enabled = false;
-            this.btnSend.Location = new System.Drawing.Point(387, 3);
+            this.btnSend.Location = new System.Drawing.Point(328, 2);
             this.btnSend.Name = "btnSend";
-            this.btnSend.Size = new System.Drawing.Size(55, 23);
+            this.btnSend.Size = new System.Drawing.Size(45, 23);
             this.btnSend.TabIndex = 1;
             this.btnSend.Text = "Send";
             this.btnSend.UseVisualStyleBackColor = true;
@@ -154,13 +156,13 @@ namespace Radegast
             this.ctxBan,
             this.ctxMute});
             this.avatarContext.Name = "avatarContext";
-            this.avatarContext.Size = new System.Drawing.Size(158, 202);
+            this.avatarContext.Size = new System.Drawing.Size(162, 180);
             this.avatarContext.Opening += new System.ComponentModel.CancelEventHandler(this.avatarContext_Opening);
             // 
             // ctxProfile
             // 
             this.ctxProfile.Name = "ctxProfile";
-            this.ctxProfile.Size = new System.Drawing.Size(157, 22);
+            this.ctxProfile.Size = new System.Drawing.Size(161, 22);
             this.ctxProfile.Text = "Profile";
             this.ctxProfile.ToolTipText = " Profile ";
             this.ctxProfile.Click += new System.EventHandler(this.ctxProfile_Click);
@@ -169,7 +171,7 @@ namespace Radegast
             // 
             this.ctxPay.Enabled = false;
             this.ctxPay.Name = "ctxPay";
-            this.ctxPay.Size = new System.Drawing.Size(157, 22);
+            this.ctxPay.Size = new System.Drawing.Size(161, 22);
             this.ctxPay.Text = "Pay";
             this.ctxPay.ToolTipText = " Pay ";
             this.ctxPay.Click += new System.EventHandler(this.ctxPay_Click);
@@ -177,7 +179,7 @@ namespace Radegast
             // ctxStartIM
             // 
             this.ctxStartIM.Name = "ctxStartIM";
-            this.ctxStartIM.Size = new System.Drawing.Size(157, 22);
+            this.ctxStartIM.Size = new System.Drawing.Size(161, 22);
             this.ctxStartIM.Text = "Start IM";
             this.ctxStartIM.ToolTipText = " Start IM ";
             this.ctxStartIM.Click += new System.EventHandler(this.ctxStartIM_Click);
@@ -185,7 +187,7 @@ namespace Radegast
             // ctxOfferTP
             // 
             this.ctxOfferTP.Name = "ctxOfferTP";
-            this.ctxOfferTP.Size = new System.Drawing.Size(157, 22);
+            this.ctxOfferTP.Size = new System.Drawing.Size(161, 22);
             this.ctxOfferTP.Text = "Offer Teleport";
             this.ctxOfferTP.ToolTipText = " Offer Teleport ";
             this.ctxOfferTP.Click += new System.EventHandler(this.ctxOfferTP_Click);
@@ -193,7 +195,7 @@ namespace Radegast
             // ctxReqestLure
             // 
             this.ctxReqestLure.Name = "ctxReqestLure";
-            this.ctxReqestLure.Size = new System.Drawing.Size(157, 22);
+            this.ctxReqestLure.Size = new System.Drawing.Size(161, 22);
             this.ctxReqestLure.Text = "Request Teleport";
             this.ctxReqestLure.ToolTipText = " Request Teleport ";
             this.ctxReqestLure.Click += new System.EventHandler(this.ctxReqestLure_Click);
@@ -201,7 +203,7 @@ namespace Radegast
             // ctxEject
             // 
             this.ctxEject.Name = "ctxEject";
-            this.ctxEject.Size = new System.Drawing.Size(157, 22);
+            this.ctxEject.Size = new System.Drawing.Size(161, 22);
             this.ctxEject.Text = "Eject";
             this.ctxEject.ToolTipText = " Eject ";
             this.ctxEject.Click += new System.EventHandler(this.ctxEject_Click);
@@ -209,7 +211,7 @@ namespace Radegast
             // ctxBan
             // 
             this.ctxBan.Name = "ctxBan";
-            this.ctxBan.Size = new System.Drawing.Size(157, 22);
+            this.ctxBan.Size = new System.Drawing.Size(161, 22);
             this.ctxBan.Text = "Ban";
             this.ctxBan.ToolTipText = " Ban ";
             this.ctxBan.Visible = false;
@@ -218,7 +220,7 @@ namespace Radegast
             // ctxMute
             // 
             this.ctxMute.Name = "ctxMute";
-            this.ctxMute.Size = new System.Drawing.Size(157, 22);
+            this.ctxMute.Size = new System.Drawing.Size(161, 22);
             this.ctxMute.Text = "Mute";
             this.ctxMute.ToolTipText = " Mute ";
             this.ctxMute.Click += new System.EventHandler(this.ctxMute_Click);
@@ -226,9 +228,9 @@ namespace Radegast
             // btnShow
             // 
             this.btnShow.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.btnShow.Location = new System.Drawing.Point(445, 3);
+            this.btnShow.Location = new System.Drawing.Point(379, 2);
             this.btnShow.Name = "btnShow";
-            this.btnShow.Size = new System.Drawing.Size(55, 23);
+            this.btnShow.Size = new System.Drawing.Size(45, 23);
             this.btnShow.TabIndex = 2;
             this.btnShow.Text = "Show";
             this.btnShow.UseVisualStyleBackColor = true;
@@ -236,6 +238,7 @@ namespace Radegast
             // 
             // pnlChatInput
             // 
+            this.pnlChatInput.Controls.Add(this.autoScrollCB);
             this.pnlChatInput.Controls.Add(this.cbxInput);
             this.pnlChatInput.Controls.Add(this.btnSend);
             this.pnlChatInput.Controls.Add(this.btnShow);
@@ -251,11 +254,24 @@ namespace Radegast
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cbxInput.Location = new System.Drawing.Point(0, 4);
             this.cbxInput.Name = "cbxInput";
-            this.cbxInput.Size = new System.Drawing.Size(381, 21);
+            this.cbxInput.Size = new System.Drawing.Size(322, 21);
             this.cbxInput.TabIndex = 0;
             this.cbxInput.SizeChanged += new System.EventHandler(this.cbxInput_SizeChanged);
             this.cbxInput.TextChanged += new System.EventHandler(this.cbxInput_TextChanged);
             this.cbxInput.KeyDown += new System.Windows.Forms.KeyEventHandler(this.cbxInput_KeyDown);
+            // 
+            // autoScrollCB
+            // 
+            this.autoScrollCB.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.autoScrollCB.AutoSize = true;
+            this.autoScrollCB.Checked = true;
+            this.autoScrollCB.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.autoScrollCB.Location = new System.Drawing.Point(430, 5);
+            this.autoScrollCB.Name = "autoScrollCB";
+            this.autoScrollCB.Size = new System.Drawing.Size(73, 17);
+            this.autoScrollCB.TabIndex = 13;
+            this.autoScrollCB.Text = "Autoscroll";
+            this.autoScrollCB.UseVisualStyleBackColor = true;
             // 
             // GroupIMTabWindow
             // 
@@ -269,6 +285,7 @@ namespace Radegast
             this.VisibleChanged += new System.EventHandler(this.cbxInput_VisibleChanged);
             this.chatSplit.Panel1.ResumeLayout(false);
             this.chatSplit.Panel2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)(this.chatSplit)).EndInit();
             this.chatSplit.ResumeLayout(false);
             this.avatarContext.ResumeLayout(false);
             this.pnlChatInput.ResumeLayout(false);
@@ -295,6 +312,6 @@ namespace Radegast
         private System.Windows.Forms.ToolStripMenuItem ctxEject;
         private System.Windows.Forms.ToolStripMenuItem ctxBan;
         private System.Windows.Forms.ToolStripMenuItem ctxMute;
-
+        private System.Windows.Forms.CheckBox autoScrollCB;
     }
 }

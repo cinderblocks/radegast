@@ -46,7 +46,7 @@ namespace Radegast
             SessionId = session;
             TargetName = toName;
 
-            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Agent, SessionId, toName);
+            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText, autoScrollCB), IMTextManagerType.Agent, SessionId, toName);
 
             AddNetcomEvents();
 

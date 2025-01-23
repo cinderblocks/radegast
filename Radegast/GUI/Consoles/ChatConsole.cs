@@ -66,7 +66,7 @@ namespace Radegast
             netcom.ClientLoggedOut += netcom_ClientLoggedOut;
             RegisterClientEvents(client);
 
-            ChatManager = new ChatTextManager(instance, new RichTextBoxPrinter(rtbChat));
+            ChatManager = new ChatTextManager(instance, new RichTextBoxPrinter(rtbChat, autoScrollCB));
             ChatManager.PrintStartupMessage();
 
             this.instance.MainForm.Load += MainForm_Load;

@@ -58,10 +58,12 @@ namespace Radegast
         /// </summary>
         private void InitializeComponent()
         {
+            this.components = new System.ComponentModel.Container();
             this.rtbIMText = new Radegast.RRichTextBox();
             this.btnSend = new System.Windows.Forms.Button();
             this.cbxInput = new Radegast.ChatInputBox();
             this.pnlChatInput = new System.Windows.Forms.Panel();
+            this.autoScrollCB = new System.Windows.Forms.CheckBox();
             this.pnlChatInput.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -83,9 +85,9 @@ namespace Radegast
             // 
             this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSend.Enabled = false;
-            this.btnSend.Location = new System.Drawing.Point(423, 3);
+            this.btnSend.Location = new System.Drawing.Point(363, 3);
             this.btnSend.Name = "btnSend";
-            this.btnSend.Size = new System.Drawing.Size(75, 23);
+            this.btnSend.Size = new System.Drawing.Size(55, 23);
             this.btnSend.TabIndex = 1;
             this.btnSend.Text = "Send";
             this.btnSend.UseVisualStyleBackColor = true;
@@ -97,7 +99,7 @@ namespace Radegast
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cbxInput.Location = new System.Drawing.Point(0, 4);
             this.cbxInput.Name = "cbxInput";
-            this.cbxInput.Size = new System.Drawing.Size(417, 21);
+            this.cbxInput.Size = new System.Drawing.Size(357, 21);
             this.cbxInput.TabIndex = 0;
             this.cbxInput.SizeChanged += new System.EventHandler(this.cbxInput_SizeChanged);
             this.cbxInput.TextChanged += new System.EventHandler(this.cbxInput_TextChanged);
@@ -105,6 +107,7 @@ namespace Radegast
             // 
             // pnlChatInput
             // 
+            this.pnlChatInput.Controls.Add(this.autoScrollCB);
             this.pnlChatInput.Controls.Add(this.cbxInput);
             this.pnlChatInput.Controls.Add(this.btnSend);
             this.pnlChatInput.Dock = System.Windows.Forms.DockStyle.Bottom;
@@ -112,6 +115,19 @@ namespace Radegast
             this.pnlChatInput.Name = "pnlChatInput";
             this.pnlChatInput.Size = new System.Drawing.Size(500, 28);
             this.pnlChatInput.TabIndex = 4;
+            // 
+            // autoScrollCB
+            // 
+            this.autoScrollCB.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.autoScrollCB.AutoSize = true;
+            this.autoScrollCB.Checked = true;
+            this.autoScrollCB.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.autoScrollCB.Location = new System.Drawing.Point(424, 5);
+            this.autoScrollCB.Name = "autoScrollCB";
+            this.autoScrollCB.Size = new System.Drawing.Size(73, 17);
+            this.autoScrollCB.TabIndex = 13;
+            this.autoScrollCB.Text = "Autoscroll";
+            this.autoScrollCB.UseVisualStyleBackColor = true;
             // 
             // ConferenceIMTabWindow
             // 
@@ -135,6 +151,6 @@ namespace Radegast
         public ChatInputBox cbxInput;
         public System.Windows.Forms.Button btnSend;
         private System.Windows.Forms.Panel pnlChatInput;
-
+        private System.Windows.Forms.CheckBox autoScrollCB;
     }
 }

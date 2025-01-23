@@ -51,7 +51,7 @@ namespace Radegast
 
             SessionId = session;
 
-            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Conference, SessionId, sessionName);
+            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText, autoScrollCB), IMTextManagerType.Conference, SessionId, sessionName);
             
             // Callbacks
             netcom.ClientLoginStatus += netcom_ClientLoginStatus;
