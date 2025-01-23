@@ -188,7 +188,7 @@ namespace Radegast
                     zoom = value;
                     pixelsPerMeter = 1f / zoom;
                     PixRegS = (int)(regionSize / zoom);
-                    Logger.DebugLog("Region tile size = " + PixRegS);
+                    //Logger.DebugLog("Region tile size = " + PixRegS);
                     Invalidate();
                 }
             }

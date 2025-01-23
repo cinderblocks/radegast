@@ -114,7 +114,7 @@ namespace Radegast
 
         private RadegastInstance Instance { get; }
 
-        /// <summary>Collection of all of the loaded plugins</summary>
+        /// <summary>Collection of all loaded plugins</summary>
         public List<PluginInfo> Plugins { get; } = new List<PluginInfo>();
 
         /// <summary>

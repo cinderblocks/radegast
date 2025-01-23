@@ -2,7 +2,7 @@ GNU LESSER GENERAL PUBLIC LICENSE
 Version 3, 29 June 2007
 
 Copyright(c) 2009-2014, Radegast Development Team
-Copyright(c) 2016-2021, Sjofn, LLC
+Copyright(c) 2016-2025, Sjofn, LLC
 
 Everyone is permitted to copy and distribute verbatim copies of this license
 document, but changing it is not allowed.

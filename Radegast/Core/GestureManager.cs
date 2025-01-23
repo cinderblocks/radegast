@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -49,17 +49,6 @@ namespace Radegast.Core
             var client = RadegastInstance.GlobalInstance.Client;
             client.Inventory.Store.InventoryObjectAdded += Store_InventoryObjectAdded;
             client.Inventory.Store.InventoryObjectUpdated += Store_InventoryObjectUpdated;
-
-            foreach (var item in client.Inventory.Store.Items)
-            {
-                var gesture = item.Value.Data as InventoryGesture;
-                if (gesture == null)
-                {
-                    continue;
-                }
-
-                UpdateInventoryGesture(gesture);
-            }
         }
 
         /// <summary>
@@ -199,22 +188,18 @@ namespace Radegast.Core
 
         private void Store_InventoryObjectUpdated(object sender, InventoryObjectUpdatedEventArgs e)
         {
-            if (!(e.NewObject is InventoryGesture gesture))
+            if (e.NewObject is InventoryGesture gesture)
             {
-                return;
+                UpdateInventoryGesture(gesture);
             }
-
-            UpdateInventoryGesture(gesture);
         }
 
         private void Store_InventoryObjectAdded(object sender, InventoryObjectAddedEventArgs e)
         {
-            if (!(e.Obj is InventoryGesture gesture))
+            if (e.Obj is InventoryGesture gesture)
             {
-                return;
+                UpdateInventoryGesture(gesture);
             }
-
-            UpdateInventoryGesture(gesture);
         }
     }
 }

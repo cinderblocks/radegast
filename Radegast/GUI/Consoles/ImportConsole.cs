@@ -118,7 +118,7 @@ namespace Radegast
 		
 		UUID FindOrMakeInventoryFolder(string name)
 		{
-			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),Client.Self.AgentID,true,false,InventorySortOrder.ByName,15000);
+			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),Client.Self.AgentID,true,false,InventorySortOrder.ByName,TimeSpan.FromSeconds(15));
 			UUID dir = UUID.Zero;
 			foreach(InventoryBase item in folders)
 			{

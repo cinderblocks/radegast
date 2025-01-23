@@ -481,10 +481,10 @@ namespace RadegastSpeech.Conversation
             switch (e.Reason)
             {
                 case NetworkManager.DisconnectType.ClientInitiated:
-                    Talker.Say("You are disconnected.");
+                    Talker.Say("You have been disconnected.");
                     break;
                 case NetworkManager.DisconnectType.SimShutdown:
-                    Talker.Say("The region you were in has been shut down.  You are disconnected.",
+                    Talker.Say("You have been disconnected from the current region.",
                         Talk.BeepType.Bad);
                     break;
                 case NetworkManager.DisconnectType.NetworkTimeout:
@@ -492,7 +492,7 @@ namespace RadegastSpeech.Conversation
                         Talk.BeepType.Bad);
                     break;
                 case NetworkManager.DisconnectType.ServerInitiated:
-                    Talker.Say("The server has disconnected you.  " + e.Message,
+                    Talker.Say("You have been disconnected by the server with the message " + e.Message,
                         Talk.BeepType.Bad);
                     break;
             }

@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -66,13 +66,12 @@ namespace Radegast
                 return;
             }
 
-            if (!(txtKeys.Tag is Group)) return;
-            Group g = (Group)txtKeys.Tag;
-            if (g.ID != e.GroupID) return;
+            if (!(txtKeys.Tag is Group group)) { return; }
+            if (group.ID != e.GroupID) return;
 
             foreach (var r in e.Roles)
             {
-                txtKeys.AppendText(string.Format("Role \"{0}\": {1}{2}", r.Value.Name, r.Key, Environment.NewLine));
+                txtKeys.AppendText($"Role \"{r.Value.Name}\": {r.Key}{Environment.NewLine}");
             }
         }
 
@@ -88,7 +87,7 @@ namespace Radegast
             {
                 BeginInvoke(new MethodInvoker(() =>
                 {
-                    lblCreateStatus.Text = string.Format("Group creation failed: {0}", e.Message);
+                    lblCreateStatus.Text = $"Group creation failed: {e.Message}";
                 }
                 ));
             }
@@ -96,7 +95,10 @@ namespace Radegast
 
         void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
         {
-            BeginInvoke(new MethodInvoker(UpdateDisplay));
+            if (IsHandleCreated)
+            {
+                BeginInvoke(new MethodInvoker(UpdateDisplay));
+            }
         }
 
         private object DisplaySyncRoot = new object();
@@ -125,15 +127,8 @@ namespace Radegast
                     }
                 }
 
-                lblGroupNr.Text = string.Format("{0} groups", instance.Groups.Count);
-                if (client.Network.MaxAgentGroups > 0)
-                {
-                    lblGrpMax.Text = string.Format("max {0} groups", client.Network.MaxAgentGroups);
-                }
-                else
-                {
-                    lblGrpMax.Text = string.Empty;
-                }
+                lblGroupNr.Text = $"{instance.Groups.Count} groups";
+                lblGrpMax.Text = client.Network.MaxAgentGroups > 0 ? $"max {client.Network.MaxAgentGroups} groups" : string.Empty;
 
                 if (newGrpID != UUID.Zero)
                 {
@@ -165,7 +160,7 @@ namespace Radegast
                 return;
             }
 
-            if(MessageBox.Show(string.Format("Leave {0}?", g.Name), "Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Asterisk) == DialogResult.Yes)
+            if(MessageBox.Show($"Leave {g.Name}?", "Confirmation", MessageBoxButtons.YesNo, MessageBoxIcon.Asterisk) == DialogResult.Yes)
             {
                 client.Groups.LeaveGroup(g.ID);
                 listBox1.Items.Remove(g);
@@ -352,7 +347,7 @@ namespace Radegast
             {
                 txtKeys.Text = string.Empty;
                 txtKeys.Tag = g;
-                txtKeys.AppendText(string.Format("Group \"{0}\": {1}{2}", g.Name, g.ID, Environment.NewLine));
+                txtKeys.AppendText($"Group \"{g.Name}\": {g.ID}{Environment.NewLine}");
                 client.Groups.RequestGroupRoles(g.ID);
             }
         }

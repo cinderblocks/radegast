@@ -307,14 +307,14 @@ namespace Radegast
             {
                 lstContents.Tag = CurrentPrim;
                 List<InventoryBase> items =
-                    client.Inventory.GetTaskInventory(CurrentPrim.ID, CurrentPrim.LocalID, 1000 * 30);
+                    client.Inventory.GetTaskInventory(CurrentPrim.ID, CurrentPrim.LocalID, TimeSpan.FromSeconds(30));
                 lstContents.Invoke(new MethodInvoker(() => UpdateContentsList(items)));
             }, contentsDownloadCancelToken.Token);
         }
 
         void UpdateContentsList(List<InventoryBase> items)
         {
-            //object inventory in liste reinlesen
+            //object inventory in items List
             lstContents.Items.Clear();
             btnOpen.Enabled = false;
             Primitive prim = (Primitive)lstContents.Tag;

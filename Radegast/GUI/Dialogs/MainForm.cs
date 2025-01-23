@@ -1621,16 +1621,15 @@ namespace Radegast
 
         private void InitUpdater()
         {
-            var appcastUrl = "https://update.radegast.life/appcast.xml";
+            var appcastUrl = "https://update.radegast.life/appcast.json";
             var manifestModuleName = System.Reflection.Assembly.GetEntryAssembly()?.ManifestModule.FullyQualifiedName;
             var icon = Icon.ExtractAssociatedIcon(manifestModuleName);
             SparkleUpdater = new NetSparkleUpdater.SparkleUpdater(appcastUrl,
-                new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, "YR4STztpPyLnlPwhOVwaL2F7ToCmyXZ53cTt/encBu8="))
+                new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, "euvj+Uut3Nt3BVIu+aqJ02++Jflh8VjzBUzMgb7EnP8="))
             {
                 UIFactory = new NetSparkleUpdater.UI.WinForms.UIFactory(icon),
                 RelaunchAfterUpdate = true,
-                UseNotificationToast = true,
-                SecurityProtocolType = System.Net.SecurityProtocolType.Tls12
+                UseNotificationToast = true
             };
             SparkleUpdater.StartLoop(true);
         }

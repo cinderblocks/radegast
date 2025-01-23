@@ -325,33 +325,16 @@ namespace Radegast
                 return true;
             }
 
-            InventoryItem item = null;
-            foreach (var pair in Client.Inventory.Store.Items)
+            if (Client.Inventory.Store.Contains(id) && Client.Inventory.Store[id] is InventoryItem item)
             {
-                if (pair.Value.Data is InventoryItem)
+                if (InventoryConsole.IsFullPerm(item) || Instance.advancedDebugging)
                 {
-                    var i = (InventoryItem)pair.Value.Data;
-                    if (i.AssetUUID == id && (InventoryConsole.IsFullPerm(i) || Instance.advancedDebugging))
-                    {
-                        item = i;
-                        break;
-                    }
+                    name = item.Name;
+                    return true;
                 }
             }
 
-            if (item != null)
-            {
-                name = item.Name;
-                return true;
-            }
-            else if (Instance.advancedDebugging)
-            {
-                return true;
-            }
-            else
-            {
-                return false;
-            }
+            return false;
         }
 
         FacetedMesh MeshPrim(Primitive prim)

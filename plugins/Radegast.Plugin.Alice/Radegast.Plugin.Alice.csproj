@@ -4,7 +4,7 @@
 	<UseWindowsForms>true</UseWindowsForms>
 	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
-  <OutputPath>..\..\bin\$(Configuration)\</OutputPath>
+    <OutputPath>..\..\bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <DebugType>full</DebugType>
@@ -34,10 +34,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AIMLbot-Radegast" Version="2.5.1.1" />
-    <PackageReference Include="LibreMetaverse" Version="2.1.7.767" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.1.7.767" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.1.7.767" />
-    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.0" />
+    <PackageReference Include="LibreMetaverse" Version="2.2.0.890" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.0.890" />
+    <PackageReference Include="LibreMetaverse.Types" Version="2.2.0.890" />
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.1" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
   <ItemGroup>

@@ -910,7 +910,7 @@ namespace Radegast.Rendering
 
                         #region Elements
 
-                        // Write all of the faces (triangles) for this side
+                        // Write all faces (triangles) for this side
                         for (int k = 0; k < face.Indices.Count / 3; k++)
                         {
                             obj.AppendFormat("f -{0}/-{0}/-{0} -{1}/-{1}/-{1} -{2}/-{2}/-{2}{3}",

@@ -61,7 +61,7 @@ namespace Radegast.Commands
 
             ParcelsDownloaded.Reset();
             Client.Parcels.SimParcelsDownloaded += del;
-            Client.Parcels.RequestAllSimParcels(Client.Network.CurrentSim, true, 750);
+            Client.Parcels.RequestAllSimParcels(Client.Network.CurrentSim, true, TimeSpan.FromMilliseconds(750));
 
             if (Client.Network.CurrentSim.IsParcelMapFull())
                 ParcelsDownloaded.Set();

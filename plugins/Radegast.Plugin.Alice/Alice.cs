@@ -484,9 +484,9 @@ namespace Radegast.Plugin.Alice
         void Self_IM(object sender, InstantMessageEventArgs e)
         {
             if (!Enabled) return;
-            // Every event coming from a different thread (almost all of them, most certanly those
+            // Every event coming from a different thread (almost all of them, most certainly those
             // from libomv) needs to be executed on the GUI thread. This code can be basically
-            // copy-pasted on the begining of each libomv event handler that results in update 
+            // copy-pasted on the beginning of each libomv event handler that results in update 
             // of any GUI element
             //
             // In this case the IM we sent back as a reply is also displayed in the corresponding IM tab

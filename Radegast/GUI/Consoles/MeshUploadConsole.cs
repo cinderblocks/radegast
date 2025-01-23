@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -31,10 +31,10 @@ namespace Radegast
 {
     public partial class MeshUploadConsole : RadegastTabControl
     {
-        bool Running = false;
-        bool UploadImages;
-        Queue<string> FileNames = new Queue<string>();
-        CancellationTokenSource uploadCancelToken;
+        private bool Running = false;
+        private bool UploadImages;
+        private Queue<string> FileNames = new Queue<string>();
+        private CancellationTokenSource uploadCts;
 
         public MeshUploadConsole()
         {
@@ -53,22 +53,21 @@ namespace Radegast
             instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
             UpdateButtons();
 
-            uploadCancelToken = new CancellationTokenSource();
-
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void MeshUploadConsole_Disposed(object sender, EventArgs e)
+        private void MeshUploadConsole_Disposed(object sender, EventArgs e)
         {
-            try
+            if (uploadCts != null)
             {
-                uploadCancelToken.Cancel();
-                uploadCancelToken.Dispose();
-            } catch (ObjectDisposedException) { }
+                uploadCts.Cancel();
+                uploadCts.Dispose();
+            }
+
             Running = false;
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -78,18 +77,14 @@ namespace Radegast
                 }
                 return;
             }
-            try
-            {
-                uploadCancelToken.Cancel();
-                uploadCancelToken.Dispose();
-            }
-            catch (ObjectDisposedException) { }
+            
+            uploadCts?.Cancel();
             Running = false;
 
             UpdateButtons();
         }
 
-        void Netcom_ClientConnected(object sender, EventArgs e)
+        private void Netcom_ClientConnected(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -103,7 +98,7 @@ namespace Radegast
             UpdateButtons();
         }
 
-        void Msg(string msg)
+        private void Msg(string msg)
         {
             if (InvokeRequired)
             {
@@ -116,7 +111,8 @@ namespace Radegast
 
             txtUploadLog.AppendText(msg + "\n");
         }
-        void UpdateButtons()
+
+        private void UpdateButtons()
         {
             if (InvokeRequired)
             {
@@ -153,7 +149,7 @@ namespace Radegast
 
             lock (FileNames)
             {
-                lblStatus.Text = string.Format("{0} files remaining", FileNames.Count);
+                lblStatus.Text = $"{FileNames.Count} files remaining";
             }
         }
 
@@ -193,12 +189,11 @@ namespace Radegast
                 }
             }
 
-            Task uploadTask = Task.Run(PerformUpload, uploadCancelToken.Token);
-
-            txtUploadLog.Clear();
+            uploadCts = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+            Task task = PerformUpload(uploadCts.Token).ContinueWith(delegate { txtUploadLog.Clear(); });
         }
 
-        void PerformUpload()
+        private async Task PerformUpload(CancellationToken cancellationToken)
         {
             try
             {
@@ -220,44 +215,32 @@ namespace Radegast
                     var prims = parser.Load(filename, UploadImages);
                     if (prims == null || prims.Count == 0)
                     {
-                        Msg("Error: Failed to parse collada file");
+                        Msg("Error: Failed to parse collada file.");
                         continue;
                     }
 
                     Msg($"Parse collada file success, found {prims.Count} objects");
                     Msg("Uploading...");
 
-                    uploadCancelToken.Token.ThrowIfCancellationRequested();
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims, Path.GetFileNameWithoutExtension(filename), "Radegast " + DateTime.Now.ToString(CultureInfo.InvariantCulture));
-                    var uploadDone = new AutoResetEvent(false);
-
-                    uploader.IncludePhysicsStub = true;
-                    uploader.UseModelAsPhysics = false;
-
-                    uploader.Upload((res =>
-                    {
-                        if (res == null)
+                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims, 
+                        Path.GetFileNameWithoutExtension(filename), "Radegast " + DateTime.Now.ToString(CultureInfo.InvariantCulture))
                         {
-                            Msg("Upload failed.");
-                        }
-                        else
-                        {
-                            Msg("Upload success.");
-                        }
+                            IncludePhysicsStub = true,
+                            UseModelAsPhysics = false
+                        };
 
-                        uploadDone.Set();
-                    }));
-
-                    if (!uploadDone.WaitOne(4 * 60 * 1000))
+                    await uploader.Upload((res =>
                     {
-                        Msg("Message upload timeout");
-                    }
+                        Msg(res == null ? "Upload failed." : "Upload success.");
+
+                    }), cancellationToken);
                 }
             } 
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
-                Msg("Operation cancelled");
+                Msg("Upload cancelled.");
             }
 
             Running = false;

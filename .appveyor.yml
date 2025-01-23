@@ -26,6 +26,9 @@ environment:
     secure: nAIqrjhaoamhiuAcae/xNw==
   PfxPassword:
     secure: +vWSGzLkiBGVIxfPb+iRtD+/maQjI2d92hN4PoNAxMc=
+  SPARKLE_PRIVATE_KEY:
+    secure: 2g7T+W5R3tcNVfzj5/dXfUqk17KbTwmVQY9RIFYpGHD/xH32T0Tq6C5zzsDkWXtE
+  SPARKLE_PUBLIC_KEY: euvj+Uut3Nt3BVIu+aqJ02++Jflh8VjzBUzMgb7EnP8=
 
 branches:
   except:
@@ -33,6 +36,9 @@ branches:
 
 pull_requests:
   do_not_increment_build_number: true
+
+install:
+  - ps: dotnet tool install --global NetSparkleUpdater.Tools.AppCastGenerator
 
 build:
   project: radegast.sln
@@ -58,6 +64,7 @@ after_build:
   - cmd: '7z a -ttar -so Radegast-%TAG_VERSION%.tar %APPVEYOR_BUILD_FOLDER%\bin\Release\ | 7z a -si Radegast_%PLATFORM%-%TAG_VERSION%.tbz'
   - ps: Copy-Item bin\Packages\en-US\RadegastSetup_$env:PLATFORM.msi RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.msi
   - ps: Copy-Item bin\Packages\RadegastBundle_$env:PLATFORM.exe RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.exe
+  - ps: netsparkle-generate-appcast -n Radegast -e "exe,msi" -a . --output-type json -o windows-$env:PLATFORM --file-version $env:APPVEYOR_REPO_TAG -u https://github.com/cinderblocks/radegast/releases/download/tag/$env:APPVEYOR_REPO_TAG
 
 artifacts:
   - path: 'RadegastSetup*.exe'
@@ -80,4 +87,10 @@ artifacts:
     type: Auto
   - path: 'bin\Release\Radegast.pdb'
     name: 'Radegast symbols'
+    type: Auto
+  - path: 'appcast.json'
+    name: AppCast
+    type: Auto
+  - path: 'appcast.json.signature'
+    name: AppCast Signature
     type: Auto

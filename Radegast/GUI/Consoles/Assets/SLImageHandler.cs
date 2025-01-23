@@ -359,23 +359,15 @@ namespace Radegast
 
             tbtbInvShow.Enabled = false;
 
-            InventoryItem found = null;
-            foreach (var traversed in client.Inventory.Store.Items.Values)
+            InventoryItem invItem = null;
+            if (client.Inventory.Store.Contains(imageID))
             {
-                if (traversed.Data is InventoryItem)
-                {
-                    InventoryItem item = (InventoryItem)traversed.Data;
-                    if (item.AssetUUID == imageID)
-                    {
-                        found = item;
-                        break;
-                    }
-                }
+                invItem = client.Inventory.Store[imageID] as InventoryItem;
             }
 
             bool save = allowSave;
 
-            if (found == null)
+            if (invItem == null)
             {
                 tbtbInvShow.Enabled = false;
                 tbtbInvShow.Tag = null;
@@ -383,8 +375,8 @@ namespace Radegast
             else
             {
                 tbtbInvShow.Enabled = true;
-                tbtbInvShow.Tag = found;
-                save |= InventoryConsole.IsFullPerm(found);
+                tbtbInvShow.Tag = invItem;
+                save |= InventoryConsole.IsFullPerm(invItem);
             }
 
             save |= instance.advancedDebugging;

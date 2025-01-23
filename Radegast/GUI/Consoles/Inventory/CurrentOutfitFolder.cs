@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using OpenMetaverse;
 
 namespace Radegast
@@ -32,7 +33,7 @@ namespace Radegast
 
         private GridClient Client;
         private readonly RadegastInstance Instance;
-        private bool InitiCOF = false;
+        private bool InitializedCOF = false;
         private bool AppearanceSent = false;
         private bool COFReady = false;
         private bool InitialUpdateDone = false;
@@ -68,7 +69,7 @@ namespace Radegast
 
         private void RegisterClientEvents(GridClient client)
         {
-            client.Network.EventQueueRunning += Network_EventQueueRunning;
+            client.Network.SimChanged += Network_OnSimChanged;
             client.Inventory.FolderUpdated += Inventory_FolderUpdated;
             client.Inventory.ItemReceived += Inventory_ItemReceived;
             client.Appearance.AppearanceSet += Appearance_AppearanceSet;
@@ -77,13 +78,13 @@ namespace Radegast
 
         private void UnregisterClientEvents(GridClient client)
         {
-            client.Network.EventQueueRunning -= Network_EventQueueRunning;
+            client.Network.SimChanged -= Network_OnSimChanged;
             client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
             client.Inventory.ItemReceived -= Inventory_ItemReceived;
             client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
             client.Objects.KillObject -= Objects_KillObject;
             lock (Content) Content.Clear();
-            InitiCOF = false;
+            InitializedCOF = false;
             AppearanceSent = false;
             COFReady = false;
             InitialUpdateDone = false;
@@ -111,7 +112,7 @@ namespace Radegast
                 }
             }
 
-            if (Content.Count != links.Count) return;
+            if (Content.Count != links.Count) { return; }
             COFReady = true;
             if (AppearanceSent)
             {
@@ -131,32 +132,21 @@ namespace Radegast
 
         private void Inventory_FolderUpdated(object sender, FolderUpdatedEventArgs e)
         {
-            if (COF == null) return;
+            if (COF == null) { return; }
 
             if (e.FolderID == COF.UUID && e.Success)
             {
                 COF = (InventoryFolder)Client.Inventory.Store[COF.UUID];
                 lock (FolderSync)
                 {
-                    lock (Content) Content.Clear();
+                    lock (Content) { Content.Clear(); }
 
-
-                    List<UUID> items = new List<UUID>();
-                    List<UUID> owners = new List<UUID>();
-
-                    foreach (var link in ContentLinks())
-                    {
-                        //if (Client.Inventory.Store.Contains(link.AssetUUID))
-                        //{
-                        //    continue;
-                        //}
-                        items.Add(link.AssetUUID);
-                        owners.Add(Client.Self.AgentID);
-                    }
+                    var items = ContentLinks().ToDictionary(
+                        link => link.AssetUUID, link => Client.Self.AgentID);
 
                     if (items.Count > 0)
                     {
-                        Client.Inventory.RequestFetchInventory(items, owners);
+                        Client.Inventory.RequestFetchInventory(items);
                     }
                 }
             }
@@ -164,7 +154,7 @@ namespace Radegast
 
         private void Objects_KillObject(object sender, KillObjectEventArgs e)
         {
-            if (Client.Network.CurrentSim != e.Simulator) return;
+            if (Client.Network.CurrentSim != e.Simulator) { return; }
 
             Primitive prim = null;
             if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out prim))
@@ -177,49 +167,50 @@ namespace Radegast
             }
         }
 
-        private void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
+        private void Network_OnSimChanged(object sender, SimChangedEventArgs e)
         {
-            if (e.Simulator == Client.Network.CurrentSim && !InitiCOF)
+            Client.Network.CurrentSim.Caps.CapabilitiesReceived += Simulator_OnCapabilitiesReceived;
+        }
+
+        private void Simulator_OnCapabilitiesReceived(object sender, CapabilitiesReceivedEventArgs e)
+        {
+            e.Simulator.Caps.CapabilitiesReceived -= Simulator_OnCapabilitiesReceived;
+
+            if (e.Simulator == Client.Network.CurrentSim && !InitializedCOF)
             {
-                InitiCOF = true;
-                InitCOF();
+                InitializeCurrentOutfitFolder();
+                InitializedCOF = true;
             }
         }
+
         #endregion Event handling
 
         #region Private methods
 
-        private void RequestDescendants(UUID folderID)
+        private UUID InitializeCurrentOutfitFolder()
         {
-            Client.Inventory.RequestFolderContents(folderID, Client.Self.AgentID, true, true, InventorySortOrder.ByDate);
-        }
+            COF = Client.Appearance.GetCurrentOutfitFolder();
 
-        private void InitCOF()
-        {
-            var rootContent = Client.Inventory.Store.GetContents(Client.Inventory.Store.RootFolder.UUID);
-            foreach (var baseItem in rootContent)
-            {
-                if (baseItem is InventoryFolder folder && folder.PreferredType == FolderType.CurrentOutfit)
-                {
-                    COF = folder;
-                    break;
-                }
-            }
-
+            UUID id;
             if (COF == null)
             {
-                CreateCOF();
+                id = CreateCurrentOutfitFolder();
             }
             else
             {
-                RequestDescendants(COF.UUID);
+                id = COF.UUID;
+                Task task = Client.Inventory.RequestFolderContents(COF.UUID, Client.Self.AgentID,
+                    true, true, InventorySortOrder.ByDate);
             }
+            Logger.Log($"Initialized Current Outfit Folder with UUID {id}", Helpers.LogLevel.Info, Client);
+            return id;
         }
 
-        private void CreateCOF()
+        private UUID CreateCurrentOutfitFolder()
         {
-            UUID cofID = Client.Inventory.CreateFolder(Client.Inventory.Store.RootFolder.UUID, "Current Outfit", FolderType.CurrentOutfit);
-            if (Client.Inventory.Store.Items.ContainsKey(cofID) && Client.Inventory.Store.Items[cofID].Data is InventoryFolder folder)
+            UUID cofId = Client.Inventory.CreateFolder(Client.Inventory.Store.RootFolder.UUID, 
+                "Current Outfit", FolderType.CurrentOutfit);
+            if (Client.Inventory.Store.Contains(cofId) && Client.Inventory.Store[cofId] is InventoryFolder folder)
             {
                 COF = folder;
                 COFReady = true;
@@ -228,11 +219,14 @@ namespace Radegast
                     InitialUpdate();
                 }
             }
+
+            return cofId;
         }
 
         private void InitialUpdate()
         {
-            if (InitialUpdateDone) return;
+            if (InitialUpdateDone) { return; }
+
             InitialUpdateDone = true;
             lock (Content)
             {
@@ -250,18 +244,18 @@ namespace Radegast
 
         #region Public methods
         /// <summary>
-        /// Get COF contents
+        /// Return contents of COF
         /// </summary>
         /// <returns>List if InventoryItems that can be part of appearance (attachments, wearables)</returns>
         public List<InventoryItem> ContentLinks()
         {
             var ret = new List<InventoryItem>();
-            if (COF == null) return ret;
-
-            Client.Inventory.Store.GetContents(COF)
-                .FindAll(b => CanBeWorn(b) && ((InventoryItem)b).AssetType == AssetType.Link)
-                .ForEach(item => ret.Add((InventoryItem)item));
-
+            if (COF != null)
+            {
+                Client.Inventory.Store.GetContents(COF)
+                    .FindAll(b => CanBeWorn(b) && ((InventoryItem)b).AssetType == AssetType.Link)
+                    .ForEach(item => ret.Add((InventoryItem)item));
+            }
             return ret;
         }
 
@@ -354,11 +348,13 @@ namespace Radegast
         /// <param name="newDescription">Description for the link</param>
         public void AddLink(InventoryItem item, string newDescription)
         {
-            if (COF == null) return;
+            if (COF == null)
+            {
+                Logger.Log("Can't add link; COF hasn't been initialized.", Helpers.LogLevel.Warning, Client);
+                return;
+            }
 
-            bool linkExists = null != ContentLinks().Find(itemLink => itemLink.AssetUUID == item.UUID);
-
-            if (!linkExists)
+            if (ContentLinks().Find(itemLink => itemLink.AssetUUID == item.UUID) == null)
             {
                 Client.Inventory.CreateLink(COF.UUID, item.UUID, item.Name, newDescription, 
                     AssetType.Link, item.InventoryType, UUID.Random(), 
@@ -387,7 +383,11 @@ namespace Radegast
         /// <param name="itemIDs">List of IDs of the target inventory item for which we want link to be removed</param>
         public void RemoveLink(List<UUID> itemIDs)
         {
-            if (COF == null) return;
+            if (COF == null)
+            {
+                Logger.Log("Can't remove link; COF hasn't been initialized.", Helpers.LogLevel.Warning, Client);
+                return;
+            }
 
             foreach (var links in itemIDs.Select(itemID => ContentLinks()
                          .FindAll(itemLink => itemLink.AssetUUID == itemID)))
@@ -402,8 +402,8 @@ namespace Radegast
         /// <param name="item">>Inventory item to be detached</param>
         public void Detach(InventoryItem item)
         {
-            var realItem = RealInventoryItem(item);
-            if (!Instance.RLV.AllowDetach(realItem)) return;
+            var realItem = OriginalInventoryItem(item);
+            if (!Instance.RLV.AllowDetach(realItem)) { return; }
 
             Client.Appearance.Detach(item);
             RemoveLink(item.UUID);
@@ -414,8 +414,8 @@ namespace Radegast
             var ret = new List<InventoryItem>();
             ContentLinks().ForEach(link =>
             {
-                var item = RealInventoryItem(link);
-                if (!(item is InventoryWearable wearable)) return;
+                var item = OriginalInventoryItem(link);
+                if (!(item is InventoryWearable wearable)) { return; }
 
                 if (wearable.WearableType == type)
                 {
@@ -432,7 +432,7 @@ namespace Radegast
         /// </summary>
         /// <param name="item"></param>
         /// <returns></returns>
-        public InventoryItem RealInventoryItem(InventoryItem item)
+        public InventoryItem OriginalInventoryItem(InventoryItem item)
         {
             if (item.IsLink() && Client.Inventory.Store.Contains(item.AssetUUID)
                               && Client.Inventory.Store[item.AssetUUID] is InventoryItem invItem)
@@ -450,7 +450,7 @@ namespace Radegast
         public void ReplaceOutfit(List<InventoryItem> newOutfit)
         {
             // Resolve inventory links
-            var outfit = newOutfit.Select(RealInventoryItem).ToList();
+            var outfit = newOutfit.Select(OriginalInventoryItem).ToList();
 
             // Remove links to all exiting items
             var toRemove = new List<UUID>();
@@ -458,8 +458,8 @@ namespace Radegast
             {
                 if (IsBodyPart(item))
                 {
-                    WearableType linkType = ((InventoryWearable)RealInventoryItem(item)).WearableType;
-                    bool hasBodyPart = newOutfit.Select(RealInventoryItem).Where(IsBodyPart).Any(newItem =>
+                    WearableType linkType = ((InventoryWearable)OriginalInventoryItem(item)).WearableType;
+                    bool hasBodyPart = newOutfit.Select(OriginalInventoryItem).Where(IsBodyPart).Any(newItem =>
                         ((InventoryWearable) newItem).WearableType == linkType);
 
                     if (hasBodyPart)
@@ -518,12 +518,12 @@ namespace Radegast
 
             foreach (var item in items)
             {
-                var realItem = RealInventoryItem(item);
+                var realItem = OriginalInventoryItem(item);
                 if (replace && realItem is InventoryWearable wearable)
                 {
                     foreach (var link in current)
                     {
-                        var currentItem = RealInventoryItem(link);
+                        var currentItem = OriginalInventoryItem(link);
                         if (link.AssetUUID == item.UUID)
                         {
                             toRemove.Add(link.UUID);
@@ -578,7 +578,7 @@ namespace Radegast
         public void RemoveFromOutfit(List<InventoryItem> items)
         {
             // Resolve inventory links
-            var outfit = items.Select(RealInventoryItem).Where(realItem => Instance.RLV.AllowDetach(realItem)).ToList();
+            var outfit = items.Select(OriginalInventoryItem).Where(realItem => Instance.RLV.AllowDetach(realItem)).ToList();
 
             // Remove links to all items that were removed
             var toRemove = outfit.FindAll(item => CanBeWorn(item) && !IsBodyPart(item)).Select(item => item.UUID).ToList();
@@ -589,7 +589,7 @@ namespace Radegast
 
         public bool IsBodyPart(InventoryItem item)
         {
-            var realItem = RealInventoryItem(item);
+            var realItem = OriginalInventoryItem(item);
             if (!(realItem is InventoryWearable wearable)) return false;
 
             var t = wearable.WearableType;

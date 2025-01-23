@@ -133,8 +133,8 @@ namespace Radegast
                 try
                 {
                     client.Inventory.Move(
-                        client.Inventory.Store.Items[objectID].Data,
-                        (InventoryFolder)client.Inventory.Store.Items[client.Inventory.FindFolderForType(FolderType.Trash)].Data);
+                        client.Inventory.Store[objectID],
+                        client.Inventory.Store[client.Inventory.FindFolderForType(FolderType.Trash)] as InventoryFolder);
                 }
                 catch (Exception) { }
             }

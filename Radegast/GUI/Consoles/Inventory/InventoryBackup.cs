@@ -51,7 +51,7 @@ namespace Radegast
 
             inv = client.Inventory.Store;
             rootNode = inv.RootNode;
-            if (inv.Items.ContainsKey(rootFolder) && inv.Items[rootFolder].Data is InventoryFolder)
+            if (inv.Contains(rootFolder) && inv.GetNodeFor(rootFolder).Data is InventoryFolder)
             {
                 rootNode = inv.GetNodeFor(rootFolder);
             }

@@ -18,6 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Threading;
 using OpenMetaverse;
 
@@ -65,7 +66,7 @@ namespace Radegast
         {
             UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, folder.Name, FolderType.None);
             Thread.Sleep(500);
-            var items = Client.Inventory.FolderContents(folder.UUID, folder.OwnerID, true, true, InventorySortOrder.ByDate, 45 * 1000);
+            var items = Client.Inventory.FolderContents(folder.UUID, folder.OwnerID, true, true, InventorySortOrder.ByDate, TimeSpan.FromSeconds(45));
             AutoResetEvent copied = new AutoResetEvent(false);
             foreach (var item in items)
             {

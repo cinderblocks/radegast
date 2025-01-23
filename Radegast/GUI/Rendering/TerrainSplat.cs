@@ -183,7 +183,7 @@ namespace Radegast.Rendering
 
             unsafe
             {
-                // Get handles to all of the texture data arrays
+                // Get handles to all texture data arrays
                 BitmapData[] datas = new BitmapData[]
                 {
                     detailTexture[0].LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.ReadOnly, detailTexture[0].PixelFormat),
