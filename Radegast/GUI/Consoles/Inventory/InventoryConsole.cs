@@ -35,7 +35,6 @@ using Radegast.WinForms;
 
 namespace Radegast
 {
-
     public partial class InventoryConsole : UserControl
     {
         private const int UPDATE_INTERVAL = 1000;
@@ -43,20 +42,17 @@ namespace Radegast
         private readonly RadegastInstance instance;
         private GridClient Client => instance.Client;
 
-        private InventoryManager Manager;
         private readonly Inventory Inventory;
         private TreeNode invRootNode;
         private string newItemName = string.Empty;
         private readonly List<UUID> fetchedFolders = new List<UUID>();
         private System.Threading.Timer _EditTimer;
         private TreeNode _EditNode;
-        private readonly Dictionary<UUID, AttachmentInfo> attachments = new Dictionary<UUID, AttachmentInfo>();
         private System.Timers.Timer TreeUpdateTimer;
         private readonly Queue<InventoryBase> ItemsToAdd = new Queue<InventoryBase>();
         private readonly Queue<InventoryBase> ItemsToUpdate = new Queue<InventoryBase>();
         private bool TreeUpdateInProgress = false;
         private readonly Dictionary<UUID, TreeNode> UUID2NodeCache = new Dictionary<UUID, TreeNode>();
-        private readonly List<UUID> WornItems = new List<UUID>();
         private bool appearanceWasBusy;
         private InvNodeSorter sorter;
         private readonly List<UUID> QueuedFolders = new List<UUID>();
@@ -80,8 +76,7 @@ namespace Radegast
             TreeUpdateTimer.Elapsed += TreeUpdateTimerTick;
 
             this.instance = instance;
-            Manager = Client.Inventory;
-            Inventory = Manager.Store;
+            Inventory = Client.Inventory.Store;
             Inventory.RootFolder.OwnerID = Client.Self.AgentID;
             invTree.ImageList = frmMain.ResourceImages;
             invRootNode = AddDir(null, Inventory.RootFolder);
@@ -164,9 +159,8 @@ namespace Radegast
             Inventory.InventoryObjectUpdated += Inventory_InventoryObjectUpdated;
             Inventory.InventoryObjectRemoved += Inventory_InventoryObjectRemoved;
 
-            Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
-            Client.Objects.KillObject += Objects_KillObject;
             Client.Appearance.AppearanceSet += Appearance_AppearanceSet;
+            Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
         }
 
         private void InventoryConsole_Disposed(object sender, EventArgs e)
@@ -184,9 +178,8 @@ namespace Radegast
             Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
             Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
 
-            Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
-            Client.Objects.KillObject -= Objects_KillObject;
             Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
+            Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
         }
         #endregion
 
@@ -195,90 +188,39 @@ namespace Radegast
         private void Appearance_AppearanceSet(object sender, AppearanceSetEventArgs e)
         {
             UpdateWornLabels();
-            if (appearanceWasBusy)
-            {
-                appearanceWasBusy = false;
-                Client.Appearance.RequestSetAppearance(true);
-            }
-        }
+            if (!appearanceWasBusy) { return; }
 
-        private void Objects_KillObject(object sender, KillObjectEventArgs e)
-        {
-            AttachmentInfo attachment = null;
-            lock (attachments)
-            {
-                foreach (AttachmentInfo att in attachments.Values)
-                {
-                    if (att.Prim != null && att.Prim.LocalID == e.ObjectLocalID)
-                    {
-                        attachment = att;
-                        break;
-                    }
-                }
-
-                if (attachment == null) return;
-
-                attachments.Remove(attachment.InventoryID);
-                UpdateNodeLabel(attachment.InventoryID);
-            }
+            appearanceWasBusy = false;
+            Client.Appearance.RequestSetAppearance(true);
         }
 
         private void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
         {
             Primitive prim = e.Prim;
 
-            if (Client.Self.LocalID == 0 ||
-                prim.ParentID != Client.Self.LocalID ||
-                prim.NameValues == null) return;
-
-            for (int i = 0; i < prim.NameValues.Length; i++)
+            if (Client.Self.LocalID == 0
+                || prim.ParentID != Client.Self.LocalID
+                || prim.NameValues == null)
             {
-                if (prim.NameValues[i].Name != "AttachItemID") continue;
+                return;
+            }
 
-                AttachmentInfo attachment = new AttachmentInfo
-                {
-                    Prim = prim,
-                    InventoryID = new UUID(prim.NameValues[i].Value.ToString()),
-                    PrimID = prim.ID
-                };
+            for (int i = 0; i < prim.NameValues.Length; ++i)
+            {
+                if (prim.NameValues[i].Name != "AttachItemID") { continue ;}
 
-                lock (attachments)
+                var inventoryID = new UUID(prim.NameValues[i].Value.ToString());
+
+                // Don't update the tree yet if we're still updating inventory tree from server
+                if (!TreeUpdateInProgress)
                 {
-                    // Add new attachment info
-                    if (!attachments.ContainsKey(attachment.InventoryID))
+                    if (Inventory.Contains(inventoryID))
                     {
-                        attachments.Add(attachment.InventoryID, attachment);
-
+                        UpdateNodeLabel(inventoryID);
                     }
                     else
                     {
-                        attachment = attachments[attachment.InventoryID];
-                        if (attachment.Prim == null)
-                        {
-                            attachment.Prim = prim;
-                        }
-                    }
-
-                    // Don't update the tree yet if we're still updating invetory tree from server
-                    if (!TreeUpdateInProgress)
-                    {
-                        if (Inventory.Contains(attachment.InventoryID))
-                        {
-                            if (attachment.Item == null)
-                            {
-                                InventoryItem item = (InventoryItem)Inventory[attachment.InventoryID];
-                                attachment.Item = item;
-                            }
-                            if (!attachment.MarkedAttached)
-                            {
-                                attachment.MarkedAttached = true;
-                                UpdateNodeLabel(attachment.InventoryID);
-                            }
-                        }
-                        else
-                        {
-                            Client.Inventory.RequestFetchInventory(attachment.InventoryID, Client.Self.AgentID);
-                        }
+                        Client.Inventory.RequestFetchInventory(inventoryID, Client.Self.AgentID);
                     }
                 }
                 break;
@@ -318,14 +260,6 @@ namespace Radegast
                 return;
             }
 
-            lock (attachments)
-            {
-                if (attachments.TryGetValue(obj.UUID, out var attachment))
-                {
-                    attachment.Item = (InventoryItem)obj;
-                }
-            }
-
             TreeNode parent = FindNodeForItem(obj.ParentUUID);
 
             if (parent != null)
@@ -352,14 +286,6 @@ namespace Radegast
             {
                 BeginInvoke(new MethodInvoker(() => Inventory_InventoryObjectRemoved(sender, e)));
                 return;
-            }
-
-            lock (attachments)
-            {
-                if (attachments.ContainsKey(e.Obj.UUID))
-                {
-                    attachments.Remove(e.Obj.UUID);
-                }
             }
 
             TreeNode currentNode = FindNodeForItem(e.Obj.UUID);
@@ -395,20 +321,12 @@ namespace Radegast
 
         private void Exec_OnInventoryObjectUpdated(InventoryBase oldObject, InventoryBase newObject)
         {
-            if (newObject == null) return;
+            if (newObject == null) { return; }
 
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(() => Exec_OnInventoryObjectUpdated(oldObject, newObject)));
                 return;
-            }
-
-            lock (attachments)
-            {
-                if (attachments.TryGetValue(newObject.UUID, out var attachment))
-                {
-                    attachment.Item = (InventoryItem)newObject;
-                }
             }
 
             // Find our current node in the tree
@@ -417,7 +335,7 @@ namespace Radegast
             // Find which node should be our parent
             TreeNode parent = FindNodeForItem(newObject.ParentUUID);
 
-            if (parent == null) return;
+            if (parent == null) { return; }
 
             if (currentNode != null)
             {
@@ -467,15 +385,15 @@ namespace Radegast
             int res = frmMain.ImageNames.IndexOf("inv_item_" + t);
             if (res != -1) return res;
 
-            if (t == "lsltext")
+            switch (t)
             {
-                return frmMain.ImageNames.IndexOf("inv_item_script");
+                case "lsltext":
+                    return frmMain.ImageNames.IndexOf("inv_item_script");
+                case "callingcard":
+                    return frmMain.ImageNames.IndexOf("inv_item_callingcard_offline");
+                default:
+                    return res;
             }
-            else if (t == "callingcard")
-            {
-                return frmMain.ImageNames.IndexOf("inv_item_callingcard_offline");
-            }
-            return res;
         }
 
         private TreeNode AddBase(TreeNode parent, InventoryBase obj)
@@ -726,23 +644,9 @@ namespace Radegast
 
         private void StartTraverseNodes()
         {
-            if (!Client.Network.CurrentSim.Caps.IsEventQueueRunning)
+            if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
             {
-                AutoResetEvent EQRunning = new AutoResetEvent(false);
-
-                void RunningHandler(object sender, EventQueueRunningEventArgs e)
-                {
-                    EQRunning.Set();
-                }
-
-                Client.Network.EventQueueRunning += RunningHandler;
-                EQRunning.WaitOne(TimeSpan.FromSeconds(10), false);
-                Client.Network.EventQueueRunning -= RunningHandler;
-            }
-
-            if (!Client.Network.CurrentSim.Caps.IsEventQueueRunning)
-            {
-                return;
+                Logger.Log("Could not traverse inventory. Event Queue is not running.", Helpers.LogLevel.Warning, Client);
             }
 
             UpdateStatus("Loading...");
@@ -810,21 +714,16 @@ namespace Radegast
             UpdateWornLabels();
 
             // Update attachments now that we are done
-            lock (attachments)
+            foreach (var attachment in Client.Appearance.GetAttachments())
             {
-                foreach (var attachment in attachments.Values.Where(a => a.Item == null))
+                if (Inventory.Contains(attachment))
                 {
-                    if (Inventory.Contains(attachment.InventoryID))
-                    {
-                        attachment.MarkedAttached = true;
-                        attachment.Item = (InventoryItem)Inventory[attachment.InventoryID];
-                        UpdateNodeLabel(attachment.InventoryID);
-                    }
-                    else
-                    {
-                        Client.Inventory.RequestFetchInventory(attachment.InventoryID, Client.Self.AgentID);
-                        return;
-                    }
+                    UpdateNodeLabel(attachment.UUID);
+                }
+                else
+                {
+                    Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID);
+                    return;
                 }
             }
 
@@ -1123,77 +1022,24 @@ namespace Radegast
 
         public bool IsWorn(InventoryItem item)
         {
-            bool worn = Client.Appearance.IsItemWorn(item) != WearableType.Invalid;
-
-            lock (WornItems)
-            {
-                if (worn && !WornItems.Contains(item.UUID))
-                {
-                    WornItems.Add(item.UUID);
-                }
-            }
-            return worn;
+            return Client.Appearance.IsItemWorn(item) != WearableType.Invalid;
         }
 
         public AttachmentPoint AttachedTo(InventoryItem item)
         {
-            lock (attachments)
-            {
-                if (attachments.TryGetValue(item.UUID, out var attachment))
-                {
-                    return attachment.Point;
-                }
-            }
-
-            return AttachmentPoint.Default;
+            return Client.Appearance.GetAttachmentsByInventoryItem()
+                .TryGetValue(item, out var attachmentPoint) ? attachmentPoint : AttachmentPoint.Default;
         }
 
         public bool IsAttached(InventoryItem item)
         {
-            var myAtt = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == Client.Self.LocalID);
-            foreach (Primitive prim in myAtt)
-            {
-                if (prim.NameValues == null) continue;
-                UUID invID = UUID.Zero;
-                for (int i = 0; i < prim.NameValues.Length; i++)
-                {
-                    if (prim.NameValues[i].Name == "AttachItemID")
-                    {
-                        invID = (UUID)prim.NameValues[i].Value.ToString();
-                        break;
-                    }
-                }
-                if (invID == item.UUID)
-                {
-                    lock (attachments)
-                    {
-                        AttachmentInfo inf = new AttachmentInfo
-                        {
-                            InventoryID = item.UUID,
-                            Item = item,
-                            MarkedAttached = true,
-                            Prim = prim,
-                            PrimID = prim.ID
-                        };
-                        attachments[invID] = inf;
-                    }
-                    return true;
-                }
-            }
-            return false;
+            return Client.Appearance.isItemAttached(item);
         }
 
         public InventoryItem AttachmentAt(AttachmentPoint point)
         {
-            lock (attachments)
-            {
-                foreach (var att in attachments
-                    .Where(att => att.Value.Point == point))
-                {
-                    return att.Value.Item;
-                }
-            }
-            return null;
+            return (from attachment in Client.Appearance.GetAttachmentsByAttachmentPoint() 
+                where attachment.Key == point select attachment.Value.First()).FirstOrDefault();
         }
 
         /// <summary>
@@ -1246,7 +1092,7 @@ namespace Radegast
             }
             if (IsAttached(item))
             {
-                raw += " (worn on " + AttachedTo(item) + ")";
+                raw += $" (worn on {AttachedTo(item)})";
             }
 
             return raw;
@@ -1528,14 +1374,20 @@ namespace Radegast
                     {
                         ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
                         //TODO: add RLV support
-                        if ((attachments[item.UUID].Prim.Flags & PrimFlags.Touch) == 0) ctxItem.Enabled = false;
+                        var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
+                            p => p.ParentID == Client.Self.LocalID 
+                                 && p.ID == item.ActualUUID);
+                        if (attached != null)
+                        {
+                            ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
+                        }
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (IsAttached(item) && instance.RLV.AllowDetach(attachments[item.UUID]))
+                    if (IsAttached(item) && instance.RLV.AllowDetach(item))
                     {
                         ctxItem =
-                            new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) {Name = "detach"};
+                            new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
@@ -1556,7 +1408,7 @@ namespace Radegast
                                 InventoryItem alreadyAttached = null;
                                 if ((alreadyAttached = AttachmentAt(pt)) != null)
                                 {
-                                    name += " (" + alreadyAttached.Name + ")";
+                                    name += $" ({alreadyAttached.Name})";
                                 }
 
                                 ToolStripMenuItem ptItem =
@@ -1575,7 +1427,7 @@ namespace Radegast
                                 InventoryItem alreadyAttached = null;
                                 if ((alreadyAttached = AttachmentAt(pt)) != null)
                                 {
-                                    name += " (" + alreadyAttached.Name + ")";
+                                    name += $" ({alreadyAttached.Name})";
                                 }
 
                                 ToolStripMenuItem ptItem =
@@ -1843,20 +1695,21 @@ namespace Radegast
                         break;
 
                     case "touch":
-                        lock (attachments[item.UUID])
+                        var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
+                            p => p.ParentID == Client.Self.LocalID && p.ID == item.UUID);
+                        if (attached != null)
                         {
-                            AttachmentInfo aInfo = attachments[item.UUID];
-                            Client.Self.Grab(aInfo.Prim.LocalID, Vector3.Zero, Vector3.Zero, Vector3.Zero, 0,
-                                    Vector3.Zero, Vector3.Zero, Vector3.Zero);
+                            Client.Self.Grab(attached.LocalID, 
+                                Vector3.Zero, Vector3.Zero, Vector3.Zero, 0,
+                                Vector3.Zero, Vector3.Zero, Vector3.Zero);
                             Thread.Sleep(100);
-                            Client.Self.DeGrab(aInfo.Prim.LocalID, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero,
-                                    Vector3.Zero, Vector3.Zero);
+                            Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero,
+                                Vector3.Zero, Vector3.Zero);
                         }
                         break;
 
                     case "detach":
                         instance.COF.Detach(item);
-                        lock (attachments) attachments.Remove(item.UUID);
                         invTree.SelectedNode.Text = ItemLabel(item, false);
                         break;
 
@@ -1886,13 +1739,6 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         instance.COF.RemoveFromOutfit(item);
                         invTree.SelectedNode.Text = ItemLabel(item, false);
-                        lock (WornItems)
-                        {
-                            if (WornItems.Contains(item.UUID))
-                            {
-                                WornItems.Remove(item.UUID);
-                            }
-                        }
                         break;
 
                     case "wearable_wear":
@@ -2125,11 +1971,6 @@ namespace Radegast
             }
 
             invTree.BeginUpdate();
-            foreach (var node in WornItems.Select(FindNodeForItem).Where(node => node != null))
-            {
-                node.Text = ItemLabel((InventoryBase)node.Tag, false);
-            }
-            WornItems.Clear();
             foreach (var wearable in Client.Appearance.GetWearables())
             {
                 TreeNode node = FindNodeForItem(wearable.ItemID);
@@ -2212,56 +2053,61 @@ namespace Radegast
                 return;
             }
 
-            if (e.Node.Tag is InventoryFolder folder)
+            switch (e.Node.Tag)
             {
-                folder.Name = e.Label;
-                Client.Inventory.UpdateFolderProperties(folder.UUID, folder.ParentUUID, folder.Name, folder.PreferredType);
+                case InventoryFolder folder:
+                    folder.Name = e.Label;
+                    Client.Inventory.UpdateFolderProperties(folder.UUID, folder.ParentUUID, folder.Name, folder.PreferredType);
+                    break;
+                case InventoryItem item:
+                    item.Name = e.Label;
+                    e.Node.Text = ItemLabel((InventoryBase)item, false);
+                    Client.Inventory.MoveItem(item.UUID, item.ParentUUID, item.Name);
+                    UpdateItemInfo(item);
+                    break;
             }
-            else if (e.Node.Tag is InventoryItem item)
-            {
-                item.Name = e.Label;
-                e.Node.Text = ItemLabel((InventoryBase)item, false);
-                Client.Inventory.MoveItem(item.UUID, item.ParentUUID, item.Name);
-                UpdateItemInfo(item);
-            }
-
         }
 
         private void invTree_KeyUp(object sender, KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.F2 && invTree.SelectedNode != null)
+            switch (e.KeyCode)
             {
-                invTree.SelectedNode.BeginEdit();
-            }
-            else if (e.KeyCode == Keys.F5 && invTree.SelectedNode != null)
-            {
-                if (invTree.SelectedNode.Tag is InventoryFolder folder)
+                case Keys.F2 when invTree.SelectedNode != null:
+                    invTree.SelectedNode.BeginEdit();
+                    break;
+                case Keys.F5 when invTree.SelectedNode != null:
                 {
-                    FetchFolder(folder.UUID, folder.OwnerID, true);
-                }
-            }
-            else if (e.KeyCode == Keys.Delete && invTree.SelectedNode != null)
-            {
-                var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
-                if (trash == Inventory.RootFolder.UUID)
-                {
-                    trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                    Thread.Sleep(2000);
-                }
+                    if (invTree.SelectedNode.Tag is InventoryFolder folder)
+                    {
+                        FetchFolder(folder.UUID, folder.OwnerID, true);
+                    }
 
-                switch (invTree.SelectedNode.Tag)
-                {
-                    case InventoryItem item:
-                        Client.Inventory.MoveItem(item.UUID, trash);
-                        break;
-                    case InventoryFolder folder:
-                        Client.Inventory.MoveFolder(folder.UUID, trash);
-                        break;
+                    break;
                 }
-            }
-            else if (e.KeyCode == Keys.Apps && invTree.SelectedNode != null)
-            {
-                ctxInv.Show();
+                case Keys.Delete when invTree.SelectedNode != null:
+                {
+                    var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
+                    if (trash == Inventory.RootFolder.UUID)
+                    {
+                        trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                        Thread.Sleep(2000);
+                    }
+
+                    switch (invTree.SelectedNode.Tag)
+                    {
+                        case InventoryItem item:
+                            Client.Inventory.MoveItem(item.UUID, trash);
+                            break;
+                        case InventoryFolder folder:
+                            Client.Inventory.MoveFolder(folder.UUID, trash);
+                            break;
+                    }
+
+                    break;
+                }
+                case Keys.Apps when invTree.SelectedNode != null:
+                    ctxInv.Show();
+                    break;
             }
         }
 
@@ -2294,7 +2140,7 @@ namespace Radegast
 
             if (sourceNode == destinationNode) return;
 
-            // If droping to item within folder drop to its folder
+            // If dropping to item within folder drop to its folder
             if (destinationNode.Tag is InventoryItem)
             {
                 destinationNode = destinationNode.Parent;
@@ -2302,35 +2148,28 @@ namespace Radegast
 
             if (!(destinationNode.Tag is InventoryFolder dest)) return;
 
-            if (sourceNode.Tag is InventoryItem item)
+            switch (sourceNode.Tag)
             {
-                Client.Inventory.MoveItem(item.UUID, dest.UUID, item.Name);
-            }
-            else if (sourceNode.Tag is InventoryFolder folder)
-            {
-                Client.Inventory.MoveFolder(folder.UUID, dest.UUID);
+                case InventoryItem item:
+                    Client.Inventory.MoveItem(item.UUID, dest.UUID, item.Name);
+                    break;
+                case InventoryFolder folder:
+                    Client.Inventory.MoveFolder(folder.UUID, dest.UUID);
+                    break;
             }
         }
 
         private void invTree_DragEnter(object sender, DragEventArgs e)
         {
             TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            if (node == null)
-            {
-                e.Effect = DragDropEffects.None;
-            }
-            else
-            {
-                e.Effect = DragDropEffects.Move;
-            }
+            e.Effect = node == null ? DragDropEffects.None : DragDropEffects.Move;
         }
 
         private TreeNode highlightedNode = null;
 
         private void invTree_DragOver(object sender, DragEventArgs e)
         {
-            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            if (node == null)
+            if (!(e.Data.GetData(typeof(TreeNode)) is TreeNode node))
             {
                 e.Effect = DragDropEffects.None;
             }
@@ -2740,8 +2579,6 @@ namespace Radegast
             var c = new FolderCopy(instance);
             c.GetFolders("Initial Outfits");
         }
-
-
     }
 
     #region Sorter class
@@ -2760,7 +2597,7 @@ namespace Radegast
             {
                 return 1;
             }
-            return String.CompareOrdinal(x.Name, y.Name);
+            return string.CompareOrdinal(x.Name, y.Name);
         }
 
         public bool SystemFoldersFirst { set; get; } = true;
@@ -2782,13 +2619,10 @@ namespace Radegast
             }
 
             // Two items
-            if (!(tx.Tag is InventoryItem) || !(ty.Tag is InventoryItem))
+            if (!(tx.Tag is InventoryItem item1) || !(ty.Tag is InventoryItem item2))
             {
                 return 0;
             }
-
-            InventoryItem item1 = (InventoryItem)tx.Tag;
-            InventoryItem item2 = (InventoryItem)ty.Tag;
 
             if (!ByDate) return string.CompareOrdinal(item1.Name, item2.Name);
 
@@ -2805,16 +2639,4 @@ namespace Radegast
         }
     }
     #endregion
-
-    public class AttachmentInfo
-    {
-        public Primitive Prim;
-        public InventoryItem Item;
-        public UUID InventoryID;
-        public UUID PrimID;
-        public bool MarkedAttached;
-        public AttachmentPoint Point => Prim != null ? Prim.PrimData.AttachmentPoint : AttachmentPoint.Default;
-    }
-
-
 }

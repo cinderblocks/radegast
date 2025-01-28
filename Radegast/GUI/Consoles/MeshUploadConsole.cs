@@ -238,7 +238,7 @@ namespace Radegast
                     }), cancellationToken);
                 }
             } 
-            catch (OperationCanceledException ex)
+            catch (OperationCanceledException)
             {
                 Msg("Upload cancelled.");
             }

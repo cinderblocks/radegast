@@ -34,10 +34,6 @@ namespace Radegast
         private GridClient Client;
         private readonly RadegastInstance Instance;
         private bool InitializedCOF = false;
-        private bool AppearanceSent = false;
-        private bool COFReady = false;
-        private bool InitialUpdateDone = false;
-        public Dictionary<UUID, InventoryItem> Content = new Dictionary<UUID, InventoryItem>();
         public InventoryFolder COF;
 
         #endregion Fields
@@ -83,49 +79,17 @@ namespace Radegast
             client.Inventory.ItemReceived -= Inventory_ItemReceived;
             client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
             client.Objects.KillObject -= Objects_KillObject;
-            lock (Content) Content.Clear();
             InitializedCOF = false;
-            AppearanceSent = false;
-            COFReady = false;
-            InitialUpdateDone = false;
         }
 
         private void Appearance_AppearanceSet(object sender, AppearanceSetEventArgs e)
         {
-            AppearanceSent = true;
-            if (COFReady)
-            {
-                InitialUpdate();
-            }
+
         }
 
         private void Inventory_ItemReceived(object sender, ItemReceivedEventArgs e)
         {
-            var links = ContentLinks();
-            bool partOfCOF = links.Any(cofItem => cofItem.AssetUUID == e.Item.UUID);
 
-            if (partOfCOF)
-            {
-                lock (Content)
-                {
-                    Content[e.Item.UUID] = e.Item;
-                }
-            }
-
-            if (Content.Count != links.Count) { return; }
-            COFReady = true;
-            if (AppearanceSent)
-            {
-                InitialUpdate();
-            }
-            lock (Content)
-            {
-                foreach (var lk in from link in Content.Values 
-                         where link.InventoryType == InventoryType.Wearable 
-                         select (InventoryWearable)link into w 
-                         select links.Find(l => l.AssetUUID == w.UUID))
-                { }
-            }
         }
 
         private readonly object FolderSync = new object();
@@ -139,10 +103,11 @@ namespace Radegast
                 COF = (InventoryFolder)Client.Inventory.Store[COF.UUID];
                 lock (FolderSync)
                 {
-                    lock (Content) { Content.Clear(); }
-
-                    var items = ContentLinks().ToDictionary(
-                        link => link.AssetUUID, link => Client.Self.AgentID);
+                    var items = new Dictionary<UUID, UUID>();
+                    foreach (var link in ContentLinks().Where(link => !items.ContainsKey(link.AssetUUID)))
+                    {
+                        items.Add(link.AssetUUID, Client.Self.AgentID);
+                    }
 
                     if (items.Count > 0)
                     {
@@ -187,59 +152,32 @@ namespace Radegast
 
         #region Private methods
 
-        private UUID InitializeCurrentOutfitFolder()
+        private void InitializeCurrentOutfitFolder()
         {
-            COF = Client.Appearance.GetCurrentOutfitFolder();
+            COF = Client.Appearance.GetCurrentOutfitFolder(CancellationToken.None).Result;
 
-            UUID id;
             if (COF == null)
             {
-                id = CreateCurrentOutfitFolder();
+                CreateCurrentOutfitFolder();
             }
             else
             {
-                id = COF.UUID;
                 Task task = Client.Inventory.RequestFolderContents(COF.UUID, Client.Self.AgentID,
                     true, true, InventorySortOrder.ByDate);
             }
-            Logger.Log($"Initialized Current Outfit Folder with UUID {id}", Helpers.LogLevel.Info, Client);
-            return id;
+            Logger.Log($"Initialized Current Outfit Folder with UUID {COF.UUID}", Helpers.LogLevel.Info, Client);
         }
 
-        private UUID CreateCurrentOutfitFolder()
+        private void CreateCurrentOutfitFolder()
         {
             UUID cofId = Client.Inventory.CreateFolder(Client.Inventory.Store.RootFolder.UUID, 
                 "Current Outfit", FolderType.CurrentOutfit);
             if (Client.Inventory.Store.Contains(cofId) && Client.Inventory.Store[cofId] is InventoryFolder folder)
             {
                 COF = folder;
-                COFReady = true;
-                if (AppearanceSent)
-                {
-                    InitialUpdate();
-                }
-            }
-
-            return cofId;
-        }
-
-        private void InitialUpdate()
-        {
-            if (InitialUpdateDone) { return; }
-
-            InitialUpdateDone = true;
-            lock (Content)
-            {
-                var myAtt = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == Client.Self.LocalID);
-
-                foreach (var item in Content.Values
-                             .Where(item => item is InventoryObject || item is InventoryAttachment)
-                             .Where(item => !IsAttached(myAtt, item)))
-                {
-                    Client.Appearance.Attach(item, AttachmentPoint.Default, false);
-                }
             }
         }
+
         #endregion Private methods
 
         #region Public methods
@@ -247,7 +185,7 @@ namespace Radegast
         /// Return contents of COF
         /// </summary>
         /// <returns>List if InventoryItems that can be part of appearance (attachments, wearables)</returns>
-        public List<InventoryItem> ContentLinks()
+        private List<InventoryItem> ContentLinks()
         {
             var ret = new List<InventoryItem>();
             if (COF != null)
@@ -357,7 +295,7 @@ namespace Radegast
             if (ContentLinks().Find(itemLink => itemLink.AssetUUID == item.UUID) == null)
             {
                 Client.Inventory.CreateLink(COF.UUID, item.UUID, item.Name, newDescription, 
-                    AssetType.Link, item.InventoryType, UUID.Random(), 
+                    item.InventoryType, UUID.Random(), 
                     (success, newItem) =>
                 {
                     if (success)

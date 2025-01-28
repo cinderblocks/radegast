@@ -33,9 +33,9 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="2.2.0.890" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.0.890" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.2.0.890" />
+    <PackageReference Include="LibreMetaverse" Version="2.2.3.909" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.3.909" />
+    <PackageReference Include="LibreMetaverse.Types" Version="2.2.3.909" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.1" />
     <PackageReference Include="SmartIrc4net" Version="1.1.0" />
     <PackageReference Include="System.Data.DataSetExtensions" Version="4.5.0" />

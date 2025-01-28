@@ -1017,13 +1017,6 @@ namespace Radegast
             return ret;
         }
 
-        public bool AllowDetach(AttachmentInfo a)
-        {
-            if (!Enabled || a == null) return true;
-
-            return rules.FindAll(r => r.Behaviour == "detach" && r.Sender == a.Prim.ID).Count <= 0;
-        }
-
         public bool AllowDetach(InventoryItem item)
         {
             if (!Enabled || item == null) return true;
