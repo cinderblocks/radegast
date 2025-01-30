@@ -67,8 +67,6 @@ namespace Radegast
         {
             client.Network.SimChanged += Network_OnSimChanged;
             client.Inventory.FolderUpdated += Inventory_FolderUpdated;
-            client.Inventory.ItemReceived += Inventory_ItemReceived;
-            client.Appearance.AppearanceSet += Appearance_AppearanceSet;
             client.Objects.KillObject += Objects_KillObject;
         }
 
@@ -76,20 +74,8 @@ namespace Radegast
         {
             client.Network.SimChanged -= Network_OnSimChanged;
             client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
-            client.Inventory.ItemReceived -= Inventory_ItemReceived;
-            client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
             client.Objects.KillObject -= Objects_KillObject;
             InitializedCOF = false;
-        }
-
-        private void Appearance_AppearanceSet(object sender, AppearanceSetEventArgs e)
-        {
-
-        }
-
-        private void Inventory_ItemReceived(object sender, ItemReceivedEventArgs e)
-        {
-
         }
 
         private readonly object FolderSync = new object();
