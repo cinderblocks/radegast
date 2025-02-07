@@ -28,10 +28,13 @@
         /// </summary>
         private void InitializeComponent()
         {
+            this.components = new System.ComponentModel.Container();
             this.pnlChatLine = new System.Windows.Forms.Panel();
             this.btnSend = new System.Windows.Forms.Button();
             this.cbxInput = new Radegast.ChatInputBox();
             this.pnlConnectionSettings = new System.Windows.Forms.Panel();
+            this.cbSource = new System.Windows.Forms.ComboBox();
+            this.label5 = new System.Windows.Forms.Label();
             this.btnConnect = new System.Windows.Forms.Button();
             this.txtChan = new System.Windows.Forms.TextBox();
             this.txtNick = new System.Windows.Forms.TextBox();
@@ -45,8 +48,7 @@
             this.scChat = new System.Windows.Forms.SplitContainer();
             this.rtbChatText = new Radegast.RRichTextBox();
             this.Participants = new Radegast.ListViewNoFlicker();
-            this.label5 = new System.Windows.Forms.Label();
-            this.cbSource = new System.Windows.Forms.ComboBox();
+            this.autoScrollCB = new System.Windows.Forms.CheckBox();
             this.pnlChatLine.SuspendLayout();
             this.pnlConnectionSettings.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.scChat)).BeginInit();
@@ -57,6 +59,7 @@
             // 
             // pnlChatLine
             // 
+            this.pnlChatLine.Controls.Add(this.autoScrollCB);
             this.pnlChatLine.Controls.Add(this.btnSend);
             this.pnlChatLine.Controls.Add(this.cbxInput);
             this.pnlChatLine.Dock = System.Windows.Forms.DockStyle.Bottom;
@@ -69,7 +72,7 @@
             // 
             this.btnSend.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnSend.Enabled = false;
-            this.btnSend.Location = new System.Drawing.Point(695, 2);
+            this.btnSend.Location = new System.Drawing.Point(620, 3);
             this.btnSend.Name = "btnSend";
             this.btnSend.Size = new System.Drawing.Size(55, 23);
             this.btnSend.TabIndex = 2;
@@ -83,7 +86,7 @@
             | System.Windows.Forms.AnchorStyles.Right)));
             this.cbxInput.Location = new System.Drawing.Point(3, 3);
             this.cbxInput.Name = "cbxInput";
-            this.cbxInput.Size = new System.Drawing.Size(687, 20);
+            this.cbxInput.Size = new System.Drawing.Size(611, 20);
             this.cbxInput.TabIndex = 1;
             this.cbxInput.KeyDown += new System.Windows.Forms.KeyEventHandler(this.cbxInput_KeyDown);
             // 
@@ -106,6 +109,24 @@
             this.pnlConnectionSettings.Name = "pnlConnectionSettings";
             this.pnlConnectionSettings.Size = new System.Drawing.Size(754, 32);
             this.pnlConnectionSettings.TabIndex = 1;
+            // 
+            // cbSource
+            // 
+            this.cbSource.FormattingEnabled = true;
+            this.cbSource.Location = new System.Drawing.Point(620, 6);
+            this.cbSource.Name = "cbSource";
+            this.cbSource.Size = new System.Drawing.Size(121, 21);
+            this.cbSource.TabIndex = 14;
+            this.cbSource.SelectionChangeCommitted += new System.EventHandler(this.cbSource_SelectionChangeCommitted);
+            // 
+            // label5
+            // 
+            this.label5.AutoSize = true;
+            this.label5.Location = new System.Drawing.Point(573, 9);
+            this.label5.Name = "label5";
+            this.label5.Size = new System.Drawing.Size(41, 13);
+            this.label5.TabIndex = 13;
+            this.label5.Text = "Source";
             // 
             // btnConnect
             // 
@@ -246,23 +267,18 @@
             this.Participants.UseCompatibleStateImageBehavior = false;
             this.Participants.View = System.Windows.Forms.View.List;
             // 
-            // label5
+            // autoScrollCB
             // 
-            this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(573, 9);
-            this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(41, 13);
-            this.label5.TabIndex = 13;
-            this.label5.Text = "Source";
-            // 
-            // cbSource
-            // 
-            this.cbSource.FormattingEnabled = true;
-            this.cbSource.Location = new System.Drawing.Point(620, 6);
-            this.cbSource.Name = "cbSource";
-            this.cbSource.Size = new System.Drawing.Size(121, 21);
-            this.cbSource.TabIndex = 14;
-            this.cbSource.SelectionChangeCommitted += new System.EventHandler(this.cbSource_SelectionChangeCommitted);
+            this.autoScrollCB.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.autoScrollCB.AutoSize = true;
+            this.autoScrollCB.Checked = true;
+            this.autoScrollCB.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.autoScrollCB.Location = new System.Drawing.Point(679, 7);
+            this.autoScrollCB.Name = "autoScrollCB";
+            this.autoScrollCB.Size = new System.Drawing.Size(72, 17);
+            this.autoScrollCB.TabIndex = 14;
+            this.autoScrollCB.Text = "Autoscroll";
+            this.autoScrollCB.UseVisualStyleBackColor = true;
             // 
             // RelayConsole
             // 
@@ -306,5 +322,6 @@
         private System.Windows.Forms.Button btnDisconnect;
         private System.Windows.Forms.ComboBox cbSource;
         private System.Windows.Forms.Label label5;
+        private System.Windows.Forms.CheckBox autoScrollCB;
     }
 }

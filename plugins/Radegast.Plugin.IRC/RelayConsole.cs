@@ -118,7 +118,7 @@ namespace Radegast.Plugin.IRC
             InitializeComponent();
             Disposed += RelayConsole_Disposed;
             
-            textPrinter = new RichTextBoxPrinter(rtbChatText);
+            textPrinter = new RichTextBoxPrinter(rtbChatText, autoScrollCB);
 
             // Get configuration settings, and initialize if not found.
             config = instance.GlobalSettings["plugin.irc"] as OSDMap;

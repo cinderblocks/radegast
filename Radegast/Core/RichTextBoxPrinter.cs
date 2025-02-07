@@ -29,12 +29,17 @@ namespace Radegast
     public class RichTextBoxPrinter : ITextPrinter
     {
         [System.Runtime.InteropServices.DllImport("User32.dll")]
-        extern static int GetScrollPos(IntPtr hWnd, int nBar);
-
+        private static extern int GetScrollPos(IntPtr hWnd, int nBar);
         [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
+        private static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool PostMessageA(IntPtr hWnd, int nBar, int wParam, int lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool GetScrollRange(IntPtr hWnd, int nBar, out int lpMinPos, out int lpMaxPos);
 
         private const int SB_VERT = 1; // vertical scroll bar
+        private const int WM_VSCROLL = 0x115;
+        private const int SB_THUMBPOSITION = 0x4;
 
         private RRichTextBox rtb;
         private CheckBox autoScrollCB;
@@ -104,12 +109,31 @@ namespace Radegast
             }
         }
 
+        private int GetScrollPosition()
+        {
+            return GetScrollPos(rtb.Handle, SB_VERT);
+        }
+
+        private void PossibleSetScrollBackToPosition(int scrollPos)
+        {
+            if (!autoScrollCB.Checked)
+            {
+                GetScrollRange(rtb.Handle, SB_VERT, out int _, out int vsBot);
+                int sbOffset = (int)((rtb.ClientSize.Height - SystemInformation.HorizontalScrollBarHeight) / (rtb.Font.Height));
+                if (scrollPos >= (vsBot - sbOffset - 1)) //still scroll with the output if the thumb is at the bottom
+                {
+                    SetScrollPos(rtb.Handle, SB_VERT, scrollPos, true);
+                    PostMessageA(rtb.Handle, WM_VSCROLL, SB_THUMBPOSITION + 0x10000 * scrollPos, 0);
+                }
+            }
+        }
+
         private void AppendTextWithAntiScroll(string text)
         {
 
-            int scrollPos = GetScrollPos(rtb.Handle, SB_VERT);
+            int scrollPos = GetScrollPosition();
             rtb.AppendText(text);
-            if (!autoScrollCB.Checked) SetScrollPos(rtb.Handle, SB_VERT, scrollPos, true);
+            PossibleSetScrollBackToPosition(scrollPos);
         }
 
         #region ITextPrinter Members
@@ -118,13 +142,13 @@ namespace Radegast
         {
             if (rtb.InvokeRequired)
             {
-                rtb.Invoke(new MethodInvoker(() => rtb.AppendText(text)));
+                rtb.Invoke(new MethodInvoker(() => AppendTextWithAntiScroll(text)));
                 return;
             }
 
             if (mono)
             {
-                rtb.AppendText(text);
+                AppendTextWithAntiScroll(text);
             }
             else
             {
@@ -165,19 +189,43 @@ namespace Radegast
         public Color ForeColor
         {
             get => rtb.SelectionColor;
-            set => rtb.SelectionColor = value;
+            set
+            {
+                if (rtb.SelectionColor != value)
+                {
+                    int scrollPos = GetScrollPosition();
+                    rtb.SelectionColor = value;
+                    PossibleSetScrollBackToPosition(scrollPos);
+                }
+            }
         }
 
         public Color BackColor
         {
             get => rtb.SelectionBackColor;
-            set => rtb.SelectionBackColor = value;
+            set
+            {
+                if (rtb.SelectionBackColor != value)
+                {
+                    int scrollPos = GetScrollPosition();
+                    rtb.SelectionBackColor = value;
+                    PossibleSetScrollBackToPosition(scrollPos);
+                }
+            }
         }
 
         public Font Font
         {
             get => rtb.SelectionFont;
-            set => rtb.SelectionFont = value;
+            set
+            {
+                if (rtb.SelectionFont != value)
+                {
+                    int scrollPos = GetScrollPosition();
+                    rtb.SelectionFont = value;
+                    PossibleSetScrollBackToPosition(scrollPos);
+                }
+            }
         }
 
         #endregion
