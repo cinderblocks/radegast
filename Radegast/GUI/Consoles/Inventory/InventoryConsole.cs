@@ -1375,8 +1375,7 @@ namespace Radegast
                         ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
                         //TODO: add RLV support
                         var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-                            p => p.ParentID == Client.Self.LocalID 
-                                 && p.ID == item.ActualUUID);
+                            p => p.ParentID == Client.Self.LocalID && CurrentOutfitFolder.GetAttachmentItem(p) == item.UUID);
                         if (attached != null)
                         {
                             ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
@@ -1696,7 +1695,7 @@ namespace Radegast
 
                     case "touch":
                         var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-                            p => p.ParentID == Client.Self.LocalID && p.ID == item.UUID);
+                            p => p.ParentID == Client.Self.LocalID && CurrentOutfitFolder.GetAttachmentItem(p) == item.UUID);
                         if (attached != null)
                         {
                             Client.Self.Grab(attached.LocalID, 
