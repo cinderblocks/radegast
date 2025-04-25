@@ -5,6 +5,5 @@
   <?define companyName="Sjofn, LLC"?>
   <?define aboutUrl="https://radegast.life/"?>
   <?define copyright="Copyright (c) 2006-2025 Sjofn LLC."?>
-  <?define upgradeCode=""fc37bb97-5666-46ff-be02-737f4537ca8b"?>
   <?define totalFileSize="10"?>
 </Include>

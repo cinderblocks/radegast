@@ -7,7 +7,7 @@
            Compressed="yes"
            Version="$(var.productVersion)"
            Manufacturer="$(var.companyName)"
-           UpgradeCode="$(var.upgradeCode)"
+           Id="$(var.productName)"
            InstallerVersion="500">
     <SummaryInformation Description="$(var.productDesc)"
                         Keywords="virtual world,3D,secondlife,opensimulator"

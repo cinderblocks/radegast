@@ -10,7 +10,7 @@
           UpdateUrl="$(var.aboutUrl)"
           Copyright="$(var.copyright)"
           IconSourceFile="$(var.Radegast.ProjectDir)radegast.ico"
-          UpgradeCode="$(var.upgradeCode)">
+          Id="$(var.productName)">
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication LicenseFile="..\..\LICENSE.rtf"
                                               ShowVersion="yes"
