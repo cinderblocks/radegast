@@ -17,13 +17,17 @@
                                               Theme='rtfLargeLicense' />
     </BootstrapperApplication>
 
+    <Variable Name="InstallFolder" Type="string" Value="[ProgramFiles64Folder]$(var.productName)" />
+
     <Chain>
       <PackageGroupRef Id="NetFx48Redist" />
-      <MsiPackage Id="RadegastSetup" 
-                  SourceFile="$(var.RadegastSetup.TargetPath)" 
+      <MsiPackage Id="RadegastSetup"
+                  SourceFile="$(var.RadegastSetup.TargetPath)"
                   DisplayName="$(var.productName)"
-                  Vital="yes" 
-                  After="NetFx48Redist" />
+                  Vital="yes"
+                  After="NetFx48Redist">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+      </MsiPackage>
     </Chain>
   </Bundle>
 </Wix>
