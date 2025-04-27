@@ -160,7 +160,7 @@ namespace Radegast
                     {
                         BeginInvoke(new MethodInvoker(() =>
                         {
-                            lblStatus.Text = string.Format("Traversed {0} nodes...", traversed);
+                            lblStatus.Text = $"Traversed {traversed} nodes...";
                         }));
                     }
 
@@ -299,7 +299,8 @@ namespace Radegast
                                             }
                                             else
                                             {
-                                                Logger.Log(string.Format("Falied to decode asset for '{0}' - {1}", item.Name, receivedAsset.AssetID), Helpers.LogLevel.Warning, client);
+                                                Logger.Log(
+                                                    $"Falied to decode asset for '{item.Name}' - {receivedAsset.AssetID}", Helpers.LogLevel.Warning, client);
                                             }
 
                                             break;
@@ -317,7 +318,8 @@ namespace Radegast
                                             }
                                             else
                                             {
-                                                Logger.Log(string.Format("Falied to decode asset for '{0}' - {1}", item.Name, receivedAsset.AssetID), Helpers.LogLevel.Warning, client);
+                                                Logger.Log(
+                                                    $"Failed to decode asset for '{item.Name}' - {receivedAsset.AssetID}", Helpers.LogLevel.Warning, client);
                                             }
 
                                             break;
