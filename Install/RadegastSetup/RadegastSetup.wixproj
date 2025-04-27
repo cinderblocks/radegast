@@ -1,4 +1,4 @@
-﻿<Project Sdk="WixToolset.Sdk/5.0.2">
+﻿<Project Sdk="WixToolset.Sdk/6.0.0">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <ProductVersion Condition=" '$(ProductVersion)' == '' ">3.1.0</ProductVersion>
@@ -7,10 +7,10 @@
     <Name>RadegastSetup</Name>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="WixToolset.NetFx.wixext" Version="5.0.2" />
-    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
-    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
-    <PackageReference Include="WixToolset.Heat" Version="5.0.2" />
+    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.0" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.0" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.0" />
+    <PackageReference Include="WixToolset.Heat" Version="6.0.0" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="vcredist" />

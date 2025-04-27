@@ -6,7 +6,8 @@
 	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	<UseWindowsForms>true</UseWindowsForms>
 	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-	<Platforms>AnyCPU;x64;x86</Platforms>
+    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
 	<OutputPath>..\bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
@@ -49,18 +50,18 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="AIMLbot-Radegast" Version="2.5.1.1" />
-    <PackageReference Include="BugSplatDotNetStandard" Version="4.2.1" />
+    <PackageReference Include="BugSplatDotNetStandard" Version="4.2.2" />
     <PackageReference Include="C5" Version="3.0.0" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.1" />
-    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="2.3.0" />
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.4" />
+    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.4" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
     <PackageReference Include="RoslynCodeTaskFactory" Version="2.0.7" />
     <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.116.1" />
     <PackageReference Include="System.Collections" Version="4.3.0" />
-    <PackageReference Include="System.ComponentModel.Composition" Version="9.0.1" />
+    <PackageReference Include="System.ComponentModel.Composition" Version="9.0.4" />
     <PackageReference Include="System.Console" Version="4.3.1" />
     <PackageReference Include="System.Diagnostics.Debug" Version="4.3.0" />
     <PackageReference Include="System.Globalization" Version="4.3.0" />
@@ -72,7 +73,7 @@
     <PackageReference Include="System.Reflection" Version="4.3.0" />
     <PackageReference Include="System.Reflection.Extensions" Version="4.3.0" />
     <PackageReference Include="System.Reflection.TypeExtensions" Version="4.7.0" />
-    <PackageReference Include="System.Resources.Extensions" Version="9.0.1" />
+    <PackageReference Include="System.Resources.Extensions" Version="9.0.4" />
     <PackageReference Include="System.Resources.ResourceManager" Version="4.3.0" />
     <PackageReference Include="System.Runtime" Version="4.3.1" />
     <PackageReference Include="System.Runtime.Extensions" Version="4.3.1" />
