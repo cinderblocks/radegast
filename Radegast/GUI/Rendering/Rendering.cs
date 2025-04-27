@@ -1068,12 +1068,6 @@ namespace Radegast.Rendering
                     }
                     if (item.TextureData == null) { continue; }
 
-                    if (item.ImageType == ImageType.ServerBaked || item.ImageType == ImageType.Baked)
-                    {
-                        // TODO: CoreJ2K can't handle images with more than 4 components and it seems like baked generally has 5.
-                        continue;
-                    }
-
                     var mi = new ManagedImage(J2kImage.FromBytes(item.TextureData));
                     
                     bool hasAlpha = false;
