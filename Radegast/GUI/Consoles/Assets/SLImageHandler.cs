@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,6 +26,7 @@ using OpenMetaverse;
 using OpenMetaverse.Assets;
 using System.IO;
 using CoreJ2K;
+using OpenMetaverse.Imaging;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -37,9 +38,9 @@ namespace Radegast
         private GridClient client => instance.Client;
         private UUID imageID;
 
-        byte[] j2kdata;
-        Image image;
-        bool allowSave = false;
+        private byte[] j2kdata;
+        private Image image;
+        private readonly bool allowSave = false;
 
         public event EventHandler<ImageUpdatedEventArgs> ImageUpdated;
 
@@ -58,7 +59,7 @@ namespace Radegast
 
                 if (image != null)
                 {
-                    base.Text += string.Format(" ({0}x{1})", image.Width, image.Height);
+                    base.Text += $" ({image.Width}x{image.Height})";
                 }
 
                 SetTitle();
@@ -123,7 +124,8 @@ namespace Radegast
                 return;
             }
 
-            client.Assets.RequestImage(imageID, ImageType.Normal, 101300.0f, 0, 0, delegate(TextureRequestState state, AssetTexture assetTexture)
+            client.Assets.RequestImage(imageID, ImageType.Normal, 101300.0f, 0, 0, 
+                delegate(TextureRequestState state, AssetTexture assetTexture)
             {
                 if (state == TextureRequestState.Finished || state == TextureRequestState.Timeout)
                 {
@@ -137,12 +139,12 @@ namespace Radegast
             true);
         }
 
-        void SLImageHandler_Disposed(object sender, EventArgs e)
+        private void SLImageHandler_Disposed(object sender, EventArgs e)
         {
             client.Assets.ImageReceiveProgress -= Assets_ImageReceiveProgress;
         }
 
-        void Assets_ImageReceiveProgress(object sender, ImageReceiveProgressEventArgs e)
+        private void Assets_ImageReceiveProgress(object sender, ImageReceiveProgressEventArgs e)
         {
             if (imageID != e.ImageID)
             {
@@ -165,11 +167,11 @@ namespace Radegast
             {
                 return;
             }
-            lblProgress.Text = string.Format("{0} of {1}KB ({2}%)", (int)e.Received / 1024, (int)e.Total / 1024, pct);
+            lblProgress.Text = $"{(int)e.Received / 1024} of {(int)e.Total / 1024}KB ({pct}%)";
             progressBar1.Value = pct;
         }
 
-        void DisplayPartialImage(AssetTexture assetTexture)
+        private void DisplayPartialImage(AssetTexture assetTexture)
         {
             if (InvokeRequired)
             {
@@ -258,8 +260,8 @@ namespace Radegast
                 else if (type == 1)
                 { // targa
                     var bmp = (Bitmap)image;
-                    var mi = new OpenMetaverse.Imaging.ManagedImage(bmp.ToSKBitmap());
-                    File.WriteAllBytes(dlg.FileName, OpenMetaverse.Imaging.Targa.Encode(mi));
+                    var tga = Targa.Encode(bmp.ToSKBitmap());
+                    File.WriteAllBytes(dlg.FileName, tga);
                 }
                 else if (type == 3)
                 { // png
@@ -413,13 +415,13 @@ namespace Radegast
             {
                 UUID newID = UUID.Zero;
 
-                if (instance.InventoryClipboard.Item is InventoryTexture)
+                if (instance.InventoryClipboard.Item is InventoryTexture texture)
                 {
-                    newID = ((InventoryTexture)instance.InventoryClipboard.Item).AssetUUID;
+                    newID = texture.AssetUUID;
                 }
-                else if (instance.InventoryClipboard.Item is InventorySnapshot)
+                else if (instance.InventoryClipboard.Item is InventorySnapshot snapshot)
                 {
-                    newID = ((InventorySnapshot)instance.InventoryClipboard.Item).AssetUUID;
+                    newID = snapshot.AssetUUID;
                 }
                 else
                 {
@@ -435,9 +437,7 @@ namespace Radegast
 
         private void tbtbInvShow_Click(object sender, EventArgs e)
         {
-            if (!(tbtbInvShow.Tag is InventoryItem)) return;
-            
-            InventoryItem item = (InventoryItem)tbtbInvShow.Tag;
+            if (!(tbtbInvShow.Tag is InventoryItem item)) { return; }
 
             if (instance.TabConsole.TabExists("inventory"))
             {

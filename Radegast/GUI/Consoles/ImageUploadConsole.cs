@@ -31,6 +31,7 @@ using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
+using Targa = OpenMetaverse.Imaging.Targa;
 
 namespace Radegast
 {
@@ -281,8 +282,8 @@ namespace Radegast
                 }
                 else if (type == 2)
                 { // targa
-                    var mgimg = new ManagedImage(J2kImage.FromBytes(UploadData));
-                    File.WriteAllBytes(dlg.FileName, OpenMetaverse.Imaging.Targa.Encode(mgimg));
+                    var bitmap = J2kImage.FromBytes(UploadData).As<SKBitmap>();
+                    File.WriteAllBytes(dlg.FileName, Targa.Encode(bitmap));
                 }
                 else if (type == 1)
                 { // png
