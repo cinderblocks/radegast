@@ -33,10 +33,10 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="2.2.8.932" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.8.932" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.2.8.932" />
-    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.2.8.932" />
+    <PackageReference Include="LibreMetaverse" Version="2.2.9.940" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.9.940" />
+    <PackageReference Include="LibreMetaverse.Types" Version="2.2.9.940" />
+    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.2.9.940" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.4" />
     <PackageReference Include="System.Data.DataSetExtensions" Version="4.5.0" />
     <PackageReference Include="System.Speech" Version="9.0.4" />
