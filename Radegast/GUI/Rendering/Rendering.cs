@@ -1,7 +1,7 @@
 // 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
-// Copyright (c) 2019-2022, Sjofn LLC
+// Copyright (c) 2019-2025, Sjofn LLC
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without
@@ -31,12 +31,12 @@
 //
 
 #region Usings
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
-using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using System.Threading;
@@ -49,7 +49,6 @@ using OpenMetaverse.Imaging;
 using OpenMetaverse.Packets;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
-using MemoryStream = System.IO.MemoryStream;
 
 #endregion Usings
 
@@ -75,7 +74,7 @@ namespace Radegast.Rendering
         public bool RenderingEnabled = false;
 
         /// <summary>
-        /// Rednder in wireframe mode
+        /// Render in wireframe mode
         /// </summary>
         public bool Wireframe = false;
 
@@ -97,11 +96,12 @@ namespace Radegast.Rendering
         /// <summary>
         /// List of prims in the scene
         /// </summary>
-        Dictionary<uint, RenderPrimitive> Prims = new Dictionary<uint, RenderPrimitive>();
-        List<SceneObject> SortedObjects;
-        List<SceneObject> OccludedObjects;
-        List<RenderAvatar> VisibleAvatars;
-        Dictionary<uint, RenderAvatar> Avatars = new Dictionary<uint, RenderAvatar>();
+        private readonly Dictionary<uint, RenderPrimitive> Prims = new Dictionary<uint, RenderPrimitive>();
+
+        private List<SceneObject> SortedObjects;
+        private List<SceneObject> OccludedObjects;
+        private List<RenderAvatar> VisibleAvatars;
+        private readonly Dictionary<uint, RenderAvatar> Avatars = new Dictionary<uint, RenderAvatar>();
 
         /// <summary>
         /// Cache images after jpeg2000 decode. Uses a lot of disk space and can cause disk trashing
@@ -116,53 +116,54 @@ namespace Radegast.Rendering
 
         #region Private fields
 
-        ChatOverlay chatOverlay;
-        TextRendering textRendering;
-        Camera Camera;
-        SceneObject trackedObject;
-        Vector3 lastTrackedObjectPos = RHelp.InvalidPosition;
-        RenderAvatar myself;
+        private ChatOverlay chatOverlay;
+        private TextRendering textRendering;
+        private readonly Camera Camera;
+        private SceneObject trackedObject;
+        private Vector3 lastTrackedObjectPos = RHelp.InvalidPosition;
+        private RenderAvatar myself;
 
-        Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
-        MeshmerizerR renderer;
-        OpenTK.Graphics.GraphicsMode GLMode = null;
-        AutoResetEvent TextureThreadContextReady = new AutoResetEvent(false);
+        private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
+        private readonly MeshmerizerR renderer;
+        private OpenTK.Graphics.GraphicsMode GLMode = null;
+        private readonly AutoResetEvent TextureThreadContextReady = new AutoResetEvent(false);
 
         private CancellationTokenSource cancellationTokenSource = null;
 
-        delegate void GenericTask();
-        readonly ConcurrentQueue<GenericTask> PendingTasks = new ConcurrentQueue<GenericTask>();
+        private delegate void GenericTask();
+
+        private readonly ConcurrentQueue<GenericTask> PendingTasks = new ConcurrentQueue<GenericTask>();
         private readonly SemaphoreSlim PendingTasksAvailable = new SemaphoreSlim(0);
-        Thread genericTaskThread;
+        private Thread genericTaskThread;
 
-        readonly ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
+        private readonly ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
 
-        readonly Dictionary<UUID, int> AssetFetchFailCount = new Dictionary<UUID, int>();
+        private readonly Dictionary<UUID, int> AssetFetchFailCount = new Dictionary<UUID, int>();
 
-        Font HoverTextFont = new Font(FontFamily.GenericSansSerif, 9f, FontStyle.Regular);
-        Font AvatarTagFont = new Font(FontFamily.GenericSansSerif, 10f, FontStyle.Bold);
-        Dictionary<UUID, SKBitmap> sculptCache = new Dictionary<UUID, SKBitmap>();
-        OpenTK.Matrix4 ModelMatrix;
-        OpenTK.Matrix4 ProjectionMatrix;
-        System.Diagnostics.Stopwatch renderTimer;
-        float lastFrameTime = 0f;
-        float advTimerTick = 0f;
-        float minLODFactor = 0.0001f;
+        private readonly Font HoverTextFont = new Font(FontFamily.GenericSansSerif, 9f, FontStyle.Regular);
+        private readonly Font AvatarTagFont = new Font(FontFamily.GenericSansSerif, 10f, FontStyle.Bold);
+        private readonly Dictionary<UUID, SKBitmap> sculptCache = new Dictionary<UUID, SKBitmap>();
+        private OpenTK.Matrix4 ModelMatrix;
+        private OpenTK.Matrix4 ProjectionMatrix;
+        private readonly System.Diagnostics.Stopwatch renderTimer;
+        private float lastFrameTime = 0f;
+        private float advTimerTick = 0f;
+        private float minLODFactor = 0.0001f;
 
-        float[] sunPos = new float[] { 128f, 128f, 5000f, 1f };
-        float ambient = 0.26f;
-        float difuse = 0.27f;
-        float specular = 0.20f;
-        OpenTK.Vector4 ambientColor;
-        OpenTK.Vector4 difuseColor;
-        OpenTK.Vector4 specularColor;
-        float drawDistance;
-        float drawDistanceSquared;
+        private readonly float[] sunPos = new float[] { 128f, 128f, 5000f, 1f };
+        private float ambient = 0.26f;
+        private float diffuse = 0.27f;
+        private float specular = 0.20f;
+        private OpenTK.Vector4 ambientColor;
+        private OpenTK.Vector4 diffuseColor;
+        private OpenTK.Vector4 specularColor;
+        private float drawDistance;
+        private float drawDistanceSquared;
 
-        RenderTerrain terrain;
+        private readonly RenderTerrain terrain;
 
-        GridClient Client;
-        RadegastInstance Instance;
+        private readonly GridClient Client;
+        private readonly RadegastInstance Instance;
 
         #endregion Private fields
 
@@ -221,7 +222,7 @@ namespace Radegast.Rendering
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void DisposeInternal()
+        private void DisposeInternal()
         {
             RenderingEnabled = false;
             Application.Idle -= Application_Idle;
@@ -303,7 +304,7 @@ namespace Radegast.Rendering
             GC.Collect();
         }
 
-        void Application_Idle(object sender, EventArgs e)
+        private void Application_Idle(object sender, EventArgs e)
         {
             if (RenderingEnabled && glControl != null && !glControl.IsDisposed)
             {
@@ -349,17 +350,17 @@ namespace Radegast.Rendering
             RadegastTab.TabClosed -= RadegastTab_TabClosed;
         }
 
-        void RadegastTab_TabDetached(object sender, EventArgs e)
+        private void RadegastTab_TabDetached(object sender, EventArgs e)
         {
             Instance.GlobalSettings["scene_window_docked"] = false;
         }
 
-        void RadegastTab_TabAttached(object sender, EventArgs e)
+        private void RadegastTab_TabAttached(object sender, EventArgs e)
         {
             Instance.GlobalSettings["scene_window_docked"] = true;
         }
 
-        void RadegastTab_TabClosed(object sender, EventArgs e)
+        private void RadegastTab_TabClosed(object sender, EventArgs e)
         {
             if (RadegastTab != null)
             {
@@ -370,7 +371,8 @@ namespace Radegast.Rendering
         #endregion Tab Events
 
         #region Network messaage handlers
-        void Terrain_LandPatchReceived(object sender, LandPatchReceivedEventArgs e)
+
+        private void Terrain_LandPatchReceived(object sender, LandPatchReceivedEventArgs e)
         {
             if (e.Simulator.Handle == Client.Network.CurrentSim.Handle)
             {
@@ -378,7 +380,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -387,7 +389,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -421,13 +423,13 @@ namespace Radegast.Rendering
                 return;
             }
 
-            KillObjectPacket kill = (KillObjectPacket)e.Packet;
+            var kill = (KillObjectPacket)e.Packet;
 
             lock (Prims)
             {
                 foreach (var obj in kill.ObjectData)
                 {
-                    uint id = obj.ID;
+                    var id = obj.ID;
                     if (Prims.ContainsKey(id))
                     {
                         Prims[id].Dispose();
@@ -440,7 +442,7 @@ namespace Radegast.Rendering
             {
                 foreach (var ob in kill.ObjectData)
                 {
-                    uint id = ob.ID;
+                    var id = ob.ID;
                     if (Avatars.ContainsKey(id))
                     {
                         Avatars[id].Dispose();
@@ -450,7 +452,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
             if (e.Prim.ID == Client.Self.AgentID)
@@ -465,13 +467,13 @@ namespace Radegast.Rendering
             UpdatePrimBlocking(e.Prim);
         }
 
-        void Objects_ObjectUpdate(object sender, PrimEventArgs e)
+        private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
         {
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
             UpdatePrimBlocking(e.Prim);
         }
 
-        void Objects_AvatarUpdate(object sender, AvatarUpdateEventArgs e)
+        private void Objects_AvatarUpdate(object sender, AvatarUpdateEventArgs e)
         {
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
             AddAvatarToScene(e.Avatar);
@@ -482,32 +484,28 @@ namespace Radegast.Rendering
         // the entire list of animations is sent each time and it is our job to determine which are new and
         // which are deleted
 
-        void AvatarAnimationChanged(object sender, AvatarAnimationEventArgs e)
+        private void AvatarAnimationChanged(object sender, AvatarAnimationEventArgs e)
         {
-
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(() => AvatarAnimationChanged(sender, e)));
                 return;
             }
 
-            // We don't currently have UUID -> RenderAvatar mapping so we need to walk the list
-            foreach (RenderAvatar av in Avatars.Values)
+            // We don't currently have UUID -> RenderAvatar mapping, so we need to walk the list
+            foreach (var av in Avatars.Values.Where(av => av.avatar.ID == e.AvatarID))
             {
-                if (av.avatar.ID == e.AvatarID)
-                {
-                    UpdateAvatarAnimations(av);
-                    break;
-                }
+                UpdateAvatarAnimations(av);
+                break;
             }
         }
 
-        void AnimRecievedCallback(AssetDownload transfer, Asset asset)
+        private void AnimReceivedCallback(AssetDownload transfer, Asset asset)
         {
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => AnimRecievedCallback(transfer, asset)));
+                BeginInvoke(new MethodInvoker(() => AnimReceivedCallback(transfer, asset)));
                 return;
             }
 
@@ -517,36 +515,34 @@ namespace Radegast.Rendering
             }
             else
             {
-                int nofails = 1;
-                if (AssetFetchFailCount.TryGetValue(transfer.AssetID, out nofails))
+                if (AssetFetchFailCount.TryGetValue(transfer.AssetID, out var noFails))
                 {
-                    nofails++;
+                    noFails++;
                 }
 
-                AssetFetchFailCount[transfer.AssetID] = nofails;
+                AssetFetchFailCount[transfer.AssetID] = noFails;
 
             }
 
 
         }
 
-        void Avatars_AvatarAppearance(object sender, AvatarAppearanceEventArgs e)
+        private void Avatars_AvatarAppearance(object sender, AvatarAppearanceEventArgs e)
         {
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
 
-            Avatar a = e.Simulator.ObjectsAvatars.Find(av => av.ID == e.AvatarID);
+            var a = e.Simulator.ObjectsAvatars.Find(av => av.ID == e.AvatarID);
             if (a != null)
             {
                 AddAvatarToScene(a);
             }
         }
 
-        void Appearance_AppearanceSet(object sender, AppearanceSetEventArgs e)
+        private void Appearance_AppearanceSet(object sender, AppearanceSetEventArgs e)
         {
             if (e.Success)
             {
-                Avatar me;
-                if (Client.Network.CurrentSim.ObjectsAvatars.TryGetValue(Client.Self.LocalID, out me))
+                if (Client.Network.CurrentSim.ObjectsAvatars.TryGetValue(Client.Self.LocalID, out var me))
                 {
                     AddAvatarToScene(me);
                 }
@@ -580,7 +576,7 @@ namespace Radegast.Rendering
                 }
                 else
                 {
-                    for (int aa = 0; aa <= 4; aa += 2)
+                    for (var aa = 0; aa <= 4; aa += 2)
                     {
                         var testMode = new OpenTK.Graphics.GraphicsMode(OpenTK.DisplayDevice.Default.BitsPerPixel, 24, 8, aa);
                         if (testMode.Samples == aa)
@@ -598,15 +594,8 @@ namespace Radegast.Rendering
 
             try
             {
-                if (GLMode == null)
-                {
-                    // Try default mode
-                    glControl = new OpenTK.GLControl();
-                }
-                else
-                {
-                    glControl = new OpenTK.GLControl(GLMode);
-                }
+                // Try default mode
+                glControl = GLMode == null ? new OpenTK.GLControl() : new OpenTK.GLControl(GLMode);
             }
             catch (Exception ex)
             {
@@ -636,7 +625,7 @@ namespace Radegast.Rendering
             glControl.BringToFront();
         }
 
-        void glControl_UnhookEvents()
+        private void glControl_UnhookEvents()
         {
             glControl.Paint -= glControl_Paint;
             glControl.Resize -= glControl_Resize;
@@ -648,24 +637,26 @@ namespace Radegast.Rendering
             glControl.Disposed -= glControl_Disposed;
 
         }
-        void glControl_Disposed(object sender, EventArgs e)
+
+        private void glControl_Disposed(object sender, EventArgs e)
         {
             glControl_UnhookEvents();
         }
 
-        void SetSun()
+        private void SetSun()
         {
-            ambientColor = new OpenTK.Vector4(ambient, ambient, ambient, difuse);
-            difuseColor = new OpenTK.Vector4(difuse, difuse, difuse, difuse);
+            ambientColor = new OpenTK.Vector4(ambient, ambient, ambient, diffuse);
+            diffuseColor = new OpenTK.Vector4(diffuse, diffuse, diffuse, diffuse);
             specularColor = new OpenTK.Vector4(specular, specular, specular, specular);
             GL.Light(LightName.Light0, LightParameter.Ambient, ambientColor);
-            GL.Light(LightName.Light0, LightParameter.Diffuse, difuseColor);
+            GL.Light(LightName.Light0, LightParameter.Diffuse, diffuseColor);
             GL.Light(LightName.Light0, LightParameter.Specular, specularColor);
             GL.Light(LightName.Light0, LightParameter.Position, sunPos);
         }
 
-        bool glControlLoaded = false;
-        void glControl_Load(object sender, EventArgs e)
+        private bool glControlLoaded = false;
+
+        private void glControl_Load(object sender, EventArgs e)
         {
             if (glControlLoaded) return;
 
@@ -695,8 +686,8 @@ namespace Radegast.Rendering
                 GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
                 // Compatibility checks
-                OpenTK.Graphics.IGraphicsContextInternal context = glControl.Context as OpenTK.Graphics.IGraphicsContextInternal;
-                string glExtensions = GL.GetString(StringName.Extensions);
+                var context = glControl.Context as OpenTK.Graphics.IGraphicsContextInternal;
+                var glExtensions = GL.GetString(StringName.Extensions);
 
                 // VBO
                 RenderSettings.ARBVBOPresent = context.GetAddress("glGenBuffersARB") != IntPtr.Zero;
@@ -764,8 +755,9 @@ namespace Radegast.Rendering
             }
         }
 
-        ShaderProgram shinyProgram = new ShaderProgram();
-        void InitShaders()
+        private readonly ShaderProgram shinyProgram = new ShaderProgram();
+
+        private void InitShaders()
         {
             if (RenderSettings.HasShaders)
             {
@@ -790,7 +782,7 @@ namespace Radegast.Rendering
             renderTimer.Start();
 
             // Determine if we need to throttle frame rate
-            bool throttle = false;
+            var throttle = false;
 
             // Some other app has focus
             if (Form.ActiveForm == null)
@@ -809,7 +801,7 @@ namespace Radegast.Rendering
             // Limit FPS to max 15
             if (throttle)
             {
-                int msToSleep = 66 - ((int)(lastFrameTime / 1000));
+                var msToSleep = 66 - ((int)(lastFrameTime / 1000));
                 if (msToSleep < 10) msToSleep = 10;
                 Thread.Sleep(msToSleep);
             }
@@ -819,7 +811,7 @@ namespace Radegast.Rendering
             glControl.SwapBuffers();
         }
 
-        void glControl_Paint(object sender, EventArgs e)
+        private void glControl_Paint(object sender, EventArgs e)
         {
             MainRenderLoop();
         }
@@ -845,32 +837,32 @@ namespace Radegast.Rendering
         #endregion glControl paint and resize events
 
         #region Mouse handling
-        bool dragging = false;
-        int dragX, dragY;
+
+        private bool dragging = false;
+        private int dragX, dragY;
 
         private void glControl_MouseWheel(object sender, MouseEventArgs e)
         {
             Camera.MoveToTarget(e.Delta / -500f);
         }
 
-        SceneObject RightclickedObject;
-        int RightclickedFaceID;
-        int LeftclickedFaceID;
+        private SceneObject RightclickedObject;
+        private int RightclickedFaceID;
+        private int LeftclickedFaceID;
 
-        Vector3 RightclickedPosition;
+        private Vector3 RightclickedPosition;
 
         private void glControl_MouseDown(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
             {
                 dragging = true;
-                int downX = dragX = e.X;
-                int downY = dragY = e.Y;
+                var downX = dragX = e.X;
+                var downY = dragY = e.Y;
 
                 if (ModifierKeys == Keys.None)
                 {
-                    object picked;
-                    if (TryPick(e.X, e.Y, out picked, out LeftclickedFaceID))
+                    if (TryPick(e.X, e.Y, out var picked, out LeftclickedFaceID))
                     {
                         if (picked is RenderPrimitive primitive)
                         {
@@ -880,14 +872,11 @@ namespace Radegast.Rendering
                 }
                 else if (ModifierKeys == Keys.Alt)
                 {
-                    object picked;
-                    int LeftclickedFaceID;
-                    Vector3 worldPosition;
-                    if (TryPick(e.X, e.Y, out picked, out LeftclickedFaceID, out worldPosition))
+                    if (TryPick(e.X, e.Y, out var picked, out var LeftclickedFaceID, out var worldPosition))
                     {
                         trackedObject = null;
                         Camera.FocalPoint = worldPosition;
-                        Point screenCenter = new Point(glControl.Width / 2, glControl.Height / 2);
+                        var screenCenter = new Point(glControl.Width / 2, glControl.Height / 2);
                         Cursor.Position = glControl.PointToScreen(screenCenter);
                         downX = dragX = screenCenter.X;
                         downY = dragY = screenCenter.Y;
@@ -897,13 +886,12 @@ namespace Radegast.Rendering
             }
             else if (e.Button == MouseButtons.Right)
             {
-                object picked;
                 RightclickedObject = null;
-                if (TryPick(e.X, e.Y, out picked, out RightclickedFaceID, out RightclickedPosition))
+                if (TryPick(e.X, e.Y, out var picked, out RightclickedFaceID, out RightclickedPosition))
                 {
-                    if (picked is SceneObject)
+                    if (picked is SceneObject sceneObject)
                     {
-                        RightclickedObject = (SceneObject)picked;
+                        RightclickedObject = sceneObject;
                     }
                 }
                 ctxMenu.Show(glControl, e.X, e.Y);
@@ -950,17 +938,15 @@ namespace Radegast.Rendering
         {
             if (dragging)
             {
-                int deltaX = e.X - dragX;
-                int deltaY = e.Y - dragY;
-                float pixelToM = 1f / 75f;
+                var deltaX = e.X - dragX;
+                var deltaY = e.Y - dragY;
+                var pixelToM = 1f / 75f;
                 if (e.Button == MouseButtons.Left)
                 {
                     if (ModifierKeys == Keys.None)
                     {
-                        //Only touch if we arn't doing anything else
-                        object picked;
-                        int LeftclickedFaceID;
-                        if (TryPick(e.X, e.Y, out picked, out LeftclickedFaceID))
+                        //Only touch if we aren't doing anything else
+                        if (TryPick(e.X, e.Y, out var picked, out var LeftclickedFaceID))
                         {
                             if (picked is RenderPrimitive primitive)
                             {
@@ -1027,7 +1013,7 @@ namespace Radegast.Rendering
             GL.LoadIdentity();
         }
 
-        // Switch back to frustrum display mode
+        // Switch back to frustum display mode
         public void GLHUDEnd()
         {
             GL.Enable(EnableCap.DepthTest);
@@ -1038,9 +1024,10 @@ namespace Radegast.Rendering
         }
 
         #region Texture thread
-        bool TextureThreadRunning = true;
 
-        void TextureThread()
+        private bool TextureThreadRunning = true;
+
+        private void TextureThread()
         {
             TextureThreadContextReady.Set();
 
@@ -1048,19 +1035,13 @@ namespace Radegast.Rendering
 
             while (TextureThreadRunning)
             {
-                TextureLoadItem item = null;
-
-                if (!PendingTextures.TryDequeue(out item)) { continue; }
+                if (!PendingTextures.TryDequeue(out var item)) { continue; }
 
                 // Already have this one loaded
                 if (item.Data.TextureInfo.TexturePointer != 0) { continue; }
 
                 byte[] imageBytes = null;
-                if (item.TGAData != null)
-                {
-                    imageBytes = item.TGAData;
-                }
-                else if (item.TextureData != null || item.LoadAssetFromCache)
+                if (item.TextureData != null || item.LoadAssetFromCache)
                 {
                     if (item.LoadAssetFromCache)
                     {
@@ -1068,18 +1049,19 @@ namespace Radegast.Rendering
                     }
                     if (item.TextureData == null) { continue; }
 
+                    // TODO: eliminate this.
                     var mi = new ManagedImage(J2kImage.FromBytes(item.TextureData));
                     
-                    bool hasAlpha = false;
-                    bool fullAlpha = false;
-                    bool isMask = false;
+                    var hasAlpha = false;
+                    var fullAlpha = false;
+                    var isMask = false;
                     if ((mi.Channels & ManagedImage.ImageChannels.Alpha) != 0)
                     {
                         fullAlpha = true;
                         isMask = true;
 
                         // Do we really have alpha, is it all full alpha, or is it a mask
-                        foreach (byte b in mi.Alpha)
+                        foreach (var b in mi.Alpha)
                         {
                             if (b < 255)
                             {
@@ -1094,18 +1076,13 @@ namespace Radegast.Rendering
                                 isMask = false;
                             }
                         }
-
-                        if (!hasAlpha)
-                        {
-                            mi.ConvertChannels(mi.Channels & ~ManagedImage.ImageChannels.Alpha);
-                        }
                     }
 
                     item.Data.TextureInfo.HasAlpha = hasAlpha;
                     item.Data.TextureInfo.FullAlpha = fullAlpha;
                     item.Data.TextureInfo.IsMask = isMask;
 
-                    imageBytes = Targa.Encode(mi);
+                    imageBytes = item.TextureData;
                     if (CacheDecodedTextures)
                     {
                         RHelp.SaveCachedImage(imageBytes, item.TeFace.TextureID, hasAlpha, fullAlpha, isMask);
@@ -1114,7 +1091,7 @@ namespace Radegast.Rendering
 
                 if (imageBytes != null)
                 {
-                    var bitmap = Targa.Decode(new MemoryStream(imageBytes)).ToBitmap();
+                    var bitmap = J2kImage.FromBytes(imageBytes).As<SKBitmap>().ToBitmap();
 
                     bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
 
@@ -1127,7 +1104,6 @@ namespace Radegast.Rendering
                 }
 
                 item.TextureData = null;
-                item.TGAData = null;
                 imageBytes = null;
             }
             //context.MakeCurrent(window.WindowInfo);
@@ -1138,7 +1114,7 @@ namespace Radegast.Rendering
         }
         #endregion Texture thread
 
-        void GenericTaskRunner()
+        private void GenericTaskRunner()
         {
             Logger.DebugLog("Started generic task thread");
 
@@ -1148,8 +1124,7 @@ namespace Radegast.Rendering
                 while (true)
                 {
                     PendingTasksAvailable.Wait(token);
-                    GenericTask task = null;
-                    if (!PendingTasks.TryDequeue(out task)) break;
+                    if (!PendingTasks.TryDequeue(out var task)) break;
                     task.Invoke();
                 }
             }
@@ -1165,7 +1140,7 @@ namespace Radegast.Rendering
             Logger.DebugLog("Generic task thread exited");
         }
 
-        void LoadCurrentPrims()
+        private void LoadCurrentPrims()
         {
             if (!Client.Network.Connected) return;
 
@@ -1173,8 +1148,8 @@ namespace Radegast.Rendering
             {
                 if (RenderSettings.PrimitiveRenderingEnabled)
                 {
-                    List<Primitive> mainPrims = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(root => root.ParentID == 0);
-                    foreach (Primitive mainPrim in mainPrims)
+                    var mainPrims = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(root => root.ParentID == 0);
+                    foreach (var mainPrim in mainPrims)
                     {
                         UpdatePrimBlocking(mainPrim);
                         Client.Network.CurrentSim.ObjectsPrimitives
@@ -1185,8 +1160,8 @@ namespace Radegast.Rendering
 
                 if (RenderSettings.AvatarRenderingEnabled)
                 {
-                    List<Avatar> avis = Client.Network.CurrentSim.ObjectsAvatars.FindAll((Avatar a) => true);
-                    foreach (Avatar avatar in avis)
+                    var avis = Client.Network.CurrentSim.ObjectsAvatars.FindAll((Avatar a) => true);
+                    foreach (var avatar in avis)
                     {
                         UpdatePrimBlocking(avatar);
                         Client.Network.CurrentSim.ObjectsPrimitives
@@ -1253,28 +1228,27 @@ namespace Radegast.Rendering
             }
         }
 
-        void InitCamera()
+        private void InitCamera()
         {
-            Vector3 camPos = Client.Self.SimPosition + new Vector3(-4, 0, 1) * Client.Self.Movement.BodyRotation;
+            var camPos = Client.Self.SimPosition + new Vector3(-4, 0, 1) * Client.Self.Movement.BodyRotation;
             Camera.Position = camPos;
             Camera.FocalPoint = Client.Self.SimPosition + new Vector3(5, 0, 0) * Client.Self.Movement.BodyRotation;
             Camera.Zoom = 1.0f;
             Camera.Far = DrawDistance;
         }
 
-        Vector3 PrimPos(Primitive prim)
+        private Vector3 PrimPos(Primitive prim)
         {
-            Vector3 pos;
-            PrimPosAndRot(GetSceneObject(prim.LocalID), out pos, out _);
+            PrimPosAndRot(GetSceneObject(prim.LocalID), out var pos, out _);
             return pos;
         }
 
         /// <summary>
         /// Gets attachment state of a prim
         /// </summary>
-        /// <param name="parentLocalID">Prim's parent id</param>
+        /// <param name="parentLocalID">Parent id</param>
         /// <returns>True, if prim is part of an attachment</returns>
-        bool IsAttached(uint parentLocalID)
+        private bool IsAttached(uint parentLocalID)
         {
             if (parentLocalID == 0) return false;
             try
@@ -1292,15 +1266,13 @@ namespace Radegast.Rendering
             return false;
         }
 
-        SceneObject GetSceneObject(uint localID)
+        private SceneObject GetSceneObject(uint localID)
         {
-            RenderPrimitive parent;
-            RenderAvatar avi;
-            if (Prims.TryGetValue(localID, out parent))
+            if (Prims.TryGetValue(localID, out var parent))
             {
                 return parent;
             }
-            return Avatars.TryGetValue(localID, out avi) ? avi : null;
+            return Avatars.TryGetValue(localID, out var avi) ? avi : null;
         }
 
         /// <summary>
@@ -1309,7 +1281,7 @@ namespace Radegast.Rendering
         /// <param name="obj">SceneObject whose position is calculated</param>
         /// <param name="pos">Rendering position</param>
         /// <param name="rot">Rendering rotation</param>
-        void PrimPosAndRot(SceneObject obj, out Vector3 pos, out Quaternion rot)
+        private void PrimPosAndRot(SceneObject obj, out Vector3 pos, out Quaternion rot)
         {
             // Sanity check
             if (obj == null)
@@ -1331,7 +1303,7 @@ namespace Radegast.Rendering
                 rot = Quaternion.Identity;
 
                 // Not root, find our parent
-                SceneObject p = GetSceneObject(obj.BasePrim.ParentID);
+                var p = GetSceneObject(obj.BasePrim.ParentID);
                 if (p == null) return;
 
                 // If we don't know parent position, recursively find out
@@ -1342,8 +1314,8 @@ namespace Radegast.Rendering
                     p.PositionCalculated = true;
                 }
 
-                Vector3 parentPos = p.RenderPosition;
-                Quaternion parentRot = p.RenderRotation;
+                var parentPos = p.RenderPosition;
+                var parentRot = p.RenderRotation;
 
                 if (p is RenderPrimitive)
                 {
@@ -1356,18 +1328,18 @@ namespace Radegast.Rendering
                 {
 
                     // Check for invalid attachment point
-                    int attachment_index = (int)obj.BasePrim.PrimData.AttachmentPoint;
+                    var attachment_index = (int)obj.BasePrim.PrimData.AttachmentPoint;
                     if (attachment_index >= GLAvatar.attachment_points.Count) return;
-                    attachment_point apoint = GLAvatar.attachment_points[attachment_index];
-                    skeleton skel = parentav.glavatar.skel;
+                    var apoint = GLAvatar.attachment_points[attachment_index];
+                    var skel = parentav.glavatar.skel;
                     if (!skel.mBones.ContainsKey(apoint.joint)) return;
 
                     // Bone position and rotation
-                    Bone bone = skel.mBones[apoint.joint];
-                    Vector3 bpos = bone.getTotalOffset();
-                    Quaternion brot = bone.getTotalRotation();
+                    var bone = skel.mBones[apoint.joint];
+                    var bpos = bone.getTotalOffset();
+                    var brot = bone.getTotalRotation();
 
-                    // Start with avatar positon
+                    // Start with avatar position
                     pos = parentPos;
                     rot = parentRot;
 
@@ -1410,10 +1382,10 @@ namespace Radegast.Rendering
                 return Vector3.DistanceSquared(calcPos, p.RenderPosition);
             }
 
-            Vector3 posToCheckFrom = Vector3.Zero;
+            var posToCheckFrom = Vector3.Zero;
             //Get the bounding boxes for this prim
-            Vector3 boundingBoxMin = p.RenderPosition + p.BoundingVolume.ScaledMin;
-            Vector3 boundingBoxMax = p.RenderPosition + p.BoundingVolume.ScaledMax;
+            var boundingBoxMin = p.RenderPosition + p.BoundingVolume.ScaledMin;
+            var boundingBoxMax = p.RenderPosition + p.BoundingVolume.ScaledMax;
             posToCheckFrom.X = (calcPos.X < boundingBoxMin.X) ? boundingBoxMin.X : (calcPos.X > boundingBoxMax.X) ? boundingBoxMax.X : calcPos.X;
             posToCheckFrom.Y = (calcPos.Y < boundingBoxMin.Y) ? boundingBoxMin.Y : (calcPos.Y > boundingBoxMax.Y) ? boundingBoxMax.Y : calcPos.Y;
             posToCheckFrom.Z = (calcPos.Z < boundingBoxMin.Z) ? boundingBoxMin.Z : (calcPos.Z > boundingBoxMax.Z) ? boundingBoxMax.Z : calcPos.Z;
@@ -1429,7 +1401,7 @@ namespace Radegast.Rendering
 
         private void SetPerspective()
         {
-            float dAspRat = (float)glControl.Width / (float)glControl.Height;
+            var dAspRat = (float)glControl.Width / (float)glControl.Height;
             GluPerspective(50.0f * Camera.Zoom, dAspRat, 0.1f, 1000f);
         }
 
@@ -1458,34 +1430,37 @@ namespace Radegast.Rendering
         {
             lock (VisibleAvatars)
             {
-                foreach (RenderAvatar av in VisibleAvatars)
+                foreach (var av in VisibleAvatars)
                 {
-                    Vector3 avPos = av.RenderPosition;
+                    var avPos = av.RenderPosition;
                     if (av.DistanceSquared > 400f) continue;
 
                     byte[] faceColor = null;
 
-                    OpenTK.Vector3 tagPos = RHelp.TKVector3(avPos);
+                    var tagPos = RHelp.TKVector3(avPos);
                     tagPos.Z += 1.2f;
-                    OpenTK.Vector3 screenPos;
-                    if (!Math3D.GluProject(tagPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
+                    if (!Math3D.GluProject(tagPos, ModelMatrix, ProjectionMatrix, Viewport, 
+                            out var screenPos))
+                    {
+                        continue;
+                    }
 
-                    string tagText = instance.Names.Get(av.avatar.ID, av.avatar.Name);
+                    var tagText = instance.Names.Get(av.avatar.ID, av.avatar.Name);
                     if (!string.IsNullOrEmpty(av.avatar.GroupName))
                         tagText = av.avatar.GroupName + "\n" + tagText;
 
-                    TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
+                    var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
                     var tSize = TextRendering.Measure(tagText, AvatarTagFont, flags);
 
                     if (pass == RenderPass.Picking)
                     {
                         // Send avatar anyway, we're attached to it
-                        int faceID = 0;
-                        foreach (FaceData f in av.data)
+                        var faceID = 0;
+                        foreach (var f in av.data)
                         {
                             if (f != null)
                             {
-                                byte[] primNrBytes = Utils.Int16ToBytes((short)f.PickingID);
+                                var primNrBytes = Utils.Int16ToBytes((short)f.PickingID);
                                 faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceID, 254 };
                                 GL.Color4(faceColor);
                                 break;
@@ -1494,14 +1469,14 @@ namespace Radegast.Rendering
                         }
                     }
 
-                    OpenTK.Vector3 quadPos = screenPos;
+                    var quadPos = screenPos;
                     screenPos.Y = glControl.Height - screenPos.Y;
                     screenPos.X -= tSize.Width / 2;
                     screenPos.Y -= tSize.Height / 2 + 2;
 
                     if (screenPos.Y > 0)
                     {
-                        // Render tag backround
+                        // Render tag background
                         float halfWidth = tSize.Width / 2 + 12;
                         float halfHeight = tSize.Height / 2 + 5;
                         GL.Color4(0f, 0f, 0f, 0.4f);
@@ -1510,7 +1485,7 @@ namespace Radegast.Rendering
                         if (pass == RenderPass.Simple)
                         {
                             textRendering.Begin();
-                            Color textColor = pass == RenderPass.Simple ?
+                            var textColor = pass == RenderPass.Simple ?
                                 Color.Orange :
                                 Color.FromArgb(faceColor[3], faceColor[0], faceColor[1], faceColor[2]);
                             textRendering.Print(tagText, AvatarTagFont, textColor,
@@ -1524,69 +1499,67 @@ namespace Radegast.Rendering
 
             lock (SortedObjects)
             {
-                int primNr = 0;
-                foreach (SceneObject obj in SortedObjects)
+                var primNr = 0;
+                foreach (var prim in SortedObjects.OfType<RenderPrimitive>())
                 {
-                    if (!(obj is RenderPrimitive)) continue;
-
-                    RenderPrimitive prim = (RenderPrimitive)obj;
                     primNr++;
 
-                    if (!string.IsNullOrEmpty(prim.BasePrim.Text))
+                    if (string.IsNullOrEmpty(prim.BasePrim.Text)) { continue; }
+                    var text = System.Text.RegularExpressions.Regex.Replace(prim.BasePrim.Text, "(\r?\n)+", "\n");
+                    var primPos = RHelp.TKVector3(prim.RenderPosition);
+
+                    // Display hovertext only on objects that are withing 12m of the camera
+                    if (prim.DistanceSquared > (12 * 12)) { continue; }
+
+                    primPos.Z += prim.BasePrim.Scale.Z * 0.8f;
+
+                    // Convert objects world position to 2D screen position in pixels
+                    if (!Math3D.GluProject(primPos, ModelMatrix, ProjectionMatrix, Viewport,
+                            out var screenPos))
                     {
-                        string text = System.Text.RegularExpressions.Regex.Replace(prim.BasePrim.Text, "(\r?\n)+", "\n");
-                        OpenTK.Vector3 primPos = RHelp.TKVector3(prim.RenderPosition);
+                        continue;
+                    }
+                    screenPos.Y = glControl.Height - screenPos.Y;
 
-                        // Display hovertext only on objects that are withing 12m of the camera
-                        if (prim.DistanceSquared > (12 * 12)) continue;
+                    textRendering.Begin();
 
-                        primPos.Z += prim.BasePrim.Scale.Z * 0.8f;
+                    var color = Color.FromArgb((int)(prim.BasePrim.TextColor.A * 255), (int)(prim.BasePrim.TextColor.R * 255), (int)(prim.BasePrim.TextColor.G * 255), (int)(prim.BasePrim.TextColor.B * 255));
 
-                        // Convert objects world position to 2D screen position in pixels
-                        OpenTK.Vector3 screenPos;
-                        if (!Math3D.GluProject(primPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
-                        screenPos.Y = glControl.Height - screenPos.Y;
+                    var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
+                    var size = TextRendering.Measure(text, HoverTextFont, flags);
+                    screenPos.X -= size.Width / 2;
+                    screenPos.Y -= size.Height;
 
-                        textRendering.Begin();
-
-                        Color color = Color.FromArgb((int)(prim.BasePrim.TextColor.A * 255), (int)(prim.BasePrim.TextColor.R * 255), (int)(prim.BasePrim.TextColor.G * 255), (int)(prim.BasePrim.TextColor.B * 255));
-
-                        TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
-                        var size = TextRendering.Measure(text, HoverTextFont, flags);
-                        screenPos.X -= size.Width / 2;
-                        screenPos.Y -= size.Height;
-
-                        if (screenPos.Y + size.Height > 0)
+                    if (screenPos.Y + size.Height > 0)
+                    {
+                        if (pass == RenderPass.Picking)
                         {
-                            if (pass == RenderPass.Picking)
+                            //Send the prim anyway, we're attached to it
+                            var faceID = 0;
+                            foreach (var f in prim.Faces)
                             {
-                                //Send the prim anyway, we're attached to it
-                                int faceID = 0;
-                                foreach (Face f in prim.Faces)
+                                if (f.UserData != null)
                                 {
-                                    if (f.UserData != null)
-                                    {
-                                        byte[] primNrBytes = Utils.Int16ToBytes((short)((FaceData)f.UserData).PickingID);
-                                        byte[] faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceID, 255 };
-                                        textRendering.Print(text, HoverTextFont, Color.FromArgb(faceColor[3], faceColor[0], faceColor[1], faceColor[2]), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
-                                        break;
-                                    }
-                                    faceID++;
+                                    var primNrBytes = Utils.Int16ToBytes((short)((FaceData)f.UserData).PickingID);
+                                    var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceID, 255 };
+                                    textRendering.Print(text, HoverTextFont, Color.FromArgb(faceColor[3], faceColor[0], faceColor[1], faceColor[2]), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
+                                    break;
                                 }
-                            }
-                            else
-                            {
-                                // Shadow
-                                if (color != Color.Black)
-                                    textRendering.Print(text, HoverTextFont, Color.Black, new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width + 2, size.Height + 2), flags);
-
-                                // Text
-                                textRendering.Print(text, HoverTextFont, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
+                                faceID++;
                             }
                         }
+                        else
+                        {
+                            // Shadow
+                            if (color != Color.Black)
+                                textRendering.Print(text, HoverTextFont, Color.Black, new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width + 2, size.Height + 2), flags);
 
-                        textRendering.End();
+                            // Text
+                            textRendering.Print(text, HoverTextFont, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
+                        }
                     }
+
+                    textRendering.End();
                 }
             }
         }
@@ -1606,10 +1579,10 @@ namespace Radegast.Rendering
                 }
                 else
                 {
-                    GLAvatar ga = new GLAvatar();
+                    var ga = new GLAvatar();
 
                     //ga.morph(av);
-                    RenderAvatar ra = new RenderAvatar {avatar = av, glavatar = ga};
+                    var ra = new RenderAvatar {avatar = av, glavatar = ga};
                     UpdateAVtes(ra);
                     Avatars.Add(av.LocalID, ra);
                     ra.glavatar.morph(av);
@@ -1629,7 +1602,7 @@ namespace Radegast.Rendering
             if (av.avatar.Animations == null) return;
 
             av.glavatar.skel.flushanimations();
-            foreach (Animation anim in av.avatar.Animations)
+            foreach (var anim in av.avatar.Animations)
             {
                 //Console.WriteLine(string.Format("AvatarAnimationChanged {0} {1}", anim.AnimationID, anim.AnimationSequence));
 
@@ -1642,18 +1615,16 @@ namespace Radegast.Rendering
 
                 av.glavatar.skel.processAnimation(anim.AnimationID);
 
-                int nofails = 0;
-                if (AssetFetchFailCount.TryGetValue(anim.AnimationID, out nofails))
+                if (AssetFetchFailCount.TryGetValue(anim.AnimationID, out var nofails))
                 {
                     if (nofails >= 5)
                         continue; // asset fetch has failed 5 times, give up.
                 }
 
-                UUID tid = UUID.Random();
+                var tid = UUID.Random();
                 skeleton.mAnimationTransactions.Add(tid, av);
 
-                BinBVHAnimationReader bvh;
-                if (skeleton.mAnimationCache.TryGetValue(anim.AnimationID, out bvh))
+                if (skeleton.mAnimationCache.TryGetValue(anim.AnimationID, out var bvh))
                 {
                     try
                     {
@@ -1668,7 +1639,7 @@ namespace Radegast.Rendering
 
                 Logger.Log($"Requesting new animation asset {anim.AnimationID}", Helpers.LogLevel.Debug);
 
-                Client.Assets.RequestAsset(anim.AnimationID, AssetType.Animation, false, SourceType.Asset, tid, AnimRecievedCallback);
+                Client.Assets.RequestAsset(anim.AnimationID, AssetType.Animation, false, SourceType.Asset, tid, AnimReceivedCallback);
             }
 
             av.glavatar.skel.flushanimationsfinal();
@@ -1682,19 +1653,19 @@ namespace Radegast.Rendering
                 return;
 
 
-            foreach (int fi in RenderAvatar.BakedTextures.Keys)
+            foreach (var fi in RenderAvatar.BakedTextures.Keys)
             {
-                Primitive.TextureEntryFace TEF = ra.avatar.Textures.FaceTextures[fi];
+                var TEF = ra.avatar.Textures.FaceTextures[fi];
                 if (TEF == null)
                     continue;
 
                 if (ra.data[fi] == null || ra.data[fi].TextureInfo.TextureID != TEF.TextureID || ra.data[fi].TextureInfo.TexturePointer < 1)
                 {
-                    FaceData data = new FaceData();
+                    var data = new FaceData();
                     ra.data[fi] = data;
                     data.TextureInfo.TextureID = TEF.TextureID;
 
-                    ImageType type = ImageType.Baked;
+                    var type = ImageType.Baked;
                     if (ra.avatar.COFVersion > 0) // This avatar was server baked
                     {
                         type = ImageType.ServerBaked;
@@ -1719,15 +1690,15 @@ namespace Radegast.Rendering
 
             lock (Avatars)
             {
-                foreach (RenderAvatar av in Avatars.Values)
+                foreach (var av in Avatars.Values)
                 {
                     // Individual prim matrix
                     GL.PushMatrix();
 
-                    // Prim roation and position
+                    // Prim rotation and position
                     //Vector3 pos = av.avatar.Position;
 
-                    Vector3 avataroffset = av.glavatar.skel.getOffset("mPelvis");
+                    var avataroffset = av.glavatar.skel.getOffset("mPelvis");
                     avataroffset.X += 1.0f;
 
                     GL.MultMatrix(Math3D.CreateSRTMatrix(Vector3.One, av.RenderRotation, av.RenderPosition - avataroffset * av.RenderRotation));
@@ -1736,13 +1707,13 @@ namespace Radegast.Rendering
 
                     GL.Color3(1.0, 0.0, 0.0);
 
-                    foreach (Bone b in av.glavatar.skel.mBones.Values)
+                    foreach (var b in av.glavatar.skel.mBones.Values)
                     {
-                        Vector3 newpos = b.getTotalOffset();
+                        var newpos = b.getTotalOffset();
 
                         if (b.parent != null)
                         {
-                            Vector3 parentpos = b.parent.getTotalOffset();
+                            var parentpos = b.parent.getTotalOffset();
                             GL.Vertex3(parentpos.X, parentpos.Y, parentpos.Z);
                         }
                         else
@@ -1805,8 +1776,6 @@ namespace Radegast.Rendering
 
                     }
 
-
-
                     GL.Color3(0.0, 1.0, 0.0);
 
                     GL.End();
@@ -1826,22 +1795,22 @@ namespace Radegast.Rendering
                 GL.EnableClientState(ArrayCap.TextureCoordArray);
                 GL.EnableClientState(ArrayCap.NormalArray);
 
-                int avatarNr = 0;
-                foreach (RenderAvatar av in VisibleAvatars)
+                var avatarNr = 0;
+                foreach (var av in VisibleAvatars)
                 {
                     avatarNr++;
 
                     // Whole avatar position
                     GL.PushMatrix();
 
-                    // Prim roation and position
+                    // Prim rotation and position
                     av.UpdateSize();
                     GL.MultMatrix(Math3D.CreateSRTMatrix(Vector3.One, av.RenderRotation, av.AdjustedPosition(av.RenderPosition)));
 
                     if (av.glavatar._meshes.Count > 0)
                     {
-                        int faceNr = 0;
-                        foreach (GLMesh mesh in av.glavatar._meshes.Values)
+                        var faceNr = 0;
+                        foreach (var mesh in av.glavatar._meshes.Values)
                         {
                             if (av.glavatar.skel.mNeedsMeshRebuild)
                             {
@@ -1874,8 +1843,8 @@ namespace Radegast.Rendering
                                         d.PickingID = avatarNr;
                                     }
                                 }
-                                byte[] primNrBytes = Utils.Int16ToBytes((short)avatarNr);
-                                byte[] faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceNr, 254 };
+                                var primNrBytes = Utils.Int16ToBytes((short)avatarNr);
+                                var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceNr, 254 };
                                 GL.Color4(faceColor);
                             }
                             else
@@ -1932,7 +1901,7 @@ namespace Radegast.Rendering
         ///</summary>
         private const float upKeyHeldBeforeFly = 0.5f;
 
-        void CheckKeyboard(float time)
+        private void CheckKeyboard(float time)
         {
             if (ModifierKeys == Keys.None)
             {
@@ -2058,7 +2027,7 @@ namespace Radegast.Rendering
             else if (ModifierKeys == Keys.Control)
             {
                 // Camera pan
-                float timeFactor = 3f;
+                var timeFactor = 3f;
 
                 if (Instance.Keyboard.IsKeyDown(Keys.Left))
                 {
@@ -2080,12 +2049,12 @@ namespace Radegast.Rendering
         }
         #endregion Keyboard
 
-        float LODFactor(float distance, float radius)
+        private float LODFactor(float distance, float radius)
         {
             return radius * radius / distance;
         }
 
-        void SortCullInterpolate()
+        private void SortCullInterpolate()
         {
             SortedObjects = new List<SceneObject>();
             VisibleAvatars = new List<RenderAvatar>();
@@ -2097,14 +2066,14 @@ namespace Radegast.Rendering
 
             lock (Prims)
             {
-                foreach (RenderPrimitive obj in Prims.Values)
+                foreach (var obj in Prims.Values)
                 {
                     obj.PositionCalculated = false;
                 }
 
                 // Calculate positions and rotations of root prims
                 // Perform interpolation om objects that survive culling
-                foreach (RenderPrimitive obj in Prims.Values)
+                foreach (var obj in Prims.Values)
                 {
                     if (obj.BasePrim.ParentID != 0) continue;
                     if (!obj.Initialized) obj.Initialize();
@@ -2143,7 +2112,7 @@ namespace Radegast.Rendering
                 // Calculate avatar positions and perform interpolation tasks
                 lock (Avatars)
                 {
-                    foreach (RenderAvatar obj in Avatars.Values)
+                    foreach (var obj in Avatars.Values)
                     {
                         if (!obj.Initialized) obj.Initialize();
                         if (RenderSettings.AvatarRenderingEnabled) obj.Step(lastFrameTime);
@@ -2159,9 +2128,8 @@ namespace Radegast.Rendering
                 }
 
                 // Calculate position and rotations of child objects
-                foreach (RenderPrimitive obj in Prims.Values)
+                foreach (var obj in Prims.Values.Where(obj => obj.BasePrim.ParentID != 0))
                 {
-                    if (obj.BasePrim.ParentID == 0) continue;
                     if (!obj.Initialized) obj.Initialize();
 
                     obj.Step(lastFrameTime);
@@ -2185,7 +2153,7 @@ namespace Radegast.Rendering
                         }
                     }
 
-                    if (obj.Faces == null) continue;
+                    if (obj.Faces == null) { continue; }
 
                     if (!obj.AttachedStateKnown)
                     {
@@ -2209,9 +2177,9 @@ namespace Radegast.Rendering
             SortedObjects.Sort();
         }
 
-        void RenderBoundingBox(SceneObject prim)
+        private void RenderBoundingBox(SceneObject prim)
         {
-            Vector3 scale = prim.BasePrim.Scale;
+            var scale = prim.BasePrim.Scale;
 
             GL.PushMatrix();
             GL.MultMatrix(Math3D.CreateSRTMatrix(scale, prim.RenderRotation, prim.RenderPosition));
@@ -2228,9 +2196,9 @@ namespace Radegast.Rendering
             GL.PopMatrix();
         }
 
-        int boundingBoxVBO = -1;
-        int boundingBoxVIndexVBO = -1;
-        bool occludedVBOFailed = false;
+        private int boundingBoxVBO = -1;
+        private int boundingBoxVIndexVBO = -1;
+        private bool occludedVBOFailed = false;
 
         private void RenderOccludedObjects()
         {
@@ -2280,9 +2248,8 @@ namespace Radegast.Rendering
                 GL.VertexPointer(3, VertexPointerType.Float, 0, (IntPtr)0);
             }
 
-            foreach (SceneObject obj in OccludedObjects)
+            foreach (var obj in OccludedObjects.Where(obj => (obj.HasAlphaFaces || obj.HasSimpleFaces)))
             {
-                if ((!obj.HasAlphaFaces && !obj.HasSimpleFaces)) continue;
                 obj.HasSimpleFaces = true;
                 obj.HasAlphaFaces = false;
                 obj.StartSimpleQuery();
@@ -2310,15 +2277,8 @@ namespace Radegast.Rendering
             GL.EnableClientState(ArrayCap.TextureCoordArray);
             GL.EnableClientState(ArrayCap.NormalArray);
 
-            Vector3 myPos = Vector3.Zero;
-            if (myself != null)
-            {
-                myPos = myself.RenderPosition;
-            }
-            else
-            {
-                myPos = Client.Self.SimPosition;
-            }
+            var myPos = Vector3.Zero;
+            myPos = myself != null ? myself.RenderPosition : Client.Self.SimPosition;
 
             if (pass == RenderPass.Invisible)
             {
@@ -2329,19 +2289,19 @@ namespace Radegast.Rendering
                 GL.StencilMask(0);
             }
 
-            int nrPrims = SortedObjects.Count;
-            for (int i = 0; i < nrPrims; i++)
+            var nrPrims = SortedObjects.Count;
+            for (var i = 0; i < nrPrims; i++)
             {
                 //RenderBoundingBox(SortedPrims[i]);
 
-                // When rendering alpha faces, draw from back towards the camers
+                // When rendering alpha faces, draw from back towards the cameras
                 // otherwise from those closest to camera, to the farthest
-                int ix = pass == RenderPass.Alpha ? nrPrims - i - 1 : i;
-                SceneObject obj = SortedObjects[ix];
+                var ix = pass == RenderPass.Alpha ? nrPrims - i - 1 : i;
+                var obj = SortedObjects[ix];
 
                 if (obj is RenderPrimitive)
                 {
-                    // Don't render objects that are outside the draw distane
+                    // Don't render objects that are outside the draw distance
                     if (FindClosestDistanceSquared(myPos, obj) > drawDistanceSquared) continue;
                     if (pass == RenderPass.Simple || pass == RenderPass.Alpha)
                     {
@@ -2370,11 +2330,11 @@ namespace Radegast.Rendering
             GL.DisableClientState(ArrayCap.NormalArray);
         }
 
-        int texturesRequestedThisFrame;
-        int meshingsRequestedThisFrame;
-        int meshingsRequestedLastFrame;
-        int framesSinceReflection = 0;
-        float timeSinceReflection = 0f;
+        private int texturesRequestedThisFrame;
+        private int meshingsRequestedThisFrame;
+        private int meshingsRequestedLastFrame;
+        private int framesSinceReflection = 0;
+        private float timeSinceReflection = 0f;
 
         private void Render(bool picking)
         {
@@ -2432,7 +2392,7 @@ namespace Radegast.Rendering
                 // If camera is locked onto our avatar, follow us
                 if (trackedObject == myself)
                 {
-                    Vector3 camPos = myself.RenderPosition + new Vector3(-4, 0, 1) * Client.Self.Movement.BodyRotation;
+                    var camPos = myself.RenderPosition + new Vector3(-4, 0, 1) * Client.Self.Movement.BodyRotation;
                     Camera.Position = camPos;
                     Camera.FocalPoint = myself.RenderPosition + new Vector3(5, 0, 0) * Client.Self.Movement.BodyRotation;
                 }
@@ -2444,7 +2404,7 @@ namespace Radegast.Rendering
                     }
                     else if (lastTrackedObjectPos != trackedObject.RenderPosition)
                     {
-                        Vector3 diffPos = (trackedObject.RenderPosition - lastTrackedObjectPos);
+                        var diffPos = (trackedObject.RenderPosition - lastTrackedObjectPos);
                         Camera.Position += diffPos;
                         Camera.FocalPoint += diffPos;
                         lastTrackedObjectPos = trackedObject.RenderPosition;
@@ -2515,8 +2475,8 @@ namespace Radegast.Rendering
 
         private void GluPerspective(float fovy, float aspect, float zNear, float zFar)
         {
-            float fH = (float)Math.Tan(fovy / 360 * (float)Math.PI) * zNear;
-            float fW = fH * aspect;
+            var fH = (float)Math.Tan(fovy / 360 * (float)Math.PI) * zNear;
+            var fW = fH * aspect;
             GL.Frustum(-fW, fW, -fH, fH, zNear, zFar);
         }
 
@@ -2544,12 +2504,11 @@ namespace Radegast.Rendering
 
             Render(true);
 
-            byte[] color = new byte[4];
+            var color = new byte[4];
             GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, color);
-            float depth = 0f;
+            var depth = 0f;
             GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.DepthComponent, PixelType.Float, ref depth);
-            OpenTK.Vector3 worldPosTK = OpenTK.Vector3.Zero;
-            Math3D.GluUnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out worldPosTK);
+            Math3D.GluUnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
             worldPos = RHelp.OMVVector3(worldPosTK);
             GL.PopAttrib();
 
@@ -2560,9 +2519,8 @@ namespace Radegast.Rendering
 
             if (color[3] == 253) // Terrain
             {
-                int vertexIndex = Utils.BytesToInt(new byte[] { color[0], color[1], color[2], 0 });
-                ColorVertex cv;
-                if (terrain.TryGetVertex(vertexIndex, out cv))
+                var vertexIndex = Utils.BytesToInt(new byte[] { color[0], color[1], color[2], 0 });
+                if (terrain.TryGetVertex(vertexIndex, out var cv))
                 {
                     picked = cv.Vertex.Position;
                     return true;
@@ -2572,12 +2530,10 @@ namespace Radegast.Rendering
             {
                 lock (VisibleAvatars)
                 {
-                    foreach (var avatar in VisibleAvatars)
+                    foreach (var avatar in VisibleAvatars.Where(
+                                 avatar => avatar.data.Any(face => face != null && face.PickingID == primID)))
                     {
-                        if (avatar.data.Any(face => face != null && face.PickingID == primID))
-                        {
-                            picked = avatar;
-                        }
+                        picked = avatar;
                     }
                 }
 
@@ -2590,25 +2546,17 @@ namespace Radegast.Rendering
             {
                 lock (SortedObjects)
                 {
-                    foreach (SceneObject obj in SortedObjects)
+                    foreach (var prim in from obj 
+                                 in SortedObjects.OfType<RenderPrimitive>() let prim = obj 
+                             where obj.BasePrim.LocalID != 0 select prim)
                     {
-                        if (!(obj is RenderPrimitive)) continue;
-                        RenderPrimitive prim = (RenderPrimitive)obj;
-
-                        if (obj.BasePrim.LocalID == 0)
-                            continue;
-
-                        foreach (var face in prim.Faces)
+                        if (prim.Faces.Where(face => face.UserData != null).Any(
+                                face => ((FaceData)face.UserData).PickingID == primID))
                         {
-                            if (face.UserData == null) continue;
-                            if (((FaceData)face.UserData).PickingID == primID)
-                            {
-                                picked = prim;
-                                break;
-                            }
+                            picked = prim;
                         }
 
-                        if (picked != null) break;
+                        if (picked != null) { break; }
                     }
                 }
             }
@@ -2631,9 +2579,9 @@ namespace Radegast.Rendering
         {
             info = null;
 
-            if (TexturesPtrMap.ContainsKey(textureID))
+            if (TexturesPtrMap.TryGetValue(textureID, out var textureinfo))
             {
-                info = TexturesPtrMap[textureID];
+                info = textureinfo;
                 return true;
             }
 
@@ -2650,9 +2598,9 @@ namespace Radegast.Rendering
             {
                 lock (TexturesPtrMap)
                 {
-                    if (TexturesPtrMap.ContainsKey(item.TeFace.TextureID))
+                    if (TexturesPtrMap.TryGetValue(item.TeFace.TextureID, out var textureInfo))
                     {
-                        item.Data.TextureInfo = TexturesPtrMap[item.TeFace.TextureID];
+                        item.Data.TextureInfo = textureInfo;
                     }
                     else if (item.TeFace.TextureID == invisi1 || item.TeFace.TextureID == invisi2)
                     {
@@ -2664,9 +2612,10 @@ namespace Radegast.Rendering
                     {
                         TexturesPtrMap[item.TeFace.TextureID] = item.Data.TextureInfo;
 
-                        if (item.TextureData == null && item.TGAData == null)
+                        if (item.TextureData == null)
                         {
-                            if (CacheDecodedTextures && RHelp.LoadCachedImage(item.TeFace.TextureID, out item.TGAData, out item.Data.TextureInfo.HasAlpha, out item.Data.TextureInfo.FullAlpha, out item.Data.TextureInfo.IsMask))
+                            if (CacheDecodedTextures && RHelp.LoadCachedImage(item.TeFace.TextureID, out item.TextureData, 
+                                    out item.Data.TextureInfo.HasAlpha, out item.Data.TextureInfo.FullAlpha, out item.Data.TextureInfo.IsMask))
                             {
                                 PendingTextures.Enqueue(item);
                             }
@@ -2717,17 +2666,17 @@ namespace Radegast.Rendering
 
         private void CalculateBoundingBox(RenderPrimitive rprim)
         {
-            Primitive prim = rprim.BasePrim;
+            var prim = rprim.BasePrim;
 
             // Calculate bounding volumes for each prim and adjust textures
             rprim.BoundingVolume = new BoundingVolume();
-            for (int j = 0; j < rprim.Faces.Count; j++)
+            for (var j = 0; j < rprim.Faces.Count; j++)
             {
-                Primitive.TextureEntryFace teFace = prim.Textures.GetFace((uint)j);
+                var teFace = prim.Textures.GetFace((uint)j);
                 if (teFace == null) continue;
 
-                Face face = rprim.Faces[j];
-                FaceData data = new FaceData();
+                var face = rprim.Faces[j];
+                var data = new FaceData();
 
                 data.BoundingVolume.CreateBoundingVolume(face, prim.Scale);
                 rprim.BoundingVolume.AddVolume(data.BoundingVolume, prim.Scale);
@@ -2764,12 +2713,12 @@ namespace Radegast.Rendering
             if (rprim.Meshing) return;
 
             rprim.Meshing = true;
-            Primitive prim = rprim.BasePrim;
+            var prim = rprim.BasePrim;
 
             // Regular prim
             if (prim.Sculpt == null || prim.Sculpt.SculptTexture == UUID.Zero)
             {
-                DetailLevel detailLevel = RenderSettings.PrimRenderDetail;
+                var detailLevel = RenderSettings.PrimRenderDetail;
                 if (RenderSettings.AllowQuickAndDirtyMeshing)
                 {
                     if (prim.Flexible == null && prim.Type == PrimType.Box &&
@@ -2784,7 +2733,7 @@ namespace Radegast.Rendering
                         prim.PrimData.PathRadiusOffset == 0)
                         detailLevel = DetailLevel.Low;//Its a box or something else that can use lower meshing
                 }
-                FacetedMesh mesh = renderer.GenerateFacetedMesh(prim, detailLevel);
+                var mesh = renderer.GenerateFacetedMesh(prim, detailLevel);
                 rprim.Faces = mesh.Faces;
                 CalculateBoundingBox(rprim);
                 rprim.Meshing = false;
@@ -2806,20 +2755,20 @@ namespace Radegast.Rendering
                 try
                 {
                     if (prim.Sculpt.Type != SculptType.Mesh)
-                    { // Regular sculptie
+                    { // Regular sculpty
                         SKBitmap img = null;
 
                         lock (sculptCache)
                         {
-                            if (sculptCache.ContainsKey(prim.Sculpt.SculptTexture))
+                            if (sculptCache.TryGetValue(prim.Sculpt.SculptTexture, out var value))
                             {
-                                img = sculptCache[prim.Sculpt.SculptTexture];
+                                img = value;
                             }
                         }
 
                         if (img == null)
                         {
-                            if (LoadTexture(prim.Sculpt.SculptTexture, ref img, true))
+                            if (LoadTexture(prim.Sculpt.SculptTexture, ref img))
                             {
                                 sculptCache[prim.Sculpt.SculptTexture] = img;
                             }
@@ -2833,7 +2782,7 @@ namespace Radegast.Rendering
                     }
                     else
                     { // Mesh
-                        AutoResetEvent gotMesh = new AutoResetEvent(false);
+                        var gotMesh = new AutoResetEvent(false);
 
                         Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
                         {
@@ -2881,8 +2830,7 @@ namespace Radegast.Rendering
 
                     if (prim.Textures == null) return;
 
-                    RenderPrimitive rPrim;
-                    if (Prims.TryGetValue(prim.LocalID, out rPrim))
+                    if (Prims.TryGetValue(prim.LocalID, out var rPrim))
                     {
                         rPrim.AttachedStateKnown = false;
                     }
@@ -2907,19 +2855,18 @@ namespace Radegast.Rendering
             }
         }
 
-        private bool LoadTexture(UUID textureID, ref SKBitmap texture, bool removeAlpha)
+        private bool LoadTexture(UUID textureID, ref SKBitmap texture)
         {
-            ManualResetEvent gotImage = new ManualResetEvent(false);
+            var gotImage = new ManualResetEvent(false);
             SKBitmap img = null;
 
             try
             {
                 gotImage.Reset();
-                bool hasAlpha, fullAlpha, isMask;
-                byte[] tgaData;
-                if (RHelp.LoadCachedImage(textureID, out tgaData, out hasAlpha, out fullAlpha, out isMask))
+                if (RHelp.LoadCachedImage(textureID, out var textureBytes, 
+                        out var hasAlpha, out var fullAlpha, out var isMask))
                 {
-                    img = Targa.Decode(new MemoryStream(tgaData));
+                    img = J2kImage.FromBytes(textureBytes).As<SKBitmap>();
                 }
                 else
                 {
@@ -2927,20 +2874,8 @@ namespace Radegast.Rendering
                         {
                             if (state == TextureRequestState.Finished)
                             {
-                                var mi = new ManagedImage(J2kImage.FromBytes(assetTexture.AssetData));
-                                if (removeAlpha)
-                                {
-                                    if ((mi.Channels & ManagedImage.ImageChannels.Alpha) != 0)
-                                    {
-                                        mi.ConvertChannels(mi.Channels & ~ManagedImage.ImageChannels.Alpha);
-                                    }
-                                }
-
-                                // This is GROSS.
-                                tgaData = Targa.Encode(mi);
-                                img = Targa.Decode(new MemoryStream(tgaData));
-                                RHelp.SaveCachedImage(tgaData, textureID,
-                                    (mi.Channels & ManagedImage.ImageChannels.Alpha) != 0, false, false);
+                                RHelp.SaveCachedImage(assetTexture.AssetData, textureID, 
+                                    true, false, false);
                             }
 
                             gotImage.Set();
@@ -2971,7 +2906,7 @@ namespace Radegast.Rendering
 
         #region Context menu
         /// <summary>
-        /// Dynamically construct the context menu when we right click on the screen
+        /// Dynamically construct the context menu when we right-click on the screen
         /// </summary>
         /// <param name="csender"></param>
         /// <param name="ce"></param>
@@ -2992,7 +2927,7 @@ namespace Radegast.Rendering
                 ctxMenu.Items.Add(item);
             }
 
-            // Was it prim that was right clicked
+            // Was it prim that was right-clicked
             if (RightclickedObject is RenderPrimitive prim)
             {
                 // Sit button handling
@@ -3054,7 +2989,7 @@ namespace Radegast.Rendering
                 // add prim context menu items
                 instance.ContextActionManager.AddContributions(ctxMenu, typeof(Primitive), prim.Prim);
 
-            } // We right clicked on an avatar, add some context menu items
+            } // We right-clicked on an avatar, add some context menu items
             else if (RightclickedObject is RenderAvatar av)
             {
                 // Profile button
@@ -3093,7 +3028,7 @@ namespace Radegast.Rendering
 
 
             // Dock/undock menu item
-            bool docked = !instance.TabConsole.Tabs["scene_window"].Detached;
+            var docked = !instance.TabConsole.Tabs["scene_window"].Detached;
             if (docked)
             {
                 item = new ToolStripMenuItem("Undock", null, (sender, e) =>
@@ -3106,7 +3041,7 @@ namespace Radegast.Rendering
             {
                 item = new ToolStripMenuItem("Dock", null, (sender, e) =>
                 {
-                    Control p = Parent;
+                    var p = Parent;
                     instance.TabConsole.Tabs["scene_window"].AttachTo(instance.TabConsole.tstTabs, instance.TabConsole.toolStripContainer1.ContentPanel);
                     (p as Form)?.Close();
                 });
@@ -3151,7 +3086,7 @@ namespace Radegast.Rendering
 
         private void hsDiffuse_Scroll(object sender, ScrollEventArgs e)
         {
-            difuse = (float)hsDiffuse.Value / 100f;
+            diffuse = (float)hsDiffuse.Value / 100f;
             SetSun();
         }
 
@@ -3170,16 +3105,16 @@ namespace Radegast.Rendering
         {
             //int paramid = int.Parse(textBox_vparamid.Text);
             //float weight = (float)hScrollBar_weight.Value/100f;
-            float weightx = float.Parse(textBox_x.Text);
-            float weighty = float.Parse(textBox_y.Text);
-            float weightz = float.Parse(textBox_z.Text);
+            var weightx = float.Parse(textBox_x.Text);
+            var weighty = float.Parse(textBox_y.Text);
+            var weightz = float.Parse(textBox_z.Text);
 
-            foreach (RenderAvatar av in Avatars.Values)
+            foreach (var av in Avatars.Values)
             {
                 //av.glavatar.applyMorph(av.avatar,paramid,weight);
                 av.glavatar.skel.deformbone(comboBox1.Text, new Vector3(float.Parse(textBox_sx.Text), float.Parse(textBox_sy.Text), float.Parse(textBox_sz.Text)), Quaternion.CreateFromEulers((float)(Math.PI * (weightx / 180)), (float)(Math.PI * (weighty / 180)), (float)(Math.PI * (weightz / 180))));
 
-                foreach (GLMesh mesh in av.glavatar._meshes.Values)
+                foreach (var mesh in av.glavatar._meshes.Values)
                 {
                     mesh.applyjointweights();
                 }
@@ -3195,18 +3130,16 @@ namespace Radegast.Rendering
         private void comboBox1_SelectedIndexChanged(object sender, EventArgs e)
         {
 
-            string bone = comboBox1.Text;
-            foreach (RenderAvatar av in Avatars.Values)
+            var bone = comboBox1.Text;
+            foreach (var av in Avatars.Values)
             {
-                Bone b;
-                if (av.glavatar.skel.mBones.TryGetValue(bone, out b))
+                if (av.glavatar.skel.mBones.TryGetValue(bone, out var b))
                 {
                     textBox_sx.Text = (b.scale.X - 1.0f).ToString(CultureInfo.InvariantCulture);
                     textBox_sy.Text = (b.scale.Y - 1.0f).ToString(CultureInfo.InvariantCulture);
                     textBox_sz.Text = (b.scale.Z - 1.0f).ToString(CultureInfo.InvariantCulture);
 
-                    float x, y, z;
-                    b.rot.GetEulerAngles(out x, out y, out z);
+                    b.rot.GetEulerAngles(out var x, out var y, out var z);
                     textBox_x.Text = x.ToString(CultureInfo.InvariantCulture);
                     textBox_y.Text = y.ToString(CultureInfo.InvariantCulture);
                     textBox_z.Text = z.ToString(CultureInfo.InvariantCulture);
@@ -3235,9 +3168,9 @@ namespace Radegast.Rendering
 
         private void button1_Click(object sender, EventArgs e)
         {
-            foreach (RenderAvatar av in Avatars.Values)
+            foreach (var av in Avatars.Values)
             {
-                int id = -1;
+                var id = -1;
 
                 //foreach (VisualParamEx vpe in VisualParamEx.morphParams.Values)
                 //{
@@ -3251,7 +3184,7 @@ namespace Radegast.Rendering
 
                 av.glavatar.applyMorph(av.avatar, id, float.Parse(textBox_morphamount.Text));
 
-                foreach (GLMesh mesh in av.glavatar._meshes.Values)
+                foreach (var mesh in av.glavatar._meshes.Values)
                 {
                     mesh.applyjointweights();
                 }
@@ -3293,7 +3226,7 @@ namespace Radegast.Rendering
             */
         }
 
-        bool miscEnabled = true;
+        private bool miscEnabled = true;
         private void cbMisc_CheckedChanged(object sender, EventArgs e)
         {
             miscEnabled = cbMisc.Checked;
@@ -3329,7 +3262,7 @@ namespace Radegast.Rendering
         {
             if (e.KeyCode != Keys.Enter) return;
             e.Handled = e.SuppressKeyPress = true;
-            ChatConsole chat = (ChatConsole)Instance.TabConsole.Tabs["chat"].Control;
+            var chat = (ChatConsole)Instance.TabConsole.Tabs["chat"].Control;
 
             if (e.Shift)
                 chat.ProcessChatInput(txtChat.Text, ChatType.Whisper);
@@ -3343,7 +3276,7 @@ namespace Radegast.Rendering
 
         private void btnSay_Click(object sender, EventArgs e)
         {
-            ChatConsole chat = (ChatConsole)Instance.TabConsole.Tabs["chat"].Control;
+            var chat = (ChatConsole)Instance.TabConsole.Tabs["chat"].Control;
             chat.ProcessChatInput(txtChat.Text, (ChatType)cbChatType.SelectedIndex);
             txtChat.Select();
             txtChat.Text = string.Empty;
