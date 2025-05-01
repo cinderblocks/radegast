@@ -144,7 +144,7 @@ namespace Radegast
 
             if (COF == null)
             {
-                CreateCurrentOutfitFolder();
+                //CreateCurrentOutfitFolder();
             }
             else
             {
