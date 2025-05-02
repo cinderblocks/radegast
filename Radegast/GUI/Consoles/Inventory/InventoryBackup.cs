@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,7 +26,6 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
-using OpenMetaverse.Imaging;
 
 namespace Radegast
 {
@@ -192,7 +191,7 @@ namespace Radegast
                                 fullName += ".lsl";
                                 break;
                             case AssetType.Notecard: fullName += ".txt"; break;
-                            case AssetType.Texture: fullName += ".png"; break;
+                            case AssetType.Texture: fullName += ".jp2"; break;
                             default: fullName += ".bin"; break;
                         }
                         string dirName = Path.GetDirectoryName(fullName);
@@ -300,7 +299,7 @@ namespace Radegast
                                             else
                                             {
                                                 Logger.Log(
-                                                    $"Falied to decode asset for '{item.Name}' - {receivedAsset.AssetID}", Helpers.LogLevel.Warning, client);
+                                                    $"Failed to decode asset for '{item.Name}' - {receivedAsset.AssetID}", Helpers.LogLevel.Warning, client);
                                             }
 
                                             break;
@@ -326,7 +325,7 @@ namespace Radegast
 
                                         case AssetType.Texture:
                                             AssetTexture imgAsset = (AssetTexture)receivedAsset;
-                                            var img = Targa.Encode(imgAsset.Image);
+                                            var img = CoreJ2K.J2kImage.ToBytes(imgAsset.Image.ExportBitmap());
                                             File.WriteAllBytes(fullName, img);
                                             if (dateOK)
                                             {
