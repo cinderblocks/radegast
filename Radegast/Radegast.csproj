@@ -53,13 +53,13 @@
     <PackageReference Include="BugSplatDotNetStandard" Version="4.2.2" />
     <PackageReference Include="C5" Version="3.0.0" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="LibreMetaverse" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.2.9.940" />
-    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.2.9.940" />
+    <PackageReference Include="LibreMetaverse" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.LslTools" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.Types" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.2.10.950" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.4" />
     <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.4" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
