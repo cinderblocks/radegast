@@ -151,7 +151,7 @@ namespace Radegast
                 Task task = Client.Inventory.RequestFolderContents(COF.UUID, Client.Self.AgentID,
                     true, true, InventorySortOrder.ByDate);
             }
-            Logger.Log($"Initialized Current Outfit Folder with UUID {COF.UUID}", Helpers.LogLevel.Info, Client);
+            Logger.Log($"Initialized Current Outfit Folder with UUID {COF.UUID} v.{COF.Version}", Helpers.LogLevel.Info, Client);
         }
 
         private void CreateCurrentOutfitFolder()
@@ -168,9 +168,9 @@ namespace Radegast
 
         #region Public methods
         /// <summary>
-        /// Return contents of COF
+        /// Return links found in Current Outfit Folder
         /// </summary>
-        /// <returns>List if InventoryItems that can be part of appearance (attachments, wearables)</returns>
+        /// <returns>List of <see cref="InventoryItem"/> that can be part of appearance (attachments, wearables)</returns>
         private List<InventoryItem> ContentLinks()
         {
             var ret = new List<InventoryItem>();

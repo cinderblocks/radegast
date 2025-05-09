@@ -74,24 +74,11 @@ namespace Radegast
 
         private List<InventoryBase> FetchFolder(InventoryFolder folder)
         {
-            List<InventoryBase> ret = new List<InventoryBase>();
-
-            AutoResetEvent folderFetched = new AutoResetEvent(false);
-
-            EventHandler<FolderUpdatedEventArgs> handler = (sender, e) =>
-            {
-                if (e.FolderID == folder.UUID)
-                {
-                    ret = Store.GetContents(e.FolderID);
-                    folderFetched.Set();
-                }
-            };
-
-            Client.Inventory.FolderUpdated += handler;
-            var task = Client.Inventory.RequestFolderContents(folder.UUID, folder.OwnerID, true, true, InventorySortOrder.ByName);
-            bool success = folderFetched.WaitOne(20 * 1000, false);
-            Client.Inventory.FolderUpdated -= handler;
-            return ret;
+            CancellationTokenSource cts = new CancellationTokenSource();
+            cts.CancelAfter(TimeSpan.FromSeconds(20));
+            var contents = Client.Inventory.RequestFolderContents(folder.UUID, folder.OwnerID, 
+                true, true, InventorySortOrder.ByName, cts.Token).Result;
+            return contents;
         }
 
         public void CheckFolders()
