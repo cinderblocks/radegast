@@ -647,6 +647,7 @@ namespace Radegast
             if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
             {
                 Logger.Log("Could not traverse inventory. Event Queue is not running.", Helpers.LogLevel.Warning, Client);
+                return;
             }
 
             UpdateStatus("Loading...");
@@ -670,26 +671,8 @@ namespace Radegast
 
                 Parallel.ForEach(QueuedFolders, folderID =>
                 {
-                    bool success = false;
-
-                    AutoResetEvent gotFolder = new AutoResetEvent(false);
-
-                    void updateHandler(object sender, FolderUpdatedEventArgs ev)
-                    {
-                        if (ev.FolderID != folderID) return;
-
-                        success = ev.Success;
-                        gotFolder.Set();
-                    }
-
-                    Client.Inventory.FolderUpdated += updateHandler;
-                    Task task = Client.Inventory.RequestFolderContents(folderID, Client.Self.AgentID, 
-                        true, true, InventorySortOrder.ByDate, inventoryUpdateCancelToken.Token);
-                    if (!gotFolder.WaitOne(TimeSpan.FromSeconds(15), false))
-                    {
-                        success = false;
-                    }
-                    Client.Inventory.FolderUpdated -= updateHandler;
+                    _ = Client.Inventory.RequestFolderContents(folderID, Client.Self.AgentID, 
+                        true, true, InventorySortOrder.ByDate, inventoryUpdateCancelToken.Token).Result;
                 });
             }
             while (QueuedFolders.Count > 0);
@@ -2299,7 +2282,7 @@ namespace Radegast
                     }
 
                     if (cbSrchWorn.Checked && add &&
-                        !(it.InventoryType == InventoryType.Wearable && IsWorn(it) 
+                        !(it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID) 
                           || (it.InventoryType == InventoryType.Attachment 
                               || it.InventoryType == InventoryType.Object) && IsAttached(it)))
                     {
