@@ -832,15 +832,15 @@ namespace Radegast
 
                 if (Environment.OSVersion.Platform == PlatformID.Unix)
                 {
-                    System.Diagnostics.Process.Start("xdg-open", link);
+                    System.Diagnostics.Process.Start("xdg-open", uriToOpen.AbsoluteUri);
                 }
                 else if (Environment.OSVersion.Platform == PlatformID.MacOSX)
                 {
-                    System.Diagnostics.Process.Start("open", link);
+                    System.Diagnostics.Process.Start("open", uriToOpen.AbsoluteUri);
                 }
                 else
                 {
-                    System.Diagnostics.Process.Start(link);
+                    System.Diagnostics.Process.Start(uriToOpen.AbsoluteUri);
                 }
             }
 
