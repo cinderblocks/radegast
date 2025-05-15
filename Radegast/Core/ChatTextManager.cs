@@ -22,103 +22,60 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Text;
-using Radegast;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using System.Reflection;
-using Newtonsoft.Json;
 
 namespace Radegast
 {
-    public class ChatTextManager : IDisposable
+    public class ChatTextManager : TextManagerBase, IDisposable
     {
-
         public event EventHandler<ChatLineAddedArgs> ChatLineAdded;
 
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom => instance.Netcom;
-        private GridClient client => instance.Client;
-
+        private bool showTimestamps;
         private List<ChatBufferItem> textBuffer;
 
-        private bool showTimestamps;
-
-        public static Dictionary<string, Settings.FontSetting> fontSettings = new Dictionary<string, Settings.FontSetting>();
-
         public ChatTextManager(RadegastInstance instance, ITextPrinter textPrinter)
+            : base(instance, textPrinter)
         {
-            TextPrinter = textPrinter;
             textBuffer = new List<ChatBufferItem>();
 
-            this.instance = instance;
             InitializeConfig();
 
             // Callbacks
-            netcom.ChatReceived += netcom_ChatReceived;
-            netcom.ChatSent += netcom_ChatSent;
-            netcom.AlertMessageReceived += netcom_AlertMessageReceived;
+            instance.Netcom.ChatReceived += netcom_ChatReceived;
+            instance.Netcom.ChatSent += netcom_ChatSent;
+            instance.Netcom.AlertMessageReceived += netcom_AlertMessageReceived;
         }
 
-        public void Dispose()
+        public override void Dispose()
         {
-            netcom.ChatReceived -= netcom_ChatReceived;
-            netcom.ChatSent -= netcom_ChatSent;
-            netcom.AlertMessageReceived -= netcom_AlertMessageReceived;
+            instance.Netcom.ChatReceived -= netcom_ChatReceived;
+            instance.Netcom.ChatSent -= netcom_ChatSent;
+            instance.Netcom.AlertMessageReceived -= netcom_AlertMessageReceived;
+
+            base.Dispose();
         }
 
         private void InitializeConfig()
         {
-            Settings s = instance.GlobalSettings;
-
-            if (s["chat_timestamps"].Type == OSDType.Unknown)
+            if (instance.GlobalSettings["chat_timestamps"].Type == OSDType.Unknown)
             {
-                s["chat_timestamps"] = OSD.FromBoolean(true);
-            }
-            if (s["chat_fonts"].Type == OSDType.Unknown)
-            {
-                try
-                {
-                    s["chat_fonts"] = JsonConvert.SerializeObject(Settings.DefaultFontSettings);
-                }
-                catch (Exception ex)
-                {
-                    System.Windows.Forms.MessageBox.Show("Failed to save default font settings: " + ex.Message);
-                }
+                instance.GlobalSettings["chat_timestamps"] = OSD.FromBoolean(true);
             }
 
-            try
-            {
-                fontSettings = JsonConvert.DeserializeObject<Dictionary<string, Settings.FontSetting>>(s["chat_fonts"]);
-            }
-            catch (Exception ex)
-            {
-                System.Windows.Forms.MessageBox.Show("Failed to read chat font settings: " + ex.Message);
-            }
-
-            showTimestamps = s["chat_timestamps"].AsBoolean();
-
-            s.OnSettingChanged += s_OnSettingChanged;
+            showTimestamps = instance.GlobalSettings["chat_timestamps"].AsBoolean();
         }
 
-        void s_OnSettingChanged(object sender, SettingsEventArgs e)
+        protected override void OnSettingChanged(object sender, SettingsEventArgs e)
         {
             if (e.Key == "chat_timestamps" && e.Value != null)
             {
                 showTimestamps = e.Value.AsBoolean();
                 ReprintAllText();
             }
-            else if (e.Key == "chat_fonts")
-            {
-                try
-                {
-                    fontSettings = JsonConvert.DeserializeObject<Dictionary<string, Settings.FontSetting>>(e.Value);
-                }
-                catch (Exception ex)
-                {
-                    System.Windows.Forms.MessageBox.Show("Failed to read new font settings: " + ex.Message);
-                }
-                ReprintAllText();
-            }
+
+            base.OnSettingChanged(sender, e);
         }
 
         private void netcom_ChatSent(object sender, ChatSentEventArgs e)
@@ -160,20 +117,20 @@ namespace Radegast
 
         private Object SyncChat = new Object();
 
-        public void ProcessBufferItem(ChatBufferItem item, bool addToBuffer)
+        public void ProcessBufferItem(ChatBufferItem item, bool isNewMessage)
         {
             ChatLineAdded?.Invoke(this, new ChatLineAddedArgs(item));
 
             lock (SyncChat)
             {
                 instance.LogClientMessage("chat.txt", item.From + item.Text);
-                if (addToBuffer) textBuffer.Add(item);
+                if (isNewMessage) textBuffer.Add(item);
 
                 if (showTimestamps)
                 {
-                    if (fontSettings.ContainsKey("Timestamp"))
+                    if (FontSettings.ContainsKey("Timestamp"))
                     {
-                        var fontSetting = fontSettings["Timestamp"];
+                        var fontSetting = FontSettings["Timestamp"];
                         TextPrinter.ForeColor = fontSetting.ForeColor;
                         TextPrinter.BackColor = fontSetting.BackColor;
                         TextPrinter.Font = fontSetting.Font;
@@ -188,9 +145,9 @@ namespace Radegast
                     }
                 }
 
-                if (fontSettings.ContainsKey("Name"))
+                if (FontSettings.ContainsKey("Name"))
                 {
-                    var fontSetting = fontSettings["Name"];
+                    var fontSetting = FontSettings["Name"];
                     TextPrinter.ForeColor = fontSetting.ForeColor;
                     TextPrinter.BackColor = fontSetting.BackColor;
                     TextPrinter.Font = fontSetting.Font;
@@ -211,9 +168,9 @@ namespace Radegast
                     TextPrinter.PrintText(item.From);
                 }
 
-                if (fontSettings.ContainsKey(item.Style.ToString()))
+                if (FontSettings.ContainsKey(item.Style.ToString()))
                 {
-                    var fontSetting = fontSettings[item.Style.ToString()];
+                    var fontSetting = FontSettings[item.Style.ToString()];
                     TextPrinter.ForeColor = fontSetting.ForeColor;
                     TextPrinter.BackColor = fontSetting.BackColor;
                     TextPrinter.Font = fontSetting.Font;
@@ -224,7 +181,8 @@ namespace Radegast
                     TextPrinter.BackColor = Color.Transparent;
                     TextPrinter.Font = Settings.FontSetting.DefaultFont;
                 }
-                TextPrinter.PrintTextLine(item.Text);
+
+                ProcessAndPrintText(item.Text, isNewMessage, true);
             }
         }
 
@@ -251,7 +209,7 @@ namespace Radegast
             sb.Append(e.Message);
 
             ChatBufferItem item = new ChatBufferItem(
-                DateTime.Now, $"(channel {e.Channel}) {client.Self.Name}", client.Self.AgentID, sb.ToString(), ChatBufferTextStyle.StatusDarkBlue);
+                DateTime.Now, $"(channel {e.Channel}) {instance.Client.Self.Name}", instance.Client.Self.AgentID, sb.ToString(), ChatBufferTextStyle.StatusDarkBlue);
 
             ProcessBufferItem(item, true);
 
@@ -264,7 +222,7 @@ namespace Radegast
 
             // Check if the sender agent is muted
             if (e.SourceType == ChatSourceType.Agent
-                && client.Self.MuteList.Find(me => me.Type == MuteType.Resident
+                && instance.Client.Self.MuteList.Find(me => me.Type == MuteType.Resident
                                                    && me.ID == e.SourceID) != null)
             {
                 return;
@@ -278,7 +236,7 @@ namespace Radegast
 
             // Check if sender object is muted
             if (e.SourceType == ChatSourceType.Object &&
-                null != client.Self.MuteList.Find(me =>
+                null != instance.Client.Self.MuteList.Find(me =>
                         (me.Type == MuteType.Resident && me.ID == e.OwnerID) // Owner muted
                         || (me.Type == MuteType.Object && me.ID == e.SourceID) // Object muted by ID
                         || (me.Type == MuteType.ByName && me.Name == e.FromName) // Object muted by name
@@ -363,7 +321,7 @@ namespace Radegast
                     {
                         item.Style = ChatBufferTextStyle.Emote;
                     }
-                    else if (e.SourceID == client.Self.AgentID)
+                    else if (e.SourceID == instance.Client.Self.AgentID)
                     {
                         item.Style = ChatBufferTextStyle.Self;
                     }
@@ -397,7 +355,7 @@ namespace Radegast
             sb = null;
         }
 
-        public void ReprintAllText()
+        public override void ReprintAllText()
         {
             TextPrinter.ClearText();
 
@@ -406,13 +364,6 @@ namespace Radegast
                 ProcessBufferItem(item, false);
             }
         }
-
-        public void ClearInternalBuffer()
-        {
-            textBuffer.Clear();
-        }
-
-        public ITextPrinter TextPrinter { get; set; }
     }
 
     public class ChatLineAddedArgs : EventArgs

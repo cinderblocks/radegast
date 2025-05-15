@@ -154,6 +154,8 @@ namespace Radegast
             this.cbxFontSize = new System.Windows.Forms.ComboBox();
             this.cbxFont = new System.Windows.Forms.ComboBox();
             this.fontDialog1 = new System.Windows.Forms.FontDialog();
+            this.cbMentionMeSound = new System.Windows.Forms.CheckBox();
+            this.txtMentionMeSoundUUID = new System.Windows.Forms.TextBox();
             this.tcGraphics.SuspendLayout();
             this.tbpGeneral.SuspendLayout();
             this.cbHighLight.SuspendLayout();
@@ -181,11 +183,10 @@ namespace Radegast
             this.tcGraphics.Controls.Add(this.tbpChat);
             this.tcGraphics.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tcGraphics.Location = new System.Drawing.Point(0, 0);
-            this.tcGraphics.Margin = new System.Windows.Forms.Padding(4);
             this.tcGraphics.Multiline = true;
             this.tcGraphics.Name = "tcGraphics";
             this.tcGraphics.SelectedIndex = 0;
-            this.tcGraphics.Size = new System.Drawing.Size(707, 565);
+            this.tcGraphics.Size = new System.Drawing.Size(530, 515);
             this.tcGraphics.TabIndex = 0;
             // 
             // tbpGeneral
@@ -194,11 +195,10 @@ namespace Radegast
             this.tbpGeneral.Controls.Add(this.cbMisc);
             this.tbpGeneral.Controls.Add(this.Chat);
             this.tbpGeneral.Controls.Add(this.gbDisplayNames);
-            this.tbpGeneral.Location = new System.Drawing.Point(4, 25);
-            this.tbpGeneral.Margin = new System.Windows.Forms.Padding(4);
+            this.tbpGeneral.Location = new System.Drawing.Point(4, 22);
             this.tbpGeneral.Name = "tbpGeneral";
-            this.tbpGeneral.Padding = new System.Windows.Forms.Padding(4);
-            this.tbpGeneral.Size = new System.Drawing.Size(699, 536);
+            this.tbpGeneral.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.tbpGeneral.Size = new System.Drawing.Size(522, 489);
             this.tbpGeneral.TabIndex = 1;
             this.tbpGeneral.Text = "General";
             this.tbpGeneral.UseVisualStyleBackColor = true;
@@ -210,11 +210,9 @@ namespace Radegast
             this.cbHighLight.Controls.Add(this.cbHighlightChat);
             this.cbHighLight.Controls.Add(this.cbFriendsHighlight);
             this.cbHighLight.Controls.Add(this.cbTaskBarHighLight);
-            this.cbHighLight.Location = new System.Drawing.Point(11, 228);
-            this.cbHighLight.Margin = new System.Windows.Forms.Padding(4);
+            this.cbHighLight.Location = new System.Drawing.Point(8, 240);
             this.cbHighLight.Name = "cbHighLight";
-            this.cbHighLight.Padding = new System.Windows.Forms.Padding(4);
-            this.cbHighLight.Size = new System.Drawing.Size(341, 167);
+            this.cbHighLight.Size = new System.Drawing.Size(256, 136);
             this.cbHighLight.TabIndex = 1;
             this.cbHighLight.TabStop = false;
             this.cbHighLight.Text = "Highlight when tab changes";
@@ -222,10 +220,9 @@ namespace Radegast
             // cbHighlightGroupIM
             // 
             this.cbHighlightGroupIM.AutoSize = true;
-            this.cbHighlightGroupIM.Location = new System.Drawing.Point(36, 137);
-            this.cbHighlightGroupIM.Margin = new System.Windows.Forms.Padding(4);
+            this.cbHighlightGroupIM.Location = new System.Drawing.Point(27, 111);
             this.cbHighlightGroupIM.Name = "cbHighlightGroupIM";
-            this.cbHighlightGroupIM.Size = new System.Drawing.Size(164, 20);
+            this.cbHighlightGroupIM.Size = new System.Drawing.Size(136, 17);
             this.cbHighlightGroupIM.TabIndex = 5;
             this.cbHighlightGroupIM.Text = "Group Instant Message";
             this.cbHighlightGroupIM.UseVisualStyleBackColor = true;
@@ -233,10 +230,9 @@ namespace Radegast
             // cbHighlightIM
             // 
             this.cbHighlightIM.AutoSize = true;
-            this.cbHighlightIM.Location = new System.Drawing.Point(36, 108);
-            this.cbHighlightIM.Margin = new System.Windows.Forms.Padding(4);
+            this.cbHighlightIM.Location = new System.Drawing.Point(27, 88);
             this.cbHighlightIM.Name = "cbHighlightIM";
-            this.cbHighlightIM.Size = new System.Drawing.Size(124, 20);
+            this.cbHighlightIM.Size = new System.Drawing.Size(104, 17);
             this.cbHighlightIM.TabIndex = 4;
             this.cbHighlightIM.Text = "Instant Message";
             this.cbHighlightIM.UseVisualStyleBackColor = true;
@@ -244,10 +240,9 @@ namespace Radegast
             // cbHighlightChat
             // 
             this.cbHighlightChat.AutoSize = true;
-            this.cbHighlightChat.Location = new System.Drawing.Point(36, 52);
-            this.cbHighlightChat.Margin = new System.Windows.Forms.Padding(4);
+            this.cbHighlightChat.Location = new System.Drawing.Point(27, 42);
             this.cbHighlightChat.Name = "cbHighlightChat";
-            this.cbHighlightChat.Size = new System.Drawing.Size(53, 20);
+            this.cbHighlightChat.Size = new System.Drawing.Size(48, 17);
             this.cbHighlightChat.TabIndex = 2;
             this.cbHighlightChat.Text = "Chat";
             this.cbHighlightChat.UseVisualStyleBackColor = true;
@@ -255,10 +250,9 @@ namespace Radegast
             // cbFriendsHighlight
             // 
             this.cbFriendsHighlight.AutoSize = true;
-            this.cbFriendsHighlight.Location = new System.Drawing.Point(36, 80);
-            this.cbFriendsHighlight.Margin = new System.Windows.Forms.Padding(4);
+            this.cbFriendsHighlight.Location = new System.Drawing.Point(27, 65);
             this.cbFriendsHighlight.Name = "cbFriendsHighlight";
-            this.cbFriendsHighlight.Size = new System.Drawing.Size(183, 20);
+            this.cbFriendsHighlight.Size = new System.Drawing.Size(150, 17);
             this.cbFriendsHighlight.TabIndex = 3;
             this.cbFriendsHighlight.Text = "Friends online notifications";
             this.cbFriendsHighlight.UseVisualStyleBackColor = true;
@@ -267,10 +261,9 @@ namespace Radegast
             // cbTaskBarHighLight
             // 
             this.cbTaskBarHighLight.AutoSize = true;
-            this.cbTaskBarHighLight.Location = new System.Drawing.Point(8, 23);
-            this.cbTaskBarHighLight.Margin = new System.Windows.Forms.Padding(4);
+            this.cbTaskBarHighLight.Location = new System.Drawing.Point(6, 19);
             this.cbTaskBarHighLight.Name = "cbTaskBarHighLight";
-            this.cbTaskBarHighLight.Size = new System.Drawing.Size(139, 20);
+            this.cbTaskBarHighLight.Size = new System.Drawing.Size(115, 17);
             this.cbTaskBarHighLight.TabIndex = 1;
             this.cbTaskBarHighLight.Text = "Enable highlighting";
             this.cbTaskBarHighLight.UseVisualStyleBackColor = true;
@@ -296,21 +289,18 @@ namespace Radegast
             this.cbMisc.Controls.Add(this.cbRLVDebug);
             this.cbMisc.Controls.Add(this.cbMinToTrey);
             this.cbMisc.Controls.Add(this.cbSyntaxHighlight);
-            this.cbMisc.Location = new System.Drawing.Point(360, 7);
-            this.cbMisc.Margin = new System.Windows.Forms.Padding(4);
+            this.cbMisc.Location = new System.Drawing.Point(270, 6);
             this.cbMisc.Name = "cbMisc";
-            this.cbMisc.Padding = new System.Windows.Forms.Padding(4);
-            this.cbMisc.Size = new System.Drawing.Size(325, 519);
+            this.cbMisc.Size = new System.Drawing.Size(244, 477);
             this.cbMisc.TabIndex = 2;
             this.cbMisc.TabStop = false;
             // 
             // cbThemeCompatibilityMode
             // 
             this.cbThemeCompatibilityMode.AutoSize = true;
-            this.cbThemeCompatibilityMode.Location = new System.Drawing.Point(8, 369);
-            this.cbThemeCompatibilityMode.Margin = new System.Windows.Forms.Padding(4);
+            this.cbThemeCompatibilityMode.Location = new System.Drawing.Point(6, 300);
             this.cbThemeCompatibilityMode.Name = "cbThemeCompatibilityMode";
-            this.cbThemeCompatibilityMode.Size = new System.Drawing.Size(187, 20);
+            this.cbThemeCompatibilityMode.Size = new System.Drawing.Size(150, 17);
             this.cbThemeCompatibilityMode.TabIndex = 22;
             this.cbThemeCompatibilityMode.Text = "Theme Compatibility Mode";
             this.cbThemeCompatibilityMode.UseVisualStyleBackColor = true;
@@ -319,10 +309,9 @@ namespace Radegast
             // cbConfirmExit
             // 
             this.cbConfirmExit.AutoSize = true;
-            this.cbConfirmExit.Location = new System.Drawing.Point(8, 347);
-            this.cbConfirmExit.Margin = new System.Windows.Forms.Padding(4);
+            this.cbConfirmExit.Location = new System.Drawing.Point(6, 282);
             this.cbConfirmExit.Name = "cbConfirmExit";
-            this.cbConfirmExit.Size = new System.Drawing.Size(95, 20);
+            this.cbConfirmExit.Size = new System.Drawing.Size(81, 17);
             this.cbConfirmExit.TabIndex = 21;
             this.cbConfirmExit.Text = "Confirm Exit";
             this.cbConfirmExit.UseVisualStyleBackColor = true;
@@ -330,10 +319,9 @@ namespace Radegast
             // 
             // txtResolveURITime
             // 
-            this.txtResolveURITime.Location = new System.Drawing.Point(208, 324);
-            this.txtResolveURITime.Margin = new System.Windows.Forms.Padding(4);
+            this.txtResolveURITime.Location = new System.Drawing.Point(156, 263);
             this.txtResolveURITime.Name = "txtResolveURITime";
-            this.txtResolveURITime.Size = new System.Drawing.Size(69, 22);
+            this.txtResolveURITime.Size = new System.Drawing.Size(53, 20);
             this.txtResolveURITime.TabIndex = 20;
             this.txtResolveURITime.Text = "100";
             this.txtResolveURITime.TextChanged += new System.EventHandler(this.txtResolveURITime_TextChanged);
@@ -341,10 +329,9 @@ namespace Radegast
             // cbResolveURIs
             // 
             this.cbResolveURIs.AutoSize = true;
-            this.cbResolveURIs.Location = new System.Drawing.Point(8, 304);
-            this.cbResolveURIs.Margin = new System.Windows.Forms.Padding(4);
+            this.cbResolveURIs.Location = new System.Drawing.Point(6, 247);
             this.cbResolveURIs.Name = "cbResolveURIs";
-            this.cbResolveURIs.Size = new System.Drawing.Size(110, 20);
+            this.cbResolveURIs.Size = new System.Drawing.Size(92, 17);
             this.cbResolveURIs.TabIndex = 18;
             this.cbResolveURIs.Text = "Resolve URIs";
             this.cbResolveURIs.UseVisualStyleBackColor = true;
@@ -353,10 +340,9 @@ namespace Radegast
             // cbShowScriptErrors
             // 
             this.cbShowScriptErrors.AutoSize = true;
-            this.cbShowScriptErrors.Location = new System.Drawing.Point(8, 260);
-            this.cbShowScriptErrors.Margin = new System.Windows.Forms.Padding(4);
+            this.cbShowScriptErrors.Location = new System.Drawing.Point(6, 211);
             this.cbShowScriptErrors.Name = "cbShowScriptErrors";
-            this.cbShowScriptErrors.Size = new System.Drawing.Size(135, 20);
+            this.cbShowScriptErrors.Size = new System.Drawing.Size(113, 17);
             this.cbShowScriptErrors.TabIndex = 17;
             this.cbShowScriptErrors.Text = "Show Script Errors";
             this.cbShowScriptErrors.UseVisualStyleBackColor = true;
@@ -364,20 +350,18 @@ namespace Radegast
             // label4
             // 
             this.label4.AutoSize = true;
-            this.label4.Location = new System.Drawing.Point(29, 327);
-            this.label4.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label4.Location = new System.Drawing.Point(22, 266);
             this.label4.Name = "label4";
-            this.label4.Size = new System.Drawing.Size(139, 16);
+            this.label4.Size = new System.Drawing.Size(109, 13);
             this.label4.TabIndex = 19;
             this.label4.Text = "Resolve Timeout (ms)";
             // 
             // cbHideLoginGraphics
             // 
             this.cbHideLoginGraphics.AutoSize = true;
-            this.cbHideLoginGraphics.Location = new System.Drawing.Point(8, 14);
-            this.cbHideLoginGraphics.Margin = new System.Windows.Forms.Padding(4);
+            this.cbHideLoginGraphics.Location = new System.Drawing.Point(6, 11);
             this.cbHideLoginGraphics.Name = "cbHideLoginGraphics";
-            this.cbHideLoginGraphics.Size = new System.Drawing.Size(174, 20);
+            this.cbHideLoginGraphics.Size = new System.Drawing.Size(141, 17);
             this.cbHideLoginGraphics.TabIndex = 3;
             this.cbHideLoginGraphics.Text = "Hide login splash screen";
             this.cbHideLoginGraphics.UseVisualStyleBackColor = true;
@@ -386,10 +370,9 @@ namespace Radegast
             // cbDisableLookAt
             // 
             this.cbDisableLookAt.AutoSize = true;
-            this.cbDisableLookAt.Location = new System.Drawing.Point(8, 238);
-            this.cbDisableLookAt.Margin = new System.Windows.Forms.Padding(4);
+            this.cbDisableLookAt.Location = new System.Drawing.Point(6, 193);
             this.cbDisableLookAt.Name = "cbDisableLookAt";
-            this.cbDisableLookAt.Size = new System.Drawing.Size(170, 20);
+            this.cbDisableLookAt.Size = new System.Drawing.Size(140, 17);
             this.cbDisableLookAt.TabIndex = 15;
             this.cbDisableLookAt.Text = "Disable Look At beacon";
             this.cbDisableLookAt.UseVisualStyleBackColor = true;
@@ -397,10 +380,9 @@ namespace Radegast
             // cbTrasactDialog
             // 
             this.cbTrasactDialog.AutoSize = true;
-            this.cbTrasactDialog.Location = new System.Drawing.Point(8, 127);
-            this.cbTrasactDialog.Margin = new System.Windows.Forms.Padding(4);
+            this.cbTrasactDialog.Location = new System.Drawing.Point(6, 103);
             this.cbTrasactDialog.Name = "cbTrasactDialog";
-            this.cbTrasactDialog.Size = new System.Drawing.Size(216, 20);
+            this.cbTrasactDialog.Size = new System.Drawing.Size(176, 17);
             this.cbTrasactDialog.TabIndex = 9;
             this.cbTrasactDialog.Text = "Display dialog on L$ transaction";
             this.cbTrasactDialog.UseVisualStyleBackColor = true;
@@ -409,10 +391,9 @@ namespace Radegast
             // cbRadegastLogToFile
             // 
             this.cbRadegastLogToFile.AutoSize = true;
-            this.cbRadegastLogToFile.Location = new System.Drawing.Point(8, 215);
-            this.cbRadegastLogToFile.Margin = new System.Windows.Forms.Padding(4);
+            this.cbRadegastLogToFile.Location = new System.Drawing.Point(6, 175);
             this.cbRadegastLogToFile.Name = "cbRadegastLogToFile";
-            this.cbRadegastLogToFile.Size = new System.Drawing.Size(83, 20);
+            this.cbRadegastLogToFile.Size = new System.Drawing.Size(72, 17);
             this.cbRadegastLogToFile.TabIndex = 14;
             this.cbRadegastLogToFile.Text = "Log to file";
             this.cbRadegastLogToFile.UseVisualStyleBackColor = true;
@@ -421,10 +402,9 @@ namespace Radegast
             // cbTransactChat
             // 
             this.cbTransactChat.AutoSize = true;
-            this.cbTransactChat.Location = new System.Drawing.Point(8, 149);
-            this.cbTransactChat.Margin = new System.Windows.Forms.Padding(4);
+            this.cbTransactChat.Location = new System.Drawing.Point(6, 121);
             this.cbTransactChat.Name = "cbTransactChat";
-            this.cbTransactChat.Size = new System.Drawing.Size(205, 20);
+            this.cbTransactChat.Size = new System.Drawing.Size(170, 17);
             this.cbTransactChat.TabIndex = 10;
             this.cbTransactChat.Text = "Display L$ transactions in chat";
             this.cbTransactChat.UseVisualStyleBackColor = true;
@@ -433,10 +413,9 @@ namespace Radegast
             // cbFriendsNotifications
             // 
             this.cbFriendsNotifications.AutoSize = true;
-            this.cbFriendsNotifications.Location = new System.Drawing.Point(8, 171);
-            this.cbFriendsNotifications.Margin = new System.Windows.Forms.Padding(4);
+            this.cbFriendsNotifications.Location = new System.Drawing.Point(6, 139);
             this.cbFriendsNotifications.Name = "cbFriendsNotifications";
-            this.cbFriendsNotifications.Size = new System.Drawing.Size(227, 20);
+            this.cbFriendsNotifications.Size = new System.Drawing.Size(184, 17);
             this.cbFriendsNotifications.TabIndex = 11;
             this.cbFriendsNotifications.Text = "Display friends online notifications";
             this.cbFriendsNotifications.UseVisualStyleBackColor = true;
@@ -444,10 +423,9 @@ namespace Radegast
             // 
             // txtReconnectTime
             // 
-            this.txtReconnectTime.Location = new System.Drawing.Point(208, 101);
-            this.txtReconnectTime.Margin = new System.Windows.Forms.Padding(4);
+            this.txtReconnectTime.Location = new System.Drawing.Point(156, 82);
             this.txtReconnectTime.Name = "txtReconnectTime";
-            this.txtReconnectTime.Size = new System.Drawing.Size(69, 22);
+            this.txtReconnectTime.Size = new System.Drawing.Size(53, 20);
             this.txtReconnectTime.TabIndex = 8;
             this.txtReconnectTime.Text = "120";
             this.txtReconnectTime.TextChanged += new System.EventHandler(this.txtReconnectTime_TextChanged);
@@ -455,10 +433,9 @@ namespace Radegast
             // cbAutoReconnect
             // 
             this.cbAutoReconnect.AutoSize = true;
-            this.cbAutoReconnect.Location = new System.Drawing.Point(8, 80);
-            this.cbAutoReconnect.Margin = new System.Windows.Forms.Padding(4);
+            this.cbAutoReconnect.Location = new System.Drawing.Point(6, 65);
             this.cbAutoReconnect.Name = "cbAutoReconnect";
-            this.cbAutoReconnect.Size = new System.Drawing.Size(201, 20);
+            this.cbAutoReconnect.Size = new System.Drawing.Size(169, 17);
             this.cbAutoReconnect.TabIndex = 6;
             this.cbAutoReconnect.Text = "Auto reconnect on disconnect";
             this.cbAutoReconnect.UseVisualStyleBackColor = true;
@@ -467,20 +444,18 @@ namespace Radegast
             // label2
             // 
             this.label2.AutoSize = true;
-            this.label2.Location = new System.Drawing.Point(29, 105);
-            this.label2.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label2.Location = new System.Drawing.Point(22, 85);
             this.label2.Name = "label2";
-            this.label2.Size = new System.Drawing.Size(157, 16);
+            this.label2.Size = new System.Drawing.Size(128, 13);
             this.label2.TabIndex = 7;
             this.label2.Text = "Auto reconnect time (sec)";
             // 
             // cbRLV
             // 
             this.cbRLV.AutoSize = true;
-            this.cbRLV.Location = new System.Drawing.Point(8, 193);
-            this.cbRLV.Margin = new System.Windows.Forms.Padding(4);
+            this.cbRLV.Location = new System.Drawing.Point(6, 157);
             this.cbRLV.Name = "cbRLV";
-            this.cbRLV.Size = new System.Drawing.Size(100, 20);
+            this.cbRLV.Size = new System.Drawing.Size(85, 17);
             this.cbRLV.TabIndex = 12;
             this.cbRLV.Text = "RLV support";
             this.cbRLV.UseVisualStyleBackColor = true;
@@ -489,10 +464,9 @@ namespace Radegast
             // cbRLVDebug
             // 
             this.cbRLVDebug.AutoSize = true;
-            this.cbRLVDebug.Location = new System.Drawing.Point(8, 282);
-            this.cbRLVDebug.Margin = new System.Windows.Forms.Padding(4);
+            this.cbRLVDebug.Location = new System.Drawing.Point(6, 229);
             this.cbRLVDebug.Name = "cbRLVDebug";
-            this.cbRLVDebug.Size = new System.Drawing.Size(163, 20);
+            this.cbRLVDebug.Size = new System.Drawing.Size(136, 17);
             this.cbRLVDebug.TabIndex = 12;
             this.cbRLVDebug.Text = "Output RLV commands";
             this.cbRLVDebug.UseVisualStyleBackColor = true;
@@ -501,10 +475,9 @@ namespace Radegast
             // cbMinToTrey
             // 
             this.cbMinToTrey.AutoSize = true;
-            this.cbMinToTrey.Location = new System.Drawing.Point(8, 36);
-            this.cbMinToTrey.Margin = new System.Windows.Forms.Padding(4);
+            this.cbMinToTrey.Location = new System.Drawing.Point(6, 29);
             this.cbMinToTrey.Name = "cbMinToTrey";
-            this.cbMinToTrey.Size = new System.Drawing.Size(163, 20);
+            this.cbMinToTrey.Size = new System.Drawing.Size(133, 17);
             this.cbMinToTrey.TabIndex = 4;
             this.cbMinToTrey.Text = "Minimize to system tray";
             this.cbMinToTrey.UseVisualStyleBackColor = true;
@@ -513,16 +486,17 @@ namespace Radegast
             // cbSyntaxHighlight
             // 
             this.cbSyntaxHighlight.AutoSize = true;
-            this.cbSyntaxHighlight.Location = new System.Drawing.Point(8, 58);
-            this.cbSyntaxHighlight.Margin = new System.Windows.Forms.Padding(4);
+            this.cbSyntaxHighlight.Location = new System.Drawing.Point(6, 47);
             this.cbSyntaxHighlight.Name = "cbSyntaxHighlight";
-            this.cbSyntaxHighlight.Size = new System.Drawing.Size(160, 20);
+            this.cbSyntaxHighlight.Size = new System.Drawing.Size(134, 17);
             this.cbSyntaxHighlight.TabIndex = 5;
             this.cbSyntaxHighlight.Text = "LSL syntax highlighting";
             this.cbSyntaxHighlight.UseVisualStyleBackColor = true;
             // 
             // Chat
             // 
+            this.Chat.Controls.Add(this.txtMentionMeSoundUUID);
+            this.Chat.Controls.Add(this.cbMentionMeSound);
             this.Chat.Controls.Add(this.btnChatLogDir);
             this.Chat.Controls.Add(this.cbGroupIMSound);
             this.Chat.Controls.Add(this.cbNameLinks);
@@ -533,11 +507,9 @@ namespace Radegast
             this.Chat.Controls.Add(this.cbIMTimeStamps);
             this.Chat.Controls.Add(this.cbMUEmotes);
             this.Chat.Controls.Add(this.cbNoTyping);
-            this.Chat.Location = new System.Drawing.Point(11, 6);
-            this.Chat.Margin = new System.Windows.Forms.Padding(4);
+            this.Chat.Location = new System.Drawing.Point(8, 5);
             this.Chat.Name = "Chat";
-            this.Chat.Padding = new System.Windows.Forms.Padding(4);
-            this.Chat.Size = new System.Drawing.Size(341, 214);
+            this.Chat.Size = new System.Drawing.Size(256, 229);
             this.Chat.TabIndex = 0;
             this.Chat.TabStop = false;
             this.Chat.Text = "Chat";
@@ -546,10 +518,9 @@ namespace Radegast
             // 
             this.btnChatLogDir.AccessibleDescription = "Browse for chat log directory";
             this.btnChatLogDir.AccessibleName = "Browse Chat Log Directory";
-            this.btnChatLogDir.Location = new System.Drawing.Point(261, 181);
-            this.btnChatLogDir.Margin = new System.Windows.Forms.Padding(4);
+            this.btnChatLogDir.Location = new System.Drawing.Point(193, 199);
             this.btnChatLogDir.Name = "btnChatLogDir";
-            this.btnChatLogDir.Size = new System.Drawing.Size(76, 28);
+            this.btnChatLogDir.Size = new System.Drawing.Size(57, 23);
             this.btnChatLogDir.TabIndex = 12;
             this.btnChatLogDir.Text = "Browse";
             this.btnChatLogDir.UseVisualStyleBackColor = true;
@@ -558,10 +529,9 @@ namespace Radegast
             // cbGroupIMSound
             // 
             this.cbGroupIMSound.AutoSize = true;
-            this.cbGroupIMSound.Location = new System.Drawing.Point(11, 159);
-            this.cbGroupIMSound.Margin = new System.Windows.Forms.Padding(4);
+            this.cbGroupIMSound.Location = new System.Drawing.Point(8, 129);
             this.cbGroupIMSound.Name = "cbGroupIMSound";
-            this.cbGroupIMSound.Size = new System.Drawing.Size(195, 20);
+            this.cbGroupIMSound.Size = new System.Drawing.Size(163, 17);
             this.cbGroupIMSound.TabIndex = 10;
             this.cbGroupIMSound.Text = "Play sound on new Group IM";
             this.cbGroupIMSound.UseVisualStyleBackColor = true;
@@ -569,10 +539,9 @@ namespace Radegast
             // cbNameLinks
             // 
             this.cbNameLinks.AutoSize = true;
-            this.cbNameLinks.Location = new System.Drawing.Point(11, 135);
-            this.cbNameLinks.Margin = new System.Windows.Forms.Padding(4);
+            this.cbNameLinks.Location = new System.Drawing.Point(8, 110);
             this.cbNameLinks.Name = "cbNameLinks";
-            this.cbNameLinks.Size = new System.Drawing.Size(132, 20);
+            this.cbNameLinks.Size = new System.Drawing.Size(110, 17);
             this.cbNameLinks.TabIndex = 9;
             this.cbNameLinks.Text = "Avatar name links";
             this.cbNameLinks.UseVisualStyleBackColor = true;
@@ -582,19 +551,17 @@ namespace Radegast
             this.txtChatLogDir.AccessibleDescription = "Directory storing chat logs";
             this.txtChatLogDir.AccessibleName = "Chat Log Location";
             this.txtChatLogDir.Enabled = false;
-            this.txtChatLogDir.Location = new System.Drawing.Point(132, 182);
-            this.txtChatLogDir.Margin = new System.Windows.Forms.Padding(4);
+            this.txtChatLogDir.Location = new System.Drawing.Point(99, 200);
             this.txtChatLogDir.Name = "txtChatLogDir";
-            this.txtChatLogDir.Size = new System.Drawing.Size(120, 22);
+            this.txtChatLogDir.Size = new System.Drawing.Size(91, 20);
             this.txtChatLogDir.TabIndex = 11;
             // 
             // cbDisableChatIMLog
             // 
             this.cbDisableChatIMLog.AutoSize = true;
-            this.cbDisableChatIMLog.Location = new System.Drawing.Point(11, 112);
-            this.cbDisableChatIMLog.Margin = new System.Windows.Forms.Padding(4);
+            this.cbDisableChatIMLog.Location = new System.Drawing.Point(8, 91);
             this.cbDisableChatIMLog.Name = "cbDisableChatIMLog";
-            this.cbDisableChatIMLog.Size = new System.Drawing.Size(166, 20);
+            this.cbDisableChatIMLog.Size = new System.Drawing.Size(138, 17);
             this.cbDisableChatIMLog.TabIndex = 8;
             this.cbDisableChatIMLog.Text = "Disable chat and IM log";
             this.cbDisableChatIMLog.UseVisualStyleBackColor = true;
@@ -602,10 +569,9 @@ namespace Radegast
             // cbChatTimestamps
             // 
             this.cbChatTimestamps.AutoSize = true;
-            this.cbChatTimestamps.Location = new System.Drawing.Point(11, 20);
-            this.cbChatTimestamps.Margin = new System.Windows.Forms.Padding(4);
+            this.cbChatTimestamps.Location = new System.Drawing.Point(8, 16);
             this.cbChatTimestamps.Name = "cbChatTimestamps";
-            this.cbChatTimestamps.Size = new System.Drawing.Size(172, 20);
+            this.cbChatTimestamps.Size = new System.Drawing.Size(143, 17);
             this.cbChatTimestamps.TabIndex = 0;
             this.cbChatTimestamps.Text = "Show timestamps in chat";
             this.cbChatTimestamps.UseVisualStyleBackColor = true;
@@ -613,20 +579,18 @@ namespace Radegast
             // lblChatLog
             // 
             this.lblChatLog.AutoSize = true;
-            this.lblChatLog.Location = new System.Drawing.Point(8, 187);
-            this.lblChatLog.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblChatLog.Location = new System.Drawing.Point(6, 203);
             this.lblChatLog.Name = "lblChatLog";
-            this.lblChatLog.Size = new System.Drawing.Size(114, 16);
+            this.lblChatLog.Size = new System.Drawing.Size(94, 13);
             this.lblChatLog.TabIndex = 10;
             this.lblChatLog.Text = "Chat Log Location";
             // 
             // cbIMTimeStamps
             // 
             this.cbIMTimeStamps.AutoSize = true;
-            this.cbIMTimeStamps.Location = new System.Drawing.Point(11, 43);
-            this.cbIMTimeStamps.Margin = new System.Windows.Forms.Padding(4);
+            this.cbIMTimeStamps.Location = new System.Drawing.Point(8, 35);
             this.cbIMTimeStamps.Name = "cbIMTimeStamps";
-            this.cbIMTimeStamps.Size = new System.Drawing.Size(161, 20);
+            this.cbIMTimeStamps.Size = new System.Drawing.Size(134, 17);
             this.cbIMTimeStamps.TabIndex = 1;
             this.cbIMTimeStamps.Text = "Show timestamps in IM";
             this.cbIMTimeStamps.UseVisualStyleBackColor = true;
@@ -634,10 +598,9 @@ namespace Radegast
             // cbMUEmotes
             // 
             this.cbMUEmotes.AutoSize = true;
-            this.cbMUEmotes.Location = new System.Drawing.Point(11, 65);
-            this.cbMUEmotes.Margin = new System.Windows.Forms.Padding(4);
+            this.cbMUEmotes.Location = new System.Drawing.Point(8, 53);
             this.cbMUEmotes.Name = "cbMUEmotes";
-            this.cbMUEmotes.Size = new System.Drawing.Size(131, 20);
+            this.cbMUEmotes.Size = new System.Drawing.Size(108, 17);
             this.cbMUEmotes.TabIndex = 5;
             this.cbMUEmotes.Text = "MU* style emotes";
             this.cbMUEmotes.UseVisualStyleBackColor = true;
@@ -646,10 +609,9 @@ namespace Radegast
             // cbNoTyping
             // 
             this.cbNoTyping.AutoSize = true;
-            this.cbNoTyping.Location = new System.Drawing.Point(11, 89);
-            this.cbNoTyping.Margin = new System.Windows.Forms.Padding(4);
+            this.cbNoTyping.Location = new System.Drawing.Point(8, 72);
             this.cbNoTyping.Name = "cbNoTyping";
-            this.cbNoTyping.Size = new System.Drawing.Size(182, 20);
+            this.cbNoTyping.Size = new System.Drawing.Size(150, 17);
             this.cbNoTyping.TabIndex = 6;
             this.cbNoTyping.Text = "Don\'t use typing animation";
             this.cbNoTyping.UseVisualStyleBackColor = true;
@@ -661,11 +623,9 @@ namespace Radegast
             this.gbDisplayNames.Controls.Add(this.rbDNDandUsernme);
             this.gbDisplayNames.Controls.Add(this.rbDNSmart);
             this.gbDisplayNames.Controls.Add(this.rbDNOff);
-            this.gbDisplayNames.Location = new System.Drawing.Point(11, 403);
-            this.gbDisplayNames.Margin = new System.Windows.Forms.Padding(4);
+            this.gbDisplayNames.Location = new System.Drawing.Point(8, 382);
             this.gbDisplayNames.Name = "gbDisplayNames";
-            this.gbDisplayNames.Padding = new System.Windows.Forms.Padding(4);
-            this.gbDisplayNames.Size = new System.Drawing.Size(341, 123);
+            this.gbDisplayNames.Size = new System.Drawing.Size(256, 101);
             this.gbDisplayNames.TabIndex = 3;
             this.gbDisplayNames.TabStop = false;
             this.gbDisplayNames.Text = "Display names";
@@ -673,10 +633,9 @@ namespace Radegast
             // rbDNOnlyDN
             // 
             this.rbDNOnlyDN.AutoSize = true;
-            this.rbDNOnlyDN.Location = new System.Drawing.Point(8, 92);
-            this.rbDNOnlyDN.Margin = new System.Windows.Forms.Padding(4);
+            this.rbDNOnlyDN.Location = new System.Drawing.Point(6, 75);
             this.rbDNOnlyDN.Name = "rbDNOnlyDN";
-            this.rbDNOnlyDN.Size = new System.Drawing.Size(136, 20);
+            this.rbDNOnlyDN.Size = new System.Drawing.Size(110, 17);
             this.rbDNOnlyDN.TabIndex = 3;
             this.rbDNOnlyDN.TabStop = true;
             this.rbDNOnlyDN.Text = "Only display name";
@@ -686,10 +645,9 @@ namespace Radegast
             // rbDNDandUsernme
             // 
             this.rbDNDandUsernme.AutoSize = true;
-            this.rbDNDandUsernme.Location = new System.Drawing.Point(8, 68);
-            this.rbDNDandUsernme.Margin = new System.Windows.Forms.Padding(4);
+            this.rbDNDandUsernme.Location = new System.Drawing.Point(6, 55);
             this.rbDNDandUsernme.Name = "rbDNDandUsernme";
-            this.rbDNDandUsernme.Size = new System.Drawing.Size(179, 20);
+            this.rbDNDandUsernme.Size = new System.Drawing.Size(143, 17);
             this.rbDNDandUsernme.TabIndex = 2;
             this.rbDNDandUsernme.TabStop = true;
             this.rbDNDandUsernme.Text = "Display name (username)";
@@ -699,10 +657,9 @@ namespace Radegast
             // rbDNSmart
             // 
             this.rbDNSmart.AutoSize = true;
-            this.rbDNSmart.Location = new System.Drawing.Point(8, 43);
-            this.rbDNSmart.Margin = new System.Windows.Forms.Padding(4);
+            this.rbDNSmart.Location = new System.Drawing.Point(6, 35);
             this.rbDNSmart.Name = "rbDNSmart";
-            this.rbDNSmart.Size = new System.Drawing.Size(60, 20);
+            this.rbDNSmart.Size = new System.Drawing.Size(52, 17);
             this.rbDNSmart.TabIndex = 1;
             this.rbDNSmart.TabStop = true;
             this.rbDNSmart.Text = "Smart";
@@ -712,10 +669,9 @@ namespace Radegast
             // rbDNOff
             // 
             this.rbDNOff.AutoSize = true;
-            this.rbDNOff.Location = new System.Drawing.Point(8, 18);
-            this.rbDNOff.Margin = new System.Windows.Forms.Padding(4);
+            this.rbDNOff.Location = new System.Drawing.Point(6, 15);
             this.rbDNOff.Name = "rbDNOff";
-            this.rbDNOff.Size = new System.Drawing.Size(41, 20);
+            this.rbDNOff.Size = new System.Drawing.Size(39, 17);
             this.rbDNOff.TabIndex = 0;
             this.rbDNOff.TabStop = true;
             this.rbDNOff.Text = "Off";
@@ -728,11 +684,10 @@ namespace Radegast
             this.tbpAutoResponse.Controls.Add(this.gnAutoInventory);
             this.tbpAutoResponse.Controls.Add(this.txtAutoResponse);
             this.tbpAutoResponse.Controls.Add(this.gbAutoResponse);
-            this.tbpAutoResponse.Location = new System.Drawing.Point(4, 25);
-            this.tbpAutoResponse.Margin = new System.Windows.Forms.Padding(4);
+            this.tbpAutoResponse.Location = new System.Drawing.Point(4, 22);
             this.tbpAutoResponse.Name = "tbpAutoResponse";
-            this.tbpAutoResponse.Padding = new System.Windows.Forms.Padding(4);
-            this.tbpAutoResponse.Size = new System.Drawing.Size(699, 536);
+            this.tbpAutoResponse.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.tbpAutoResponse.Size = new System.Drawing.Size(522, 433);
             this.tbpAutoResponse.TabIndex = 2;
             this.tbpAutoResponse.Text = "Auto Response";
             this.tbpAutoResponse.UseVisualStyleBackColor = true;
@@ -740,11 +695,9 @@ namespace Radegast
             // gnAutoScriptPermission
             // 
             this.gnAutoScriptPermission.Controls.Add(this.cbAutoScriptPermission);
-            this.gnAutoScriptPermission.Location = new System.Drawing.Point(12, 266);
-            this.gnAutoScriptPermission.Margin = new System.Windows.Forms.Padding(4);
+            this.gnAutoScriptPermission.Location = new System.Drawing.Point(9, 216);
             this.gnAutoScriptPermission.Name = "gnAutoScriptPermission";
-            this.gnAutoScriptPermission.Padding = new System.Windows.Forms.Padding(4);
-            this.gnAutoScriptPermission.Size = new System.Drawing.Size(375, 66);
+            this.gnAutoScriptPermission.Size = new System.Drawing.Size(281, 54);
             this.gnAutoScriptPermission.TabIndex = 3;
             this.gnAutoScriptPermission.TabStop = false;
             this.gnAutoScriptPermission.Text = "On script permission questions";
@@ -757,21 +710,18 @@ namespace Radegast
             "Ask",
             "Auto Accept",
             "Auto Decline"});
-            this.cbAutoScriptPermission.Location = new System.Drawing.Point(8, 23);
-            this.cbAutoScriptPermission.Margin = new System.Windows.Forms.Padding(4);
+            this.cbAutoScriptPermission.Location = new System.Drawing.Point(6, 19);
             this.cbAutoScriptPermission.Name = "cbAutoScriptPermission";
-            this.cbAutoScriptPermission.Size = new System.Drawing.Size(160, 24);
+            this.cbAutoScriptPermission.Size = new System.Drawing.Size(121, 21);
             this.cbAutoScriptPermission.TabIndex = 0;
             this.cbAutoScriptPermission.SelectedIndexChanged += new System.EventHandler(this.cbAutoScriptPermission_SelectedIndexChanged);
             // 
             // gnAutoInventory
             // 
             this.gnAutoInventory.Controls.Add(this.cbOnInvOffer);
-            this.gnAutoInventory.Location = new System.Drawing.Point(12, 192);
-            this.gnAutoInventory.Margin = new System.Windows.Forms.Padding(4);
+            this.gnAutoInventory.Location = new System.Drawing.Point(9, 156);
             this.gnAutoInventory.Name = "gnAutoInventory";
-            this.gnAutoInventory.Padding = new System.Windows.Forms.Padding(4);
-            this.gnAutoInventory.Size = new System.Drawing.Size(375, 66);
+            this.gnAutoInventory.Size = new System.Drawing.Size(281, 54);
             this.gnAutoInventory.TabIndex = 2;
             this.gnAutoInventory.TabStop = false;
             this.gnAutoInventory.Text = "On inventory offers";
@@ -784,20 +734,18 @@ namespace Radegast
             "Ask",
             "Auto Accept",
             "Auto Discard"});
-            this.cbOnInvOffer.Location = new System.Drawing.Point(8, 23);
-            this.cbOnInvOffer.Margin = new System.Windows.Forms.Padding(4);
+            this.cbOnInvOffer.Location = new System.Drawing.Point(6, 19);
             this.cbOnInvOffer.Name = "cbOnInvOffer";
-            this.cbOnInvOffer.Size = new System.Drawing.Size(160, 24);
+            this.cbOnInvOffer.Size = new System.Drawing.Size(121, 21);
             this.cbOnInvOffer.TabIndex = 0;
             // 
             // txtAutoResponse
             // 
             this.txtAutoResponse.AccessibleName = "Auto response text";
-            this.txtAutoResponse.Location = new System.Drawing.Point(11, 78);
-            this.txtAutoResponse.Margin = new System.Windows.Forms.Padding(4);
+            this.txtAutoResponse.Location = new System.Drawing.Point(8, 63);
             this.txtAutoResponse.Multiline = true;
             this.txtAutoResponse.Name = "txtAutoResponse";
-            this.txtAutoResponse.Size = new System.Drawing.Size(375, 106);
+            this.txtAutoResponse.Size = new System.Drawing.Size(282, 87);
             this.txtAutoResponse.TabIndex = 1;
             // 
             // gbAutoResponse
@@ -805,11 +753,9 @@ namespace Radegast
             this.gbAutoResponse.Controls.Add(this.rbAutoAlways);
             this.gbAutoResponse.Controls.Add(this.rbAutoNonFriend);
             this.gbAutoResponse.Controls.Add(this.rbAutobusy);
-            this.gbAutoResponse.Location = new System.Drawing.Point(4, 7);
-            this.gbAutoResponse.Margin = new System.Windows.Forms.Padding(4);
+            this.gbAutoResponse.Location = new System.Drawing.Point(3, 6);
             this.gbAutoResponse.Name = "gbAutoResponse";
-            this.gbAutoResponse.Padding = new System.Windows.Forms.Padding(4);
-            this.gbAutoResponse.Size = new System.Drawing.Size(383, 63);
+            this.gbAutoResponse.Size = new System.Drawing.Size(287, 51);
             this.gbAutoResponse.TabIndex = 0;
             this.gbAutoResponse.TabStop = false;
             this.gbAutoResponse.Text = "Send auto response when:";
@@ -817,10 +763,9 @@ namespace Radegast
             // rbAutoAlways
             // 
             this.rbAutoAlways.AutoSize = true;
-            this.rbAutoAlways.Location = new System.Drawing.Point(288, 23);
-            this.rbAutoAlways.Margin = new System.Windows.Forms.Padding(4);
+            this.rbAutoAlways.Location = new System.Drawing.Point(216, 19);
             this.rbAutoAlways.Name = "rbAutoAlways";
-            this.rbAutoAlways.Size = new System.Drawing.Size(68, 20);
+            this.rbAutoAlways.Size = new System.Drawing.Size(58, 17);
             this.rbAutoAlways.TabIndex = 2;
             this.rbAutoAlways.Text = "Always";
             this.rbAutoAlways.UseVisualStyleBackColor = true;
@@ -829,10 +774,9 @@ namespace Radegast
             // rbAutoNonFriend
             // 
             this.rbAutoNonFriend.AutoSize = true;
-            this.rbAutoNonFriend.Location = new System.Drawing.Point(133, 23);
-            this.rbAutoNonFriend.Margin = new System.Windows.Forms.Padding(4);
+            this.rbAutoNonFriend.Location = new System.Drawing.Point(100, 19);
             this.rbAutoNonFriend.Name = "rbAutoNonFriend";
-            this.rbAutoNonFriend.Size = new System.Drawing.Size(130, 20);
+            this.rbAutoNonFriend.Size = new System.Drawing.Size(110, 17);
             this.rbAutoNonFriend.TabIndex = 1;
             this.rbAutoNonFriend.Text = "IM from non-friend";
             this.rbAutoNonFriend.UseVisualStyleBackColor = true;
@@ -842,10 +786,9 @@ namespace Radegast
             // 
             this.rbAutobusy.AutoSize = true;
             this.rbAutobusy.Checked = true;
-            this.rbAutobusy.Location = new System.Drawing.Point(8, 23);
-            this.rbAutobusy.Margin = new System.Windows.Forms.Padding(4);
+            this.rbAutobusy.Location = new System.Drawing.Point(6, 19);
             this.rbAutobusy.Name = "rbAutobusy";
-            this.rbAutobusy.Size = new System.Drawing.Size(105, 20);
+            this.rbAutobusy.Size = new System.Drawing.Size(88, 17);
             this.rbAutobusy.TabIndex = 0;
             this.rbAutobusy.TabStop = true;
             this.rbAutobusy.Text = "In busy mode";
@@ -854,11 +797,10 @@ namespace Radegast
             // 
             // tbpGraphics
             // 
-            this.tbpGraphics.Location = new System.Drawing.Point(4, 25);
-            this.tbpGraphics.Margin = new System.Windows.Forms.Padding(4);
+            this.tbpGraphics.Location = new System.Drawing.Point(4, 22);
             this.tbpGraphics.Name = "tbpGraphics";
-            this.tbpGraphics.Padding = new System.Windows.Forms.Padding(4);
-            this.tbpGraphics.Size = new System.Drawing.Size(699, 536);
+            this.tbpGraphics.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.tbpGraphics.Size = new System.Drawing.Size(522, 433);
             this.tbpGraphics.TabIndex = 3;
             this.tbpGraphics.Text = "Graphics Settings";
             this.tbpGraphics.UseVisualStyleBackColor = true;
@@ -868,10 +810,9 @@ namespace Radegast
             this.tbpBot.Controls.Add(this.gbLSLHelper);
             this.tbpBot.Controls.Add(this.pseudoHome);
             this.tbpBot.Controls.Add(this.autoSit);
-            this.tbpBot.Location = new System.Drawing.Point(4, 25);
-            this.tbpBot.Margin = new System.Windows.Forms.Padding(4);
+            this.tbpBot.Location = new System.Drawing.Point(4, 22);
             this.tbpBot.Name = "tbpBot";
-            this.tbpBot.Size = new System.Drawing.Size(699, 536);
+            this.tbpBot.Size = new System.Drawing.Size(522, 489);
             this.tbpBot.TabIndex = 4;
             this.tbpBot.Text = "Automation";
             this.tbpBot.UseVisualStyleBackColor = true;
@@ -882,11 +823,9 @@ namespace Radegast
             this.gbLSLHelper.Controls.Add(this.cbLSLHelperEnabled);
             this.gbLSLHelper.Controls.Add(this.tbLSLAllowedOwner);
             this.gbLSLHelper.Controls.Add(this.lblLSLUUID);
-            this.gbLSLHelper.Location = new System.Drawing.Point(11, 268);
-            this.gbLSLHelper.Margin = new System.Windows.Forms.Padding(4);
+            this.gbLSLHelper.Location = new System.Drawing.Point(8, 218);
             this.gbLSLHelper.Name = "gbLSLHelper";
-            this.gbLSLHelper.Padding = new System.Windows.Forms.Padding(4);
-            this.gbLSLHelper.Size = new System.Drawing.Size(351, 209);
+            this.gbLSLHelper.Size = new System.Drawing.Size(263, 170);
             this.gbLSLHelper.TabIndex = 2;
             this.gbLSLHelper.TabStop = false;
             this.gbLSLHelper.Text = "LSL Helper";
@@ -895,10 +834,9 @@ namespace Radegast
             // 
             this.llLSLHelperInstructios.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.llLSLHelperInstructios.AutoSize = true;
-            this.llLSLHelperInstructios.Location = new System.Drawing.Point(261, 180);
-            this.llLSLHelperInstructios.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.llLSLHelperInstructios.Location = new System.Drawing.Point(196, 146);
             this.llLSLHelperInstructios.Name = "llLSLHelperInstructios";
-            this.llLSLHelperInstructios.Size = new System.Drawing.Size(73, 16);
+            this.llLSLHelperInstructios.Size = new System.Drawing.Size(61, 13);
             this.llLSLHelperInstructios.TabIndex = 4;
             this.llLSLHelperInstructios.TabStop = true;
             this.llLSLHelperInstructios.Text = "Instructions";
@@ -908,10 +846,9 @@ namespace Radegast
             // 
             this.cbLSLHelperEnabled.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.cbLSLHelperEnabled.AutoSize = true;
-            this.cbLSLHelperEnabled.Location = new System.Drawing.Point(12, 180);
-            this.cbLSLHelperEnabled.Margin = new System.Windows.Forms.Padding(4);
+            this.cbLSLHelperEnabled.Location = new System.Drawing.Point(9, 146);
             this.cbLSLHelperEnabled.Name = "cbLSLHelperEnabled";
-            this.cbLSLHelperEnabled.Size = new System.Drawing.Size(77, 20);
+            this.cbLSLHelperEnabled.Size = new System.Drawing.Size(65, 17);
             this.cbLSLHelperEnabled.TabIndex = 3;
             this.cbLSLHelperEnabled.Text = "Enabled";
             this.cbLSLHelperEnabled.UseVisualStyleBackColor = true;
@@ -922,23 +859,21 @@ namespace Radegast
             this.tbLSLAllowedOwner.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.tbLSLAllowedOwner.Location = new System.Drawing.Point(12, 39);
-            this.tbLSLAllowedOwner.Margin = new System.Windows.Forms.Padding(4);
+            this.tbLSLAllowedOwner.Location = new System.Drawing.Point(9, 32);
             this.tbLSLAllowedOwner.MaxLength = 0;
             this.tbLSLAllowedOwner.Multiline = true;
             this.tbLSLAllowedOwner.Name = "tbLSLAllowedOwner";
             this.tbLSLAllowedOwner.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
-            this.tbLSLAllowedOwner.Size = new System.Drawing.Size(329, 131);
+            this.tbLSLAllowedOwner.Size = new System.Drawing.Size(248, 107);
             this.tbLSLAllowedOwner.TabIndex = 2;
             this.tbLSLAllowedOwner.Leave += new System.EventHandler(this.tbLSLAllowedOwner_Leave);
             // 
             // lblLSLUUID
             // 
             this.lblLSLUUID.AutoSize = true;
-            this.lblLSLUUID.Location = new System.Drawing.Point(8, 20);
-            this.lblLSLUUID.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblLSLUUID.Location = new System.Drawing.Point(6, 16);
             this.lblLSLUUID.Name = "lblLSLUUID";
-            this.lblLSLUUID.Size = new System.Drawing.Size(192, 16);
+            this.lblLSLUUID.Size = new System.Drawing.Size(154, 13);
             this.lblLSLUUID.TabIndex = 0;
             this.lblLSLUUID.Text = "Allowed object owners (UUIDs)";
             this.lblLSLUUID.Click += new System.EventHandler(this.lblLSLUUID_Click);
@@ -952,11 +887,9 @@ namespace Radegast
             this.pseudoHome.Controls.Add(this.pseudoHomeClear);
             this.pseudoHome.Controls.Add(this.pseudoHomeToleranceLabel);
             this.pseudoHome.Controls.Add(this.pseudoHomeEnabled);
-            this.pseudoHome.Location = new System.Drawing.Point(11, 128);
-            this.pseudoHome.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHome.Location = new System.Drawing.Point(8, 104);
             this.pseudoHome.Name = "pseudoHome";
-            this.pseudoHome.Padding = new System.Windows.Forms.Padding(4);
-            this.pseudoHome.Size = new System.Drawing.Size(351, 133);
+            this.pseudoHome.Size = new System.Drawing.Size(263, 108);
             this.pseudoHome.TabIndex = 1;
             this.pseudoHome.TabStop = false;
             this.pseudoHome.Text = "Pseudo Home";
@@ -964,10 +897,9 @@ namespace Radegast
             // pseudoHomeSet
             // 
             this.pseudoHomeSet.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.pseudoHomeSet.Location = new System.Drawing.Point(125, 90);
-            this.pseudoHomeSet.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeSet.Location = new System.Drawing.Point(94, 73);
             this.pseudoHomeSet.Name = "pseudoHomeSet";
-            this.pseudoHomeSet.Size = new System.Drawing.Size(100, 28);
+            this.pseudoHomeSet.Size = new System.Drawing.Size(75, 23);
             this.pseudoHomeSet.TabIndex = 9;
             this.pseudoHomeSet.Text = "Set";
             this.pseudoHomeSet.UseVisualStyleBackColor = true;
@@ -975,8 +907,7 @@ namespace Radegast
             // 
             // pseudoHomeTolerance
             // 
-            this.pseudoHomeTolerance.Location = new System.Drawing.Point(116, 17);
-            this.pseudoHomeTolerance.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeTolerance.Location = new System.Drawing.Point(87, 14);
             this.pseudoHomeTolerance.Maximum = new decimal(new int[] {
             256,
             0,
@@ -988,7 +919,7 @@ namespace Radegast
             0,
             0});
             this.pseudoHomeTolerance.Name = "pseudoHomeTolerance";
-            this.pseudoHomeTolerance.Size = new System.Drawing.Size(53, 22);
+            this.pseudoHomeTolerance.Size = new System.Drawing.Size(40, 20);
             this.pseudoHomeTolerance.TabIndex = 6;
             this.pseudoHomeTolerance.Value = new decimal(new int[] {
             256,
@@ -999,10 +930,9 @@ namespace Radegast
             // 
             // pseudoHomeTP
             // 
-            this.pseudoHomeTP.Location = new System.Drawing.Point(8, 47);
-            this.pseudoHomeTP.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeTP.Location = new System.Drawing.Point(6, 38);
             this.pseudoHomeTP.Name = "pseudoHomeTP";
-            this.pseudoHomeTP.Size = new System.Drawing.Size(100, 28);
+            this.pseudoHomeTP.Size = new System.Drawing.Size(75, 23);
             this.pseudoHomeTP.TabIndex = 6;
             this.pseudoHomeTP.Text = "Teleport";
             this.pseudoHomeTP.UseVisualStyleBackColor = true;
@@ -1012,20 +942,18 @@ namespace Radegast
             // 
             this.pseudoHomeLocation.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.pseudoHomeLocation.Location = new System.Drawing.Point(116, 49);
-            this.pseudoHomeLocation.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeLocation.Location = new System.Drawing.Point(87, 40);
             this.pseudoHomeLocation.Name = "pseudoHomeLocation";
             this.pseudoHomeLocation.ReadOnly = true;
-            this.pseudoHomeLocation.Size = new System.Drawing.Size(225, 22);
+            this.pseudoHomeLocation.Size = new System.Drawing.Size(170, 20);
             this.pseudoHomeLocation.TabIndex = 7;
             // 
             // pseudoHomeClear
             // 
             this.pseudoHomeClear.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.pseudoHomeClear.Location = new System.Drawing.Point(243, 90);
-            this.pseudoHomeClear.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeClear.Location = new System.Drawing.Point(182, 73);
             this.pseudoHomeClear.Name = "pseudoHomeClear";
-            this.pseudoHomeClear.Size = new System.Drawing.Size(100, 28);
+            this.pseudoHomeClear.Size = new System.Drawing.Size(75, 23);
             this.pseudoHomeClear.TabIndex = 10;
             this.pseudoHomeClear.Text = "Clear";
             this.pseudoHomeClear.UseVisualStyleBackColor = true;
@@ -1034,10 +962,9 @@ namespace Radegast
             // pseudoHomeToleranceLabel
             // 
             this.pseudoHomeToleranceLabel.AutoSize = true;
-            this.pseudoHomeToleranceLabel.Location = new System.Drawing.Point(8, 20);
-            this.pseudoHomeToleranceLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.pseudoHomeToleranceLabel.Location = new System.Drawing.Point(6, 16);
             this.pseudoHomeToleranceLabel.Name = "pseudoHomeToleranceLabel";
-            this.pseudoHomeToleranceLabel.Size = new System.Drawing.Size(69, 16);
+            this.pseudoHomeToleranceLabel.Size = new System.Drawing.Size(55, 13);
             this.pseudoHomeToleranceLabel.TabIndex = 6;
             this.pseudoHomeToleranceLabel.Text = "Tolerance";
             // 
@@ -1045,10 +972,9 @@ namespace Radegast
             // 
             this.pseudoHomeEnabled.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.pseudoHomeEnabled.AutoSize = true;
-            this.pseudoHomeEnabled.Location = new System.Drawing.Point(12, 99);
-            this.pseudoHomeEnabled.Margin = new System.Windows.Forms.Padding(4);
+            this.pseudoHomeEnabled.Location = new System.Drawing.Point(9, 80);
             this.pseudoHomeEnabled.Name = "pseudoHomeEnabled";
-            this.pseudoHomeEnabled.Size = new System.Drawing.Size(77, 20);
+            this.pseudoHomeEnabled.Size = new System.Drawing.Size(65, 17);
             this.pseudoHomeEnabled.TabIndex = 8;
             this.pseudoHomeEnabled.Text = "Enabled";
             this.pseudoHomeEnabled.UseVisualStyleBackColor = true;
@@ -1063,11 +989,9 @@ namespace Radegast
             this.autoSit.Controls.Add(this.autoSitUUID);
             this.autoSit.Controls.Add(this.autoSitName);
             this.autoSit.Controls.Add(this.autoSitNameLabel);
-            this.autoSit.Location = new System.Drawing.Point(11, 4);
-            this.autoSit.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSit.Location = new System.Drawing.Point(8, 3);
             this.autoSit.Name = "autoSit";
-            this.autoSit.Padding = new System.Windows.Forms.Padding(4);
-            this.autoSit.Size = new System.Drawing.Size(351, 117);
+            this.autoSit.Size = new System.Drawing.Size(263, 95);
             this.autoSit.TabIndex = 0;
             this.autoSit.TabStop = false;
             this.autoSit.Text = "Auto-Sit";
@@ -1076,10 +1000,9 @@ namespace Radegast
             // 
             this.autoSitEnabled.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
             this.autoSitEnabled.AutoSize = true;
-            this.autoSitEnabled.Location = new System.Drawing.Point(12, 87);
-            this.autoSitEnabled.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSitEnabled.Location = new System.Drawing.Point(9, 70);
             this.autoSitEnabled.Name = "autoSitEnabled";
-            this.autoSitEnabled.Size = new System.Drawing.Size(77, 20);
+            this.autoSitEnabled.Size = new System.Drawing.Size(65, 17);
             this.autoSitEnabled.TabIndex = 2;
             this.autoSitEnabled.Text = "Enabled";
             this.autoSitEnabled.UseVisualStyleBackColor = true;
@@ -1088,10 +1011,9 @@ namespace Radegast
             // autoSitSit
             // 
             this.autoSitSit.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.autoSitSit.Location = new System.Drawing.Point(125, 81);
-            this.autoSitSit.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSitSit.Location = new System.Drawing.Point(94, 66);
             this.autoSitSit.Name = "autoSitSit";
-            this.autoSitSit.Size = new System.Drawing.Size(100, 28);
+            this.autoSitSit.Size = new System.Drawing.Size(75, 23);
             this.autoSitSit.TabIndex = 3;
             this.autoSitSit.Text = "Sit";
             this.autoSitSit.UseVisualStyleBackColor = true;
@@ -1100,10 +1022,9 @@ namespace Radegast
             // autoSitClear
             // 
             this.autoSitClear.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
-            this.autoSitClear.Location = new System.Drawing.Point(243, 81);
-            this.autoSitClear.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSitClear.Location = new System.Drawing.Point(182, 66);
             this.autoSitClear.Name = "autoSitClear";
-            this.autoSitClear.Size = new System.Drawing.Size(100, 28);
+            this.autoSitClear.Size = new System.Drawing.Size(75, 23);
             this.autoSitClear.TabIndex = 4;
             this.autoSitClear.Text = "Clear";
             this.autoSitClear.UseVisualStyleBackColor = true;
@@ -1112,10 +1033,9 @@ namespace Radegast
             // autoSitUUIDLabel
             // 
             this.autoSitUUIDLabel.AutoSize = true;
-            this.autoSitUUIDLabel.Location = new System.Drawing.Point(8, 53);
-            this.autoSitUUIDLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.autoSitUUIDLabel.Location = new System.Drawing.Point(6, 43);
             this.autoSitUUIDLabel.Name = "autoSitUUIDLabel";
-            this.autoSitUUIDLabel.Size = new System.Drawing.Size(40, 16);
+            this.autoSitUUIDLabel.Size = new System.Drawing.Size(34, 13);
             this.autoSitUUIDLabel.TabIndex = 4;
             this.autoSitUUIDLabel.Text = "UUID";
             this.autoSitUUIDLabel.Click += new System.EventHandler(this.autoSitUUIDLabel_Click);
@@ -1124,11 +1044,10 @@ namespace Radegast
             // 
             this.autoSitUUID.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.autoSitUUID.Location = new System.Drawing.Point(63, 49);
-            this.autoSitUUID.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSitUUID.Location = new System.Drawing.Point(47, 40);
             this.autoSitUUID.MaxLength = 36;
             this.autoSitUUID.Name = "autoSitUUID";
-            this.autoSitUUID.Size = new System.Drawing.Size(279, 22);
+            this.autoSitUUID.Size = new System.Drawing.Size(210, 20);
             this.autoSitUUID.TabIndex = 1;
             this.autoSitUUID.Leave += new System.EventHandler(this.autoSitUUID_Leave);
             // 
@@ -1136,20 +1055,18 @@ namespace Radegast
             // 
             this.autoSitName.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.autoSitName.Location = new System.Drawing.Point(63, 16);
-            this.autoSitName.Margin = new System.Windows.Forms.Padding(4);
+            this.autoSitName.Location = new System.Drawing.Point(47, 13);
             this.autoSitName.Name = "autoSitName";
             this.autoSitName.ReadOnly = true;
-            this.autoSitName.Size = new System.Drawing.Size(279, 22);
+            this.autoSitName.Size = new System.Drawing.Size(210, 20);
             this.autoSitName.TabIndex = 0;
             // 
             // autoSitNameLabel
             // 
             this.autoSitNameLabel.AutoSize = true;
-            this.autoSitNameLabel.Location = new System.Drawing.Point(8, 20);
-            this.autoSitNameLabel.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.autoSitNameLabel.Location = new System.Drawing.Point(6, 16);
             this.autoSitNameLabel.Name = "autoSitNameLabel";
-            this.autoSitNameLabel.Size = new System.Drawing.Size(44, 16);
+            this.autoSitNameLabel.Size = new System.Drawing.Size(35, 13);
             this.autoSitNameLabel.TabIndex = 1;
             this.autoSitNameLabel.Text = "Name";
             this.autoSitNameLabel.Click += new System.EventHandler(this.autoSitNameLabel_Click);
@@ -1172,21 +1089,19 @@ namespace Radegast
             this.tbpChat.Controls.Add(this.cbxForeground);
             this.tbpChat.Controls.Add(this.cbxFontSize);
             this.tbpChat.Controls.Add(this.cbxFont);
-            this.tbpChat.Location = new System.Drawing.Point(4, 25);
-            this.tbpChat.Margin = new System.Windows.Forms.Padding(4);
+            this.tbpChat.Location = new System.Drawing.Point(4, 22);
             this.tbpChat.Name = "tbpChat";
-            this.tbpChat.Padding = new System.Windows.Forms.Padding(4);
-            this.tbpChat.Size = new System.Drawing.Size(699, 536);
+            this.tbpChat.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.tbpChat.Size = new System.Drawing.Size(522, 433);
             this.tbpChat.TabIndex = 5;
             this.tbpChat.Text = "Chat";
             this.tbpChat.UseVisualStyleBackColor = true;
             // 
             // btnSave
             // 
-            this.btnSave.Location = new System.Drawing.Point(451, 357);
-            this.btnSave.Margin = new System.Windows.Forms.Padding(4);
+            this.btnSave.Location = new System.Drawing.Point(338, 290);
             this.btnSave.Name = "btnSave";
-            this.btnSave.Size = new System.Drawing.Size(65, 28);
+            this.btnSave.Size = new System.Drawing.Size(49, 23);
             this.btnSave.TabIndex = 18;
             this.btnSave.Text = "Save";
             this.btnSave.UseVisualStyleBackColor = true;
@@ -1194,10 +1109,9 @@ namespace Radegast
             // 
             // btnResetFontSettings
             // 
-            this.btnResetFontSettings.Location = new System.Drawing.Point(15, 357);
-            this.btnResetFontSettings.Margin = new System.Windows.Forms.Padding(4);
+            this.btnResetFontSettings.Location = new System.Drawing.Point(11, 290);
             this.btnResetFontSettings.Name = "btnResetFontSettings";
-            this.btnResetFontSettings.Size = new System.Drawing.Size(141, 28);
+            this.btnResetFontSettings.Size = new System.Drawing.Size(106, 23);
             this.btnResetFontSettings.TabIndex = 17;
             this.btnResetFontSettings.Text = "Reset All Colors";
             this.btnResetFontSettings.UseVisualStyleBackColor = true;
@@ -1207,10 +1121,9 @@ namespace Radegast
             // 
             this.lblPreview.BackColor = System.Drawing.Color.Transparent;
             this.lblPreview.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.lblPreview.Location = new System.Drawing.Point(336, 272);
-            this.lblPreview.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.lblPreview.Location = new System.Drawing.Point(252, 221);
             this.lblPreview.Name = "lblPreview";
-            this.lblPreview.Size = new System.Drawing.Size(179, 77);
+            this.lblPreview.Size = new System.Drawing.Size(135, 63);
             this.lblPreview.TabIndex = 16;
             this.lblPreview.Text = "Preview";
             this.lblPreview.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
@@ -1218,10 +1131,9 @@ namespace Radegast
             // cbxItalic
             // 
             this.cbxItalic.AutoSize = true;
-            this.cbxItalic.Location = new System.Drawing.Point(407, 213);
-            this.cbxItalic.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxItalic.Location = new System.Drawing.Point(305, 173);
             this.cbxItalic.Name = "cbxItalic";
-            this.cbxItalic.Size = new System.Drawing.Size(53, 20);
+            this.cbxItalic.Size = new System.Drawing.Size(48, 17);
             this.cbxItalic.TabIndex = 15;
             this.cbxItalic.Text = "Italic";
             this.cbxItalic.UseVisualStyleBackColor = true;
@@ -1230,30 +1142,27 @@ namespace Radegast
             // label10
             // 
             this.label10.AutoSize = true;
-            this.label10.Location = new System.Drawing.Point(11, 85);
-            this.label10.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label10.Location = new System.Drawing.Point(8, 69);
             this.label10.Name = "label10";
-            this.label10.Size = new System.Drawing.Size(42, 16);
+            this.label10.Size = new System.Drawing.Size(35, 13);
             this.label10.TabIndex = 14;
             this.label10.Text = "Items:";
             // 
             // label9
             // 
             this.label9.AutoSize = true;
-            this.label9.Location = new System.Drawing.Point(332, 251);
-            this.label9.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label9.Location = new System.Drawing.Point(249, 204);
             this.label9.Name = "label9";
-            this.label9.Size = new System.Drawing.Size(58, 16);
+            this.label9.Size = new System.Drawing.Size(48, 13);
             this.label9.TabIndex = 11;
             this.label9.Text = "Preview:";
             // 
             // cbxBold
             // 
             this.cbxBold.AutoSize = true;
-            this.cbxBold.Location = new System.Drawing.Point(336, 213);
-            this.cbxBold.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxBold.Location = new System.Drawing.Point(252, 173);
             this.cbxBold.Name = "cbxBold";
-            this.cbxBold.Size = new System.Drawing.Size(54, 20);
+            this.cbxBold.Size = new System.Drawing.Size(47, 17);
             this.cbxBold.TabIndex = 9;
             this.cbxBold.Text = "Bold";
             this.cbxBold.UseVisualStyleBackColor = true;
@@ -1262,11 +1171,9 @@ namespace Radegast
             // lbxColorItems
             // 
             this.lbxColorItems.FormattingEnabled = true;
-            this.lbxColorItems.ItemHeight = 16;
-            this.lbxColorItems.Location = new System.Drawing.Point(15, 105);
-            this.lbxColorItems.Margin = new System.Windows.Forms.Padding(4);
+            this.lbxColorItems.Location = new System.Drawing.Point(11, 85);
             this.lbxColorItems.Name = "lbxColorItems";
-            this.lbxColorItems.Size = new System.Drawing.Size(308, 244);
+            this.lbxColorItems.Size = new System.Drawing.Size(232, 199);
             this.lbxColorItems.TabIndex = 8;
             this.lbxColorItems.SelectedIndexChanged += new System.EventHandler(this.lbxColorItems_SelectedIndexChanged);
             this.lbxColorItems.MouseDown += new System.Windows.Forms.MouseEventHandler(this.lbxColorItems_MouseDown);
@@ -1275,40 +1182,36 @@ namespace Radegast
             // label8
             // 
             this.label8.AutoSize = true;
-            this.label8.Location = new System.Drawing.Point(332, 18);
-            this.label8.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label8.Location = new System.Drawing.Point(249, 15);
             this.label8.Name = "label8";
-            this.label8.Size = new System.Drawing.Size(36, 16);
+            this.label8.Size = new System.Drawing.Size(30, 13);
             this.label8.TabIndex = 7;
             this.label8.Text = "Size:";
             // 
             // label7
             // 
             this.label7.AutoSize = true;
-            this.label7.Location = new System.Drawing.Point(11, 18);
-            this.label7.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label7.Location = new System.Drawing.Point(8, 15);
             this.label7.Name = "label7";
-            this.label7.Size = new System.Drawing.Size(36, 16);
+            this.label7.Size = new System.Drawing.Size(31, 13);
             this.label7.TabIndex = 6;
             this.label7.Text = "Font:";
             // 
             // label6
             // 
             this.label6.AutoSize = true;
-            this.label6.Location = new System.Drawing.Point(332, 85);
-            this.label6.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label6.Location = new System.Drawing.Point(249, 69);
             this.label6.Name = "label6";
-            this.label6.Size = new System.Drawing.Size(80, 16);
+            this.label6.Size = new System.Drawing.Size(64, 13);
             this.label6.TabIndex = 5;
             this.label6.Text = "Foreground:";
             // 
             // label5
             // 
             this.label5.AutoSize = true;
-            this.label5.Location = new System.Drawing.Point(332, 148);
-            this.label5.Margin = new System.Windows.Forms.Padding(4, 0, 4, 0);
+            this.label5.Location = new System.Drawing.Point(249, 120);
             this.label5.Name = "label5";
-            this.label5.Size = new System.Drawing.Size(83, 16);
+            this.label5.Size = new System.Drawing.Size(68, 13);
             this.label5.TabIndex = 4;
             this.label5.Text = "Background:";
             // 
@@ -1317,10 +1220,9 @@ namespace Radegast
             this.cbxBackground.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.cbxBackground.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cbxBackground.FormattingEnabled = true;
-            this.cbxBackground.Location = new System.Drawing.Point(336, 167);
-            this.cbxBackground.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxBackground.Location = new System.Drawing.Point(252, 136);
             this.cbxBackground.Name = "cbxBackground";
-            this.cbxBackground.Size = new System.Drawing.Size(179, 23);
+            this.cbxBackground.Size = new System.Drawing.Size(135, 21);
             this.cbxBackground.TabIndex = 3;
             this.cbxBackground.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.cbxForeground_DrawItem);
             this.cbxBackground.SelectedIndexChanged += new System.EventHandler(this.SelectedIndexChanged);
@@ -1330,10 +1232,9 @@ namespace Radegast
             this.cbxForeground.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.cbxForeground.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cbxForeground.FormattingEnabled = true;
-            this.cbxForeground.Location = new System.Drawing.Point(336, 105);
-            this.cbxForeground.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxForeground.Location = new System.Drawing.Point(252, 85);
             this.cbxForeground.Name = "cbxForeground";
-            this.cbxForeground.Size = new System.Drawing.Size(179, 23);
+            this.cbxForeground.Size = new System.Drawing.Size(135, 21);
             this.cbxForeground.TabIndex = 2;
             this.cbxForeground.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.cbxForeground_DrawItem);
             this.cbxForeground.SelectedIndexChanged += new System.EventHandler(this.SelectedIndexChanged);
@@ -1341,10 +1242,9 @@ namespace Radegast
             // cbxFontSize
             // 
             this.cbxFontSize.FormattingEnabled = true;
-            this.cbxFontSize.Location = new System.Drawing.Point(336, 38);
-            this.cbxFontSize.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxFontSize.Location = new System.Drawing.Point(252, 31);
             this.cbxFontSize.Name = "cbxFontSize";
-            this.cbxFontSize.Size = new System.Drawing.Size(179, 24);
+            this.cbxFontSize.Size = new System.Drawing.Size(135, 21);
             this.cbxFontSize.TabIndex = 1;
             this.cbxFontSize.SelectedIndexChanged += new System.EventHandler(this.SelectedIndexChanged);
             // 
@@ -1353,10 +1253,9 @@ namespace Radegast
             this.cbxFont.DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
             this.cbxFont.FormattingEnabled = true;
             this.cbxFont.ItemHeight = 15;
-            this.cbxFont.Location = new System.Drawing.Point(15, 38);
-            this.cbxFont.Margin = new System.Windows.Forms.Padding(4);
+            this.cbxFont.Location = new System.Drawing.Point(11, 31);
             this.cbxFont.Name = "cbxFont";
-            this.cbxFont.Size = new System.Drawing.Size(308, 21);
+            this.cbxFont.Size = new System.Drawing.Size(232, 21);
             this.cbxFont.TabIndex = 0;
             this.cbxFont.DrawItem += new System.Windows.Forms.DrawItemEventHandler(this.cbxFont_DrawItem);
             this.cbxFont.SelectedIndexChanged += new System.EventHandler(this.SelectedIndexChanged);
@@ -1365,14 +1264,33 @@ namespace Radegast
             // 
             this.fontDialog1.ShowColor = true;
             // 
+            // cbMentionMeSound
+            // 
+            this.cbMentionMeSound.AutoSize = true;
+            this.cbMentionMeSound.Location = new System.Drawing.Point(8, 150);
+            this.cbMentionMeSound.Name = "cbMentionMeSound";
+            this.cbMentionMeSound.Size = new System.Drawing.Size(133, 17);
+            this.cbMentionMeSound.TabIndex = 13;
+            this.cbMentionMeSound.Text = "Play sound on mention";
+            this.cbMentionMeSound.UseVisualStyleBackColor = true;
+            // 
+            // txtMentionMeSoundUUID
+            // 
+            this.txtMentionMeSoundUUID.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtMentionMeSoundUUID.Location = new System.Drawing.Point(8, 173);
+            this.txtMentionMeSoundUUID.MaxLength = 36;
+            this.txtMentionMeSoundUUID.Name = "txtMentionMeSoundUUID";
+            this.txtMentionMeSoundUUID.Size = new System.Drawing.Size(242, 20);
+            this.txtMentionMeSoundUUID.TabIndex = 14;
+            // 
             // frmSettings
             // 
-            this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
+            this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(707, 565);
+            this.ClientSize = new System.Drawing.Size(530, 515);
             this.Controls.Add(this.tcGraphics);
             this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
-            this.Margin = new System.Windows.Forms.Padding(4);
             this.Name = "frmSettings";
             this.Text = "Settings - Radegast";
             this.tcGraphics.ResumeLayout(false);
@@ -1501,5 +1419,7 @@ namespace Radegast
         private System.Windows.Forms.Label lblChatLog;
         private System.Windows.Forms.Button btnChatLogDir;
         public System.Windows.Forms.CheckBox cbGroupIMSound;
+        public System.Windows.Forms.TextBox txtMentionMeSoundUUID;
+        public System.Windows.Forms.CheckBox cbMentionMeSound;
     }
 }

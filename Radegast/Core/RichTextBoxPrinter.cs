@@ -29,9 +29,6 @@ namespace Radegast
     {
         private RRichTextBox rtb;
         private bool mono;
-        private static readonly string urlRegexString = @"(https?://[^ \r\n]+)|(\[secondlife://[^ \]\r\n]* ?(?:[^\]\r\n]*)])|(secondlife://[^ \r\n]*)";
-        Regex urlRegex;
-        private SlUriParser uriParser;
 
         public RichTextBoxPrinter(RRichTextBox textBox)
         {
@@ -45,10 +42,6 @@ namespace Radegast
                 // so we keep using built in URL detection
                 rtb.DetectUrls = true;
             }
-
-            uriParser = new SlUriParser();
-            urlRegex = new Regex(urlRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
         }
 
         public void InsertLink(string text)
@@ -61,38 +54,6 @@ namespace Radegast
             rtb.InsertLink(text, hyperlink);
         }
 
-        private void FindURLs(string text)
-        {
-            string[] lineParts = urlRegex.Split(text);
-            int linePartIndex;
-
-            // 'text' will be split into 1 + NumLinks*2 parts...
-            // If 'text' has no links in it:
-            //    lineParts[0] = text
-            // If 'text' has one link in it:
-            //    lineParts[0] = <Text before first link>
-            //    lineParts[1] = <first link>
-            //    lineParts[2] = <text after first link>
-            // If 'text' has two links in it:
-            //    lineParts[0] = <Text before first link>
-            //    lineParts[1] = <first link>
-            //    lineParts[2] = <text after first link>
-            //    lineParts[3] = <second link>
-            //    lineParts[4] = <text after second link>
-            // ...
-            for (linePartIndex = 0; linePartIndex < lineParts.Length - 1; linePartIndex += 2)
-            {
-                rtb.AppendText(lineParts[linePartIndex]);
-                Color c = ForeColor;
-                rtb.InsertLink(uriParser.GetLinkName(lineParts[linePartIndex + 1]), lineParts[linePartIndex+1]);
-                ForeColor = c;
-            }
-            if (linePartIndex != lineParts.Length)
-            {
-                rtb.AppendText(lineParts[linePartIndex]);
-            }
-        }
-
         #region ITextPrinter Members
 
         public void PrintText(string text)
@@ -103,14 +64,7 @@ namespace Radegast
                 return;
             }
 
-            if (mono)
-            {
-                rtb.AppendText(text);
-            }
-            else
-            {
-                FindURLs(text);
-            }
+            rtb.AppendText(text);
         }
 
         public void PrintTextLine(string text)
