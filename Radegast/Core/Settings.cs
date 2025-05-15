@@ -137,6 +137,18 @@ namespace Radegast
                 BackColor = Color.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
+            {"MentionMe", new FontSetting {
+                Name = "MentionMe",
+                ForeColor = SystemColors.ControlText,
+                BackColor = Color.Pink,
+                Font = FontSetting.DefaultFont,
+            }},
+            {"MentionOthers", new FontSetting {
+                Name = "MentionOthers",
+                ForeColor = SystemColors.ControlText,
+                BackColor = Color.Transparent,
+                Font = FontSetting.DefaultFont,
+            }},
         };
 
         public class FontSetting

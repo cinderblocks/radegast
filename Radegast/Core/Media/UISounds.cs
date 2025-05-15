@@ -96,5 +96,11 @@ namespace Radegast
 
         /// <summary>Warning</summary>
         public static UUID Warning = new UUID("449bc80c-91b6-6365-8fd1-95bd91016624");
+
+        /// <summary>Chat mention</summary>
+        public static UUID ChatMention = new UUID("03e77cb5-592c-5b33-d271-2e46497c3fb3");
+
+        /// <summary>Chat ping</summary>
+        public static UUID ChatPing = new UUID("7dd36df6-2624-5438-f988-fdf8588a0ad9");
     }
 }

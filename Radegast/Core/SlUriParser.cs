@@ -52,6 +52,17 @@ namespace Radegast
             Parcel
         };
 
+        public class ParsedUriInfo
+        {
+            public string DisplayText { get; set; }
+            public string RequestedFontSettingName { get; set; }
+            public UUID RequestedSoundUUID { get; set; }
+        }
+
+        public static readonly string UrlRegexString = @"(https?://[^ \r\n]+)|(\[secondlife://[^ \]\r\n]* ?(?:[^\]\r\n]*)])|(secondlife://[^ \r\n]*)";
+        public static readonly Regex UrlRegex = new Regex(UrlRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private readonly RadegastInstance instance;
+
         // Regular expression created by following the majority of http://wiki.secondlife.com/wiki/Viewer_URI_Name_Space (excluding support for secondlife:///app/login).
         //  This is a nasty one and should really only be used on single links to minimize processing time.
         private readonly Regex patternUri = new Regex(
@@ -92,84 +103,128 @@ namespace Radegast
                     @"(?<appcommand>worldmap)/(?<region_name>[^\]/ ]+)(/(?<local_x>[0-9]+))?(/(?<local_y>[0-9]+))?(/(?<local_z>[0-9]+))?)))" +
             @"( (?<endingbrace>[^\]]*)\])?", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture);
 
+
+        public SlUriParser(RadegastInstance instance)
+        {
+            this.instance = instance;
+        }
+
         /// <summary>
         /// Gets the display text for the specified URI
         /// </summary>
         /// <param name="uri">URI to get the display text of</param>
         /// <returns>Display text for URI</returns>
-        public string GetLinkName(string uri)
+        public ParsedUriInfo GetLinkName(string uri)
         {
-            if (!RadegastInstance.GlobalInstance.GlobalSettings["resolve_uris"])
+            if (!instance.GlobalSettings["resolve_uris"])
             {
-                return uri;
+                return new ParsedUriInfo()
+                {
+                    DisplayText = uri
+                };
             }
 
             Match match = patternUri.Match(uri);
             if (!match.Success)
             {
-                return uri;
+                return new ParsedUriInfo()
+                {
+                    DisplayText = uri
+                };
             }
 
             // Custom named links in the form of [secondlife://<truncated> Custom%20Link%20Name] will
             //   result in a link named 'Custom Link Name' regardless of the previous secondlife URI.
             if (match.Groups["startingbrace"].Success && match.Groups["endingbrace"].Length > 0)
             {
-                return HttpUtility.UrlDecode(match.Groups["endingbrace"].Value);
+                return new ParsedUriInfo()
+                {
+                    DisplayText = HttpUtility.UrlDecode(match.Groups["endingbrace"].Value)
+                };
             }
 
             if (match.Groups["regionuri"].Success)
             {
-                return GetLinkNameRegionUri(match);
+                return new ParsedUriInfo()
+                {
+                    DisplayText = GetLinkNameRegionUri(match)
+                };
             }
 
             if (match.Groups["appuri"].Success)
             {
                 string appcommand = match.Groups["appcommand"].Value;
 
+                var displayTextInfo = new ParsedUriInfo();
+
                 switch (appcommand)
                 {
                     case "agent":
-                        return GetLinkNameAgent(match);
+                        displayTextInfo = GetLinkNameAgent(match);
+                        break;
                     case "appearance":
-                        return match.ToString();
+                        displayTextInfo.DisplayText = match.ToString();
+                        break;
                     case "balance":
-                        return match.ToString();
+                        displayTextInfo.DisplayText = match.ToString();
+                        break;
                     case "chat":
-                        return GetLinkNameChat(match);
+                        displayTextInfo.DisplayText = GetLinkNameChat(match);
+                        break;
                     case "classified":
-                        return GetLinkNameClassified(match);
+                        displayTextInfo.DisplayText = GetLinkNameClassified(match);
+                        break;
                     case "event":
-                        return GetLinkNameEvent(match);
+                        displayTextInfo.DisplayText = GetLinkNameEvent(match);
+                        break;
                     case "group":
-                        return GetLinkNameGroup(match);
+                        displayTextInfo.DisplayText = GetLinkNameGroup(match);
+                        break;
                     case "help":
-                        return GetLinkNameHelp(match);
+                        displayTextInfo.DisplayText = GetLinkNameHelp(match);
+                        break;
                     case "inventory":
-                        return GetLinkNameInventory(match);
+                        displayTextInfo.DisplayText = GetLinkNameInventory(match);
+                        break;
                     case "maptrackavatar":
-                        return GetLinkNameTrackAvatar(match);
+                        displayTextInfo.DisplayText = GetLinkNameTrackAvatar(match);
+                        break;
                     case "objectim":
-                        return GetLinkNameObjectIm(match);
+                        displayTextInfo.DisplayText = GetLinkNameObjectIm(match);
+                        break;
                     case "parcel":
-                        return GetLinkNameParcel(match);
+                        displayTextInfo.DisplayText = GetLinkNameParcel(match);
+                        break;
                     case "search":
-                        return GetLinkNameSearch(match);
+                        displayTextInfo.DisplayText = GetLinkNameSearch(match);
+                        break;
                     case "sharewithavatar":
-                        return GetLinkNameShareWithAvatar(match);
+                        displayTextInfo.DisplayText = GetLinkNameShareWithAvatar(match);
+                        break;
                     case "teleport":
-                        return GetLinkNameTeleport(match);
+                        displayTextInfo.DisplayText = GetLinkNameTeleport(match);
+                        break;
                     case "voicecallavatar":
-                        return GetLinkNameVoiceCallAvatar(match);
+                        displayTextInfo.DisplayText = GetLinkNameVoiceCallAvatar(match);
+                        break;
                     case "wear_folder":
-                        return GetLinkNameWearFolder(match);
+                        displayTextInfo.DisplayText = GetLinkNameWearFolder(match);
+                        break;
                     case "worldmap":
-                        return GetLinkNameWorldMap(match);
+                        displayTextInfo.DisplayText = GetLinkNameWorldMap(match);
+                        break;
                     default:
-                        return match.ToString();
+                        displayTextInfo.DisplayText = match.ToString();
+                        break;
                 }
+
+                return displayTextInfo;
             }
 
-            return match.ToString();
+            return new ParsedUriInfo()
+            {
+                DisplayText = match.ToString()
+            };
         }
 
         /// <summary>
@@ -262,7 +317,6 @@ namespace Radegast
         /// <returns>Name of agent on success, INCOMPLETE_NAME on failure or timeout</returns>
         private string GetAgentName(UUID agentID, ResolveType nameType)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             string name = RadegastInstance.INCOMPLETE_NAME;
 
             using (ManualResetEvent gotName = new ManualResetEvent(false))
@@ -318,7 +372,6 @@ namespace Radegast
         /// <returns>Name of the group on success, INCOMPLETE_NAME on failure or timeout</returns>
         private string GetGroupName(UUID groupID)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             string name = RadegastInstance.INCOMPLETE_NAME;
 
             using (ManualResetEvent gotName = new ManualResetEvent(false))
@@ -356,7 +409,6 @@ namespace Radegast
         /// <returns>Name of the parcel on success, INCOMPLETE_NAME on failure or timeout</returns>
         private string GetParcelName(UUID parcelID)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             string name = RadegastInstance.INCOMPLETE_NAME;
             
             using (ManualResetEvent gotName = new ManualResetEvent(false))
@@ -438,36 +490,67 @@ namespace Radegast
             return string.Format("{0}{1}", name, coordinateString);
         }
 
-        private string GetLinkNameAgent(Match match)
+        private ParsedUriInfo GetLinkNameAgent(Match match)
         {
-            UUID agentID = new UUID(match.Groups["agent_id"].Value);
-            string action = match.Groups["action"].Value;
+            var agentID = new UUID(match.Groups["agent_id"].Value);
+            var action = match.Groups["action"].Value;
+
+            var parsedUriInfo = new ParsedUriInfo();
 
             switch (action)
             {
                 case "about":
                 case "inspect":
                 case "completename":
-                    return Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "displayname":
-                    return Resolve(agentID, ResolveType.AgentDisplayName);
+                    parsedUriInfo.DisplayText = Resolve(agentID, ResolveType.AgentDisplayName);
+                    break;
                 case "username":
-                    return Resolve(agentID, ResolveType.AgentUsername);
+                    parsedUriInfo.DisplayText = Resolve(agentID, ResolveType.AgentUsername);
+                    break;
                 case "im":
-                    return "IM " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "IM " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "offerteleport":
-                    return "Offer Teleport to " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "Offer Teleport to " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "pay":
-                    return "Pay " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "Pay " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "requestfriend":
-                    return "Friend Request " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "Friend Request " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "mute":
-                    return "Mute " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "Mute " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
                 case "unmute":
-                    return "Unmute " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    parsedUriInfo.DisplayText = "Unmute " + Resolve(agentID, ResolveType.AgentDefaultName);
+                    break;
+                case "mention":
+                    parsedUriInfo.DisplayText = "@" + Resolve(agentID, ResolveType.AgentDefaultName);
+                    if(agentID == instance.Client.Self.AgentID)
+                    {
+                        parsedUriInfo.RequestedFontSettingName = "MentionMe";
+                        parsedUriInfo.RequestedSoundUUID = UUID.Zero;
+
+                        if (instance.GlobalSettings["mention_me_sound"].AsBoolean())
+                        {
+                            parsedUriInfo.RequestedSoundUUID = instance.GlobalSettings["mention_me_sound_uuid"].AsUUID();
+                        }
+                    }
+                    else
+                    {
+                        parsedUriInfo.RequestedFontSettingName = "MentionOthers";
+                    }
+                    break;
                 default:
-                    return match.ToString();
+                    parsedUriInfo.DisplayText = match.ToString();
+                    break;
             }
+
+            return parsedUriInfo;
         }
 
         private string GetLinkNameChat(Match match)
@@ -629,8 +712,6 @@ namespace Radegast
         #region Link Execution
         private void ExecuteLinkRegionUri(Match match)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
-
             string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
             int x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : 128;
             int y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : 128;
@@ -642,11 +723,10 @@ namespace Radegast
 
         private void ExecuteLinkAgent(Match match)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             UUID agentID = new UUID(match.Groups["agent_id"].Value);
             //string action = match.Groups["action"].Value;
 
-            RadegastInstance.GlobalInstance.MainForm.ShowAgentProfile(instance.Names.Get(agentID), agentID);
+            instance.MainForm.ShowAgentProfile(instance.Names.Get(agentID), agentID);
         }
 
         private void ExecuteLinkShowApperance()
@@ -677,7 +757,6 @@ namespace Radegast
 
         private void ExecuteLinkGroup(Match match)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             string action = match.Groups["action"].Value;
 
             switch (action)
@@ -757,8 +836,6 @@ namespace Radegast
 
         private void ExecuteLinkWorldMap(Match match)
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
-
             string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
             int x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : 128;
             int y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : 128;
