@@ -831,17 +831,39 @@ namespace Radegast
                     return false;
                 }
 
-                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                try
                 {
-                    System.Diagnostics.Process.Start("xdg-open", uriToOpen.AbsoluteUri);
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "xdg-open",
+                            Arguments = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "open",
+                            Arguments = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
+                    else
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
                 }
-                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                catch (Exception ex)
                 {
-                    System.Diagnostics.Process.Start("open", uriToOpen.AbsoluteUri);
-                }
-                else
-                {
-                    System.Diagnostics.Process.Start(uriToOpen.AbsoluteUri);
+                    Logger.Log($"Failed to execute link: {link}", Helpers.LogLevel.Error, instance.Client, ex);
+                    return false;
                 }
 
                 return true;
