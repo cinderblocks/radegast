@@ -34,6 +34,7 @@ using System.Web;
 using Radegast;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
+using System.Runtime.InteropServices;
 
 namespace Radegast
 {
@@ -830,11 +831,11 @@ namespace Radegast
                     return false;
                 }
 
-                if (Environment.OSVersion.Platform == PlatformID.Unix)
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
                 {
                     System.Diagnostics.Process.Start("xdg-open", uriToOpen.AbsoluteUri);
                 }
-                else if (Environment.OSVersion.Platform == PlatformID.MacOSX)
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
                     System.Diagnostics.Process.Start("open", uriToOpen.AbsoluteUri);
                 }
@@ -842,6 +843,8 @@ namespace Radegast
                 {
                     System.Diagnostics.Process.Start(uriToOpen.AbsoluteUri);
                 }
+
+                return true;
             }
 
             return false;
