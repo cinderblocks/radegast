@@ -34,6 +34,7 @@ using System.Web;
 using Radegast;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
+using System.Runtime.InteropServices;
 
 namespace Radegast
 {
@@ -820,8 +821,54 @@ namespace Radegast
             }
             else if (!onlyMap)
             {
-                System.Diagnostics.Process.Start(link);
+                if (!Uri.TryCreate(link, UriKind.Absolute, out Uri uriToOpen))
+                {
+                    return false;
+                }
+
+                if (uriToOpen.Scheme != Uri.UriSchemeHttp && uriToOpen.Scheme != Uri.UriSchemeHttps)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "xdg-open",
+                            Arguments = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
+                    else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "open",
+                            Arguments = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
+                    else
+                    {
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = uriToOpen.AbsoluteUri,
+                            UseShellExecute = true
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"Failed to execute link: {link}", Helpers.LogLevel.Error, instance.Client, ex);
+                    return false;
+                }
+
+                return true;
             }
+
             return false;
         }
         #endregion
