@@ -243,7 +243,7 @@ namespace Radegast
         public void InitializeControls()
         {
             InitializeTabsConsole();
-            uriParser = new SlUriParser();
+            uriParser = new SlUriParser(instance);
 
             if (!instance.MediaManager.SoundSystemAvailable) return;
 

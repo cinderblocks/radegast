@@ -127,6 +127,10 @@ namespace Radegast
 
             if (!s.ContainsKey("group_im_sound")) s["group_im_sound"] = true;
 
+            if (!s.ContainsKey("mention_me_sound")) s["mention_me_sound"] = true;
+
+            if (!s.ContainsKey("mention_me_sound_uuid")) s["mention_me_sound_uuid"] = UISounds.ChatMention;
+
             if (!s.ContainsKey("av_name_link")) s["av_name_link"] = false;
 
             if (!s.ContainsKey("on_script_question"))
@@ -183,6 +187,14 @@ namespace Radegast
             {
                 Dictionary<string, Settings.FontSetting> unpacked = new Dictionary<string, Settings.FontSetting>();
                 chatFontSettings = JsonConvert.DeserializeObject<Dictionary<string, Settings.FontSetting>>(chatFontsJson);
+
+                foreach (var fontSetting in Settings.DefaultFontSettings)
+                {
+                    if(!chatFontSettings.ContainsKey(fontSetting.Key))
+                    {
+                        chatFontSettings.Add(fontSetting.Key, fontSetting.Value);
+                    }
+                }
             }
             else
             {
@@ -379,6 +391,29 @@ namespace Radegast
             cbGroupIMSound.CheckedChanged += (sender, e) =>
             {
                 s["group_im_sound"] = cbGroupIMSound.Checked;
+            };
+
+            cbMentionMeSound.Checked = s["mention_me_sound"];
+            cbMentionMeSound.CheckedChanged += (sender, e) =>
+            {
+                s["mention_me_sound"] = cbMentionMeSound.Checked;
+                txtMentionMeSoundUUID.Enabled = cbMentionMeSound.Checked;
+            };
+
+            txtMentionMeSoundUUID.Text = s["mention_me_sound_uuid"];
+            txtMentionMeSoundUUID.Enabled = cbMentionMeSound.Checked;
+            txtMentionMeSoundUUID.TextChanged += (sender, e) =>
+            {
+                if (UUID.TryParse(txtMentionMeSoundUUID.Text, out UUID newMentionMeSoundUUID))
+                {
+                    txtMentionMeSoundUUID.ForeColor = DefaultForeColor;
+                    s["mention_me_sound_uuid"] = newMentionMeSoundUUID;
+                }
+                else
+                {
+                    txtMentionMeSoundUUID.ForeColor = Color.Red;
+                    s["mention_me_sound_uuid"] = UISounds.ChatMention;
+                }
             };
 
             cbShowScriptErrors.Checked = s["show_script_errors"];
