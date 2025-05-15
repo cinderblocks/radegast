@@ -820,8 +820,30 @@ namespace Radegast
             }
             else if (!onlyMap)
             {
-                System.Diagnostics.Process.Start(link);
+                if (!Uri.TryCreate(link, UriKind.Absolute, out Uri uriToOpen))
+                {
+                    return false;
+                }
+
+                if (uriToOpen.Scheme != Uri.UriSchemeHttp && uriToOpen.Scheme != Uri.UriSchemeHttps)
+                {
+                    return false;
+                }
+
+                if (Environment.OSVersion.Platform == PlatformID.Unix)
+                {
+                    System.Diagnostics.Process.Start("xdg-open", link);
+                }
+                else if (Environment.OSVersion.Platform == PlatformID.MacOSX)
+                {
+                    System.Diagnostics.Process.Start("open", link);
+                }
+                else
+                {
+                    System.Diagnostics.Process.Start(link);
+                }
             }
+
             return false;
         }
         #endregion
