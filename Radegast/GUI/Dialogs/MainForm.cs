@@ -1054,8 +1054,6 @@ namespace Radegast
 
         }
 
-        private int filesDeleted;
-
         private void deleteFolder(DirectoryInfo dir)
         {
             foreach (var file in dir.GetFiles())
@@ -1063,7 +1061,6 @@ namespace Radegast
                 try 
                 {
                     file.Delete();
-                    filesDeleted++;
                 }
                 catch { }
             }
