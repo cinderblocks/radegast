@@ -17,7 +17,7 @@
                                               Theme='rtfLargeLicense' />
     </BootstrapperApplication>
 
-    <Variable Name="InstallFolder" Type="string" Value="[ProgramFiles64Folder]$(var.productName)" />
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]$(var.productName)" />
 
     <Chain>
       <PackageGroupRef Id="NetFx48Redist" />
