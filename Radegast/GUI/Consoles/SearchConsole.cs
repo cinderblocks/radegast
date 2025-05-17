@@ -780,7 +780,7 @@ namespace Radegast
         private void btnShowOnMap_Click(object sender, EventArgs e)
         {
             var evt = (DirectoryManager.EventInfo)pnlEventDetail.Tag;
-            instance.MainForm.ProcessSecondlifeURI(evt.ToSLurl());
+            instance.MainForm.ProcessSecondLifeURI(evt.ToSLurl());
         }
 
         #endregion Events Search
