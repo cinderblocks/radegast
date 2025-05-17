@@ -17,7 +17,7 @@
                                               Theme='rtfLargeLicense' />
     </BootstrapperApplication>
 
-    <Variable Name="InstallFolder" Type="string" Value="[ProgramFiles64Folder]$(var.productName)" />
+    <Variable Name="InstallFolder" Type="string" Value="" />
 
     <Chain>
       <PackageGroupRef Id="NetFx48Redist" />
@@ -26,7 +26,7 @@
                   DisplayName="$(var.productName)"
                   Vital="yes"
                   After="NetFx48Redist">
-        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" Condition="InstallFolder" />
       </MsiPackage>
     </Chain>
   </Bundle>
