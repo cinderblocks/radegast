@@ -1,6 +1,6 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
- * Copyright(c) 2021, Sjofn, LLC
+ * Copyright(c) 2021-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -23,10 +23,12 @@ namespace Radegast
 {
     public partial class ntfRegionRestart : Notification
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private string RegionName;
         private int CountdownSeconds;
-        private System.Timers.Timer CountdownTimer;
+        private readonly System.Timers.Timer CountdownTimer;
+
+        public override bool SingleInstance => true;
 
         public ntfRegionRestart(RadegastInstance instance, string region_name, int countdown_seconds)
             : base(NotificationType.RegionRestart)

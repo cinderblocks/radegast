@@ -57,6 +57,8 @@ namespace Radegast
         /// </summary>
         public static event NotificationCallback OnNotificationDisplayed;
 
+        public virtual bool SingleInstance => false;
+
         public Notification()
         {
             Type = NotificationType.Generic;

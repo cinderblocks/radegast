@@ -31,7 +31,6 @@ using System.Windows.Forms;
 using System.Resources;
 using System.IO;
 using System.Web;
-using Radegast;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
 using System.Runtime.InteropServices;
@@ -112,7 +111,7 @@ namespace Radegast
             btnDialogNextControl.FlatAppearance.BorderSize = 0;
             btnDialogNextControl.FlatStyle = FlatStyle.Flat;
             btnDialogNextControl.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            btnDialogNextControl.Text = ">>";
+            btnDialogNextControl.Text = @">>";
             btnDialogNextControl.Font = new Font(btnDialogNextControl.Font, FontStyle.Bold);
             btnDialogNextControl.Margin = new Padding(0);
             btnDialogNextControl.Padding = new Padding(0);
@@ -149,18 +148,18 @@ namespace Radegast
             client.Network.CurrentSim.Caps.CapabilitiesReceived += Caps_CapabilitiesReceived;
         }
 
-        private void RegisterClientEvents(GridClient client)
+        private void RegisterClientEvents(GridClient gc)
         {
-            client.Parcels.ParcelProperties += Parcels_ParcelProperties;
-            client.Self.MoneyBalanceReply += Self_MoneyBalanceReply;
-            client.Self.MoneyBalance += Self_MoneyBalance;
+            gc.Parcels.ParcelProperties += Parcels_ParcelProperties;
+            gc.Self.MoneyBalanceReply += Self_MoneyBalanceReply;
+            gc.Self.MoneyBalance += Self_MoneyBalance;
         }
 
-        private void UnregisterClientEvents(GridClient client)
+        private void UnregisterClientEvents(GridClient gc)
         {
-            client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
-            client.Self.MoneyBalanceReply -= Self_MoneyBalanceReply;
-            client.Self.MoneyBalance -= Self_MoneyBalance;
+            gc.Parcels.ParcelProperties -= Parcels_ParcelProperties;
+            gc.Self.MoneyBalanceReply -= Self_MoneyBalanceReply;
+            gc.Self.MoneyBalance -= Self_MoneyBalance;
         }
 
         private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
@@ -189,7 +188,7 @@ namespace Radegast
                 instance.Names.NameUpdated -= Names_NameUpdated;
             }
 
-            if (instance != null) instance.CleanUp();
+            instance?.CleanUp();
         }
         #endregion
 
@@ -339,7 +338,14 @@ namespace Radegast
         {
             firstMoneyNotification = true;
 
-            if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) return;
+            // clean up old notifications
+            foreach (var notification in notifications.FindAll(
+                notification => notification.Type == NotificationType.RegionRestart))
+            {
+                RemoveNotification(notification);
+            }
+
+            if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) { return; }
             netcom_ClientLoggedOut(sender, EventArgs.Empty);
 
             if (instance.GlobalSettings["auto_reconnect"].AsBoolean())
@@ -685,8 +691,7 @@ namespace Radegast
         {
             lock (shownProfiles)
             {
-                frmProfile profile = null;
-                if (shownProfiles.TryGetValue(agentID, out profile))
+                if (shownProfiles.TryGetValue(agentID, out var profile))
                 {
                     profile.WindowState = FormWindowState.Normal;
                     profile.Focus();
@@ -743,8 +748,7 @@ namespace Radegast
 
             lock (shownGroupProfiles)
             {
-                frmGroupInfo profile = null;
-                if (shownGroupProfiles.TryGetValue(group.ID, out profile))
+                if (shownGroupProfiles.TryGetValue(group.ID, out var profile))
                 {
                     profile.WindowState = FormWindowState.Normal;
                     profile.Focus();
@@ -876,7 +880,7 @@ namespace Radegast
 
         #region Notifications
 
-        private readonly CircularList<Control> notifications = new CircularList<Control>();
+        private readonly CircularList<Notification> notifications = new CircularList<Notification>();
 
         public Color NotificationBackground => pnlDialog.BackColor;
 
@@ -894,7 +898,7 @@ namespace Radegast
             btnDialogNextControl.BringToFront();
         }
 
-        public void AddNotification(Control control)
+        public void AddNotification(Notification control)
         {
             if (InvokeRequired)
             {
@@ -906,17 +910,25 @@ namespace Radegast
                 return;
             }
 
-            Control active = TabsConsole.FindFocusedControl(this);
+            var active = TabsConsole.FindFocusedControl(this);
 
             FormFlash.StartFlash(this);
             pnlDialog.Visible = true;
             pnlDialog.BringToFront();
 
-            foreach (Control existing in notifications)
+            if (control.SingleInstance)
+            {
+                var exists = notifications.Find(notification => notification.Type == control.Type);
+                if (exists != null)
+                {
+                    RemoveNotification(exists);
+                }
+            }
+
+            foreach (var existing in notifications)
             {
                 existing.Visible = false;
             }
-
             instance.MediaManager.PlayUISound(UISounds.WindowOpen);
 
             notifications.Add(control);
@@ -932,7 +944,7 @@ namespace Radegast
             active?.Focus();
         }
 
-        public void RemoveNotification(Control control)
+        public void RemoveNotification(Notification control)
         {
             pnlDialog.Controls.Remove(control);
             notifications.Remove(control);
@@ -955,7 +967,7 @@ namespace Radegast
 
         private void btnDialogNextControl_Click(object sender, EventArgs e)
         {
-            foreach (Control existing in notifications)
+            foreach (var existing in notifications)
             {
                 existing.Visible = false;
             }
