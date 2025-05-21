@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -34,14 +34,14 @@ namespace Radegast
     {
         public List<Primitive> Prims = new List<Primitive>();
 
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient client => instance.Client;
 
         private float searchRadius = 40.0f;
-        PropertiesQueue propRequester;
+        private readonly PropertiesQueue propRequester;
         private ObjectConsoleFilter filter;
-        private ObjectSorter PrimSorter;
-        CancellationTokenSource contentsDownloadCancelToken;
+        private readonly ObjectSorter PrimSorter;
+        private readonly CancellationTokenSource contentsDownloadCancelToken;
 
         public Primitive CurrentPrim { get; private set; } = new Primitive();
 
@@ -97,7 +97,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void frmObjects_Disposed(object sender, EventArgs e)
+        private void frmObjects_Disposed(object sender, EventArgs e)
         {
             try
             {
@@ -118,7 +118,7 @@ namespace Radegast
             instance.State.OnWalkStateCanged -= State_OnWalkStateCanged;
         }
 
-        void State_SitStateChanged(object sender, SitEventArgs e)
+        private void State_SitStateChanged(object sender, SitEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -142,7 +142,7 @@ namespace Radegast
             return new List<Primitive>(Prims);
         }
 
-        void propRequester_OnTick(int remaining)
+        private void propRequester_OnTick(int remaining)
         {
             if (InvokeRequired)
             {
@@ -175,7 +175,7 @@ namespace Radegast
             lblStatus.Text = sb.ToString();
         }
 
-        void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -186,7 +186,7 @@ namespace Radegast
             btnRefresh_Click(null, null);
         }
 
-        void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
             int minIndex = -1;
             int maxIndex = -1;
@@ -226,7 +226,7 @@ namespace Radegast
             }
         }
 
-        void UpdateProperties(Primitive.ObjectProperties props)
+        private void UpdateProperties(Primitive.ObjectProperties props)
         {
             lock (Prims)
             {
@@ -263,7 +263,7 @@ namespace Radegast
             }
         }
 
-        void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
             if (e.Simulator.Handle != client.Network.CurrentSim.Handle)
             {
@@ -279,7 +279,7 @@ namespace Radegast
             UpdateProperties(e.Properties);
         }
 
-        void Objects_ObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
+        private void Objects_ObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
         {
             if (e.Simulator.Handle != client.Network.CurrentSim.Handle)
             {
@@ -296,7 +296,7 @@ namespace Radegast
         }
 
 
-        void UpdateObjectContents()
+        private void UpdateObjectContents()
         {
             lstContents.Items.Clear();
             ListViewItem entry = new ListViewItem();
@@ -312,7 +312,7 @@ namespace Radegast
             }, contentsDownloadCancelToken.Token);
         }
 
-        void UpdateContentsList(List<InventoryBase> items)
+        private void UpdateContentsList(List<InventoryBase> items)
         {
             //object inventory in items List
             lstContents.Items.Clear();
@@ -369,7 +369,7 @@ namespace Radegast
                             if ((item.Permissions.OwnerMask & PermissionMask.Transfer) == 0)
                                 sub.Text += " (no transfer)";
 
-                            sub.Text += " (" + item.InventoryType + ")";
+                            sub.Text += $" ({item.InventoryType})";
                             entry.ToolTipText = sub.Text;
 
                             lstContents.Items.Add(entry);
@@ -383,14 +383,13 @@ namespace Radegast
         {
             e.Cancel = false;
 
-            if (!(lstContents.Tag is Primitive))
+            if (!(lstContents.Tag is Primitive prim))
             {
                 e.Cancel = true;
                 return;
             }
 
             ctxContents.Items.Clear();
-            Primitive prim = (Primitive)lstContents.Tag;
             bool canModify = (prim.Flags & PrimFlags.ObjectModify) == PrimFlags.ObjectModify;
 
             if (lstContents.SelectedItems.Count == 1)
@@ -431,8 +430,12 @@ namespace Radegast
                 ctxContents.Items.Add("Delete", null, (sd, ev) =>
                 {
                     foreach (ListViewItem i in lstContents.SelectedItems)
+                    {
                         if (i.Tag is InventoryItem it)
+                        {
                             client.Inventory.RemoveTaskInventory(prim.LocalID, it.UUID, client.Network.CurrentSim);
+                        }
+                    }
                 });
             }
 
@@ -461,7 +464,8 @@ namespace Radegast
                 {
                     ctxContents.Items.Add("Paste Folder Contents", null, (sd, ev) =>
                     {
-                        foreach (InventoryBase oldItem in client.Inventory.Store.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
+                        foreach (InventoryBase oldItem in client.Inventory.Store.GetContents(
+                                     (InventoryFolder)instance.InventoryClipboard.Item))
                         {
                             if (!(oldItem is InventoryItem item)) continue;
 
@@ -486,7 +490,7 @@ namespace Radegast
             ctxContents.Items.Add("Close", null, btnCloseContents_Click);
         }
 
-        void OpenObject(object sender, EventArgs e)
+        private void OpenObject(object sender, EventArgs e)
         {
             Primitive prim = lstContents.Tag as Primitive;
             if (prim?.Properties == null) return;
@@ -508,11 +512,12 @@ namespace Radegast
                 client.Inventory.MoveTaskInventory(prim.LocalID, item.UUID, folderID, client.Network.CurrentSim);
             }
 
-            instance.TabConsole.DisplayNotificationInChat("Items from object contents copied to new inventory folder " + prim.Properties.Name);
+            instance.TabConsole.DisplayNotificationInChat(
+                $"Items from object contents copied to new inventory folder {prim.Properties.Name}");
 
         }
 
-        void UpdateCurrentObject(bool updateContents = true)
+        private void UpdateCurrentObject(bool updateContents = true)
         {
             if (CurrentPrim.Properties == null) return;
 
@@ -574,7 +579,7 @@ namespace Radegast
 
             if (CurrentPrim.Properties.SaleType != SaleType.Not)
             {
-                btnBuy.Text = string.Format("Buy $L{0}", CurrentPrim.Properties.SalePrice);
+                btnBuy.Text = $"Buy $L{CurrentPrim.Properties.SalePrice}";
                 btnBuy.Enabled = true;
             }
             else
@@ -591,7 +596,7 @@ namespace Radegast
             UpdateMuteButton();
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -644,15 +649,15 @@ namespace Radegast
 
             if (prim.ParentID == client.Self.LocalID)
             {
-                return string.Format("{0} attached to {1}", name, prim.PrimData.AttachmentPoint);
+                return $"{name} attached to {prim.PrimData.AttachmentPoint}";
             }
             else if (ownerName != "Loading...")
             {
-                return String.Format("{0} ({1}m) owned by {2}", name, distance, ownerName);
+                return $"{name} ({distance}m) owned by {ownerName}";
             }
             else
             {
-                return String.Format("{0} ({1}m)", name, distance);
+                return $"{name} ({distance}m)";
             }
 
         }
@@ -682,7 +687,7 @@ namespace Radegast
             }
         }
 
-        void Objects_ObjectUpdate(object sender, PrimEventArgs e)
+        private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
         {
             if (e.Simulator.Handle != client.Network.CurrentSim.Handle || e.Prim.Position == Vector3.Zero || e.Prim is Avatar) return;
 
@@ -711,7 +716,7 @@ namespace Radegast
             }
         }
 
-        void Objects_KillObjects(object sender, KillObjectsEventArgs e)
+        private void Objects_KillObjects(object sender, KillObjectsEventArgs e)
         {
             if (e.Simulator.Handle != client.Network.CurrentSim.Handle) return;
 
@@ -783,7 +788,8 @@ namespace Radegast
                     if (IncludePrim(prim) &&
                         (prim.Position != Vector3.Zero) &&
                         (distance < searchRadius) &&
-                        (txtSearch.Text.Length == 0 || (prim.Properties != null && prim.Properties.Name.ToLower().Contains(txtSearch.Text.ToLower()))) && //root prims and attachments only
+                        (txtSearch.Text.Length == 0 || 
+                         (prim.Properties != null && prim.Properties.Name.ToLower().Contains(txtSearch.Text.ToLower()))) && //root prims and attachments only
                         !Prims.Contains(prim))
                     {
                         Prims.Add(prim);
@@ -888,7 +894,7 @@ namespace Radegast
                 CurrentPrim = lstChildren.SelectedItems[0].Tag as Primitive;
                 btnBuy.Tag = CurrentPrim;
 
-                if (CurrentPrim.Properties == null || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero))
+                if (CurrentPrim != null && (CurrentPrim.Properties == null || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero)))
                 {
                     client.Objects.SelectObject(client.Network.CurrentSim, CurrentPrim.LocalID);
                 }
@@ -901,7 +907,7 @@ namespace Radegast
             }
         }
 
-        void UpdateChildren()
+        private void UpdateChildren()
         {
             if (CurrentPrim == null) return;
             var prims = client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == CurrentPrim.LocalID);
@@ -977,7 +983,9 @@ namespace Radegast
         {
             if (lstPrims.SelectedIndices.Count != 1) return;
             btnBuy.Enabled = false;
-            client.Objects.BuyObject(client.Network.CurrentSim, CurrentPrim.LocalID, CurrentPrim.Properties.SaleType, CurrentPrim.Properties.SalePrice, client.Self.ActiveGroup, client.Inventory.FindFolderForType(AssetType.Object));
+            client.Objects.BuyObject(client.Network.CurrentSim, CurrentPrim.LocalID, 
+                CurrentPrim.Properties.SaleType, CurrentPrim.Properties.SalePrice, client.Self.ActiveGroup, 
+                client.Inventory.FindFolderForType(AssetType.Object));
         }
 
         private void rbDistance_CheckedChanged(object sender, EventArgs e)
@@ -1020,7 +1028,7 @@ namespace Radegast
             }
         }
 
-        void State_OnWalkStateCanged(bool walking)
+        private void State_OnWalkStateCanged(bool walking)
         {
             if (InvokeRequired)
             {
@@ -1075,7 +1083,7 @@ namespace Radegast
                 ctxMenuObjects.Items.Add("Pay", null, btnPay_Click);
 
             if (CurrentPrim.Properties != null && CurrentPrim.Properties.SaleType != SaleType.Not)
-                ctxMenuObjects.Items.Add(string.Format("Buy for ${0}", CurrentPrim.Properties.SalePrice), null, btnBuy_Click);
+                ctxMenuObjects.Items.Add($"Buy for ${CurrentPrim.Properties.SalePrice}", null, btnBuy_Click);
 
             if (gbxInworld.Visible)
                 ctxMenuObjects.Items.Add("Show Contents", null, btnContents_Click);
@@ -1154,14 +1162,16 @@ namespace Radegast
             else
             {
                 instance.MediaManager.PlayUISound(UISounds.ObjectDelete);
-                client.Inventory.RequestDeRezToInventory(CurrentPrim.LocalID, DeRezDestination.AgentInventoryTake, client.Inventory.FindFolderForType(FolderType.Trash), UUID.Random());
+                client.Inventory.RequestDeRezToInventory(CurrentPrim.LocalID, 
+                    DeRezDestination.AgentInventoryTake, client.Inventory.FindFolderForType(FolderType.Trash), UUID.Random());
             }
         }
 
         private void btnReturn_Click(object sender, EventArgs e)
         {
             instance.MediaManager.PlayUISound(UISounds.ObjectDelete);
-            client.Inventory.RequestDeRezToInventory(CurrentPrim.LocalID, DeRezDestination.ReturnToOwner, UUID.Zero, UUID.Random());
+            client.Inventory.RequestDeRezToInventory(CurrentPrim.LocalID, 
+                DeRezDestination.ReturnToOwner, UUID.Zero, UUID.Random());
         }
 
         private void btnCloseContents_Click(object sender, EventArgs e)
@@ -1229,7 +1239,7 @@ namespace Radegast
             //}
         }
 
-        void Self_MuteListUpdated(object sender, EventArgs e)
+        private void Self_MuteListUpdated(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -1245,7 +1255,7 @@ namespace Radegast
             UpdateMuteButton();
         }
 
-        void UpdateMuteButton()
+        private void UpdateMuteButton()
         {
             bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
 
@@ -1347,7 +1357,7 @@ namespace Radegast
 
     public class ObjectSorter : IComparer<Primitive>
     {
-        private AgentManager me;
+        private readonly AgentManager me;
 
         public bool SortByName { get; set; } = false;
 
@@ -1402,10 +1412,10 @@ namespace Radegast
 
     public class PropertiesQueue : IDisposable
     {
-        Object sync = new Object();
-        RadegastInstance instance;
-        System.Timers.Timer qTimer;
-        Queue<Primitive> props = new Queue<Primitive>();
+        private readonly object sync = new object();
+        private RadegastInstance instance;
+        private System.Timers.Timer qTimer;
+        private Queue<Primitive> props = new Queue<Primitive>();
 
         public delegate void TickCallback(int remaining);
         public event TickCallback OnTick;
@@ -1428,7 +1438,7 @@ namespace Radegast
             }
         }
 
-        void qTimer_Elapsed(object sender, ElapsedEventArgs e)
+        private void qTimer_Elapsed(object sender, ElapsedEventArgs e)
         {
             lock (sync)
             {
