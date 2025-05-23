@@ -88,7 +88,7 @@ namespace Radegast
                 }
                 else if (X != null)
                 {
-                    extraRegionInfo += $" ({X}";
+                    extraRegionInfo += $" ({X})";
                 }
 
                 return RegionName + extraRegionInfo;
