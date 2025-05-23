@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -31,7 +31,6 @@ using System.Windows.Forms;
 using System.Resources;
 using System.IO;
 using System.Web;
-using Radegast;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
 using System.Runtime.InteropServices;
@@ -63,12 +62,12 @@ namespace Radegast
         public ToolStripDropDownButton ToolsMenu => tbnTools;
 
         /// <summary>
-        /// Dropdown that contains the heelp menu
+        /// Dropdown that contains the help menu
         /// </summary>
         public ToolStripDropDownButton HelpMenu => tbtnHelp;
 
         /// <summary>
-        /// Drop down that contants the plugins menu. Make sure to set it Visible if
+        /// Drop down that contains the plugins menu. Make sure to set it Visible if
         /// you add items to this menu, it's hidden by default
         /// </summary>
         public ToolStripDropDownButton PluginsMenu => tbnPlugins;
@@ -76,13 +75,13 @@ namespace Radegast
         #endregion
 
         #region Private members
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient client => instance.Client;
         private Radegast.Netcom netcom => instance.Netcom;
         private System.Timers.Timer statusTimer;
         private AutoPilot ap;
         private bool AutoPilotActive = false;
-        private TransparentButton btnDialogNextControl;
+        private readonly TransparentButton btnDialogNextControl;
         private SlUriParser uriParser;
         private NetSparkleUpdater.SparkleUpdater SparkleUpdater;
 
@@ -112,7 +111,7 @@ namespace Radegast
             btnDialogNextControl.FlatAppearance.BorderSize = 0;
             btnDialogNextControl.FlatStyle = FlatStyle.Flat;
             btnDialogNextControl.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
-            btnDialogNextControl.Text = ">>";
+            btnDialogNextControl.Text = @">>";
             btnDialogNextControl.Font = new Font(btnDialogNextControl.Font, FontStyle.Bold);
             btnDialogNextControl.Margin = new Padding(0);
             btnDialogNextControl.Padding = new Padding(0);
@@ -149,27 +148,27 @@ namespace Radegast
             client.Network.CurrentSim.Caps.CapabilitiesReceived += Caps_CapabilitiesReceived;
         }
 
-        private void RegisterClientEvents(GridClient client)
+        private void RegisterClientEvents(GridClient gc)
         {
-            client.Parcels.ParcelProperties += Parcels_ParcelProperties;
-            client.Self.MoneyBalanceReply += Self_MoneyBalanceReply;
-            client.Self.MoneyBalance += Self_MoneyBalance;
+            gc.Parcels.ParcelProperties += Parcels_ParcelProperties;
+            gc.Self.MoneyBalanceReply += Self_MoneyBalanceReply;
+            gc.Self.MoneyBalance += Self_MoneyBalance;
         }
 
-        private void UnregisterClientEvents(GridClient client)
+        private void UnregisterClientEvents(GridClient gc)
         {
-            client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
-            client.Self.MoneyBalanceReply -= Self_MoneyBalanceReply;
-            client.Self.MoneyBalance -= Self_MoneyBalance;
+            gc.Parcels.ParcelProperties -= Parcels_ParcelProperties;
+            gc.Self.MoneyBalanceReply -= Self_MoneyBalanceReply;
+            gc.Self.MoneyBalance -= Self_MoneyBalance;
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(client);
         }
 
-        void frmMain_Disposed(object sender, EventArgs e)
+        private void frmMain_Disposed(object sender, EventArgs e)
         {
             if (netcom != null)
             {
@@ -189,13 +188,15 @@ namespace Radegast
                 instance.Names.NameUpdated -= Names_NameUpdated;
             }
 
-            if (instance != null) instance.CleanUp();
+            instance?.CleanUp();
         }
         #endregion
 
         #region Event handlers
-        bool firstMoneyNotification = true;
-        void Self_MoneyBalance(object sender, BalanceEventArgs e)
+
+        private bool firstMoneyNotification = true;
+
+        private void Self_MoneyBalance(object sender, BalanceEventArgs e)
         {
             int oldBalance = 0;
             int.TryParse(tlblMoneyBalance.Text, out oldBalance);
@@ -214,7 +215,7 @@ namespace Radegast
             }
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             if (!e.Names.ContainsKey(client.Self.AgentID)) return;
 
@@ -231,9 +232,9 @@ namespace Radegast
             RefreshStatusBar();
         }
 
-        void Self_MoneyBalanceReply(object sender, MoneyBalanceReplyEventArgs e)
+        private void Self_MoneyBalanceReply(object sender, MoneyBalanceReplyEventArgs e)
         {
-            if (String.IsNullOrEmpty(e.Description)) return;
+            if (string.IsNullOrEmpty(e.Description)) return;
 
             if (instance.GlobalSettings["transaction_notification_dialog"].AsBoolean())
                 AddNotification(new ntfGeneric(instance, e.Description));
@@ -310,9 +311,8 @@ namespace Radegast
                 statusTimer.Start();
                 RefreshWindowTitle();
 
-                if (instance.GlobalSettings.ContainsKey("AvatarHoverOffsetZ"))
+                if (instance.GlobalSettings.TryGetValue("AvatarHoverOffsetZ", out var hoverHeight))
                 {
-                    var hoverHeight = instance.GlobalSettings["AvatarHoverOffsetZ"];
                     Client.Self.SetHoverHeight(hoverHeight);
                 }
             }
@@ -338,7 +338,14 @@ namespace Radegast
         {
             firstMoneyNotification = true;
 
-            if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) return;
+            // clean up old notifications
+            foreach (var notification in notifications.FindAll(
+                notification => notification.Type == NotificationType.RegionRestart))
+            {
+                RemoveNotification(notification);
+            }
+
+            if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) { return; }
             netcom_ClientLoggedOut(sender, EventArgs.Empty);
 
             if (instance.GlobalSettings["auto_reconnect"].AsBoolean())
@@ -397,7 +404,7 @@ namespace Radegast
 
         # region Update status
 
-        void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
+        private void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
         {
             if (PreventParcelUpdate || e.Result != ParcelResult.Single) return;
             if (InvokeRequired)
@@ -648,7 +655,7 @@ namespace Radegast
             }
         }
 
-        bool firstLoad = true;
+        private bool firstLoad = true;
 
         private void frmMain_Load(object sender, EventArgs e)
         {
@@ -678,14 +685,13 @@ namespace Radegast
 
         #region Public methods
 
-        private Dictionary<UUID, frmProfile> shownProfiles = new Dictionary<UUID, frmProfile>();
+        private readonly Dictionary<UUID, frmProfile> shownProfiles = new Dictionary<UUID, frmProfile>();
 
-        void ShowAgentProfileInternal(string name, UUID agentID)
+        private void ShowAgentProfileInternal(string name, UUID agentID)
         {
             lock (shownProfiles)
             {
-                frmProfile profile = null;
-                if (shownProfiles.TryGetValue(agentID, out profile))
+                if (shownProfiles.TryGetValue(agentID, out var profile))
                 {
                     profile.WindowState = FormWindowState.Normal;
                     profile.Focus();
@@ -711,7 +717,7 @@ namespace Radegast
             }
         }
 
-        private Dictionary<UUID, frmGroupInfo> shownGroupProfiles = new Dictionary<UUID, frmGroupInfo>();
+        private readonly Dictionary<UUID, frmGroupInfo> shownGroupProfiles = new Dictionary<UUID, frmGroupInfo>();
 
         public void ShowGroupProfile(UUID id)
         {
@@ -742,8 +748,7 @@ namespace Radegast
 
             lock (shownGroupProfiles)
             {
-                frmGroupInfo profile = null;
-                if (shownGroupProfiles.TryGetValue(group.ID, out profile))
+                if (shownGroupProfiles.TryGetValue(group.ID, out var profile))
                 {
                     profile.WindowState = FormWindowState.Normal;
                     profile.Focus();
@@ -769,7 +774,7 @@ namespace Radegast
             }
         }
 
-        public bool ProcessSecondlifeURI(string link)
+        public bool ProcessSecondLifeURI(string link)
         {
             uriParser.ExecuteLink(link);
             return true;
@@ -790,33 +795,18 @@ namespace Radegast
 
             if (link.StartsWith("secondlife://") || link.StartsWith("[secondlife://"))
             {
-                return ProcessSecondlifeURI(link);
+                return ProcessSecondLifeURI(link);
             }
 
             if (!link.Contains("://"))
             {
-                link = "http://" + link;
+                link = "https://" + link;
             }
 
-            Regex r = new Regex(@"^(http://(slurl\.com|maps\.secondlife\.com)/secondlife/|secondlife://)(?<region>[^/]+)/(?<x>\d+)/(?<y>\d+)(/(?<z>\d+))?",
-                RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase
-                );
-            Match m = r.Match(link);
-
-            if (m.Success)
+            if (SlUriParser.TryParseMapLink(link, out var mapLinkInfo))
             {
-                string region = HttpUtility.UrlDecode(m.Groups["region"].Value);
-                int x = int.Parse(m.Groups["x"].Value);
-                int y = int.Parse(m.Groups["y"].Value);
-                int z = 0;
-
-                if (!string.IsNullOrEmpty(m.Groups["z"].Value))
-                {
-                    z = int.Parse(m.Groups["z"].Value);
-                }
-
                 MapTab.Select();
-                WorldMap.DisplayLocation(region, x, y, z);
+                WorldMap.DisplayLocation(mapLinkInfo.RegionName, mapLinkInfo.X ?? 0, mapLinkInfo.Y ?? 0, mapLinkInfo.Z ?? 0);
                 return true;
             }
             else if (!onlyMap)
@@ -874,11 +864,12 @@ namespace Radegast
         #endregion
 
         #region Notifications
-        CircularList<Control> notifications = new CircularList<Control>();
+
+        private readonly CircularList<Notification> notifications = new CircularList<Notification>();
 
         public Color NotificationBackground => pnlDialog.BackColor;
 
-        void ResizeNotificationByControl(Control active)
+        private void ResizeNotificationByControl(Control active)
         {
             int width = active.Size.Width + 6;
             int height = notifications.Count > 1 ? active.Size.Height + 3 + btnDialogNextControl.Size.Height : active.Size.Height + 3;
@@ -892,7 +883,7 @@ namespace Radegast
             btnDialogNextControl.BringToFront();
         }
 
-        public void AddNotification(Control control)
+        public void AddNotification(Notification control)
         {
             if (InvokeRequired)
             {
@@ -904,17 +895,25 @@ namespace Radegast
                 return;
             }
 
-            Control active = TabsConsole.FindFocusedControl(this);
+            var active = TabsConsole.FindFocusedControl(this);
 
             FormFlash.StartFlash(this);
             pnlDialog.Visible = true;
             pnlDialog.BringToFront();
 
-            foreach (Control existing in notifications)
+            if (control.SingleInstance)
+            {
+                var exists = notifications.Find(notification => notification.Type == control.Type);
+                if (exists != null)
+                {
+                    RemoveNotification(exists);
+                }
+            }
+
+            foreach (var existing in notifications)
             {
                 existing.Visible = false;
             }
-
             instance.MediaManager.PlayUISound(UISounds.WindowOpen);
 
             notifications.Add(control);
@@ -930,7 +929,7 @@ namespace Radegast
             active?.Focus();
         }
 
-        public void RemoveNotification(Control control)
+        public void RemoveNotification(Notification control)
         {
             pnlDialog.Controls.Remove(control);
             notifications.Remove(control);
@@ -953,7 +952,7 @@ namespace Radegast
 
         private void btnDialogNextControl_Click(object sender, EventArgs e)
         {
-            foreach (Control existing in notifications)
+            foreach (var existing in notifications)
             {
                 existing.Visible = false;
             }
@@ -978,11 +977,6 @@ namespace Radegast
         private void tmnuStatusAway_Click(object sender, EventArgs e)
         {
             instance.State.SetAway(tmnuStatusAway.Checked);
-        }
-
-        private void tmnuHelpReadme_Click(object sender, EventArgs e)
-        {
-            System.Diagnostics.Process.Start(Application.StartupPath + @"\Readme.txt");
         }
 
         private void tmnuStatusBusy_Click(object sender, EventArgs e)
@@ -1057,8 +1051,6 @@ namespace Radegast
 
         }
 
-        int filesDeleted;
-
         private void deleteFolder(DirectoryInfo dir)
         {
             foreach (var file in dir.GetFiles())
@@ -1066,7 +1058,6 @@ namespace Radegast
                 try 
                 {
                     file.Delete();
-                    filesDeleted++;
                 }
                 catch { }
             }
@@ -1084,10 +1075,15 @@ namespace Radegast
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                filesDeleted = 0;
-                try { deleteFolder(new DirectoryInfo(client.Settings.ASSET_CACHE_DIR)); }
-                catch { }
-                Logger.DebugLog("Wiped out " + filesDeleted + " files from the cache directory.");
+                try
+                {
+                    deleteFolder(new DirectoryInfo(client.Settings.ASSET_CACHE_DIR));
+                    Logger.DebugLog($"Cleaned the cache directory.");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("Failed to clean the cache directory", Helpers.LogLevel.Warning, ex);
+                }
             });
             instance.Names.CleanCache();
         }
@@ -1626,9 +1622,9 @@ namespace Radegast
         private void setHoverHeightToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var hoverHeight = 0.0;
-            if (instance.GlobalSettings.ContainsKey("AvatarHoverOffsetZ"))
+            if (instance.GlobalSettings.TryGetValue("AvatarHoverOffsetZ", out var offsetSetting))
             {
-                hoverHeight = instance.GlobalSettings["AvatarHoverOffsetZ"];
+                hoverHeight = offsetSetting;
             }
 
             var hoverHeightControl = new frmHoverHeight(hoverHeight, Instance.MonoRuntime);
@@ -1670,15 +1666,19 @@ namespace Radegast
         {
             var appcastUrl = "https://update.radegast.life/appcast.json";
             var manifestModuleName = System.Reflection.Assembly.GetEntryAssembly()?.ManifestModule.FullyQualifiedName;
-            var icon = Icon.ExtractAssociatedIcon(manifestModuleName);
-            SparkleUpdater = new NetSparkleUpdater.SparkleUpdater(appcastUrl,
-                new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, "euvj+Uut3Nt3BVIu+aqJ02++Jflh8VjzBUzMgb7EnP8="))
+            if (manifestModuleName != null)
             {
-                UIFactory = new NetSparkleUpdater.UI.WinForms.UIFactory(icon),
-                RelaunchAfterUpdate = true,
-                UseNotificationToast = true
-            };
-            SparkleUpdater.StartLoop(true);
+                var icon = Icon.ExtractAssociatedIcon(manifestModuleName);
+                SparkleUpdater = new NetSparkleUpdater.SparkleUpdater(appcastUrl,
+                    new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, 
+                        "euvj+Uut3Nt3BVIu+aqJ02++Jflh8VjzBUzMgb7EnP8="))
+                {
+                    UIFactory = new NetSparkleUpdater.UI.WinForms.UIFactory(icon),
+                    RelaunchAfterUpdate = true,
+                    UseNotificationToast = true
+                };
+                SparkleUpdater.StartLoop(true);
+            }
         }
 
         private void ctxCheckForUpdates_Click(object sender, EventArgs e)

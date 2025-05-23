@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,7 +29,7 @@ namespace Radegast
 {
 
     /// <summary>
-    /// Base class for all notificatiosn (blue dialogs)
+    /// Base class for all notifications (blue dialogs)
     /// </summary>
     public class Notification : UserControl
     {
@@ -57,6 +57,8 @@ namespace Radegast
         /// </summary>
         public static event NotificationCallback OnNotificationDisplayed;
 
+        public virtual bool SingleInstance => false;
+
         public Notification()
         {
             Type = NotificationType.Generic;
@@ -73,7 +75,7 @@ namespace Radegast
             try
             {
                 e.Type = Type;
-                ThreadPool.QueueUserWorkItem(o => Notificaton_Displayed(this, e));
+                ThreadPool.QueueUserWorkItem(o => Notification_Displayed(this, e));
             }
             catch (Exception ex)
             {
@@ -82,7 +84,7 @@ namespace Radegast
             }
         }
 
-        private void Notificaton_Displayed(Notification notification, NotificationEventArgs e)
+        private void Notification_Displayed(Notification notification, NotificationEventArgs e)
         {
             try
             {
@@ -125,12 +127,12 @@ namespace Radegast
         public event Notification.NotificationClickedCallback OnNotificationClicked;
 
         /// <summary>
-        /// The Notfication form itself
+        /// The Notification form itself
         /// </summary>
         public Notification Notice;
 
         /// <summary>
-        /// Type of notfication
+        /// Type of notification
         /// </summary>
         public NotificationType Type;
 
@@ -199,7 +201,7 @@ namespace Radegast
         /// </summary>
         internal void Notification_Click(object sender, EventArgs e)
         {
-            if (ButtonSelected) throw new InvalidOperationException("Clicked twice " + Text + " item: " + sender);
+            if (ButtonSelected) throw new InvalidOperationException($"Clicked twice {Text} item: {sender}");
             ButtonSelected = true;
             try
             {

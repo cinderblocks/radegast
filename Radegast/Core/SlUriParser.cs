@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web;
@@ -62,6 +63,83 @@ namespace Radegast
         public static readonly string UrlRegexString = @"(https?://[^ \r\n]+)|(\[secondlife://[^ \]\r\n]* ?(?:[^\]\r\n]*)])|(secondlife://[^ \r\n]*)";
         public static readonly Regex UrlRegex = new Regex(UrlRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private readonly RadegastInstance instance;
+
+        private static readonly Regex MapLinkRegex = new Regex(@"^((https?://(slurl\.com|maps\.secondlife\.com)/secondlife/)(?<region>[^ /]+)(/(?<coords>\d+)){0,3})",
+            RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase
+        );
+
+        public class MapLinkInfo
+        {
+            public string RegionName { get; set; }
+            public int? X { get; set; }
+            public int? Y { get; set; }
+            public int? Z { get; set; }
+
+            public override string ToString()
+            {
+                var extraRegionInfo = "";
+                if (Z != null)
+                {
+                    extraRegionInfo += $" ({X ?? 0},{Y ?? 0},{Z})";
+                }
+                else if (Y != null)
+                {
+                    extraRegionInfo += $" ({X ?? 0},{Y})";
+                }
+                else if (X != null)
+                {
+                    extraRegionInfo += $" ({X})";
+                }
+
+                return RegionName + extraRegionInfo;
+            }
+        }
+        public static bool TryParseMapLink(string link, out MapLinkInfo mapLinkInfo)
+        {
+            Match match = MapLinkRegex.Match(link);
+            if (!match.Success)
+            {
+                mapLinkInfo = null;
+                return false;
+            }
+
+            var region = "";
+            var coords = new List<int>();
+
+            var regionMatch = match.Groups["region"];
+            if (regionMatch.Success)
+            {
+                region = regionMatch.Value;
+            }
+
+            var coordsMatch = match.Groups["coords"];
+            if (coordsMatch.Success)
+            {
+                foreach (Capture coordRaw in coordsMatch.Captures)
+                {
+                    if (!int.TryParse(coordRaw.Value, out int coord))
+                    {
+                        break;
+                    }
+
+                    coords.Add(coord);
+                }
+            }
+
+            var x = coords.Count > 0 ? coords[0] : (int?)null;
+            var y = coords.Count > 1 ? coords[1] : (int?)null;
+            var z = coords.Count > 2 ? coords[2] : (int?)null;
+
+            mapLinkInfo = new MapLinkInfo()
+            {
+                RegionName = region,
+                X = x,
+                Y = y,
+                Z = z
+            };
+
+            return true;
+        }
 
         // Regular expression created by following the majority of http://wiki.secondlife.com/wiki/Viewer_URI_Name_Space (excluding support for secondlife:///app/login).
         //  This is a nasty one and should really only be used on single links to minimize processing time.
@@ -121,6 +199,14 @@ namespace Radegast
                 return new ParsedUriInfo()
                 {
                     DisplayText = uri
+                };
+            }
+
+            if (TryParseMapLink(uri, out var mapLinkInfo))
+            {
+                return new ParsedUriInfo()
+                {
+                    DisplayText = mapLinkInfo.ToString()
                 };
             }
 

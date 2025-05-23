@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -322,13 +322,13 @@ namespace Radegast
 
             // Pop up a notification for region restarts
             if (e.NotificationId == "RegionRestartMinutes") {
-                int minutes = e.ExtraParams["MINUTES"].AsInteger();
-                string name = e.ExtraParams["NAME"].AsString();
-                instance.MainForm.AddNotification(new ntfRegionRestart(instance, name, minutes * 60));
+                var minutes = e.ExtraParams["MINUTES"].AsInteger();
+                var regionName = e.ExtraParams["NAME"].AsString();
+                instance.MainForm.AddNotification(new ntfRegionRestart(instance, regionName, minutes * 60));
             } else if (e.NotificationId == "RegionRestartSeconds") {
-                int seconds = e.ExtraParams["SECONDS"].AsInteger();
-                string name = e.ExtraParams["NAME"].AsString();
-                instance.MainForm.AddNotification(new ntfRegionRestart(instance, name, seconds));
+                var seconds = e.ExtraParams["SECONDS"].AsInteger();
+                var regionName = e.ExtraParams["NAME"].AsString();
+                instance.MainForm.AddNotification(new ntfRegionRestart(instance, regionName, seconds));
             }
 
             Tabs["chat"].Highlight();
