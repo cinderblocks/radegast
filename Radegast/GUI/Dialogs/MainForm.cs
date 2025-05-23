@@ -800,28 +800,13 @@ namespace Radegast
 
             if (!link.Contains("://"))
             {
-                link = "http://" + link;
+                link = "https://" + link;
             }
 
-            Regex r = new Regex(@"^(http://(slurl\.com|maps\.secondlife\.com)/secondlife/|secondlife://)(?<region>[^/]+)/(?<x>\d+)/(?<y>\d+)(/(?<z>\d+))?",
-                RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase
-                );
-            Match m = r.Match(link);
-
-            if (m.Success)
+            if (SlUriParser.TryParseMapLink(link, out var mapLinkInfo))
             {
-                string region = HttpUtility.UrlDecode(m.Groups["region"].Value);
-                int x = int.Parse(m.Groups["x"].Value);
-                int y = int.Parse(m.Groups["y"].Value);
-                int z = 0;
-
-                if (!string.IsNullOrEmpty(m.Groups["z"].Value))
-                {
-                    z = int.Parse(m.Groups["z"].Value);
-                }
-
                 MapTab.Select();
-                WorldMap.DisplayLocation(region, x, y, z);
+                WorldMap.DisplayLocation(mapLinkInfo.RegionName, mapLinkInfo.X ?? 0, mapLinkInfo.Y ?? 0, mapLinkInfo.Z ?? 0);
                 return true;
             }
             else if (!onlyMap)
