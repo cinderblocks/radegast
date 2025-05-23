@@ -20,9 +20,9 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="2.2.10.950" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.10.950" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.2.10.950" />
+    <PackageReference Include="LibreMetaverse" Version="2.2.11.954" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.2.11.954" />
+    <PackageReference Include="LibreMetaverse.Types" Version="2.2.11.954" />
     <PackageReference Include="System.Data.DataSetExtensions" Version="4.5.0" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
