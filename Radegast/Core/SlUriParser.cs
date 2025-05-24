@@ -91,7 +91,7 @@ namespace Radegast
                     extraRegionInfo += $" ({X})";
                 }
 
-                return HttpUtility.UrlDecode(RegionName) + extraRegionInfo;
+                return RegionName + extraRegionInfo;
             }
         }
         public static bool TryParseMapLink(string link, out MapLinkInfo mapLinkInfo)
@@ -132,7 +132,7 @@ namespace Radegast
 
             mapLinkInfo = new MapLinkInfo()
             {
-                RegionName = region,
+                RegionName = HttpUtility.UrlDecode(region),
                 X = x,
                 Y = y,
                 Z = z
