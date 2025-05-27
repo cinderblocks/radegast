@@ -208,7 +208,7 @@ namespace Radegast
         /// <param name="attachments">List of root prims that are attached to our avatar</param>
         /// <param name="item">Inventory item to check</param>
         /// <returns>True if the inventory item is attached to avatar</returns>
-        public static bool IsAttached(List<Primitive> attachments, InventoryItem item)
+        public static bool IsAttached(IEnumerable<Primitive> attachments, InventoryItem item)
         {
             return attachments.Any(prim => GetAttachmentItem(prim) == item.UUID);
         }
@@ -219,7 +219,7 @@ namespace Radegast
         /// <param name="currentlyWorn">Current outfit</param>
         /// <param name="item">Item to check</param>
         /// <returns>True if the item is worn</returns>
-        public static bool IsWorn(List<AppearanceManager.WearableData> currentlyWorn, InventoryItem item)
+        public static bool IsWorn(IEnumerable<AppearanceManager.WearableData> currentlyWorn, InventoryItem item)
         {
             return currentlyWorn.Any(worn => worn.ItemID == item.UUID);
         }
