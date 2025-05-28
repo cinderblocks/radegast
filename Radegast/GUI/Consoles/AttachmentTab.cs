@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -51,19 +52,12 @@ namespace Radegast
 
         public void RefreshList()
         {
-            List<Primitive> attachments = client.Network.CurrentSim.ObjectsPrimitives.FindAll(
-                prim => (prim.ParentID == av.LocalID)
-            );
+            var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.ParentID == av.LocalID
+                select p.Value);
 
-            List<Control> toRemove = new List<Control>();
-
-            foreach (Control c in Controls)
-            {
-                if (c is AttachmentDetail)
-                {
-                    toRemove.Add(c);
-                }
-            }
+            var toRemove = Controls.OfType<AttachmentDetail>().Cast<Control>().ToList();
 
             foreach (var control in toRemove)
             {
@@ -71,21 +65,20 @@ namespace Radegast
                 control.Dispose();
             }
 
-            List<UUID> added = new List<UUID>();
+            var added = new List<UUID>();
 
-            int n = 0;
-            foreach (Primitive prim in attachments)
+            var n = 0;
+            foreach (var attachment in attachments)
             {
-                if (!added.Contains(prim.ID))
-                {
-                    AttachmentDetail ad = new AttachmentDetail(instance, av, prim);
-                    ad.Location = new Point(0, pnlControls.Height + n * ad.Height);
-                    ad.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
-                    ad.Width = ClientSize.Width;
-                    Controls.Add(ad);
-                    added.Add(prim.ID);
-                    n++;
-                }
+                if (added.Contains(attachment.ID)) { continue; }
+
+                var ad = new AttachmentDetail(instance, av, attachment);
+                ad.Location = new Point(0, pnlControls.Height + n * ad.Height);
+                ad.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+                ad.Width = ClientSize.Width;
+                Controls.Add(ad);
+                added.Add(attachment.ID);
+                n++;
             }
 
             AutoScrollPosition = new Point(0, 0);

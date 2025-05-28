@@ -1357,10 +1357,12 @@ namespace Radegast
                     {
                         ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
                         //TODO: add RLV support
-                        var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-                            p => p.ParentID == Client.Self.LocalID && CurrentOutfitFolder.GetAttachmentItem(p) == item.UUID);
-                        if (attached != null)
+                        var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                            p => p.Value.ParentID == Client.Self.LocalID 
+                                 && CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID);
+                        if (kvp.Value != null)
                         {
+                            var attached = kvp.Value;
                             ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
                         }
                         ctxInv.Items.Add(ctxItem);
@@ -1677,16 +1679,18 @@ namespace Radegast
                         break;
 
                     case "touch":
-                        var attached = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-                            p => p.ParentID == Client.Self.LocalID && CurrentOutfitFolder.GetAttachmentItem(p) == item.UUID);
-                        if (attached != null)
+                        var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                            p => p.Value.ParentID == Client.Self.LocalID 
+                                 && CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID);
+                        if (kvp.Value != null)
                         {
+                            var attached = kvp.Value;
                             Client.Self.Grab(attached.LocalID, 
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero, 0,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero);
                             Thread.Sleep(100);
-                            Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0, Vector3.Zero,
-                                Vector3.Zero, Vector3.Zero);
+                            Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0, 
+                                Vector3.Zero, Vector3.Zero, Vector3.Zero);
                         }
                         break;
 

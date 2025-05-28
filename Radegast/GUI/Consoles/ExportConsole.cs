@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
 using System.IO;
+using System.Linq;
 using OpenMetaverse;
 
 namespace Radegast
@@ -58,62 +59,58 @@ namespace Radegast
 					BeginInvoke(new MethodInvoker(() => LogMessage(format, args)));
 				return;
 			}
-			txtLog.AppendText(String.Format(format + "\r\n",args));
+			txtLog.AppendText(string.Format(format + "\r\n",args));
 			txtLog.SelectionStart = txtLog.TextLength;
 			txtLog.ScrollToCaret();
 		}
 		
 		void GatherInfo()
 		{
-		    uint localid;
-			
-			var exportPrim = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-			    prim => prim.LocalID == uLocalID
-			);
-			
-			if (exportPrim != null)
-			{
-				if (exportPrim.ParentID != 0)
-					localid = exportPrim.ParentID;
-				else
-					localid = exportPrim.LocalID;
-				
-				List<Primitive> prims = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(
-                    prim => (prim.LocalID == localid || prim.ParentID == localid)
-                );
-				
-				foreach (Primitive prim in prims)
-				{
-				    if (prim.Textures.DefaultTexture.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
-				        !Textures.Contains(prim.Textures.DefaultTexture.TextureID))
-				    {
-				        var texture = new UUID(prim.Textures.DefaultTexture.TextureID);
-				        Textures.Add(texture);
-						
-				        foreach (Primitive.TextureEntryFace face in prim.Textures.FaceTextures)
-				        {
-				            if (face != null &&
-				                face.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
-				                !Textures.Contains(face.TextureID))
-				            {
-				                texture = new UUID(face.TextureID);
-				                Textures.Add(texture);
-				            }
-				        }
-						
-				        if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
-				        {
-				            texture = new UUID(prim.Sculpt.SculptTexture);
-				            Textures.Add(texture);
-				        }
-				    }
-				}
-				objectName.Text = exportPrim.Properties.Name;
-				objectUUID.Text = exportPrim.ID.ToString();
-				primCount.Text = prims.Count.ToString();
-				textureCount.Text = Textures.Count.ToString();
-			}
-		}
+            var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                prim => prim.Value.LocalID == uLocalID);
+
+            if (kvp.Value == null) { return; }
+
+            var exportPrim = kvp.Value;
+            var localId = exportPrim.ParentID != 0 ? exportPrim.ParentID : exportPrim.LocalID;
+            
+            var prims = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.LocalID == localId || p.Value.ParentID == localId
+                select p.Value).ToList();
+            foreach (var prim in prims)
+            {
+                if (prim.Textures.DefaultTexture.TextureID == Primitive.TextureEntry.WHITE_TEXTURE ||
+                    Textures.Contains(prim.Textures.DefaultTexture.TextureID))
+                {
+                    continue;
+
+                }
+                var texture = new UUID(prim.Textures.DefaultTexture.TextureID);
+                Textures.Add(texture);
+					
+                foreach (var face in prim.Textures.FaceTextures)
+                {
+                    if (face != null &&
+                        face.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
+                        !Textures.Contains(face.TextureID))
+                    {
+                        texture = new UUID(face.TextureID);
+                        Textures.Add(texture);
+                    }
+                }
+					
+                if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
+                {
+                    texture = new UUID(prim.Sculpt.SculptTexture);
+                    Textures.Add(texture);
+                }
+            }
+            objectName.Text = exportPrim.Properties.Name;
+            objectUUID.Text = exportPrim.ID.ToString();
+            primCount.Text = prims.Count.ToString();
+            textureCount.Text = Textures.Count.ToString();
+        }
 		
 		void ValidatePath(string fname)
 		{

@@ -27,6 +27,7 @@
 
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using CoreJ2K;
 using OpenMetaverse.Assets;
@@ -145,7 +146,9 @@ namespace Radegast.WinForms
                             Pen penColor;
                             Brush brushColor;
 
-                            if (Client.Network.CurrentSim.ObjectsAvatars.Find(av => av.ID == coarse.Key) != null)
+                            var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
+                                av => av.Value.ID == coarse.Key);
+                            if (kvp.Value != null)
                             {
                                 brushColor = Brushes.PaleGreen;
                                 penColor = Pens.Green;

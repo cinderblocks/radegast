@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using OpenMetaverse;
@@ -184,68 +185,82 @@ namespace Radegast
         }
         public Primitive ToPrimitive(object target)
         {
-            Primitive thePrim = ((target is Primitive) ? (Primitive)target : null);
-            if (thePrim != null) return thePrim;
-            object oo = DeRef(target);
+            Primitive prim = ((target is Primitive primitive) ? primitive : null);
+            if (prim != null) { return prim; }
+            var oo = DeRef(target);
             if (oo != target)
             {
-                thePrim = ToAvatar(oo);
-                if (thePrim != null) return thePrim;
+                prim = ToAvatar(oo);
+                if (prim != null) { return prim; }
             }
-            UUID uuid = ((target is UUID) ? (UUID)target : UUID.Zero);
+            UUID uuid = ((target is UUID id) ? id : UUID.Zero);
             if (uuid != UUID.Zero)
-                thePrim = Client.Network.CurrentSim.ObjectsPrimitives.Find(prim => (prim.ID == uuid));
+            {
+                var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(p => p.Value.ID == uuid);;
+                prim = kvp.Value;
+            }
+
             if (uuid != UUID.Zero)
-                thePrim = Client.Network.CurrentSim.ObjectsAvatars.Find(prim => (prim.ID == uuid));
-            return thePrim;
+            {
+                var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(a => a.Value.ID == uuid);
+                prim = kvp.Value;
+            }
+
+            return prim;
         }
 
         public Avatar ToAvatar(object target)
         {
-            Primitive thePrim = ((target is Primitive) ? (Primitive)target : null);
-            if (thePrim is Avatar) return (Avatar)thePrim;
+            Primitive thePrim = (target as Primitive);
+            if (thePrim is Avatar avatar) { return avatar; }
             if (thePrim != null && thePrim.Properties != null && thePrim.Properties.OwnerID != UUID.Zero)
             {
                 target = thePrim.Properties.OwnerID;
             }
-            object oo = DeRef(target);
+            var oo = DeRef(target);
             if (oo != target)
             {
                 thePrim = ToAvatar(oo);
-                if (thePrim != null) return (Avatar)thePrim;
+                if (thePrim != null) { return (Avatar)thePrim; }
             }
-            UUID uuid = ((target is UUID) ? (UUID)target : UUID.Zero);
-            if (uuid != UUID.Zero)
-                thePrim = Client.Network.CurrentSim.ObjectsAvatars.Find(prim => (prim.ID == uuid));
+            UUID uuid = ((target is UUID id) ? id : UUID.Zero);
+            if (uuid == UUID.Zero) { return thePrim as Avatar; }
+            var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
+                prim => prim.Value.ID == uuid);
+            if (kvp.Value != null)
+            {
+                thePrim = kvp.Value;
+            }
+
             return (Avatar)thePrim;
         }
 
         public UUID ToUUID(object target)
         {
-            UUID uuid = ((target is UUID) ? (UUID)target : UUID.Zero);
-            if (target is FriendInfo)
+            UUID uuid = ((target is UUID id) ? id : UUID.Zero);
+            if (target is FriendInfo friendInfo)
             {
-                return ((FriendInfo) target).UUID;
+                return friendInfo.UUID;
             }
-            if (target is GroupMember)
+            if (target is GroupMember groupMember)
             {
-                return ((GroupMember)target).ID;
+                return groupMember.ID;
             }
-            if (target is Group)
+            if (target is Group group)
             {
-                return ((Group)target).ID;
+                return group.ID;
             }
-            if (target is Primitive)
+            if (target is Primitive primitive)
             {
-                return ((Primitive)target).ID;
+                return primitive.ID;
             }
-            if (target is Asset)
+            if (target is Asset asset)
             {
-                return ((Asset) target).AssetID;
+                return asset.AssetID;
             }
-            if (target is InventoryItem)
+            if (target is InventoryItem item)
             {
-                return ((InventoryItem)target).AssetUUID;
+                return item.AssetUUID;
             }
             if (uuid != UUID.Zero) return uuid;
             object oo = DeRef(target);
@@ -254,7 +269,7 @@ namespace Radegast
                 uuid = ToUUID(oo);
                 if (uuid != UUID.Zero) return uuid;
             }
-            string str = ((target is string) ? (string)target : null);
+            string str = ((target is string s) ? s : null);
             if (!string.IsNullOrEmpty(str))
             {
                 if (UUID.TryParse(str, out uuid))
@@ -263,9 +278,9 @@ namespace Radegast
                 }
             }
             Primitive prim = ToPrimitive(target);
-            if (prim != null) return prim.ID;
+            if (prim != null) { return prim.ID; }
             Avatar avatar = ToAvatar(target);
-            if (avatar != null) return avatar.ID;
+            if (avatar != null) { return avatar.ID; }
             return uuid;
         }
 

@@ -1,7 +1,7 @@
 // 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
-// Copyright (c) 2019-2020, Sjofn LLC
+// Copyright (c) 2019-2025, Sjofn LLC
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using System.Threading;
 using CoreJ2K;
@@ -570,7 +571,10 @@ namespace Radegast.Rendering
                     if (Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(RootPrimLocalID))
                     {
                         UpdatePrimBlocking(Client.Network.CurrentSim.ObjectsPrimitives[RootPrimLocalID]);
-                        var children = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == RootPrimLocalID);
+                        var children = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                            where p.Value != null
+                            where p.Value.ParentID == RootPrimLocalID
+                            select p.Value).ToList();
                         children.ForEach(UpdatePrimBlocking);
                     }
                 }
@@ -889,9 +893,9 @@ namespace Radegast.Rendering
 
             lock (Prims)
             {
-                if (Prims.ContainsKey(prim.LocalID))
+                if (Prims.TryGetValue(prim.LocalID, out var existing))
                 {
-                    existingMesh = Prims[prim.LocalID];
+                    existingMesh = existing;
                 }
             }
 

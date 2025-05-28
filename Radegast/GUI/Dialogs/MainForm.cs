@@ -30,6 +30,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Resources;
 using System.IO;
+using System.Linq;
 using System.Web;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
@@ -1530,14 +1531,17 @@ namespace Radegast
 
         private void myAttachmentsToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            Avatar av = client.Network.CurrentSim.ObjectsAvatars.Find(a => a.ID == client.Self.AgentID);
 
-            if (av == null)
+            var kvp = client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
+                a => a.Value.ID == client.Self.AgentID);
+
+            if (kvp.Value == null)
             {
                 TabConsole.DisplayNotificationInChat("Unable to find my avatar!", ChatBufferTextStyle.Error);
                 return;
             }
 
+            var av = kvp.Value;
             if (!instance.TabConsole.TabExists("AT: " + av.ID))
             {
                 instance.TabConsole.AddTab("AT: " + av.ID, "My Attachments", new AttachmentTab(instance, av));

@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -19,6 +19,7 @@
  */
 
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
@@ -28,13 +29,13 @@ namespace Radegast
 {
     public class PrimSerializer
     {
-        List<UUID> Textures = new List<UUID>();
-        UUID SelectedObject = UUID.Zero;
+        private List<UUID> Textures = new List<UUID>();
+        private UUID SelectedObject = UUID.Zero;
 
-        Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
-        AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
+        private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
+        private readonly AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
 
-        private GridClient Client;
+        private readonly GridClient Client;
 
         public PrimSerializer(GridClient c)
         {
@@ -49,9 +50,10 @@ namespace Radegast
 
         public string GetSerializedAttachmentPrims(Simulator sim, uint localID)
         {
-            List<Primitive> prims = sim.ObjectsPrimitives.FindAll(
-                prim => (prim.LocalID == localID || prim.ParentID == localID)
-            );
+            List<Primitive> prims = (from p in sim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.LocalID == localID || p.Value.ParentID == localID
+                select p.Value).ToList();
 
             RequestObjectProperties(prims, 500);
 
@@ -68,25 +70,25 @@ namespace Radegast
 
         public string GetSerializedPrims(Simulator sim, uint localID)
         {
-            Primitive p;
-            sim.ObjectsPrimitives.TryGetValue(localID, out p);
+            sim.ObjectsPrimitives.TryGetValue(localID, out var prim);
 
-            if (p == null) {
-                return "";
+            if (prim == null) {
+                return string.Empty;
             }
 
-            uint rootPrim = p.ParentID == 0 ? p.LocalID : p.ParentID;
+            uint rootPrim = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
 
-            List<Primitive> prims = sim.ObjectsPrimitives.FindAll(
-                prim => (prim.LocalID == rootPrim || prim.ParentID == rootPrim)
-            );
+            var prims = (from p in sim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.LocalID == rootPrim || p.Value.ParentID == rootPrim
+                select p.Value).ToList();
 
             RequestObjectProperties(prims, 500);
 
             return OSDParser.SerializeLLSDXmlString(ClientHelpers.PrimListToOSD(prims));
         }
 
-        private bool RequestObjectProperties(List<Primitive> objects, int msPerRequest)
+        private bool RequestObjectProperties(IReadOnlyList<Primitive> objects, int msPerRequest)
         {
             // Create an array of the local IDs of all the prims we are requesting properties for
             uint[] localids = new uint[objects.Count];
@@ -116,7 +118,7 @@ namespace Radegast
             return true;
         }
 
-        void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
             lock (PrimsWaiting)
             {
