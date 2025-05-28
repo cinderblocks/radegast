@@ -485,8 +485,9 @@ namespace SimpleBuilderNamespace
 
             lock (Prims)
             {
-                client.Network.CurrentSim.ObjectsPrimitives.ForEach(prim =>
+                foreach (var kvp in client.Network.CurrentSim.ObjectsPrimitives)
                 {
+                    var prim = kvp.Value;
                     int distance = (int)Vector3.Distance(prim.Position, location);
                     if (prim.ParentID == client.Self.LocalID)
                     {
@@ -500,9 +501,10 @@ namespace SimpleBuilderNamespace
                             propRequester.RequestProps(prim);
                         }
                     }
-                });
+                }
+                lstPrims.VirtualListSize = Prims.Count;
             }
-            lstPrims.VirtualListSize = Prims.Count;
+            
             lstPrims.Invalidate();
         }
 

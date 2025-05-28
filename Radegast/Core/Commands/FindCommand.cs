@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
@@ -159,20 +160,21 @@ namespace Radegast.Commands
                     Vector3 targetPos = Vector3.Zero;
 
                     // try to find where they are
-                    Avatar avi = Client.Network.CurrentSim.ObjectsAvatars.Find(av => av.ID == person);
+                    var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
+                        av => av.Value.ID == person);
 
-                    if (avi != null)
+                    if (kvp.Value != null)
                     {
+                        var avi = kvp.Value;
                         if (avi.ParentID == 0)
                         {
                             targetPos = avi.Position;
                         }
                         else
                         {
-                            Primitive theirSeat;
-                            if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(avi.ParentID, out theirSeat))
+                            if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seatObj))
                             {
-                                targetPos = theirSeat.Position + avi.Position;
+                                targetPos = seatObj.Position + avi.Position;
                             }
                         }
                     }

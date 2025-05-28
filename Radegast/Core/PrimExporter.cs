@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -34,16 +34,16 @@ namespace Radegast
 	/// </summary>
 	public class PrimExporter
 	{
-		List<UUID> Textures = new List<UUID>();
-		AutoResetEvent GotPermissionsEvent = new AutoResetEvent(false);
-		Primitive.ObjectProperties Properties;
-		bool GotPermissions = false;
-		UUID SelectedObject = UUID.Zero;
-		
-		Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
-		AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
-		GridClient Client;
-		string ExportDirectory;
+        private List<UUID> Textures = new List<UUID>();
+        private readonly AutoResetEvent GotPermissionsEvent = new AutoResetEvent(false);
+        private Primitive.ObjectProperties Properties;
+        private bool GotPermissions = false;
+        private UUID SelectedObject = UUID.Zero;
+
+        private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
+        private readonly AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
+        private readonly GridClient Client;
+        private string ExportDirectory;
 		private uint uLocalID;
 		public delegate void LogMessageDelegate(string format, params object[] args);
 		public LogMessageDelegate LogMessage;
@@ -63,20 +63,17 @@ namespace Radegast
 		
 		public void ExportToFile(string filename, uint localID)
 		{
-		    uint localid;
-			
 			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename),Path.GetFileNameWithoutExtension(filename));
 			Directory.CreateDirectory(ExportDirectory);
 			
-			var exportPrim = Client.Network.CurrentSim.ObjectsPrimitives.Find(
-			    prim => prim.LocalID == localID
-			);
+			var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(prim => prim.Value.LocalID == localID);
 			
-			if (exportPrim != null)
+			if (kvp.Value != null)
 			{
-				localid = exportPrim.ParentID != 0 ? exportPrim.ParentID : exportPrim.LocalID;
+				var exportPrim = kvp.Value;
+				var localId = exportPrim.ParentID != 0 ? exportPrim.ParentID : exportPrim.LocalID;
 				
-				uLocalID = localid;
+				uLocalID = localId;
 				// Check for export permission first
 				Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, exportPrim.ID);
 				GotPermissionsEvent.WaitOne(1000 * 10, false);
@@ -85,76 +82,73 @@ namespace Radegast
 				{
 					throw new Exception("Couldn't fetch permissions for the requested object, try again");
 				}
-				else
-				{
-					GotPermissions = false;
 
-					// Must be Owner and Creator of the item to export, per Linden Lab's TOS
-					if (!(Properties.CreatorID == Client.Self.AgentID &&
-					     Properties.OwnerID == Client.Self.AgentID))
-					{
-						string msg = "That object is owned by {0}, Created by {1} we don't have permission to export it. Your UUID: {2}";
-						throw new Exception(String.Format(msg,Properties.OwnerID,Properties.CreatorID,Client.Self.AgentID));
-					}
+                GotPermissions = false;
+
+                // Must be Owner and Creator of the item to export, per Linden Lab's TOS
+                if (!(Properties.CreatorID == Client.Self.AgentID &&
+                      Properties.OwnerID == Client.Self.AgentID))
+                {
+                    string msg = "That object is owned by {0}, Created by {1} we don't have permission to export it. Your UUID: {2}";
+                    throw new Exception(String.Format(msg,Properties.OwnerID,Properties.CreatorID,Client.Self.AgentID));
+                }
+
+                var prims = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                    where p.Value != null 
+                    where p.Value.LocalID == localId || p.Value.ParentID == localId
+                    select p.Value).ToList();
 					
-					List<Primitive> prims = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(
-                        prim => (prim.LocalID == localid || prim.ParentID == localid)
-                    );
+                bool complete = RequestObjectProperties(prims, 250);
 					
-					bool complete = RequestObjectProperties(prims, 250);
+                string output = OSDParser.SerializeLLSDXmlString(Helpers.PrimListToOSD(prims));
+                File.WriteAllText(filename,output);
 					
-					string output = OSDParser.SerializeLLSDXmlString(Helpers.PrimListToOSD(prims));
-					File.WriteAllText(filename,output);
+                var textureRequests = new List<ImageRequest>();
 					
-					List<ImageRequest> textureRequests = new List<ImageRequest>();
-					
-					lock(Textures)
-					{
-						foreach (var prim in prims)
+                lock(Textures)
+                {
+                    foreach (var prim in prims)
+                    {
+                        UUID texture;
+							
+                        if (prim.Textures.DefaultTexture.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
+                            !Textures.Contains(prim.Textures.DefaultTexture.TextureID))
                         {
-                            UUID texture;
+                            texture = new UUID(prim.Textures.DefaultTexture.TextureID);
+                            Textures.Add(texture);
+                        }
 							
-                            if (prim.Textures.DefaultTexture.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
-                                !Textures.Contains(prim.Textures.DefaultTexture.TextureID))
+                        foreach (var tex in prim.Textures.FaceTextures)
+                        {
+                            if (tex != null &&
+                                tex.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
+                                !Textures.Contains(tex.TextureID))
                             {
-                                texture = new UUID(prim.Textures.DefaultTexture.TextureID);
-                                Textures.Add(texture);
-                            }
-							
-                            foreach (var tex in prim.Textures.FaceTextures)
-                            {
-                                if (tex != null &&
-                                    tex.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
-                                    !Textures.Contains(tex.TextureID))
-                                {
-                                    texture = new UUID(tex.TextureID);
-                                    Textures.Add(texture);
-                                }
-                            }
-							
-                            if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
-                            {
-                                texture = new UUID(prim.Sculpt.SculptTexture);
+                                texture = new UUID(tex.TextureID);
                                 Textures.Add(texture);
                             }
                         }
+							
+                        if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
+                        {
+                            texture = new UUID(prim.Sculpt.SculptTexture);
+                            Textures.Add(texture);
+                        }
+                    }
 						
-						FindImagesInInventory();
+                    FindImagesInInventory();
 
-                        textureRequests.AddRange(Textures.Select(t => new ImageRequest(t, ImageType.Normal, 1013000.0f, 0)));
+                    textureRequests.AddRange(Textures.Select(t => new ImageRequest(t, ImageType.Normal, 1013000.0f, 0)));
 
-                        foreach (ImageRequest request in textureRequests)
-						{
-							Client.Assets.RequestImage(request.ImageID, request.Type, Assets_OnImageReceived);
-						}
-					}
-				}
-			}
+                    foreach (var request in textureRequests)
+                    {
+                        Client.Assets.RequestImage(request.ImageID, request.Type, Assets_OnImageReceived);
+                    }
+                }
+            }
 			else
 			{
-				throw new Exception("Couldn't find id " + localID + " in the " +
-				                    Client.Network.CurrentSim.ObjectsPrimitives.Count + 
-				                    " objects currently indexed in the current simulator.");
+				throw new Exception($"Couldn't find id{localID} in objects currently indexed in the current simulator.");
 			}
 		}
 		
@@ -226,8 +220,8 @@ namespace Radegast
 			
 			return AllPropertiesReceived.WaitOne(2000 + msPerRequest * objects.Count, false);
 		}
-		
-		void Objects_OnObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
+
+        private void Objects_OnObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
 		{
 			Properties = new Primitive.ObjectProperties();
 			Properties.SetFamilyProperties(e.Properties);
@@ -241,8 +235,8 @@ namespace Radegast
 				GotPermissionsEvent.Set();
 			}
 		}
-		
-		void Objects_OnObjectProperties(object sender, ObjectPropertiesEventArgs e)
+
+        private void Objects_OnObjectProperties(object sender, ObjectPropertiesEventArgs e)
 		{
 			if (e.Properties.ObjectID == Properties.ObjectID)
 			{
@@ -262,8 +256,8 @@ namespace Radegast
 					AllPropertiesReceived.Set();
 			}
 		}
-		
-		void Assets_OnImageReceived(TextureRequestState state, AssetTexture asset)
+
+        private void Assets_OnImageReceived(TextureRequestState state, AssetTexture asset)
 		{
 			if (state == TextureRequestState.Finished && Textures.Contains(asset.AssetID))
 			{

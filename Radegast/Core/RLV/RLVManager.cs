@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -206,8 +206,9 @@ namespace Radegast
                 }
             }
 
-            foreach (var obj in objects.Where(obj => client.Network.CurrentSim.ObjectsPrimitives
-                                           .Find(p => p.ID == obj) == null))
+            foreach (var obj in from obj in objects 
+                     let found = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                         p => p.Value.ID == obj) where found.Value == null select obj)
             {
                 Clear(obj);
             }
@@ -343,12 +344,17 @@ namespace Radegast
                     case "getpath":
                         if (int.TryParse(rule.Param, out chan) && chan > 0)
                         {
-                            var attachment = client.Network.CurrentSim.ObjectsPrimitives.Find(p => p.ParentID == client.Self.LocalID && p.ID == rule.Sender);
-                            if (attachment != null && client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                            var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                p => p.Value.ParentID == client.Self.LocalID && p.Value.ID == rule.Sender);
+                            if (kvp.Value != null)
                             {
-                                var item = client.Inventory.Store.GetNodeFor(CurrentOutfitFolder.GetAttachmentItem(attachment));
-                                var path = FindFullInventoryPath(item, "").Substring(5);
-                                Respond(chan, path);
+                                var attachment = kvp.Value;
+                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment))) {
+                                    var item = client.Inventory.Store.GetNodeFor(
+                                        CurrentOutfitFolder.GetAttachmentItem(attachment));
+                                    var path = FindFullInventoryPath(item, "").Substring(5);
+                                    Respond(chan, path);
+                                }
                             }
                         }
                         break;
@@ -358,18 +364,25 @@ namespace Radegast
                         {
                             if (UUID.TryParse(rule.Option, out UUID uuid) && uuid != UUID.Zero)
                             {
-                                var attachment = client.Network.CurrentSim.ObjectsPrimitives.Find(p => p.ParentID == client.Self.LocalID && p.ID == uuid);
-                                if (attachment != null && client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                    p => p.Value.ParentID == client.Self.LocalID && p.Value.ID == uuid);
+                                if (kvp.Value != null)
                                 {
-                                    var item = client.Inventory.Store.GetNodeFor(CurrentOutfitFolder.GetAttachmentItem(attachment));
-                                    var path = FindFullInventoryPath(item, "");
-                                    if (path.StartsWith("#RLV"))
+                                    var attachment = kvp.Value;
+                                    if (client.Inventory.Store.Contains(
+                                            CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                     {
-                                        Respond(chan, "getpathnew: " + path.Substring(5));
-                                    }
-                                    else
-                                    {
-                                        Respond(chan, "getpathnew: ");
+                                        var item = client.Inventory.Store.GetNodeFor(
+                                            CurrentOutfitFolder.GetAttachmentItem(attachment));
+                                        var path = FindFullInventoryPath(item, "");
+                                        if (path.StartsWith("#RLV"))
+                                        {
+                                            Respond(chan, "getpathnew: " + path.Substring(5));
+                                        }
+                                        else
+                                        {
+                                            Respond(chan, "getpathnew: ");
+                                        }
                                     }
                                 }
                                 else
@@ -383,13 +396,11 @@ namespace Radegast
                     case "getsitid":
                         if (int.TryParse(rule.Param, out chan) && chan > 0)
                         {
-                            Avatar me;
-                            if (client.Network.CurrentSim.ObjectsAvatars.TryGetValue(client.Self.LocalID, out me))
+                            if (client.Network.CurrentSim.ObjectsAvatars.TryGetValue(client.Self.LocalID, out var me))
                             {
                                 if (me.ParentID != 0)
                                 {
-                                    Primitive seat;
-                                    if (client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(me.ParentID, out seat))
+                                    if (client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(me.ParentID, out var seat))
                                     {
                                         Respond(chan, seat.ID.ToString());
                                         break;
@@ -540,7 +551,10 @@ namespace Radegast
                         if (int.TryParse(rule.Param, out chan) && chan > 0)
                         {
                             string res = "";
-                            var attachments = client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == client.Self.LocalID);
+
+                            var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives 
+                                where p.Value != null where p.Value.ParentID == client.Self.LocalID select p.Value).ToList();
+
                             if (attachments.Count > 0)
                             {
                                 var myPoints = new List<AttachmentPoint>(attachments.Count);
@@ -587,10 +601,20 @@ namespace Radegast
                                 var point = RLVAttachments.Find(a => a.Name == rule.Option);
                                 if (point.Name == rule.Option)
                                 {
-                                    var attachment = client.Network.CurrentSim.ObjectsPrimitives.Find(p => p.ParentID == client.Self.LocalID && p.PrimData.AttachmentPoint == point.Point);
-                                    if (attachment != null && client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                    var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                        p => p.Value.ParentID == client.Self.LocalID 
+                                             && p.Value.PrimData.AttachmentPoint == point.Point);
+                                    if (kvp.Value != null)
                                     {
-                                        instance.COF.Detach(client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem);
+                                        var attachment = kvp.Value;
+                                        if (client.Inventory.Store.Contains(
+                                                CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                        {
+                                            instance.COF.Detach(
+                                                client.Inventory.Store[
+                                                    CurrentOutfitFolder
+                                                        .GetAttachmentItem(attachment)] as InventoryItem);
+                                        }
                                     }
                                 }
                                 else
@@ -598,20 +622,25 @@ namespace Radegast
                                     InventoryNode folder = FindFolder(rule.Option);
                                     if (folder != null)
                                     {
-                                        var outfit = (from item in folder.Nodes.Values where CurrentOutfitFolder.CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
+                                        var outfit = (from item in folder.Nodes.Values 
+                                            where CurrentOutfitFolder.CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
                                         instance.COF.RemoveFromOutfit(outfit);
                                     }
                                 }
                             }
                             else
                             {
-                                client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == client.Self.LocalID).ForEach(attachment =>
+                                var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                                    where p.Value != null
+                                    where p.Value.ParentID == client.Self.LocalID
+                                    select p.Value);
+                                foreach (var attachment in attachments)
                                 {
                                     if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                     {
                                         instance.COF.Detach(client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem);
                                     }
-                                });
+                                }
                             }
                         }
                         break;
@@ -635,15 +664,21 @@ namespace Radegast
                     case "detachallthis":
                         if (rule.Param == "force")
                         {
-                            var attachment = client.Network.CurrentSim.ObjectsPrimitives.Find(p => p.ParentID == client.Self.LocalID && p.ID == rule.Sender);
-                            if (attachment != null && client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                            var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                p => p.Value.ParentID == client.Self.LocalID && p.Value.ID == rule.Sender);
+                            if (kvp.Value != null)
                             {
-                                var folder = client.Inventory.Store.GetNodeFor(CurrentOutfitFolder.GetAttachmentItem(attachment)).Parent;
-                                if (folder != null)
+                                var attachment = kvp.Value;
+                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                 {
-                                    List<InventoryItem> outfit = new List<InventoryItem>();
-                                    GetAllItems(folder, true, ref outfit);
-                                    instance.COF.RemoveFromOutfit(outfit);
+                                    var folder = client.Inventory.Store
+                                        .GetNodeFor(CurrentOutfitFolder.GetAttachmentItem(attachment)).Parent;
+                                    if (folder != null)
+                                    {
+                                        var outfit = new List<InventoryItem>();
+                                        GetAllItems(folder, true, ref outfit);
+                                        instance.COF.RemoveFromOutfit(outfit);
+                                    }
                                 }
                             }
                         }
@@ -842,8 +877,10 @@ namespace Radegast
         protected string GetWornIndicator(InventoryNode node)
         {
             var currentOutfit = new List<AppearanceManager.WearableData>(client.Appearance.GetWearables());
-            var currentAttachments = 
-                client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == client.Self.LocalID);
+            var currentAttachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.ParentID == client.Self.LocalID
+                select p.Value).ToList();
             int myItemsCount = 0;
             int myItemsWornCount = 0;
 
@@ -1021,9 +1058,12 @@ namespace Radegast
         {
             if (!Enabled || item == null) return true;
 
-            List<Primitive> myAtt = 
-                client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == client.Self.LocalID);
-            foreach (var att in myAtt.Where(att => CurrentOutfitFolder.GetAttachmentItem(att) == item.UUID))
+            var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.ParentID == client.Self.LocalID
+                where CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID
+                select p.Value);
+            foreach (var att in attachments.Where(att => CurrentOutfitFolder.GetAttachmentItem(att) == item.UUID))
             {
                 if (rules.FindAll(r => r.Behaviour == "detach" && r.Sender == att.ID).Count > 0)
                 {

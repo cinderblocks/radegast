@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Timers;
 using System.Threading;
 
@@ -324,13 +325,13 @@ namespace Radegast
             position = Vector3.Zero;
 
             Primitive avi = null;
-
             // First try the object tracker
             foreach (var s in Simulators)
             {
-                avi = s.ObjectsAvatars.Find(av => av.ID == person);
-                if (avi != null)
+                var kvp = s.ObjectsAvatars.FirstOrDefault(av => av.Value.ID == person);
+                if (kvp.Value != null)
                 {
+                    avi = kvp.Value;
                     sim = s;
                     break;
                 }
@@ -339,9 +340,10 @@ namespace Radegast
             {
                 foreach (var s in Simulators)
                 {
-                    avi = s.ObjectsPrimitives.Find(av => av.ID == person);
-                    if (avi != null)
+                    var kvp = s.ObjectsPrimitives.FirstOrDefault(av => av.Value.ID == person);
+                    if (kvp.Value != null)
                     {
+                        avi = kvp.Value;
                         sim = s;
                         break;
                     }
@@ -355,8 +357,7 @@ namespace Radegast
                 }
                 else
                 {
-                    Primitive seat;
-                    if (sim.ObjectsPrimitives.TryGetValue(avi.ParentID, out seat))
+                    if (sim.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seat))
                     {
                         position = seat.Position + avi.Position * seat.Rotation;
                     }
@@ -366,9 +367,9 @@ namespace Radegast
             {
                 foreach (var s in Simulators)
                 {
-                    if (s.AvatarPositions.ContainsKey(person))
+                    if (s.AvatarPositions.TryGetValue(person, out var avatarPosition))
                     {
-                        position = s.AvatarPositions[person];
+                        position = avatarPosition;
                         sim = s;
                         break;
                     }
@@ -595,19 +596,21 @@ namespace Radegast
         public Quaternion AvatarRotation(Simulator sim, UUID avID)
         {
             Quaternion rot = Quaternion.Identity;
-            Avatar av = sim.ObjectsAvatars.Find(a => a.ID == avID);
+            var kvp = sim.ObjectsAvatars.FirstOrDefault(a => a.Value.ID == avID);
 
-            if (av == null)
+            if (kvp.Value == null)
+            {
                 return rot;
+            }
 
+            var av = kvp.Value;
             if (av.ParentID == 0)
             {
                 rot = av.Rotation;
             }
             else
             {
-                Primitive prim;
-                if (sim.ObjectsPrimitives.TryGetValue(av.ParentID, out prim))
+                if (sim.ObjectsPrimitives.TryGetValue(av.ParentID, out var prim))
                 {
                     rot = prim.Rotation + av.Rotation;
                 }
@@ -619,27 +622,20 @@ namespace Radegast
 
         public Vector3 AvatarPosition(Simulator sim, UUID avID)
         {
-            Vector3 pos = Vector3.Zero;
-            Avatar av = sim.ObjectsAvatars.Find(a => a.ID == avID);
-            if (av != null)
+            var pos = Vector3.Zero;
+            var av = sim.ObjectsAvatars.FirstOrDefault(a => a.Value.ID == avID);
+            if (av.Value != null)
             {
-                return AvatarPosition(sim, av);
+                return AvatarPosition(sim, av.Value);
             }
-            else
-            {
-                Vector3 coarse;
-                if (sim.AvatarPositions.TryGetValue(avID, out coarse))
-                {
-                    if (coarse.Z > 0.01)
-                        return coarse;
-                }
-            }
-            return pos;
+
+            if (!sim.AvatarPositions.TryGetValue(avID, out var coarse)) { return pos; }
+            return coarse.Z > 0.01 ? coarse : pos;
         }
 
         public Vector3 AvatarPosition(Simulator sim, Avatar av)
         {
-            Vector3 pos = Vector3.Zero;
+            var pos = Vector3.Zero;
 
             if (av.ParentID == 0)
             {
@@ -647,8 +643,7 @@ namespace Radegast
             }
             else
             {
-                Primitive prim;
-                if (sim.ObjectsPrimitives.TryGetValue(av.ParentID, out prim))
+                if (sim.ObjectsPrimitives.TryGetValue(av.ParentID, out var prim))
                 {
                     pos = prim.Position + av.Position;
                 }

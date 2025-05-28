@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using Radegast;
@@ -300,17 +301,18 @@ namespace Radegast
                             continue;
                         }
 
-                        //the AvatarPostions is checked once more because it changes wildly on its own
+                        //the AvatarPositions is checked once more because it changes wildly on its own
                         //even though the !existing should have been adequate
-                        Vector3 pos;
-                        if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out pos))
+                        if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
                         {
                             // not here anymore
                             removed.Add(key);
                             continue;
                         }
 
-                        Avatar foundAvi = e.Simulator.ObjectsAvatars.Find(av => av.ID == key);
+                        var kvp = e.Simulator.ObjectsAvatars.FirstOrDefault(
+                            av => av.Value.ID == key);
+                        var foundAvi = kvp.Value;
 
                         // CoarseLocationUpdate gives us height of 0 when actual height is
                         // between 1024-4096m on OpenSim grids. 1020 on SL
@@ -325,9 +327,9 @@ namespace Radegast
                                 }
                                 else
                                 {
-                                    if (e.Simulator.ObjectsPrimitives.ContainsKey(foundAvi.ParentID))
+                                    if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
                                     {
-                                        pos.Z = e.Simulator.ObjectsPrimitives[foundAvi.ParentID].Position.Z;
+                                        pos.Z = primitive.Position.Z;
                                     }
                                 }
                             }
@@ -637,8 +639,13 @@ namespace Radegast
             }
             else
             {
-                currentAvatar = client.Network.CurrentSim.ObjectsAvatars.Find(a =>
-                    a.ID == (UUID) lvwObjects.SelectedItems[0].Tag);
+
+                var kvp = client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
+                    a => a.Value.ID == (UUID) lvwObjects.SelectedItems[0].Tag);
+                if (kvp.Value != null)
+                {
+                    currentAvatar = kvp.Value;
+                }
 
                 ctxPay.Enabled = ctxStartIM.Enabled = ctxProfile.Enabled = true;
                 ctxPoint.Enabled = ctxFollow.Enabled = ctxTextures.Enabled = ctxMaster.Enabled = ctxAttach.Enabled = ctxAnim.Enabled = currentAvatar != null;

@@ -531,10 +531,10 @@ namespace Radegast.Rendering
         {
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
 
-            var a = e.Simulator.ObjectsAvatars.Find(av => av.ID == e.AvatarID);
-            if (a != null)
+            var a = e.Simulator.ObjectsAvatars.FirstOrDefault(av => av.Value.ID == e.AvatarID);
+            if (a.Value != null)
             {
-                AddAvatarToScene(a);
+                AddAvatarToScene(a.Value);
             }
         }
 
@@ -1148,31 +1148,44 @@ namespace Radegast.Rendering
             {
                 if (RenderSettings.PrimitiveRenderingEnabled)
                 {
-                    var mainPrims = Client.Network.CurrentSim.ObjectsPrimitives.FindAll(root => root.ParentID == 0);
+                    var mainPrims = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                        where p.Value != null
+                        where p.Value.ParentID == 0
+                        select p.Value);
                     foreach (var mainPrim in mainPrims)
                     {
                         UpdatePrimBlocking(mainPrim);
-                        Client.Network.CurrentSim.ObjectsPrimitives
-                            .FindAll(child => child.ParentID == mainPrim.LocalID)
-                            .ForEach(UpdatePrimBlocking);
+                        var children = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                            where p.Value != null
+                            where p.Value.ParentID == mainPrim.LocalID
+                            select p.Value).ToList();
+                        children.ForEach(UpdatePrimBlocking);
                     }
                 }
 
                 if (RenderSettings.AvatarRenderingEnabled)
                 {
-                    var avis = Client.Network.CurrentSim.ObjectsAvatars.FindAll((Avatar a) => true);
+                    var avis = (from a in Client.Network.CurrentSim.ObjectsAvatars 
+                            where a.Value != null select a.Value);
                     foreach (var avatar in avis)
                     {
                         UpdatePrimBlocking(avatar);
-                        Client.Network.CurrentSim.ObjectsPrimitives
-                            .FindAll(child => child.ParentID == avatar.LocalID)
-                            .ForEach(attachedPrim =>
+                        var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                            where p.Value != null
+                            where p.Value.ParentID == avatar.LocalID
+                            select p.Value);
+                        foreach (var attachment in attachments)
+                        {
+                            UpdatePrimBlocking(attachment);
+                            var attachedChildren = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                                where p.Value != null
+                                where p.Value.ParentID == attachment.LocalID
+                                select p.Value);
+                            foreach (var attachedChild in  attachedChildren)
                             {
-                                UpdatePrimBlocking(attachedPrim);
-                                Client.Network.CurrentSim.ObjectsPrimitives
-                                    .FindAll(child => child.ParentID == attachedPrim.LocalID)
-                                    .ForEach(UpdatePrimBlocking);
-                            });
+                                UpdatePrimBlocking(attachedChild);
+                            }
+                        }
                     }
                 }
             });

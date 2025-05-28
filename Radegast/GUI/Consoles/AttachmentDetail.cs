@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -19,7 +19,7 @@
  */
 
 using System;
-using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using System.Threading;
 
@@ -29,10 +29,10 @@ namespace Radegast
 {
     public partial class AttachmentDetail : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient client => instance.Client;
         private Avatar av;
-        private Primitive attachment;
+        private readonly Primitive attachment;
 
         public AttachmentDetail(RadegastInstance instance, Avatar av, Primitive attachment)
         {
@@ -91,20 +91,21 @@ namespace Radegast
                 btnTouch.Visible = false;
             }
 
-            List<Primitive> parts = client.Network.CurrentSim.ObjectsPrimitives.FindAll(
-                prim => (prim.LocalID == attachment.LocalID || prim.ParentID == attachment.LocalID)
-            );
+            // FIXME: Seems overkill
+            var parts = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.LocalID == attachment.LocalID || p.Value.ParentID == attachment.LocalID
+                select p.Value).ToList();
 
             lblPrimCount.Text = $"Prims: {parts.Count}";
         }
 
         void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
-            if (e.Properties.ObjectID == attachment.ID)
-            {
-                attachment.Properties = e.Properties;
-                UpdateControls();
-            }
+            if (e.Properties.ObjectID != attachment.ID) { return; }
+
+            attachment.Properties = e.Properties;
+            UpdateControls();
         }
 
         private void btnTouch_Click(object sender, EventArgs e)

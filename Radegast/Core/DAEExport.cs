@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -24,6 +24,7 @@ using System.Text;
 using System.Xml;
 using System.IO;
 using System.Drawing;
+using System.Linq;
 using System.Threading;
 using CoreJ2K;
 using OpenMetaverse;
@@ -102,15 +103,18 @@ namespace Radegast
             Primitive root = new Primitive(RootPrim) {Position = Vector3.Zero};
             Prims.Add(root);
 
-            sim.ObjectsPrimitives
-                .FindAll(p => p.ParentID == RootPrim.LocalID)
-                .ForEach(p =>
-                    {
-                        var child = new Primitive(p);
-                        child.Position = root.Position + child.Position * root.Rotation;
-                        child.Rotation = root.Rotation * child.Rotation;
-                        Prims.Add(child);
-                    });
+            var objs = (from p in sim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.ParentID == RootPrim.LocalID
+                select p.Value);
+
+            foreach (var child in objs.Select(obj => new Primitive(obj)))
+            {
+                child.Position = root.Position + child.Position * root.Rotation;
+                child.Rotation = root.Rotation * child.Rotation;
+                Prims.Add(child);
+            }
+
             List<uint> select = new List<uint>(Prims.Count);
             Prims.ForEach(p => select.Add(p.LocalID));
             Client.Objects.SelectObjects(sim, select.ToArray(), true);

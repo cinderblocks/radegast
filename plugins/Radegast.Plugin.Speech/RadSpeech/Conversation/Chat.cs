@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Linq;
 using OpenMetaverse;
 
 namespace RadegastSpeech.Conversation
@@ -42,8 +43,8 @@ namespace RadegastSpeech.Conversation
                 OnChat;
             control.instance.Client.Self.AlertMessage +=
                 OnAlertMessage;
-            Radegast.RadegastTab chatTab = control.instance.TabConsole.Tabs["chat"];
-            Radegast.ChatConsole chatscreen = (Radegast.ChatConsole)chatTab.Control;
+            var chatTab = control.instance.TabConsole.Tabs["chat"];
+            var chatscreen = (Radegast.ChatConsole)chatTab.Control;
 
             nearby = chatscreen.lvwObjects;
             nearby.SelectedIndexChanged += nearby_SelectedIndexChanged;
@@ -69,8 +70,8 @@ namespace RadegastSpeech.Conversation
             
             if (control.instance.TabConsole != null && control.instance.TabConsole.TabExists("chat"))
             {
-                Radegast.RadegastTab chatTab = control.instance.TabConsole.Tabs["chat"];
-                Radegast.ChatConsole chatscreen = (Radegast.ChatConsole)chatTab.Control;
+                var chatTab = control.instance.TabConsole.Tabs["chat"];
+                var chatscreen = (Radegast.ChatConsole)chatTab.Control;
 
                 nearby = chatscreen.lvwObjects;
                 nearby.SelectedIndexChanged -= nearby_SelectedIndexChanged;
@@ -125,7 +126,7 @@ namespace RadegastSpeech.Conversation
                     break;
             }
 
-            string message = e.Message;
+            var message = e.Message;
 
             // Ignore empty messages.
             if (message == "") return;
@@ -304,28 +305,27 @@ namespace RadegastSpeech.Conversation
         {
             if (nearby.SelectedItems.Count != 0)
             {
-                Avatar currentAvatar = Client.Network.CurrentSim.ObjectsAvatars.Find(delegate(Avatar a)
-                {
-                    return a.ID == (UUID)nearby.SelectedItems[0].Tag;
-                });
+                var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(a =>
+                    a.Value.ID == (UUID)nearby.SelectedItems[0].Tag);
 
-                if (currentAvatar == null)
+                if (kvp.Value == null)
                 {
                     // Not sure why this would happen.
                     Talker.SayMore("Avatar in another region.");
                     return;
                 }
+                var currentAvatar = kvp.Value;
 
                 // Selecting self is not too interesting
                 if ((UUID)nearby.SelectedItems[0].Tag == Client.Self.AgentID)
                 {
                 }
-                string where = control.env.people.Location(currentAvatar.Position);
-                string what = control.env.people.Describe(currentAvatar.ID);
-                string who = currentAvatar.Name;
+                var where = control.env.people.Location(currentAvatar.Position);
+                var what = control.env.people.Describe(currentAvatar.ID);
+                var who = currentAvatar.Name;
 
                 // "John Smith, 3m to your right, is male and 2.1 meters tall"
-                string description = who;
+                var description = who;
                 if (where != null)
                     description += ", " + where;
                 if (what != null)

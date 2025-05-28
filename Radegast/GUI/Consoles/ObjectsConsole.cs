@@ -519,7 +519,7 @@ namespace Radegast
 
         private void UpdateCurrentObject(bool updateContents = true)
         {
-            if (CurrentPrim.Properties == null) return;
+            if (CurrentPrim.Properties == null) { return; }
 
             if (InvokeRequired)
             {
@@ -546,18 +546,18 @@ namespace Radegast
             txtOwner.AgentID = CurrentPrim.Properties.OwnerID;
             txtCreator.AgentID = CurrentPrim.Properties.CreatorID;
 
-            Permissions p = CurrentPrim.Properties.Permissions;
-            cbOwnerModify.Checked = (p.OwnerMask & PermissionMask.Modify) != 0;
-            cbOwnerCopy.Checked = (p.OwnerMask & PermissionMask.Copy) != 0;
-            cbOwnerTransfer.Checked = (p.OwnerMask & PermissionMask.Transfer) != 0;
+            Permissions perms = CurrentPrim.Properties.Permissions;
+            cbOwnerModify.Checked = (perms.OwnerMask & PermissionMask.Modify) != 0;
+            cbOwnerCopy.Checked = (perms.OwnerMask & PermissionMask.Copy) != 0;
+            cbOwnerTransfer.Checked = (perms.OwnerMask & PermissionMask.Transfer) != 0;
 
             cbNextOwnModify.CheckedChanged -= cbNextOwnerUpdate_CheckedChanged;
             cbNextOwnCopy.CheckedChanged -= cbNextOwnerUpdate_CheckedChanged;
             cbNextOwnTransfer.CheckedChanged -= cbNextOwnerUpdate_CheckedChanged;
 
-            cbNextOwnModify.Checked = (p.NextOwnerMask & PermissionMask.Modify) != 0;
-            cbNextOwnCopy.Checked = (p.NextOwnerMask & PermissionMask.Copy) != 0;
-            cbNextOwnTransfer.Checked = (p.NextOwnerMask & PermissionMask.Transfer) != 0;
+            cbNextOwnModify.Checked = (perms.NextOwnerMask & PermissionMask.Modify) != 0;
+            cbNextOwnCopy.Checked = (perms.NextOwnerMask & PermissionMask.Copy) != 0;
+            cbNextOwnTransfer.Checked = (perms.NextOwnerMask & PermissionMask.Transfer) != 0;
 
             cbNextOwnModify.CheckedChanged += cbNextOwnerUpdate_CheckedChanged;
             cbNextOwnCopy.CheckedChanged += cbNextOwnerUpdate_CheckedChanged;
@@ -572,8 +572,11 @@ namespace Radegast
                 cbNextOwnModify.Enabled = cbNextOwnCopy.Enabled = cbNextOwnTransfer.Enabled = false;
             }
 
-            txtPrims.Text = (client.Network.CurrentSim.ObjectsPrimitives.FindAll(
-                prim => prim.ParentID == CurrentPrim.LocalID || prim.LocalID == CurrentPrim.LocalID)).Count.ToString();
+            var prims = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null
+                where p.Value.ParentID == CurrentPrim.LocalID || p.Value.LocalID == CurrentPrim.LocalID
+                select p.Value).ToList();
+            txtPrims.Text = prims.Count.ToString();
 
             btnPay.Enabled = (CurrentPrim.Flags & PrimFlags.Money) != 0;
 
@@ -778,8 +781,10 @@ namespace Radegast
                         ((prim.ParentID == 0) && (filter == ObjectConsoleFilter.Rezzed || filter == ObjectConsoleFilter.Both));
                 });
                 */
-                client.Network.CurrentSim.ObjectsPrimitives.ForEach(prim =>
+                foreach(var kvp in client.Network.CurrentSim.ObjectsPrimitives)
                 {
+                    if (kvp.Value == null) { continue; }
+                    var prim = kvp.Value;
                     int distance = (int)Vector3.Distance(prim.Position, location);
                     if (prim.ParentID == client.Self.LocalID)
                     {
@@ -798,7 +803,7 @@ namespace Radegast
                             propRequester.RequestProps(prim);
                         }
                     }
-                });
+                }
                 Prims.Sort(PrimSorter);
                 lstPrims.VirtualListSize = Prims.Count;
                 lstPrims.Invalidate();
@@ -909,9 +914,11 @@ namespace Radegast
 
         private void UpdateChildren()
         {
-            if (CurrentPrim == null) return;
-            var prims = client.Network.CurrentSim.ObjectsPrimitives.FindAll(p => p.ParentID == CurrentPrim.LocalID);
-            if (prims == null || prims.Count == 0) return;
+            if (CurrentPrim == null) { return; }
+            var prims = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                where p.Value != null where p.Value.ParentID == CurrentPrim.LocalID select p.Value).ToList();
+            if (!prims.Any()) { return; }
+
             List<uint> toGetNames = new List<uint>();
 
             lstChildren.BeginUpdate();

@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using FMOD;
 using System.Threading;
 using OpenMetaverse;
@@ -426,9 +427,9 @@ namespace Radegast.Media
             // This event tells us the Object ID, but not the Prim info directly.
             // So we look it up in our internal Object memory.
             Simulator sim = e.Simulator;
-            Primitive p = sim.ObjectsPrimitives.Find(p2 => p2.ID == e.ObjectID);
-            if (p == null) return;
-
+            var kvp = sim.ObjectsPrimitives.FirstOrDefault(p2 => p2.Value.ID == e.ObjectID);
+            if (kvp.Value == null) { return; }
+            var p = kvp.Value;
             // Only one attached sound per prim, so we kill any previous
             BufferSound.Kill(p.ID);
 
@@ -446,8 +447,7 @@ namespace Radegast.Media
 
             while (p != null && p.ParentID != 0)
             {
-                Avatar av;
-                if (sim.ObjectsAvatars.TryGetValue(p.ParentID, out av))
+                if (sim.ObjectsAvatars.TryGetValue(p.ParentID, out var av))
                 {
                     p = av;
                     fullPosition += p.Position;
@@ -462,7 +462,7 @@ namespace Radegast.Media
             }
 
             // Didn't find root prim
-            if (p == null) return;
+            if (p == null) { return; }
 
             new BufferSound(
                 e.ObjectID,

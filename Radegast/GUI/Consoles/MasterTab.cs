@@ -21,6 +21,8 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
+using System.Security.Permissions;
 using System.Windows.Forms;
 using System.Threading;
 
@@ -117,23 +119,23 @@ namespace Radegast
 
         void Avatars_ViewerEffectPointAt(object sender, ViewerEffectPointAtEventArgs e)
         {
-            if (e.SourceID == avatar.ID && e.TargetID != UUID.Zero) {
-                selectedID = e.TargetID;
-                selectedPrim = client.Network.CurrentSim.ObjectsPrimitives.Find(
-                    prim => prim.ID == selectedID
-                );
-                if (selectedPrim != null) {
-                    client.Objects.SelectObject(client.Network.CurrentSim, selectedPrim.LocalID);
-                    UpdateLLUUID();
-                }
-            }
+            if (e.SourceID != avatar.ID || e.TargetID == UUID.Zero) { return; }
+
+            selectedID = e.TargetID;
+            var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                prim => prim.Value.ID == selectedID);
+            selectedPrim = kvp.Value;
+            if (selectedPrim == null) { return; }
+
+            client.Objects.SelectObject(client.Network.CurrentSim, selectedPrim.LocalID);
+            UpdateLLUUID();
         }
 
         private void objInfoBtn_Click(object sender, EventArgs e)
         {
-            selectedPrim = client.Network.CurrentSim.ObjectsPrimitives.Find(
-                prim => prim.LocalID == selectedPrim.ParentID
-            );
+            var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                prim => prim.Value.LocalID == selectedPrim.ParentID);
+            selectedPrim = kvp.Value;
             selectedID = selectedPrim.ID;
             UpdateLLUUID();
             client.Objects.SelectObject(client.Network.CurrentSim, selectedPrim.LocalID);
