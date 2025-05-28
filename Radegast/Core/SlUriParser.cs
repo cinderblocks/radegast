@@ -132,7 +132,7 @@ namespace Radegast
 
             mapLinkInfo = new MapLinkInfo()
             {
-                RegionName = region,
+                RegionName = HttpUtility.UrlDecode(region),
                 X = x,
                 Y = y,
                 Z = z
