@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Timers;
 using System.Threading;
@@ -168,7 +169,7 @@ namespace Radegast
             return ret;
         }
 
-        public Dictionary<UUID, string> KnownAnimations;
+        public ImmutableDictionary<UUID, string> KnownAnimations;
         public bool CameraTracksOwnAvatar = true;
         public Vector3 DefaultCameraOffset = new Vector3(-5, 0, 0);
 

@@ -180,8 +180,10 @@ namespace Radegast.Commands
                     }
                     else
                     {
-                        if (Client.Network.CurrentSim.AvatarPositions.ContainsKey(person))
-                            targetPos = Client.Network.CurrentSim.AvatarPositions[person];
+                        if (Client.Network.CurrentSim.AvatarPositions.TryGetValue(person, out var pos))
+                        {
+                            targetPos = pos;
+                        }
                     }
 
                     if (targetPos.Z < 0.01f)

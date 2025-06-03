@@ -251,42 +251,43 @@ namespace Radegast
                 try
                 {
                     lvwObjects.BeginUpdate();
-                    Vector3d mypos = e.Simulator.AvatarPositions.ContainsKey(client.Self.AgentID)
-                                        ? StateManager.ToVector3D(e.Simulator.Handle, e.Simulator.AvatarPositions[client.Self.AgentID])
-                                        : client.Self.GlobalPosition;
+                    var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
+                        ? StateManager.ToVector3D(e.Simulator.Handle, position) 
+                        : client.Self.GlobalPosition;
 
                     // CoarseLocationUpdate gives us height of 0 when actual height is
                     // between 1024-4096m.
-                    if (mypos.Z < 0.1)
+                    if (agentPosition.Z < 0.1)
                     {
-                        mypos.Z = client.Self.GlobalPosition.Z;
+                        agentPosition.Z = client.Self.GlobalPosition.Z;
                     }
 
-                    List<UUID> existing = new List<UUID>();
-                    List<UUID> removed = new List<UUID>(e.RemovedEntries);
+                    var existing = new List<UUID>();
+                    var removed = new List<UUID>(e.RemovedEntries);
 
-                    e.Simulator.AvatarPositions.ForEach(avi =>
+                    foreach (var avatarPos in e.Simulator.AvatarPositions)
                     {
-                        existing.Add(avi.Key);
-                        if (!lvwObjects.Items.ContainsKey(avi.Key.ToString()))
+                        existing.Add(avatarPos.Key);
+                        if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString()))
                         {
-                            string name = instance.Names.Get(avi.Key);
-                            ListViewItem item = lvwObjects.Items.Add(avi.Key.ToString(), name, string.Empty);
-                            if (avi.Key == client.Self.AgentID)
-                            {
-                                // Stops our name saying "Loading..."
-                                item.Text = instance.Names.Get(avi.Key, client.Self.Name);
-                                item.Font = new Font(item.Font, FontStyle.Bold);
-                            }
-                            item.Tag = avi.Key;
-                            agentSimHandle[avi.Key] = e.Simulator.Handle;
+                            continue;
                         }
-                    });
+                        var name = instance.Names.Get(avatarPos.Key);
+                        var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
+                        if (avatarPos.Key == client.Self.AgentID)
+                        {
+                            // Stops our name saying "Loading..."
+                            item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
+                            item.Font = new Font(item.Font, FontStyle.Bold);
+                        }
+                        item.Tag = avatarPos.Key;
+                        agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
+                    }
 
                     foreach (ListViewItem item in lvwObjects.Items)
                     {
                         if (item == null) continue;
-                        UUID key = (UUID)item.Tag;
+                        var key = (UUID)item.Tag;
 
                         if (agentSimHandle[key] != e.Simulator.Handle)
                         {
@@ -316,7 +317,7 @@ namespace Radegast
 
                         // CoarseLocationUpdate gives us height of 0 when actual height is
                         // between 1024-4096m on OpenSim grids. 1020 on SL
-                        bool unknownAltitude = instance.Netcom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
+                        var unknownAltitude = instance.Netcom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
                         if (unknownAltitude) 
                         {
                             if (foundAvi != null)
@@ -335,7 +336,7 @@ namespace Radegast
                             }
                         }
 
-                        int d = (int)Vector3d.Distance(StateManager.ToVector3D(e.Simulator.Handle, pos), mypos);
+                        var d = (int)Vector3d.Distance(StateManager.ToVector3D(e.Simulator.Handle, pos), agentPosition);
 
                         if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
                         {
@@ -358,7 +359,7 @@ namespace Radegast
                         }
                     }
 
-                    foreach (UUID key in removed)
+                    foreach (var key in removed)
                     {
                         lvwObjects.Items.RemoveByKey(key.ToString());
                         agentSimHandle.Remove(key);
