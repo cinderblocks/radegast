@@ -122,20 +122,20 @@ namespace Radegast.WinForms
                 {
                     SetMapLayer(null);
                 }
-                Bitmap bmp = (Bitmap)_MapLayer.Clone();
-                Graphics g = Graphics.FromImage(bmp);
+                else
+                {
+                    var bmp = (Bitmap)_MapLayer.Clone();
+                    var g = Graphics.FromImage(bmp);
 
-                Vector3 myCoarsePos;
-
-                if (!sim.AvatarPositions.TryGetValue(Client.Self.AgentID, out myCoarsePos)) { return; }
-
-                int i = 0;
-
-                _Client.Network.CurrentSim.AvatarPositions.ForEach(
-                    delegate (KeyValuePair<UUID, Vector3> coarse)
+                    if (!sim.AvatarPositions.TryGetValue(Client.Self.AgentID, out var agentCoarsePosition))
                     {
-                        int x = (int)coarse.Value.X;
-                        int y = 255 - (int)coarse.Value.Y;
+                        return;
+                    }
+
+                    foreach (var coarse in _Client.Network.CurrentSim.AvatarPositions)
+                    {
+                        var x = (int)coarse.Value.X;
+                        var y = 255 - (int)coarse.Value.Y;
                         if (coarse.Key == Client.Self.AgentID)
                         {
                             g.FillEllipse(Brushes.Yellow, x - 5, y - 5, 10, 10);
@@ -159,16 +159,18 @@ namespace Radegast.WinForms
                                 penColor = Pens.Gray;
                             }
 
-                            if (myCoarsePos.Z - coarse.Value.Z > 1)
+                            if (agentCoarsePosition.Z - coarse.Value.Z > 1)
                             {
-                                Point[] points = new Point[3] { new Point(x - 6, y - 6), new Point(x + 6, y - 6), new Point(x, y + 6) };
+                                var points = new Point[3]
+                                    { new Point(x - 6, y - 6), new Point(x + 6, y - 6), new Point(x, y + 6) };
                                 g.FillPolygon(brushColor, points);
                                 g.DrawPolygon(penColor, points);
                             }
 
-                            else if (myCoarsePos.Z - coarse.Value.Z < -1)
+                            else if (agentCoarsePosition.Z - coarse.Value.Z < -1)
                             {
-                                Point[] points = new Point[3] { new Point(x - 6, y + 6), new Point(x + 6, y + 6), new Point(x, y - 6) };
+                                var points = new Point[3]
+                                    { new Point(x - 6, y + 6), new Point(x + 6, y + 6), new Point(x, y - 6) };
                                 g.FillPolygon(brushColor, points);
                                 g.DrawPolygon(penColor, points);
                             }
@@ -179,12 +181,11 @@ namespace Radegast.WinForms
                                 g.DrawEllipse(penColor, x - 5, y - 5, 10, 10);
                             }
                         }
-                        i++;
                     }
-                );
 
-                g.DrawImage(bmp, 0, 0);
-                Image = bmp;
+                    g.DrawImage(bmp, 0, 0);
+                    Image = bmp;
+                }
             }
         }
 
