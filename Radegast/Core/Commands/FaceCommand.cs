@@ -1,7 +1,7 @@
-﻿/**
+﻿/*5
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,14 +26,14 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class FaceCommand : RadegastCommand
+    public sealed class FaceCommand : RadegastCommand
     {
-        TabsConsole TC => Instance.TabConsole;
-        ObjectsConsole Objects;
-        ChatConsole Chat;
-        Vector3 targetPos = Vector3.Zero;
-        RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;
-        ConsoleWriteLine wl;
+        private TabsConsole TC => Instance.TabConsole;
+        private ObjectsConsole Objects;
+        private ChatConsole Chat;
+        private Vector3 targetPos = Vector3.Zero;
+        private const RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;
+        private ConsoleWriteLine wl;
 
         public FaceCommand(RadegastInstance instance)
             : base(instance)
@@ -52,12 +52,12 @@ namespace Radegast.Commands
             base.Dispose();
         }
 
-        void PrintUsage()
+        private void PrintUsage()
         {
             wl("Wrong arguments for \"face\" command. For detailed description type: " + CommandsManager.CmdPrefix + "face help");
         }
 
-        void PrintFullUsage()
+        private void PrintFullUsage()
         {
             wl(@"Usage:
 {0}face (direction|heading|object|person|help) [additional args]
@@ -95,20 +95,19 @@ Examples:
             }
             wl = WriteLine;
 
-            string cmd = string.Join(" ", cmdArgs);
-            List<string> args = new List<string>(Regex.Split(cmd, @"\s", regexOptions));
+            var cmd = string.Join(" ", cmdArgs);
+            var args = new List<string>(Regex.Split(cmd, @"\s", regexOptions));
 
             if (args.Count == 0) { PrintUsage(); return; }
 
-            string subcmd = args[0];
+            var subcmd = args[0];
             args.RemoveAt(0);
-            string subarg = string.Empty;
+            var subarg = string.Empty;
 
             // Face certain direction
-            int heading = 0;
-            if (int.TryParse(subcmd, out heading))
+            if (int.TryParse(subcmd, out var heading))
             {
-                double rad = 0.0174532925d * heading;
+                var rad = 0.0174532925d * heading;
                 Client.Self.Movement.UpdateFromHeading(rad, true);
                 WriteLine("Facing {0} degrees", heading % 360);
                 return;
@@ -136,14 +135,14 @@ Examples:
             switch (subcmd)
             {
                 case "person":
-                    List<UUID> people = Chat.GetAvatarList();
-                    UUID person = people.Find(id => Instance.Names.Get(id).ToLower().StartsWith(subarg.ToLower()));
+                    var people = Chat.GetAvatarList();
+                    var person = people.Find(id => Instance.Names.Get(id).ToLower().StartsWith(subarg.ToLower()));
                     if (person == UUID.Zero)
                     {
                         WriteLine("Could not find {0}", subarg);
                         return;
                     }
-                    string pname = Instance.Names.Get(person);
+                    var pname = Instance.Names.Get(person);
 
                     if (!Instance.State.TryFindAvatar(person, out targetPos))
                     {
@@ -160,7 +159,7 @@ Examples:
 
                     if (!TC.TabExists("objects"))
                     {
-                        RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
+                        var tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
                         tab.AllowClose = true;
                         tab.AllowDetach = true;
                         tab.Visible = true;
@@ -173,9 +172,9 @@ Examples:
                     }
 
                     Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
-                    List<Primitive> prims = Objects.GetObjectList();
+                    var prims = Objects.GetObjectList();
 
-                    Primitive target = prims.Find(prim =>
+                    var target = prims.Find(prim =>
                         prim.Properties != null && prim.Properties.Name.ToLower().Contains(subarg.ToLower()));
 
                     if (target == null)
