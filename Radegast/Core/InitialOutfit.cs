@@ -157,7 +157,7 @@ namespace Radegast
                 .Where(item => item is InventoryWearable || item is InventoryAttachment || item is InventoryObject)
                 .Cast<InventoryItem>().ToList();
 
-            Instance.COF.ReplaceOutfit(newOutfit);
+            Instance.COF.ReplaceOutfit(newClothingFolder).Wait();
             Logger.Log("Initial outfit thread (first login) exiting", Helpers.LogLevel.Debug);
         }
     }

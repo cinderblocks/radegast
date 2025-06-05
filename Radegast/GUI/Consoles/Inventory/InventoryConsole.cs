@@ -1219,18 +1219,26 @@ namespace Radegast
 
                     if (folder.PreferredType == FolderType.None || folder.PreferredType == FolderType.Outfit)
                     {
+                        var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
+
                         ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
                         {
-                            Name = "outfit_take_off"
+                            Name = "outfit_take_off",
+                            Enabled = !isAppearanceManagerBusy
                         };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick) {Name = "outfit_add"};
+                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
+                        {
+                            Name = "outfit_add",
+                            Enabled = !isAppearanceManagerBusy
+                        };
                         ctxInv.Items.Add(ctxItem);
 
                         ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
                         {
-                            Name = "outfit_replace"
+                            Name = "outfit_replace",
+                            Enabled = !isAppearanceManagerBusy
                         };
                         ctxInv.Items.Add(ctxItem);
                     }
@@ -1605,12 +1613,18 @@ namespace Radegast
                         break;
 
                     case "outfit_replace":
-                        List<InventoryItem> newOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.ReplaceOutfit(newOutfit);
-                        UpdateWornLabels();
-                        break;
+                        ThreadPool.QueueUserWorkItem(sync =>
+                        {
+                            using (var cts = new CancellationTokenSource())
+                            {
+                                cts.CancelAfter(TimeSpan.FromSeconds(30));
+                                instance.COF.ReplaceOutfit(folder.UUID, cts.Token).Wait();
+                            }
 
+                            UpdateWornLabels();
+                        });
+                        break;
                     case "outfit_add":
                         List<InventoryItem> addToOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
