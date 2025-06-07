@@ -962,29 +962,35 @@ namespace Radegast
                     break;
 
                 case AssetType.Object:
-                    if (IsAttached(item))
+                    RunBackgroundTask((cancellationToken) =>
                     {
-                        instance.COF.Detach(item).Wait();
-                    }
-                    else
-                    {
-                        instance.COF.Attach(item, AttachmentPoint.Default, true).Wait();
-                    }
+                        if (IsAttached(item))
+                        {
+                            instance.COF.Detach(item, cancellationToken).Wait();
+                        }
+                        else
+                        {
+                            instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken).Wait();
+                        }
+                    }, UpdateWornLabels);
                     break;
 
                 case AssetType.Bodypart:
                 case AssetType.Clothing:
-                    if (IsWorn(item))
+                    RunBackgroundTask((cancellationToken) =>
                     {
-                        if (item.AssetType == AssetType.Clothing)
+                        if (IsWorn(item))
                         {
-                            instance.COF.RemoveFromOutfit(item).Wait();
+                            if (item.AssetType == AssetType.Clothing)
+                            {
+                                instance.COF.RemoveFromOutfit(item, cancellationToken).Wait();
+                            }
                         }
-                    }
-                    else
-                    {
-                        instance.COF.AddToOutfit(item, true).Wait();
-                    }
+                        else
+                        {
+                            instance.COF.AddToOutfit(item, true, cancellationToken).Wait();
+                        }
+                    }, UpdateWornLabels);
                     break;
             }
         }
@@ -1490,6 +1496,34 @@ namespace Radegast
             }
         }
 
+        private void RunBackgroundTask(Action<CancellationToken> work, Action uiCallback = null, int timeoutSeconds = 10)
+        {
+            ThreadPool.QueueUserWorkItem(sync =>
+            {
+                try
+                {
+                    using (var cts = new CancellationTokenSource())
+                    {
+                        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+                        work(cts.Token);
+                    }
+                }
+                catch(TimeoutException ex)
+                {
+                    Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                }
+
+                if (uiCallback != null)
+                {
+                    Invoke(new Action(() => uiCallback()));
+                }
+            });
+        }
+
         #region Context menu folder
         private void OnInvContextClick(object sender, EventArgs e)
         {
@@ -1614,47 +1648,26 @@ namespace Radegast
 
                     case "outfit_replace":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        ThreadPool.QueueUserWorkItem(sync =>
+                        RunBackgroundTask((cancellationToken) =>
                         {
-                            using (var cts = new CancellationTokenSource())
-                            {
-                                cts.CancelAfter(TimeSpan.FromSeconds(30));
-                                instance.COF.ReplaceOutfit(folder.UUID, cts.Token).Wait();
-                            }
-
-                            UpdateWornLabels();
-                        });
+                            instance.COF.ReplaceOutfit(folder.UUID, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
                     case "outfit_add":
                         var addToOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-
-                        ThreadPool.QueueUserWorkItem(sync =>
+                        RunBackgroundTask((cancellationToken) =>
                         {
-                            using (var cts = new CancellationTokenSource())
-                            {
-                                cts.CancelAfter(TimeSpan.FromSeconds(30));
-                                instance.COF.AddToOutfit(addToOutfit, false).Wait();
-                            }
-
-                            UpdateWornLabels();
-                        });
+                            instance.COF.AddToOutfit(addToOutfit, false, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
-
                     case "outfit_take_off":
                         var removeFromOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-
-                        ThreadPool.QueueUserWorkItem(sync =>
+                        RunBackgroundTask((cancellationToken) =>
                         {
-                            using (var cts = new CancellationTokenSource())
-                            {
-                                cts.CancelAfter(TimeSpan.FromSeconds(30));
-                                instance.COF.RemoveFromOutfit(removeFromOutfit).Wait();
-                            }
-
-                            UpdateWornLabels();
-                        });
+                            instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
                 }
                 #endregion
@@ -1727,21 +1740,33 @@ namespace Radegast
                         break;
 
                     case "detach":
-                        instance.COF.Detach(item).Wait();
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.Detach(item, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment":
-                        instance.COF.Attach(item, AttachmentPoint.Default, true).Wait();
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
-                        instance.COF.Attach(item, AttachmentPoint.Default, false).Wait();
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
-                        instance.COF.Attach(item, pt, true).Wait();
+
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.Attach(item, pt, true, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "edit_script":
@@ -1755,20 +1780,26 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.RemoveFromOutfit(item).Wait();
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.RemoveFromOutfit(item, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, true).Wait();
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.AddToOutfit(item, true, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, false).Wait();
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask((cancellationToken) =>
+                        {
+                            instance.COF.AddToOutfit(item, false, cancellationToken).Wait();
+                        }, UpdateWornLabels);
                         break;
 
                     case "lm_teleport":
