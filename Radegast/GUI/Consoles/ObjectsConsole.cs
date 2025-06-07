@@ -964,7 +964,7 @@ namespace Radegast
 
             if (client.Inventory.Store.Contains(toDetach))
             {
-                instance.COF.Detach(client.Inventory.Store[toDetach] as InventoryItem);
+                instance.COF.Detach(client.Inventory.Store[toDetach] as InventoryItem).Wait();
             }
         }
 

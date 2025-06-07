@@ -115,7 +115,7 @@ namespace Radegast
                 UUID invItem = GetAttachmentItem(prim);
                 if (invItem != UUID.Zero)
                 {
-                    RemoveLink(invItem);
+                    RemoveLink(invItem).Wait();
                 }
             }
         }
@@ -173,16 +173,46 @@ namespace Radegast
         /// Return links found in Current Outfit Folder
         /// </summary>
         /// <returns>List of <see cref="InventoryItem"/> that can be part of appearance (attachments, wearables)</returns>
-        private List<InventoryItem> ContentLinks()
+        private async Task<List<InventoryItem>> ContentLinks(CancellationToken cancellationToken = default)
         {
-            var ret = new List<InventoryItem>();
-            if (COF != null)
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (COF == null)
             {
-                Client.Inventory.Store.GetContents(COF)
-                    .FindAll(b => CanBeWorn(b) && ((InventoryItem)b).AssetType == AssetType.Link)
-                    .ForEach(item => ret.Add((InventoryItem)item));
+                InitializeCurrentOutfitFolder();
             }
-            return ret;
+
+            if(COF == null)
+            {
+                Logger.Log($"COF is null", Helpers.LogLevel.Warning, Client);
+                return new List<InventoryItem>();
+            }
+
+            if(!Client.Inventory.Store.TryGetNodeFor(COF.UUID, out var cofNode))
+            {
+                Logger.Log($"Failed to find COF node in inventory store", Helpers.LogLevel.Warning, Client);
+                return new List<InventoryItem>();
+            }
+
+            if(cofNode.NeedsUpdate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await Client.Inventory.RequestFolderContents(
+                    COF.UUID,
+                    COF.OwnerID,
+                    true,
+                    true,
+                    InventorySortOrder.ByName,
+                    cancellationToken
+                );
+            }
+
+            var cofContents = Client.Inventory.Store.GetContents(COF);
+            var cofLinks = cofContents.OfType<InventoryItem>()
+                .Where(n => n.IsLink())
+                .ToList();
+
+            return cofLinks;
         }
 
         /// <summary>
@@ -242,28 +272,27 @@ namespace Radegast
         /// <param name="item">Item to be attached</param>
         /// <param name="point">Attachment point</param>
         /// <param name="replace">Replace existing attachment at that point first?</param>
-        public void Attach(InventoryItem item, AttachmentPoint point, bool replace, CancellationToken cancellationToken = default)
+        public async Task Attach(InventoryItem item, AttachmentPoint point, bool replace, CancellationToken cancellationToken = default)
         {
             Client.Appearance.Attach(item, point, replace);
-            AddLink(item, cancellationToken);
+            await AddLink(item, cancellationToken);
         }
 
         /// <summary>
         /// Creates a new COF link
         /// </summary>
         /// <param name="item">Original item to be linked from COF</param>
-        public void AddLink(InventoryItem item, CancellationToken cancellationToken = default)
+        public async Task AddLink(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            if (item.InventoryType == InventoryType.Wearable && !IsBodyPart(item))
+            if (item is InventoryWearable wearableItem && !IsBodyPart(item))
             {
-                var w = (InventoryWearable)item;
-                int layer = 0;
-                string desc = $"@{(int) w.WearableType}{layer:00}";
-                AddLink(item, desc, cancellationToken);
+                var layer = 0;
+                var desc = $"{(int)wearableItem.WearableType}{layer:00}";
+                await AddLink(item, desc, cancellationToken);
             }
             else
             {
-                AddLink(item, string.Empty, cancellationToken);
+                await AddLink(item, string.Empty, cancellationToken);
             }
         }
 
@@ -272,7 +301,7 @@ namespace Radegast
         /// </summary>
         /// <param name="item">Original item to be linked from COF</param>
         /// <param name="newDescription">Description for the link</param>
-        public void AddLink(InventoryItem item, string newDescription, CancellationToken cancellationToken = default)
+        public async Task AddLink(InventoryItem item, string newDescription, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -282,17 +311,25 @@ namespace Radegast
                 return;
             }
 
-            if (ContentLinks().Find(itemLink => itemLink.AssetUUID == item.UUID) == null)
+            var cofLinks = await ContentLinks(cancellationToken);
+            if (cofLinks.Find(itemLink => itemLink.AssetUUID == item.UUID) == null)
             {
-                Client.Inventory.CreateLink(COF.UUID, item.UUID, item.Name, newDescription, 
-                    item.InventoryType, UUID.Random(), 
+                Client.Inventory.CreateLink(
+                    COF.UUID,
+                    item.UUID,
+                    item.Name,
+                    newDescription,
+                    item.InventoryType,
+                    UUID.Random(),
                     (success, newItem) =>
-                {
-                    if (success)
                     {
-                        Client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
-                    }
-                }, cancellationToken);
+                        if (success)
+                        {
+                            Client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
+                        }
+                    },
+                    cancellationToken
+                );
             }
         }
 
@@ -300,16 +337,16 @@ namespace Radegast
         /// Remove a link to specified inventory item
         /// </summary>
         /// <param name="itemID">ID of the target inventory item for which we want link to be removed</param>
-        public void RemoveLink(UUID itemID)
+        private async Task RemoveLink(UUID itemID)
         {
-            RemoveLink(new List<UUID>(1) { itemID });
+            await RemoveLinks(new List<UUID>(1) { itemID });
         }
 
         /// <summary>
         /// Remove a link to specified inventory item
         /// </summary>
-        /// <param name="itemIDs">List of IDs of the target inventory item for which we want link to be removed</param>
-        public void RemoveLink(List<UUID> itemIDs)
+        /// <param name="itemIDsToRemove">List of IDs of the target inventory item for which we want link to be removed</param>
+        private async Task RemoveLinks(List<UUID> itemIDsToRemove)
         {
             if (COF == null)
             {
@@ -317,10 +354,27 @@ namespace Radegast
                 return;
             }
 
-            foreach (var links in itemIDs.Select(itemID => ContentLinks()
-                         .FindAll(itemLink => itemLink.AssetUUID == itemID)))
+            var cofLinks = await ContentLinks();
+            var cofLinksByAssetId = new Dictionary<UUID, List<UUID>>();
+            foreach (var cofLink in cofLinks)
             {
-                links.ForEach(item => Client.Inventory.RemoveItem(item.UUID));
+                if(!cofLinksByAssetId.TryGetValue(cofLink.AssetUUID, out var associatedLinks))
+                {
+                    associatedLinks = new List<UUID>();
+                    cofLinksByAssetId[cofLink.AssetUUID] = associatedLinks;
+                }
+
+                associatedLinks.Add(cofLink.UUID);
+            }
+
+            foreach (var itemIdToRemove in itemIDsToRemove)
+            {
+                if(!cofLinksByAssetId.TryGetValue(itemIdToRemove, out var linkIdsToRemove))
+                {
+                    continue;
+                }
+
+                await Client.Inventory.RemoveItemsAsync(linkIdsToRemove);
             }
         }
 
@@ -328,30 +382,38 @@ namespace Radegast
         /// Remove attachment
         /// </summary>
         /// <param name="item">>Inventory item to be detached</param>
-        public void Detach(InventoryItem item)
+        public async Task Detach(InventoryItem item)
         {
             var realItem = OriginalInventoryItem(item);
-            if (!Instance.RLV.AllowDetach(realItem)) { return; }
+            if (!Instance.RLV.AllowDetach(realItem))
+            {
+                return;
+            }
 
             Client.Appearance.Detach(item);
-            RemoveLink(item.UUID);
+            await RemoveLink(item.UUID);
         }
 
-        public List<InventoryItem> GetWornAt(WearableType type)
+        public async Task<List<InventoryItem>> GetWornAt(WearableType type)
         {
-            var ret = new List<InventoryItem>();
-            ContentLinks().ForEach(link =>
+            var wornItemsByAssetId = new Dictionary<UUID, InventoryItem>();
+
+            var contentLinks = await ContentLinks();
+            foreach (var link in contentLinks)
             {
-                var item = OriginalInventoryItem(link);
-                if (!(item is InventoryWearable wearable)) { return; }
+                var originalItem = OriginalInventoryItem(link);
+                if (!(originalItem is InventoryWearable wearable))
+                {
+                    continue;
+                }
 
                 if (wearable.WearableType == type)
                 {
-                    ret.Add(wearable);
+                    wornItemsByAssetId[wearable.AssetUUID] = wearable;
                 }
-            });
+            }
 
-            return ret;
+            return wornItemsByAssetId.Values.ToList();
         }
 
         /// <summary>
@@ -362,13 +424,17 @@ namespace Radegast
         /// <returns></returns>
         public InventoryItem OriginalInventoryItem(InventoryItem item)
         {
-            if (item.IsLink() && Client.Inventory.Store.Contains(item.AssetUUID)
-                              && Client.Inventory.Store[item.AssetUUID] is InventoryItem invItem)
+            if (!item.IsLink())
             {
-                return invItem;
+                return item;
             }
 
-            return item;
+            if (!Client.Inventory.Store.TryGet<InventoryItem>(item.AssetUUID, out var inventoryItem))
+            {
+                return item;
+            }
+
+            return inventoryItem;
         }
 
         /// <summary>
@@ -427,6 +493,8 @@ namespace Radegast
             var existingBodypartLinks = new List<InventoryItem>();
             var bodypartsToWear = new Dictionary<WearableType, InventoryWearable>();
             var gesturesToActivate = new Dictionary<UUID, InventoryItem>();
+            var numClothingLayers = 0;
+            var numAttachedObjects = 0;
 
             foreach (var item in newOutfit)
             {
@@ -455,10 +523,27 @@ namespace Radegast
                     bodypartsToWear[bodypartItem.WearableType] = bodypartItem;
                     continue;
                 }
-
-                if (inventoryItem.AssetType == AssetType.Gesture)
+                else if (inventoryItem.AssetType == AssetType.Gesture)
                 {
                     gesturesToActivate[inventoryItem.UUID] = inventoryItem;
+                }
+                else if(inventoryItem.AssetType == AssetType.Clothing)
+                {
+                    if(numClothingLayers >= 60)
+                    {
+                        continue;
+                    }
+
+                    numClothingLayers++;
+                }
+                else if(inventoryItem.AssetType == AssetType.Object)
+                {
+                    if(numAttachedObjects >= 36)
+                    {
+                        continue;
+                    }
+
+                    ++numAttachedObjects;
                 }
 
                 itemsToWear[inventoryItem.UUID] = inventoryItem;
@@ -558,11 +643,11 @@ namespace Radegast
             {
                 foreach (var item in bodypartsToWear)
                 {
-                    AddLink(item.Value, cancellationToken);
+                    await AddLink(item.Value, cancellationToken);
                 }
                 foreach (var item in itemsToWear)
                 {
-                    AddLink(item.Value, cancellationToken);
+                    await AddLink(item.Value, cancellationToken);
                 }
 
                 // Add link to outfit folder we're putting on
@@ -669,60 +754,174 @@ namespace Radegast
         /// </summary>
         /// <param name="item">Item to add</param>
         /// <param name="replace">Should existing wearable of the same type be removed</param>
-        public void AddToOutfit(InventoryItem item, bool replace)
+        public async Task AddToOutfit(InventoryItem item, bool replace)
         {
-            AddToOutfit(new List<InventoryItem>(1) { item }, replace);
+            await AddToOutfit(new List<InventoryItem>(1) { item }, replace);
         }
 
         /// <summary>
         /// Add items to current outfit
         /// </summary>
-        /// <param name="items">List of items to add</param>
+        /// <param name="itemsToAdd">List of items to add</param>
         /// <param name="replace">Should existing wearable of the same type be removed</param>
-        public void AddToOutfit(List<InventoryItem> items, bool replace)
+        public async Task AddToOutfit(List<InventoryItem> itemsToAdd, bool replace, CancellationToken cancellationToken = default)
         {
-            var current = ContentLinks();
-            var toRemove = new List<UUID>();
+            if (COF == null)
+            {
+                Logger.Log("Can't add to outfit link; COF hasn't been initialized.", Helpers.LogLevel.Warning, Client);
+                return;
+            }
+
+            var cofLinks = await ContentLinks();
+            var cofRealItems = new Dictionary<UUID, InventoryBase>();
+            var cofLinkAssetIds = new HashSet<UUID>();
+            var currentBodyparts = new Dictionary<WearableType, InventoryWearable>();
+            var currentClothing = new Dictionary<WearableType, List<InventoryWearable>>();
+            var currentAttachmentPoints = new Dictionary<AttachmentPoint, List<InventoryObject>>();
+            var numClothingLayers = 0;
+            var numAttachedObjects = 0;
+
+            foreach (var item in cofLinks)
+            {
+                var realItem = OriginalInventoryItem(item);
+                cofRealItems[realItem.UUID] = realItem;
+                cofLinkAssetIds.Add(item.AssetUUID);
+
+                if (realItem is InventoryWearable wearable)
+                {
+                    if(realItem.AssetType == AssetType.Bodypart)
+                    {
+                        currentBodyparts[wearable.WearableType] = wearable;
+                    }
+                    else if(realItem.AssetType == AssetType.Clothing)
+                    {
+                        if (!currentClothing.TryGetValue(wearable.WearableType, out var currentWearablesOfType))
+                        {
+                            currentWearablesOfType = new List<InventoryWearable>();
+                            currentClothing[wearable.WearableType] = currentWearablesOfType;
+                            numClothingLayers++;
+                        }
+
+                        currentWearablesOfType.Add(wearable);
+                    }
+                }
+                else if(realItem is InventoryObject inventoryObject)
+                {
+                    if (!currentAttachmentPoints.TryGetValue(inventoryObject.AttachPoint, out var attachedObjects))
+                    {
+                        attachedObjects = new List<InventoryObject>();
+                        currentAttachmentPoints[inventoryObject.AttachPoint] = attachedObjects;
+                    }
+
+                    attachedObjects.Add(inventoryObject);
+                    numAttachedObjects++;
+                }
+            }
+
+            var linksToRemove = new List<UUID>();
 
             // Resolve inventory links and remove wearables of the same type from COF
             var outfit = new List<InventoryItem>();
 
-            foreach (var item in items)
+            foreach (var item in itemsToAdd)
             {
                 var realItem = OriginalInventoryItem(item);
-                if (replace && realItem is InventoryWearable wearable)
+                if (cofLinkAssetIds.Contains(realItem.UUID))
                 {
-                    foreach (var link in current)
+                    continue;
+                }
+                if(outfit.FirstOrDefault(n => n.UUID == realItem.UUID) != null)
+                {
+                    continue;
+                }
+
+                // TODO: Copy from library if necessary
+                // TODO: Skip if item in trash
+
+                if (realItem is InventoryWearable wearable)
+                {
+                    if(wearable.AssetType == AssetType.Clothing)
                     {
-                        var currentItem = OriginalInventoryItem(link);
-                        if (link.AssetUUID == item.UUID)
+                        if(replace)
                         {
-                            toRemove.Add(link.UUID);
+                            if(currentClothing.TryGetValue(wearable.WearableType, out var currentClothingOfType))
+                            {
+                                // Remove all existing clothing links for this wearable type
+                                foreach (var clothingToRemove in currentClothingOfType)
+                                {
+                                    var clothingLinksToRemove = cofLinks
+                                        .Where(n => n.IsLink() && n.AssetUUID == clothingToRemove.UUID)
+                                        .Select(n => n.UUID);
+                                    linksToRemove.AddRange(clothingLinksToRemove);
+                                }
+                            }
                         }
                         else
                         {
-                            var w = currentItem as InventoryWearable;
-                            if (w?.WearableType == wearable.WearableType)
+                            if (numClothingLayers >= 60)
                             {
-                                toRemove.Add(link.UUID);
+                                continue;
+                            }
+
+                            numClothingLayers++;
+                        }
+                    }
+                    else if (wearable.AssetType == AssetType.Bodypart)
+                    {
+                        if(currentBodyparts.TryGetValue(wearable.WearableType, out var existingBodyPart))
+                        {
+                            var bodypartLinksToRemove = cofLinks
+                                .Where(n => n.IsLink() && n.AssetUUID == existingBodyPart.UUID)
+                                .Select(n => n.UUID);
+                            linksToRemove.AddRange(bodypartLinksToRemove);
+                        }
+                    }
+                }
+                else if (realItem.AssetType == AssetType.Gesture)
+                {
+                    Client.Self.ActivateGesture(realItem.UUID, realItem.AssetUUID);
+                }
+                else if(realItem is InventoryObject objectToAdd)
+                {
+                    if (replace)
+                    {
+                        // TODO: It's really confusing what should be done with AddToOutfit(replace=true) with objects
+                        if (currentAttachmentPoints.TryGetValue(objectToAdd.AttachPoint, out var attachedObjectsToRemove))
+                        {
+                            foreach (var attachedObject in attachedObjectsToRemove)
+                            {
+                                var attachedObjectLinksToRemove = cofLinks
+                                    .Where(n => n.IsLink() && n.AssetUUID == attachedObject.UUID)
+                                    .Select(n => n.UUID);
+                                linksToRemove.AddRange(attachedObjectLinksToRemove);
                             }
                         }
                     }
+                    else
+                    {
+                        if (numAttachedObjects >= 38)
+                        {
+                            // TODO: check user specific limits
+                            continue;
+                        }
+
+                        ++numAttachedObjects;
+                    }
+                }
+                else
+                {
+                    continue;
                 }
 
                 outfit.Add(realItem);
             }
 
-            foreach (var item in toRemove)
-            {
-                Client.Inventory.RemoveItem(item);
-            }
+            await Client.Inventory.RemoveItemsAsync(linksToRemove, cancellationToken);
 
             // Add links to new items
-            var newItems = outfit.FindAll(CanBeWorn);
-            foreach (var item in newItems)
+            foreach (var item in outfit)
             {
-                AddLink(item);
+                await AddLink(item, cancellationToken);
             }
 
             Client.Appearance.AddToOutfit(outfit, replace);
@@ -737,23 +936,23 @@ namespace Radegast
         /// Remove an item from the current outfit
         /// </summary>
         /// <param name="item">Item to remove</param>
-        public void RemoveFromOutfit(InventoryItem item)
+        public async Task RemoveFromOutfit(InventoryItem item)
         {
-            RemoveFromOutfit(new List<InventoryItem>(1) { item });
+            await RemoveFromOutfit(new List<InventoryItem>(1) { item });
         }
 
         /// <summary>
         /// Remove specified items from the current outfit
         /// </summary>
         /// <param name="items">List of items to remove</param>
-        public void RemoveFromOutfit(List<InventoryItem> items)
+        public async Task RemoveFromOutfit(List<InventoryItem> items)
         {
             // Resolve inventory links
             var outfit = items.Select(OriginalInventoryItem).Where(realItem => Instance.RLV.AllowDetach(realItem)).ToList();
 
             // Remove links to all items that were removed
             var toRemove = outfit.FindAll(item => CanBeWorn(item) && !IsBodyPart(item)).Select(item => item.UUID).ToList();
-            RemoveLink(toRemove);
+            await RemoveLinks(toRemove);
 
             Client.Appearance.RemoveFromOutfit(outfit);
         }

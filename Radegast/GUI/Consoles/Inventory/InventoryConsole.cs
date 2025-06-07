@@ -964,11 +964,11 @@ namespace Radegast
                 case AssetType.Object:
                     if (IsAttached(item))
                     {
-                        instance.COF.Detach(item);
+                        instance.COF.Detach(item).Wait();
                     }
                     else
                     {
-                        instance.COF.Attach(item, AttachmentPoint.Default, true);
+                        instance.COF.Attach(item, AttachmentPoint.Default, true).Wait();
                     }
                     break;
 
@@ -978,12 +978,12 @@ namespace Radegast
                     {
                         if (item.AssetType == AssetType.Clothing)
                         {
-                            instance.COF.RemoveFromOutfit(item);
+                            instance.COF.RemoveFromOutfit(item).Wait();
                         }
                     }
                     else
                     {
-                        instance.COF.AddToOutfit(item, true);
+                        instance.COF.AddToOutfit(item, true).Wait();
                     }
                     break;
             }
@@ -1626,17 +1626,35 @@ namespace Radegast
                         });
                         break;
                     case "outfit_add":
-                        List<InventoryItem> addToOutfit = GetInventoryItemsForOutFit(folder);
+                        var addToOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(addToOutfit, false);
-                        UpdateWornLabels();
+
+                        ThreadPool.QueueUserWorkItem(sync =>
+                        {
+                            using (var cts = new CancellationTokenSource())
+                            {
+                                cts.CancelAfter(TimeSpan.FromSeconds(30));
+                                instance.COF.AddToOutfit(addToOutfit, false).Wait();
+                            }
+
+                            UpdateWornLabels();
+                        });
                         break;
 
                     case "outfit_take_off":
-                        List<InventoryItem> removeFromOutfit = GetInventoryItemsForOutFit(folder);
+                        var removeFromOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.RemoveFromOutfit(removeFromOutfit);
-                        UpdateWornLabels();
+
+                        ThreadPool.QueueUserWorkItem(sync =>
+                        {
+                            using (var cts = new CancellationTokenSource())
+                            {
+                                cts.CancelAfter(TimeSpan.FromSeconds(30));
+                                instance.COF.RemoveFromOutfit(removeFromOutfit).Wait();
+                            }
+
+                            UpdateWornLabels();
+                        });
                         break;
                 }
                 #endregion
@@ -1709,21 +1727,21 @@ namespace Radegast
                         break;
 
                     case "detach":
-                        instance.COF.Detach(item);
+                        instance.COF.Detach(item).Wait();
                         invTree.SelectedNode.Text = ItemLabel(item, false);
                         break;
 
                     case "wear_attachment":
-                        instance.COF.Attach(item, AttachmentPoint.Default, true);
+                        instance.COF.Attach(item, AttachmentPoint.Default, true).Wait();
                         break;
 
                     case "wear_attachment_add":
-                        instance.COF.Attach(item, AttachmentPoint.Default, false);
+                        instance.COF.Attach(item, AttachmentPoint.Default, false).Wait();
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
-                        instance.COF.Attach(item, pt, true);
+                        instance.COF.Attach(item, pt, true).Wait();
                         break;
 
                     case "edit_script":
@@ -1737,19 +1755,19 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.RemoveFromOutfit(item);
+                        instance.COF.RemoveFromOutfit(item).Wait();
                         invTree.SelectedNode.Text = ItemLabel(item, false);
                         break;
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, true);
+                        instance.COF.AddToOutfit(item, true).Wait();
                         invTree.SelectedNode.Text = ItemLabel(item, false);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, false);
+                        instance.COF.AddToOutfit(item, false).Wait();
                         invTree.SelectedNode.Text = ItemLabel(item, false);
                         break;
 

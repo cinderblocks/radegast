@@ -613,7 +613,7 @@ namespace Radegast
                                             instance.COF.Detach(
                                                 client.Inventory.Store[
                                                     CurrentOutfitFolder
-                                                        .GetAttachmentItem(attachment)] as InventoryItem);
+                                                        .GetAttachmentItem(attachment)] as InventoryItem).Wait();
                                         }
                                     }
                                 }
@@ -624,7 +624,7 @@ namespace Radegast
                                     {
                                         var outfit = (from item in folder.Nodes.Values 
                                             where CurrentOutfitFolder.CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
-                                        instance.COF.RemoveFromOutfit(outfit);
+                                        instance.COF.RemoveFromOutfit(outfit).Wait();
                                     }
                                 }
                             }
@@ -638,7 +638,7 @@ namespace Radegast
                                 {
                                     if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                     {
-                                        instance.COF.Detach(client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem);
+                                        instance.COF.Detach(client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem).Wait();
                                     }
                                 }
                             }
@@ -655,7 +655,7 @@ namespace Radegast
                                     List<InventoryItem> allItems = new List<InventoryItem>();
                                     AllSubfolderWearables(folder, ref allItems);
                                     List<InventoryItem> allSubfolderWorn = allItems.Where(n => CurrentOutfitFolder.CanBeWorn(n)).ToList();
-                                    instance.COF.RemoveFromOutfit(allSubfolderWorn);
+                                    instance.COF.RemoveFromOutfit(allSubfolderWorn).Wait();
                                 }
                             }
                         }
@@ -677,7 +677,7 @@ namespace Radegast
                                     {
                                         var outfit = new List<InventoryItem>();
                                         GetAllItems(folder, true, ref outfit);
-                                        instance.COF.RemoveFromOutfit(outfit);
+                                        instance.COF.RemoveFromOutfit(outfit).Wait();
                                     }
                                 }
                             }
@@ -692,8 +692,8 @@ namespace Radegast
                                 var w = RLVWearables.Find(a => a.Name == rule.Option);
                                 if (w.Name == rule.Option)
                                 {
-                                    var items = instance.COF.GetWornAt(w.Type);
-                                    instance.COF.RemoveFromOutfit(items);
+                                    var items = instance.COF.GetWornAt(w.Type).Result;
+                                    instance.COF.RemoveFromOutfit(items).Wait();
                                 }
                             }
                         }
@@ -723,11 +723,11 @@ namespace Radegast
 
                                     if (rule.Behaviour == "attachover" || rule.Behaviour == "attachallover")
                                     {
-                                        instance.COF.AddToOutfit(outfit, false);
+                                        instance.COF.AddToOutfit(outfit, false).Wait();
                                     }
                                     else
                                     {
-                                        instance.COF.AddToOutfit(outfit, true);
+                                        instance.COF.AddToOutfit(outfit, true).Wait();
                                     }
                                 }
                             }
