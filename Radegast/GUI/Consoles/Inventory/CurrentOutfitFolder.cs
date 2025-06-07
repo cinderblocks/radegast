@@ -38,6 +38,9 @@ namespace Radegast
         private bool InitializedCOF = false;
         public InventoryFolder COF;
 
+        public int MaxClothingLayers { get; set; } = 60;
+        public int MaxAttachedObjects { get; set; } = 38;
+
         #endregion Fields
 
         #region Construction and disposal
@@ -92,7 +95,9 @@ namespace Radegast
                 lock (FolderSync)
                 {
                     var items = new Dictionary<UUID, UUID>();
-                    foreach (var link in ContentLinks().Where(link => !items.ContainsKey(link.AssetUUID)))
+                    var cofLinks = ContentLinks().Result;
+
+                    foreach (var link in cofLinks.Where(link => !items.ContainsKey(link.AssetUUID)))
                     {
                         items.Add(link.AssetUUID, Client.Self.AgentID);
                     }
@@ -529,7 +534,7 @@ namespace Radegast
                 }
                 else if(inventoryItem.AssetType == AssetType.Clothing)
                 {
-                    if(numClothingLayers >= 60)
+                    if(numClothingLayers >= MaxClothingLayers)
                     {
                         continue;
                     }
@@ -538,7 +543,7 @@ namespace Radegast
                 }
                 else if(inventoryItem.AssetType == AssetType.Object)
                 {
-                    if(numAttachedObjects >= 36)
+                    if(numAttachedObjects >= MaxAttachedObjects)
                     {
                         continue;
                     }
@@ -638,115 +643,61 @@ namespace Radegast
             await Client.Inventory.RemoveItemsAsync(toRemoveIds, cancellationToken);
 
             // Add new outfit links
-            var isSuccessful = false;
-            if (!Client.AisClient.IsAvailable)
+            foreach (var item in bodypartsToWear)
             {
-                foreach (var item in bodypartsToWear)
-                {
-                    await AddLink(item.Value, cancellationToken);
-                }
-                foreach (var item in itemsToWear)
-                {
-                    await AddLink(item.Value, cancellationToken);
-                }
+                await AddLink(item.Value, cancellationToken);
+            }
+            foreach (var item in itemsToWear)
+            {
+                await AddLink(item.Value, cancellationToken);
+            }
 
-                // Add link to outfit folder we're putting on
-                if (newOutfitFolderNode != null)
-                {
-                    Client.Inventory.CreateLink(
-                        currentOutfitFolder.UUID,
-                        newOutfitFolderNode.Data.UUID,
-                        newOutfitFolderNode.Data.Name,
-                        "",
-                        InventoryType.Folder,
-                        UUID.Random(),
-                        (success, newItem) =>
+            // Add link to outfit folder we're putting on
+            if (newOutfitFolderNode != null)
+            {
+                Client.Inventory.CreateLink(
+                    currentOutfitFolder.UUID,
+                    newOutfitFolderNode.Data.UUID,
+                    newOutfitFolderNode.Data.Name,
+                    "",
+                    InventoryType.Folder,
+                    UUID.Random(),
+                    (success, newItem) =>
+                    {
+                        if (success)
                         {
-                            if (success)
-                            {
-                                Client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
-                            }
-                        },
-                        cancellationToken
-                    );
-                }
-
-                isSuccessful = true;
+                            Client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
+                        }
+                    },
+                    cancellationToken
+                );
             }
-            else
-            {
-                var finalOutfitToWear = itemsToWear.Values.ToList();
-                finalOutfitToWear.AddRange(bodypartsToWear.Values);
-
-                var contentsArray = new OSDArray(finalOutfitToWear.Count);
-                foreach (var item in finalOutfitToWear)
-                {
-                    var itemOsd = new OSDMap();
-                    itemOsd["name"] = item.Name;
-                    itemOsd["desc"] = item.Description;
-                    itemOsd["linked_id"] = item.UUID;
-                    itemOsd["type"] = (int)AssetType.Link;
-
-                    contentsArray.Add(itemOsd);
-                }
-
-                // Add link to outfit folder we're putting on
-                if (newOutfitFolderNode != null)
-                {
-                    var itemOsd = new OSDMap();
-                    itemOsd["name"] = newOutfitFolderNode.Data.Name;
-                    itemOsd["desc"] = "";
-                    itemOsd["linked_id"] = newOutfitFolderNode.Data.UUID;
-                    itemOsd["type"] = (int)AssetType.LinkFolder;
-
-                    contentsArray.Add(itemOsd);
-                }
-
-                await Client.AisClient.SlamFolder(currentOutfitFolder.UUID, contentsArray, (success) =>
-                {
-                    // NOTE: Hardcoded success is intended. SlamFolder will currently always report non-success for .net framework
-                    isSuccessful = true;
-                }, cancellationToken);
-            }
-
-            // Just to make sure we have the latest Current Outfit folder contents in our inventory store/cache
-            await Client.Inventory.RequestFolderContents(
-                currentOutfitFolder.UUID,
-                currentOutfitFolder.OwnerID,
-                true,
-                true,
-                InventorySortOrder.ByName,
-                cancellationToken
-            );
 
             // Wear new outfit
-            if(isSuccessful)
+            var tcs = new TaskCompletionSource<bool>();
+            void handleAppearanceSet(object sender, AppearanceSetEventArgs e)
             {
-                var tcs = new TaskCompletionSource<bool>();
-                void handleAppearanceSet(object sender, AppearanceSetEventArgs e)
-                {
-                    tcs.TrySetResult(true);
-                }
-
-                try
-                {
-                    Client.Appearance.AppearanceSet += handleAppearanceSet;
-                    Client.Appearance.ReplaceOutfit(itemsToWear.Values.ToList(), false);
-
-                    var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
-                    if (completedTask != tcs.Task)
-                    {
-                        Logger.Log("Timed out while waiting for AppearanceSet confirmation. Are you changing outfits too quickly?", Helpers.LogLevel.Error, Client);
-                        return false;
-                    }
-                }
-                finally
-                {
-                    Client.Appearance.AppearanceSet -= handleAppearanceSet;
-                }
+                tcs.TrySetResult(true);
             }
 
-            return isSuccessful;
+            try
+            {
+                Client.Appearance.AppearanceSet += handleAppearanceSet;
+                Client.Appearance.ReplaceOutfit(itemsToWear.Values.ToList(), false);
+
+                var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
+                if (completedTask != tcs.Task)
+                {
+                    Logger.Log("Timed out while waiting for AppearanceSet confirmation. Are you changing outfits too quickly?", Helpers.LogLevel.Error, Client);
+                    return false;
+                }
+            }
+            finally
+            {
+                Client.Appearance.AppearanceSet -= handleAppearanceSet;
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -858,7 +809,7 @@ namespace Radegast
                         }
                         else
                         {
-                            if (numClothingLayers >= 60)
+                            if (numClothingLayers >= MaxClothingLayers)
                             {
                                 continue;
                             }
@@ -899,7 +850,7 @@ namespace Radegast
                     }
                     else
                     {
-                        if (numAttachedObjects >= 38)
+                        if (numAttachedObjects >= MaxAttachedObjects)
                         {
                             // TODO: check user specific limits
                             continue;
