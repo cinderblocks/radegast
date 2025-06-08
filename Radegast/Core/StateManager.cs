@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -22,13 +22,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Timers;
 using System.Threading;
 
 using OpenMetaverse;
 
 using Radegast.Automation;
-using Radegast;
 
 namespace Radegast
 {
@@ -55,40 +53,42 @@ namespace Radegast
     {
         public Parcel Parcel { get; set; }
 
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient Client => instance.Client;
-        private Radegast.Netcom Netcom => instance.Netcom;
+        private Netcom Netcom => instance.Netcom;
 
-        private bool away = false;
-        private bool flying = false;
-        private bool alwaysrun = false;
-        private bool sitting = false;
+        private bool Away = false;
+        private bool Flying = false;
+        private bool AlwaysRun = false;
+        private bool Sitting = false;
 
         private UUID followID;
         private bool displayEndWalk = false;
 
         internal static Random rnd = new Random();
-        private System.Threading.Timer lookAtTimer;
+        private Timer lookAtTimer;
+
+        private readonly UUID teleportEffect = UUID.Random();
 
         public float FOVVerticalAngle = Utils.TWO_PI - 0.05f;
 
         /// <summary>
         /// Passes walk state
         /// </summary>
-        /// <param name="walking">True if we are walking towards a targer</param>
-        public delegate void WalkStateCanged(bool walking);
+        /// <param name="walking">True if we are walking towards a target</param>
+        public delegate void WalkStateChanged(bool walking);
 
         /// <summary>
         /// Fires when we start or stop walking towards a target
         /// </summary>
-        public event WalkStateCanged OnWalkStateCanged;
+        public event WalkStateChanged OnWalkStateChanged;
 
         /// <summary>
         /// Fires when avatar stands
         /// </summary>
         public event EventHandler<SitEventArgs> SitStateChanged;
 
-        static List<KnownHeading> m_Headings;
+        private static List<KnownHeading> m_Headings;
         public static List<KnownHeading> KnownHeadings => m_Headings ?? (m_Headings = new List<KnownHeading>(16)
         {
             new KnownHeading("E", "East", new Quaternion(0.00000f, 0.00000f, 0.00000f, 1.00000f)),
@@ -192,7 +192,6 @@ namespace Radegast
             RegisterClientEvents(Client);
         }
 
-
         private void RegisterClientEvents(GridClient client)
         {
             client.Objects.AvatarUpdate += Objects_AvatarUpdate;
@@ -249,38 +248,37 @@ namespace Radegast
             }
         }
 
-        void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(Client);
         }
 
-        void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
+        private void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
         {
             if (e.Avatar.LocalID != Client.Self.LocalID) return;
 
-            sitting = e.SittingOn != 0;
+            Sitting = e.SittingOn != 0;
 
             if (Client.Self.SittingOn != 0 && !Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
             {
                 Client.Objects.RequestObject(Client.Network.CurrentSim, Client.Self.SittingOn);
             }
 
-            SitStateChanged?.Invoke(this, new SitEventArgs(sitting));
+            SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
         }
 
         /// <summary>
-        /// Locates avatar in the current sim, or adjacents sims
+        /// Locates avatar in the current sim, or adjacent sims
         /// </summary>
         /// <param name="person">Avatar UUID</param>
         /// <param name="position">Position within sim</param>
         /// <returns>True if managed to find the avatar</returns>
         public bool TryFindAvatar(UUID person, out Vector3 position)
         {
-            Simulator sim;
-            if (!TryFindAvatar(person, out sim, out position)) return false;
+            if (!TryFindAvatar(person, out var sim, out position)) { return false; }
             // same sim?
-            if (sim == Client.Network.CurrentSim) return true;
+            if (sim == Client.Network.CurrentSim) { return true; }
             position = ToLocalPosition(sim.Handle, position);
             return true;
         }
@@ -294,8 +292,7 @@ namespace Radegast
 
         public static Vector3d ToVector3D(ulong handle, Vector3 pos)
         {
-            uint globalX, globalY;
-            Utils.LongToUInts(handle, out globalX, out globalY);
+            Utils.LongToUInts(handle, out var globalX, out var globalY);
 
             return new Vector3d(
                 (double)globalX + (double)pos.X,
@@ -304,7 +301,7 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Locates avatar in the current sim, or adjacents sims
+        /// Locates avatar in the current sim, or adjacent sims
         /// </summary>
         /// <param name="person">Avatar UUID</param>
         /// <param name="sim">Simulator avatar is in</param>
@@ -408,8 +405,7 @@ namespace Radegast
                 }
                 else
                 {
-                    Primitive seat;
-                    if (sim.ObjectsPrimitives.TryGetValue(avi.ParentID, out seat))
+                    if (sim.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seat))
                     {
                         position = seat.Position + avi.Position*seat.Rotation;
                     }
@@ -457,7 +453,7 @@ namespace Radegast
             LookInFront();
         }
 
-        void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
+        private void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
         {
             if (e.Simulator == Client.Network.CurrentSim)
             {
@@ -465,7 +461,7 @@ namespace Radegast
             }
         }
 
-        void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
@@ -476,9 +472,7 @@ namespace Radegast
             Client.Self.Movement.SetFOVVerticalAngle(FOVVerticalAngle);
         }
 
-        private UUID teleportEffect = UUID.Random();
-
-        void Self_TeleportProgress(object sender, TeleportEventArgs e)
+        private void Self_TeleportProgress(object sender, TeleportEventArgs e)
         {
             if (!Client.Network.Connected) return;
 
@@ -499,9 +493,9 @@ namespace Radegast
             }
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            IsTyping = away = IsBusy = IsWalking = false;
+            IsTyping = Away = IsBusy = IsWalking = false;
 
             if (lookAtTimer != null)
             {
@@ -511,7 +505,7 @@ namespace Radegast
 
         }
 
-        void Netcom_ClientConnected(object sender, EventArgs e)
+        private void Netcom_ClientConnected(object sender, EventArgs e)
         {
             if (!instance.GlobalSettings.ContainsKey("draw_distance"))
             {
@@ -522,11 +516,11 @@ namespace Radegast
 
             if (lookAtTimer == null)
             {
-                lookAtTimer = new System.Threading.Timer(LookAtTimerTick, null, Timeout.Infinite, Timeout.Infinite);
+                lookAtTimer = new Timer(LookAtTimerTick, null, Timeout.Infinite, Timeout.Infinite);
             }
         }
 
-        void Objects_AvatarUpdate(object sender, AvatarUpdateEventArgs e)
+        private void Objects_AvatarUpdate(object sender, AvatarUpdateEventArgs e)
         {
             if (e.Avatar.LocalID == Client.Self.LocalID)
             {
@@ -534,30 +528,27 @@ namespace Radegast
             }
         }
 
-        void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
-            if (!e.Update.Avatar) return;
+            if (!e.Update.Avatar) { return; }
             
             if (e.Prim.LocalID == Client.Self.LocalID)
             {
                 SetDefaultCamera();
             }
 
-            if (!IsFollowing) return;
+            if (!IsFollowing) { return; }
 
-            Avatar av;
-            Client.Network.CurrentSim.ObjectsAvatars.TryGetValue(e.Update.LocalID, out av);
-            if (av == null) return;
+            Client.Network.CurrentSim.ObjectsAvatars.TryGetValue(e.Update.LocalID, out var av);
+            if (av == null) { return; }
 
             if (av.ID == followID)
             {
-                Vector3 pos = AvatarPosition(Client.Network.CurrentSim, av);
-
-                FollowUpdate(pos);
+                FollowUpdate(AvatarPosition(Client.Network.CurrentSim, av));
             }
         }
 
-        void FollowUpdate(Vector3 pos)
+        private void FollowUpdate(Vector3 pos)
         {
             if (Vector3.Distance(pos, Client.Self.SimPosition) > FollowDistance)
             {
@@ -575,22 +566,21 @@ namespace Radegast
 
         public void SetDefaultCamera()
         {
-            if (CameraTracksOwnAvatar)
+            if (!CameraTracksOwnAvatar) { return; }
+
+            if (Client.Self.SittingOn != 0 && !Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
             {
-                if (Client.Self.SittingOn != 0 && !Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
-                {
-                    // We are sitting but don't have the information about the object we are sitting on
-                    // Sim seems to ignore RequestMutlipleObjects message
-                    // client.Objects.RequestObject(client.Network.CurrentSim, client.Self.SittingOn);
-                }
-                else
-                {
-                    Vector3 pos = Client.Self.SimPosition + DefaultCameraOffset * Client.Self.Movement.BodyRotation;
-                    //Logger.Log("Setting camera position to " + pos.ToString(), Helpers.LogLevel.Debug);
-                    Client.Self.Movement.Camera.LookAt(
-                        pos, Client.Self.SimPosition
-                    );
-                }
+                // We are sitting but don't have the information about the object we are sitting on
+                // Sim seems to ignore RequestMultipleObjects message
+                // client.Objects.RequestObject(client.Network.CurrentSim, client.Self.SittingOn);
+            }
+            else
+            {
+                Vector3 pos = Client.Self.SimPosition + DefaultCameraOffset * Client.Self.Movement.BodyRotation;
+                //Logger.Log("Setting camera position to " + pos.ToString(), Helpers.LogLevel.Debug);
+                Client.Self.Movement.Camera.LookAt(
+                    pos, Client.Self.SimPosition
+                );
             }
         }
 
@@ -682,7 +672,7 @@ namespace Radegast
 
         #region Look at effect
         private int lastLookAtEffect = 0;
-        private UUID lookAtEffect = UUID.Random();
+        private readonly UUID lookAtEffect = UUID.Random();
 
         /// <summary>
         /// Set eye focus 3m in front of us
@@ -696,12 +686,12 @@ namespace Radegast
                 LookAtType.Idle, lookAtEffect);
         }
 
-        void LookAtTimerTick(object state)
+        private void LookAtTimerTick(object state)
         {
             LookInFront();
         }
 
-        void Netcom_ChatReceived(object sender, ChatEventArgs e)
+        private void Netcom_ChatReceived(object sender, ChatEventArgs e)
         {
             //somehow it can be too early (when Radegast is loaded from running bot)
             if (instance.GlobalSettings==null) return;
@@ -724,10 +714,10 @@ namespace Radegast
         #region Walking (move to)
 
         private System.Threading.Timer walkTimer;
-        private int walkChekInterval = 500;
+        private readonly int walkChekInterval = 500;
         private Vector3d walkToTarget;
-        int lastDistance = 0;
-        int lastDistanceChanged = 0;
+        private int lastDistance = 0;
+        private int lastDistanceChanged = 0;
 
         public void WalkTo(Primitive prim)
         {
@@ -769,7 +759,7 @@ namespace Radegast
             FireWalkStateCanged();
         }
 
-        void WalkTimerElapsed(object sender)
+        private void WalkTimerElapsed(object sender)
         {
 
             double distance = Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget);
@@ -796,7 +786,7 @@ namespace Radegast
             }
         }
 
-        void Self_AlertMessage(object sender, AlertMessageEventArgs e)
+        private void Self_AlertMessage(object sender, AlertMessageEventArgs e)
         {
             if (e.NotificationId == "AutopilotCanceled")
             {
@@ -807,11 +797,11 @@ namespace Radegast
             }
         }
 
-        void FireWalkStateCanged()
+        private void FireWalkStateCanged()
         {
-            if (OnWalkStateCanged != null)
+            if (OnWalkStateChanged != null)
             {
-                try { OnWalkStateCanged(IsWalking); }
+                try { OnWalkStateChanged(IsWalking); }
                 catch (Exception) { }
             }
         }
@@ -849,7 +839,7 @@ namespace Radegast
         public void SetTyping(bool typing)
         {
             if (!Client.Network.Connected) return;
-            var typingAnim = new Dictionary<UUID, bool> {{TypingAnimationID, typing}};
+            var typingAnim = new Dictionary<UUID, bool> {{Animations.TYPE, typing}};
             Client.Self.Animate(typingAnim, false);
             Client.Self.Chat(string.Empty, 0, typing ? ChatType.StartTyping : ChatType.StopTyping);
             IsTyping = typing;
@@ -857,36 +847,36 @@ namespace Radegast
 
         public void SetAway(bool away)
         {
-            var awayAnim = new Dictionary<UUID, bool> {{AwayAnimationID, away}};
+            var awayAnim = new Dictionary<UUID, bool> {{Animations.AWAY, away}};
             Client.Self.Animate(awayAnim, true);
             if (UseMoveControl) Client.Self.Movement.Away = away;
-            this.away = away;
+            this.Away = away;
         }
 
         public void SetBusy(bool busy)
         {
-            var busyAnim = new Dictionary<UUID, bool> {{BusyAnimationID, busy}};
+            var busyAnim = new Dictionary<UUID, bool> {{Animations.BUSY, busy}};
             Client.Self.Animate(busyAnim, true);
             IsBusy = busy;
         }
 
         public void SetFlying(bool fly)
         {
-            flying = Client.Self.Movement.Fly = fly;
+            Flying = Client.Self.Movement.Fly = fly;
         }
 
         public void SetAlwaysRun(bool always_run)
         {
-            alwaysrun = Client.Self.Movement.AlwaysRun = always_run;
+            AlwaysRun = Client.Self.Movement.AlwaysRun = always_run;
         }
 
         public void SetSitting(bool sit, UUID target)
         {
-            sitting = sit;
+            Sitting = sit;
 
             if (!instance.RLV.RestictionActive("unsit"))
             {
-                if (sitting)
+                if (Sitting)
                 {
                     Client.Self.RequestSit(target, Vector3.Zero);
                     Client.Self.Sit();
@@ -899,13 +889,13 @@ namespace Radegast
             else
             {
                 instance.TabConsole.DisplayNotificationInChat("Unsit prevented by RLV");
-                sitting = true;
+                Sitting = true;
                 return;
             }
 
-            SitStateChanged?.Invoke(this, new SitEventArgs(sitting));
+            SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
 
-            if (!sitting)
+            if (!Sitting)
             {
                 StopAllAnimations();
             }
@@ -931,8 +921,7 @@ namespace Radegast
 
         public static Vector3d GlobalPosition(Simulator sim, Vector3 pos)
         {
-            uint globalX, globalY;
-            Utils.LongToUInts(sim.Handle, out globalX, out globalY);
+            Utils.LongToUInts(sim.Handle, out var globalX, out var globalY);
 
             return new Vector3d(
                 (double)globalX + (double)pos.X,
@@ -947,12 +936,12 @@ namespace Radegast
 
         private System.Timers.Timer beamTimer;
         private List<Vector3d> beamTarget;
-        private Random beamRandom = new Random();
+        private readonly Random beamRandom = new Random();
         private UUID pointID;
         private UUID sphereID;
         private List<UUID> beamID;
         private int numBeans;
-        private Color4[] beamColors = new Color4[] { new Color4(0, 255, 0, 255), new Color4(255, 0, 0, 255), new Color4(0, 0, 255, 255) };
+        private readonly Color4[] beamColors = new Color4[] { new Color4(0, 255, 0, 255), new Color4(255, 0, 0, 255), new Color4(0, 0, 255, 255) };
         private Primitive targetPrim;
 
         public void UnSetPointing()
@@ -981,7 +970,7 @@ namespace Radegast
 
         }
 
-        void BeamTimer_Elapsed(object sender, EventArgs e)
+        private void BeamTimer_Elapsed(object sender, EventArgs e)
         {
             if (beamID == null) return;
 
@@ -1051,21 +1040,18 @@ namespace Radegast
             beamTimer.Enabled = true;
         }
 
-        public UUID TypingAnimationID { get; set; } = new UUID("c541c47f-e0c0-058b-ad1a-d6ae3a4584d9");
-        public UUID AwayAnimationID { get; set; } = new UUID("fd037134-85d4-f241-72c6-4f42164fedee");
-        public UUID BusyAnimationID { get; set; } = new UUID("efcf670c2d188128973a034ebc806b67");
         public bool IsTyping { get; private set; } = false;
-        public bool IsAway => UseMoveControl ? Client.Self.Movement.Away : away;
+        public bool IsAway => UseMoveControl ? Client.Self.Movement.Away : Away;
         public bool IsBusy { get; private set; } = false;
         public bool IsFlying => Client.Self.Movement.Fly;
         public bool IsSitting
         {
             get
             {
-                if (Client.Self.Movement.SitOnGround || Client.Self.SittingOn != 0) return true;
-                if (sitting) {
+                if (Client.Self.Movement.SitOnGround || Client.Self.SittingOn != 0) { return true; }
+                if (Sitting) {
                     Logger.Log("out of sync sitting", Helpers.LogLevel.Debug);
-                    sitting = false;
+                    Sitting = false;
                 }
                 return false;
             }
@@ -1081,7 +1067,7 @@ namespace Radegast
         public PseudoHome PseudoHome { get; }
 
         /// <summary>
-        /// Experimental Option that sometimes the Client has more authority than state mananger
+        /// Experimental Option that sometimes the Client has more authority than state manager
         /// </summary>
         public static bool UseMoveControl;
     }

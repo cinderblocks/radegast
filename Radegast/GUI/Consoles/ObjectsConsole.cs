@@ -92,7 +92,7 @@ namespace Radegast
             client.Network.SimChanged += Network_SimChanged;
             client.Self.MuteListUpdated += Self_MuteListUpdated;
             instance.Names.NameUpdated += Avatars_UUIDNameReply;
-            instance.State.OnWalkStateCanged += State_OnWalkStateCanged;
+            instance.State.OnWalkStateChanged += State_OnWalkStateChanged;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -115,7 +115,7 @@ namespace Radegast
             client.Network.SimChanged -= Network_SimChanged;
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;
-            instance.State.OnWalkStateCanged -= State_OnWalkStateCanged;
+            instance.State.OnWalkStateChanged -= State_OnWalkStateChanged;
         }
 
         private void State_SitStateChanged(object sender, SitEventArgs e)
@@ -1035,11 +1035,11 @@ namespace Radegast
             }
         }
 
-        private void State_OnWalkStateCanged(bool walking)
+        private void State_OnWalkStateChanged(bool walking)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate() { State_OnWalkStateCanged(walking); }));
+                BeginInvoke(new MethodInvoker(delegate() { State_OnWalkStateChanged(walking); }));
                 return;
             }
 
