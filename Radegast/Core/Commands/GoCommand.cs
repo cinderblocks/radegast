@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -18,7 +18,9 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
@@ -206,11 +208,9 @@ Examples:
                     }
 
                     Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
-                    List<Primitive> prims = Objects.GetObjectList();
-
-                    Primitive target = prims.Find(prim => prim.Properties != null
-                                                          && prim.Properties.Name.ToLower().Contains(subarg.ToLower()));
-
+                    var target = Objects.GetObjects().FirstOrDefault(
+                        prim => prim.Properties != null
+                                && prim.Properties.Name.IndexOf(cmd, StringComparison.OrdinalIgnoreCase) >= 0);
                     if (target == null)
                     {
                         WriteLine("Could not find '{0}' nearby", subarg);

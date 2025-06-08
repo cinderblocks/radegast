@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -104,20 +104,12 @@ namespace Radegast.Commands
                 }
 
                 Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
-                List<Primitive> prims = Objects.GetObjectList();
-
-                List<Primitive> targets = prims.FindAll(prim => prim.Properties != null
-                                                                && prim.Properties.Name.ToLower().Contains(subarg.ToLower()));
-
-                if (targets.Count == 0)
+                foreach (var target in Objects.GetObjects().Where(
+                             prim => prim.Properties != null 
+                                     && prim.Properties.Name.IndexOf(cmd, StringComparison.OrdinalIgnoreCase) >= 0))
                 {
-                    WriteLine("Could not find '{0}' nearby", subarg);
-                    return;
-                }
-
-                foreach (Primitive target in targets)
-                {
-                    Vector3 heading = StateManager.RotToEuler(Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(target.Position - mypos)));
+                    Vector3 heading = StateManager.RotToEuler(
+                        Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(target.Position - mypos)));
                     int facing = (int)(57.2957795d * heading.Z);
                     if (facing < 0) facing = 360 + facing;
 
@@ -146,7 +138,7 @@ namespace Radegast.Commands
             if (subcmd == "person")
             {
                 List<UUID> people = Chat.GetAvatarList();
-                people = people.FindAll(id => id != Client.Self.AgentID && Instance.Names.Get(id).ToLower().StartsWith(subarg.ToLower()));
+                people = people.FindAll(id => id != Client.Self.AgentID && Instance.Names.Get(id).StartsWith(subarg, StringComparison.OrdinalIgnoreCase));
                 if (people.Count == 0)
                 {
                     WriteLine("Could not find {0}", subarg);
