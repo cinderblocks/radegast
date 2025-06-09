@@ -47,8 +47,12 @@ namespace Radegast
         {
             if (disposing && (components != null))
             {
-                inventoryUpdateCancelToken.Cancel();
-                inventoryUpdateCancelToken.Dispose();
+                if(inventoryUpdateCancelToken != null)
+                {
+                    inventoryUpdateCancelToken.Cancel();
+                    inventoryUpdateCancelToken.Dispose();
+                    inventoryUpdateCancelToken = null;
+                }
 
                 if (_EditTimer != null)
                 {

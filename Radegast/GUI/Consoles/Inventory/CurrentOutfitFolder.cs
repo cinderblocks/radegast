@@ -19,11 +19,9 @@
  */
 
 using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -38,8 +36,7 @@ namespace Radegast
         private bool InitializedCOF = false;
         public InventoryFolder COF;
 
-        public int MaxClothingLayers { get; set; } = 60;
-        public int MaxAttachedObjects { get; set; } = 38;
+        public int MaxClothingLayers => 60;
 
         #endregion Fields
 
@@ -80,6 +77,7 @@ namespace Radegast
             client.Network.SimChanged -= Network_OnSimChanged;
             client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
             client.Objects.KillObject -= Objects_KillObject;
+
             InitializedCOF = false;
         }
 
@@ -200,9 +198,10 @@ namespace Radegast
                 return new List<InventoryItem>();
             }
 
-            if(cofNode.NeedsUpdate)
+            List<InventoryBase> cofContents;
+            if (cofNode.NeedsUpdate)
             {
-                await Client.Inventory.RequestFolderContents(
+                cofContents = await Client.Inventory.RequestFolderContents(
                     COF.UUID,
                     COF.OwnerID,
                     true,
@@ -211,8 +210,11 @@ namespace Radegast
                     cancellationToken
                 );
             }
+            else
+            {
+                cofContents = Client.Inventory.Store.GetContents(COF);
+            }
 
-            var cofContents = Client.Inventory.Store.GetContents(COF);
             var cofLinks = cofContents.OfType<InventoryItem>()
                 .Where(n => n.IsLink())
                 .ToList();
@@ -445,7 +447,7 @@ namespace Radegast
                 return item;
             }
 
-            if (!Client.Inventory.Store.TryGet<InventoryItem>(item.AssetUUID, out var inventoryItem))
+            if (!Client.Inventory.Store.TryGetValue<InventoryItem>(item.AssetUUID, out var inventoryItem))
             {
                 return item;
             }
@@ -568,7 +570,7 @@ namespace Radegast
                 }
                 else if(inventoryItem.AssetType == AssetType.Object)
                 {
-                    if(numAttachedObjects >= MaxAttachedObjects)
+                    if(numAttachedObjects >= Client.Self.Benefits.AttachmentLimit)
                     {
                         continue;
                     }
@@ -747,7 +749,7 @@ namespace Radegast
                 return itemLink;
             }
 
-            if (Client.Inventory.Store.TryGet(itemLink.AssetUUID, out var remoteInventoryItem))
+            if (Client.Inventory.Store.TryGetValue(itemLink.AssetUUID, out var remoteInventoryItem))
             {
                 return remoteInventoryItem;
             }
@@ -939,7 +941,7 @@ namespace Radegast
                     }
                     else
                     {
-                        if (numAttachedObjects >= MaxAttachedObjects)
+                        if (numAttachedObjects >= Client.Self.Benefits.AttachmentLimit)
                         {
                             continue;
                         }

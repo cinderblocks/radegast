@@ -1496,7 +1496,7 @@ namespace Radegast
             }
         }
 
-        private void RunBackgroundTask(Action<CancellationToken> work, Action uiCallback = null, int timeoutSeconds = 10)
+        private void RunBackgroundTask(Action<CancellationToken> work, Action uiCallback = null, int timeoutSeconds = 60)
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
