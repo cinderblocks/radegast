@@ -18,13 +18,14 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 using System.Reflection;
+using System.Text;
+using System.Threading;
 
 namespace Radegast
 {
@@ -249,7 +250,25 @@ namespace Radegast
                 && e.Type == ChatType.OwnerSay
                 && e.Message.StartsWith("@"))
             {
-                instance.RLV.TryProcessCMD(e);
+                ThreadPool.QueueUserWorkItem(sync =>
+                {
+                    try
+                    {
+                        using (var cts = new CancellationTokenSource())
+                        {
+                            cts.CancelAfter(TimeSpan.FromSeconds(120));
+                            instance.RLV.TryProcessCMD(e, cts.Token).Wait();
+                        }
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                    }
+                });
 #if !DEBUG
                 if (!instance.RLV.EnabledDebugCommands) {
                     return;

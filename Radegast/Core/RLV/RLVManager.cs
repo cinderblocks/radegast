@@ -24,6 +24,8 @@ using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 
@@ -224,7 +226,7 @@ namespace Radegast
             }
         }
 
-        public bool TryProcessCMD(ChatEventArgs e)
+        public async Task<bool> TryProcessCMD(ChatEventArgs e, CancellationToken cancellationToken = default)
         {
             if (!Enabled || !e.Message.StartsWith("@")) return false;
 
@@ -610,10 +612,10 @@ namespace Radegast
                                         if (client.Inventory.Store.Contains(
                                                 CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                         {
-                                            instance.COF.Detach(
+                                            await instance.COF.Detach(
                                                 client.Inventory.Store[
                                                     CurrentOutfitFolder
-                                                        .GetAttachmentItem(attachment)] as InventoryItem).Wait();
+                                                        .GetAttachmentItem(attachment)] as InventoryItem, cancellationToken);
                                         }
                                     }
                                 }
@@ -624,7 +626,7 @@ namespace Radegast
                                     {
                                         var outfit = (from item in folder.Nodes.Values 
                                             where CurrentOutfitFolder.CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
-                                        instance.COF.RemoveFromOutfit(outfit).Wait();
+                                        await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
                                 }
                             }
@@ -638,7 +640,10 @@ namespace Radegast
                                 {
                                     if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
                                     {
-                                        instance.COF.Detach(client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem).Wait();
+                                        await instance.COF.Detach(
+                                            client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem,
+                                            cancellationToken
+                                        );
                                     }
                                 }
                             }
@@ -655,7 +660,7 @@ namespace Radegast
                                     List<InventoryItem> allItems = new List<InventoryItem>();
                                     AllSubfolderWearables(folder, ref allItems);
                                     List<InventoryItem> allSubfolderWorn = allItems.Where(n => CurrentOutfitFolder.CanBeWorn(n)).ToList();
-                                    instance.COF.RemoveFromOutfit(allSubfolderWorn).Wait();
+                                    await instance.COF.RemoveFromOutfit(allSubfolderWorn, cancellationToken);
                                 }
                             }
                         }
@@ -677,7 +682,7 @@ namespace Radegast
                                     {
                                         var outfit = new List<InventoryItem>();
                                         GetAllItems(folder, true, ref outfit);
-                                        instance.COF.RemoveFromOutfit(outfit).Wait();
+                                        await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
                                 }
                             }
@@ -693,7 +698,7 @@ namespace Radegast
                                 if (w.Name == rule.Option)
                                 {
                                     var items = instance.COF.GetWornAt(w.Type).Result;
-                                    instance.COF.RemoveFromOutfit(items).Wait();
+                                    await instance.COF.RemoveFromOutfit(items, cancellationToken);
                                 }
                             }
                         }
@@ -723,11 +728,11 @@ namespace Radegast
 
                                     if (rule.Behaviour == "attachover" || rule.Behaviour == "attachallover")
                                     {
-                                        instance.COF.AddToOutfit(outfit, false).Wait();
+                                        await instance.COF.AddToOutfit(outfit, false, cancellationToken);
                                     }
                                     else
                                     {
-                                        instance.COF.AddToOutfit(outfit, true).Wait();
+                                        await instance.COF.AddToOutfit(outfit, true, cancellationToken);
                                     }
                                 }
                             }
