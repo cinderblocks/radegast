@@ -697,7 +697,7 @@ namespace Radegast
                                 var w = RLVWearables.Find(a => a.Name == rule.Option);
                                 if (w.Name == rule.Option)
                                 {
-                                    var items = instance.COF.GetWornAt(w.Type).Result;
+                                    var items = await instance.COF.GetWornAt(w.Type);
                                     await instance.COF.RemoveFromOutfit(items, cancellationToken);
                                 }
                             }
