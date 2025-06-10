@@ -140,7 +140,7 @@ namespace Radegast
             {"MentionMe", new FontSetting {
                 Name = "MentionMe",
                 ForeColor = SystemColors.ControlText,
-                BackColor = Color.Pink,
+                BackColor = Color.Yellow,
                 Font = FontSetting.DefaultFont,
             }},
             {"MentionOthers", new FontSetting {
