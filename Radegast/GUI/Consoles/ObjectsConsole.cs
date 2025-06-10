@@ -961,30 +961,34 @@ namespace Radegast
         private void btnDetach_Click(object sender, EventArgs e)
         {
             var toDetach = CurrentOutfitFolder.GetAttachmentItem(CurrentPrim);
-            if (toDetach == UUID.Zero) return;
-
-            if (client.Inventory.Store.Contains(toDetach))
+            if (toDetach == UUID.Zero)
             {
-                ThreadPool.QueueUserWorkItem(sync =>
-                {
-                    try
-                    {
-                        using (var cts = new CancellationTokenSource())
-                        {
-                            cts.CancelAfter(TimeSpan.FromSeconds(60));
-                            instance.COF.Detach(client.Inventory.Store[toDetach] as InventoryItem).Wait();
-                        }
-                    }
-                    catch (TimeoutException ex)
-                    {
-                        Logger.LogInstance.Error("Timed out while detaching object from object console", ex);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogInstance.Error("Exception while detaching object from object console", ex);
-                    }
-                });
+                return;
             }
+
+            if(!client.Inventory.Store.TryGetValue<InventoryItem>(toDetach, out var itemToDetach))
+            {
+                return;
+            }
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
+                    {
+                        await instance.COF.Detach(itemToDetach, cts.Token);
+                    }
+                }
+                catch (TaskCanceledException ex)
+                {
+                    Logger.LogInstance.Error("Timed out while detaching object from object console", ex);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogInstance.Error("Exception while detaching object from object console", ex);
+                }
+            });
         }
 
         private void btnView_Click(object sender, EventArgs e)

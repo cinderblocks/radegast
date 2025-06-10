@@ -26,6 +26,7 @@ using System.Drawing;
 using System.Reflection;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -250,17 +251,16 @@ namespace Radegast
                 && e.Type == ChatType.OwnerSay
                 && e.Message.StartsWith("@"))
             {
-                ThreadPool.QueueUserWorkItem(sync =>
+                Task.Run(async () =>
                 {
                     try
                     {
-                        using (var cts = new CancellationTokenSource())
+                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
                         {
-                            cts.CancelAfter(TimeSpan.FromSeconds(120));
-                            instance.RLV.TryProcessCMD(e, cts.Token).Wait();
+                            await instance.RLV.TryProcessCMD(e, cts.Token);
                         }
                     }
-                    catch (TimeoutException ex)
+                    catch (TaskCanceledException ex)
                     {
                         Logger.LogInstance.Error("Timed out running RLV command background task", ex);
                     }
