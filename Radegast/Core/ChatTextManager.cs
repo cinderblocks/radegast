@@ -262,11 +262,11 @@ namespace Radegast
                     }
                     catch (TimeoutException ex)
                     {
-                        Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                        Logger.LogInstance.Error("Timed out running RLV command background task", ex);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                        Logger.LogInstance.Error("Exception while running RLV command background task", ex);
                     }
                 });
 #if !DEBUG
