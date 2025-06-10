@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -41,20 +41,17 @@ namespace Radegast
         }
         public override void OnInvoke(object sender, EventArgs e, object target)
         {
-            string pname = instance.Names.Get(ToUUID(target));
+            var pname = instance.Names.Get(ToUUID(target));
             if (pname == "(???) (???)") pname = "" + target;
 
-            Simulator sim = null;
-            Vector3 pos;
-
-            if (TryFindPos(target, out sim, out pos))
+            if (TryFindPos(target, out var sim, out var pos))
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Facing {0}", pname));
+                instance.TabConsole.DisplayNotificationInChat($"Facing {pname}");
                 Client.Self.Movement.TurnToward(instance.State.ToLocalPosition(sim.Handle, pos));
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Could not locate {0}", target));
+                instance.TabConsole.DisplayNotificationInChat($"Could not locate {target}");
             }
         }
     }
