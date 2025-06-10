@@ -18,13 +18,15 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Text;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 using System.Reflection;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -249,7 +251,24 @@ namespace Radegast
                 && e.Type == ChatType.OwnerSay
                 && e.Message.StartsWith("@"))
             {
-                instance.RLV.TryProcessCMD(e);
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
+                        {
+                            await instance.RLV.TryProcessCMD(e, cts.Token);
+                        }
+                    }
+                    catch (TaskCanceledException ex)
+                    {
+                        Logger.LogInstance.Error("Timed out running RLV command background task", ex);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogInstance.Error("Exception while running RLV command background task", ex);
+                    }
+                });
 #if !DEBUG
                 if (!instance.RLV.EnabledDebugCommands) {
                     return;

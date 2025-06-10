@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using OpenMetaverse;
@@ -38,7 +39,7 @@ namespace Radegast.Core
         /// <summary>Gesture manager instance</summary>
         public static GestureManager Instance { get; } = new GestureManager();
 
-        private Dictionary<UUID, GestureTrigger> Gestures { get; } = new Dictionary<UUID, GestureTrigger>();
+        private ConcurrentDictionary<UUID, GestureTrigger> Gestures { get; } = new ConcurrentDictionary<UUID, GestureTrigger>();
         private Random Random { get; } = new Random();
 
         /// <summary>
@@ -109,11 +110,10 @@ namespace Radegast.Core
             client.Self.ActiveGestures.ForEach(pair =>
             {
                 var activeGestureID = pair.Key;
-                if (!Gestures.ContainsKey(activeGestureID))
+                if (!Gestures.TryGetValue(activeGestureID, out var gesture))
                 {
                     return;
                 }
-                var gesture = Gestures[activeGestureID];
 
                 if (lowerWord != gesture.TriggerLower)
                 {
@@ -172,17 +172,10 @@ namespace Radegast.Core
                     return;
                 }
 
-                if (!Gestures.ContainsKey(gesture.UUID))
-                {
-                    Gestures.Add(gesture.UUID, new GestureTrigger());
-                }
-
-                if (Gestures.TryGetValue(gesture.UUID, out var existingGestureTrigger))
-                {
-                    existingGestureTrigger.TriggerLower = assetGesture.Trigger.ToLower();
-                    existingGestureTrigger.Replacement = assetGesture.ReplaceWith;
-                    existingGestureTrigger.AssetID = assetGesture.AssetID;
-                }
+                var existingGestureTrigger = Gestures.GetOrAdd(gesture.UUID, __ => new GestureTrigger());
+                existingGestureTrigger.TriggerLower = assetGesture.Trigger.ToLower();
+                existingGestureTrigger.Replacement = assetGesture.ReplaceWith;
+                existingGestureTrigger.AssetID = assetGesture.AssetID;
             });
         }
 

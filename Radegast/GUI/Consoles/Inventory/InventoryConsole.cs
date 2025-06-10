@@ -18,20 +18,21 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Drawing;
-using System.Globalization;
-using System.Linq;
-using System.Windows.Forms;
-using System.Threading;
-using System.Threading.Tasks;
 using CommandLine;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using Radegast.Core;
 using Radegast.WinForms;
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Drawing;
+using System.Globalization;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace Radegast
 {
@@ -55,8 +56,7 @@ namespace Radegast
         private readonly Dictionary<UUID, TreeNode> UUID2NodeCache = new Dictionary<UUID, TreeNode>();
         private bool appearanceWasBusy;
         private InvNodeSorter sorter;
-        private readonly List<UUID> QueuedFolders = new List<UUID>();
-        private readonly Dictionary<UUID, int> FolderFetchRetries = new Dictionary<UUID, int>();
+        private readonly ConcurrentDictionary<UUID, int> QueuedFoldersNeedingUpdate = new ConcurrentDictionary<UUID, int>();
         private readonly AutoResetEvent trashCreated = new AutoResetEvent(false);
         private Task inventoryUpdateTask;
         private CancellationTokenSource inventoryUpdateCancelToken;
@@ -575,70 +575,72 @@ namespace Radegast
 
         private void TraverseAndQueueNodes(InventoryNode start)
         {
-            bool has_items = start.Nodes.Values.Any(node => node.Data is InventoryItem);
-
-            if (!has_items || start.NeedsUpdate)
+            if (start.NeedsUpdate)
             {
-                lock (QueuedFolders)
-                {
-                    lock (FolderFetchRetries)
-                    {
-                        int retries = 0;
-                        FolderFetchRetries.TryGetValue(start.Data.UUID, out retries);
-                        if (retries < 3)
-                        {
-                            if (!QueuedFolders.Contains(start.Data.UUID))
-                            {
-                                QueuedFolders.Add(start.Data.UUID);
-                            }
-                        }
-                        FolderFetchRetries[start.Data.UUID] = retries + 1;
-                    }
-                }
+                QueuedFoldersNeedingUpdate.TryAdd(start.Data.UUID, 0);
             }
 
-            foreach (var item in Inventory.GetContents((InventoryFolder)start.Data).OfType<InventoryFolder>())
+            foreach (var item in Client.Inventory.Store.GetContents((InventoryFolder)start.Data).OfType<InventoryFolder>())
             {
-                TraverseAndQueueNodes(Inventory.GetNodeFor(item.UUID));
+                TraverseAndQueueNodes(Client.Inventory.Store.GetNodeFor(item.UUID));
             }
         }
 
-        private void TraverseNodes(InventoryNode start)
+        private void Inventory_FolderUpdated(object sender, FolderUpdatedEventArgs e)
         {
-            bool has_items = start.Nodes.Values.Any(node => node.Data is InventoryItem);
-
-            if (!has_items || start.NeedsUpdate)
+            if (e.Success)
             {
-                InventoryFolder f = (InventoryFolder)start.Data;
-                AutoResetEvent gotFolderEvent = new AutoResetEvent(false);
-                bool success = false;
-
-                void FolderUpdatedCB(object sender, FolderUpdatedEventArgs ea)
-                {
-                    if (f.UUID != ea.FolderID) { return; }
-                    if (((InventoryFolder) Inventory[ea.FolderID]).DescendentCount >
-                        Inventory.GetNodeFor(ea.FolderID).Nodes.Count) { return; }
-
-                    success = true;
-                    gotFolderEvent.Set();
-                }
-
-                Client.Inventory.FolderUpdated += FolderUpdatedCB;
-                FetchFolder(f.UUID, f.OwnerID, true);
-                gotFolderEvent.WaitOne(30 * 1000, false);
-                Client.Inventory.FolderUpdated -= FolderUpdatedCB;
-
-                if (!success)
-                {
-                    Logger.Log(
-                        $"Failed fetching folder {f.Name}, got {Inventory.GetNodeFor(f.UUID).Nodes.Count} items out of {Inventory[f.UUID].Cast<InventoryFolder>().DescendentCount}",
-                        Helpers.LogLevel.Error, Client);
-                }
+                QueuedFoldersNeedingUpdate.TryRemove(e.FolderID, out var _);
+                return;
             }
 
-            foreach (var item in Inventory.GetContents((InventoryFolder)start.Data).OfType<InventoryFolder>())
+            if (!QueuedFoldersNeedingUpdate.TryGetValue(e.FolderID, out var retries))
             {
-                TraverseNodes(Inventory.GetNodeFor(item.UUID));
+                return;
+            }
+
+            if (retries > 3)
+            {
+                QueuedFoldersNeedingUpdate.TryRemove(e.FolderID, out var _);
+            }
+            else
+            {
+                QueuedFoldersNeedingUpdate.TryUpdate(e.FolderID, retries + 1, retries);
+            }
+        }
+
+        private async Task FetchQueuedFolders()
+        {
+            Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
+
+            try
+            {
+                QueuedFoldersNeedingUpdate.Clear();
+                TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+
+                while (!QueuedFoldersNeedingUpdate.IsEmpty)
+                {
+                    var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
+                    var tasks = folderKeys
+                        .Select(folderKey =>
+                        {
+                            return Client.Inventory.RequestFolderContents(
+                                folderKey,
+                                Client.Self.AgentID,
+                                true,
+                                true,
+                                InventorySortOrder.ByDate,
+                                inventoryUpdateCancelToken.Token
+                            );
+                        });
+
+                    await Task.WhenAll(tasks);
+                    TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+                }
+            }
+            finally
+            {
+                Client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
             }
         }
 
@@ -654,28 +656,9 @@ namespace Radegast
             TreeUpdateInProgress = true;
             TreeUpdateTimer.Start();
 
-            lock (FolderFetchRetries)
-            {
-                FolderFetchRetries.Clear();
-            }
             GestureManager.Instance.BeginMonitoring();
-            do
-            {
-                lock (QueuedFolders)
-                {
-                    QueuedFolders.Clear();
-                }
-                TraverseAndQueueNodes(Inventory.RootNode);
-                if (QueuedFolders.Count == 0) { break; }
-                //Logger.DebugLog($"Queued {QueuedFolders.Count} folders for update");
 
-                Parallel.ForEach(QueuedFolders, folderID =>
-                {
-                    _ = Client.Inventory.RequestFolderContents(folderID, Client.Self.AgentID, 
-                        true, true, InventorySortOrder.ByDate, inventoryUpdateCancelToken.Token).Result;
-                });
-            }
-            while (QueuedFolders.Count > 0);
+            FetchQueuedFolders().Wait();
 
             TreeUpdateTimer.Stop();
             if (IsHandleCreated)
@@ -716,12 +699,10 @@ namespace Radegast
 
             if (!instance.MonoRuntime || IsHandleCreated)
                 Invoke(new MethodInvoker(() =>
-                    {
-                        invTree.Sort();
-                    }
+                {
+                    invTree.Sort();
+                }
             ));
-
-
         }
 
         public void ReloadInventory()
@@ -962,29 +943,35 @@ namespace Radegast
                     break;
 
                 case AssetType.Object:
-                    if (IsAttached(item))
+                    RunBackgroundTask(async (cancellationToken) =>
                     {
-                        instance.COF.Detach(item);
-                    }
-                    else
-                    {
-                        instance.COF.Attach(item, AttachmentPoint.Default, true);
-                    }
+                        if (IsAttached(item))
+                        {
+                            await instance.COF.Detach(item, cancellationToken);
+                        }
+                        else
+                        {
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
+                        }
+                    }, UpdateWornLabels);
                     break;
 
                 case AssetType.Bodypart:
                 case AssetType.Clothing:
-                    if (IsWorn(item))
+                    RunBackgroundTask(async (cancellationToken) =>
                     {
-                        if (item.AssetType == AssetType.Clothing)
+                        if (IsWorn(item))
                         {
-                            instance.COF.RemoveFromOutfit(item);
+                            if (item.AssetType == AssetType.Clothing)
+                            {
+                                await instance.COF.RemoveFromOutfit(item, cancellationToken);
+                            }
                         }
-                    }
-                    else
-                    {
-                        instance.COF.AddToOutfit(item, true);
-                    }
+                        else
+                        {
+                            await instance.COF.AddToOutfit(item, true, cancellationToken);
+                        }
+                    }, UpdateWornLabels);
                     break;
             }
         }
@@ -1219,18 +1206,26 @@ namespace Radegast
 
                     if (folder.PreferredType == FolderType.None || folder.PreferredType == FolderType.Outfit)
                     {
+                        var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
+
                         ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
                         {
-                            Name = "outfit_take_off"
+                            Name = "outfit_take_off",
+                            Enabled = !isAppearanceManagerBusy
                         };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick) {Name = "outfit_add"};
+                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
+                        {
+                            Name = "outfit_add",
+                            Enabled = !isAppearanceManagerBusy
+                        };
                         ctxInv.Items.Add(ctxItem);
 
                         ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
                         {
-                            Name = "outfit_replace"
+                            Name = "outfit_replace",
+                            Enabled = !isAppearanceManagerBusy
                         };
                         ctxInv.Items.Add(ctxItem);
                     }
@@ -1482,6 +1477,33 @@ namespace Radegast
             }
         }
 
+        private void RunBackgroundTask(Func<CancellationToken, Task> work, Action uiCallback = null, int timeoutSeconds = 120)
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds)))
+                    {
+                        await work(cts.Token);
+                    }
+                }
+                catch (TaskCanceledException ex)
+                {
+                    Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                }
+
+                if (uiCallback != null)
+                {
+                    Invoke(new Action(() => uiCallback()));
+                }
+            });
+        }
+
         #region Context menu folder
         private void OnInvContextClick(object sender, EventArgs e)
         {
@@ -1605,24 +1627,27 @@ namespace Radegast
                         break;
 
                     case "outfit_replace":
-                        List<InventoryItem> newOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.ReplaceOutfit(newOutfit);
-                        UpdateWornLabels();
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.ReplaceOutfit(folder.UUID, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
-
                     case "outfit_add":
-                        List<InventoryItem> addToOutfit = GetInventoryItemsForOutFit(folder);
+                        var addToOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(addToOutfit, false);
-                        UpdateWornLabels();
+                        RunBackgroundTask(async  (cancellationToken) =>
+                        {
+                            await instance.COF.AddToOutfit(addToOutfit, false, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
-
                     case "outfit_take_off":
-                        List<InventoryItem> removeFromOutfit = GetInventoryItemsForOutFit(folder);
+                        var removeFromOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.RemoveFromOutfit(removeFromOutfit);
-                        UpdateWornLabels();
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
                 }
                 #endregion
@@ -1695,21 +1720,33 @@ namespace Radegast
                         break;
 
                     case "detach":
-                        instance.COF.Detach(item);
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.Detach(item, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment":
-                        instance.COF.Attach(item, AttachmentPoint.Default, true);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
-                        instance.COF.Attach(item, AttachmentPoint.Default, false);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
-                        instance.COF.Attach(item, pt, true);
+
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.Attach(item, pt, true, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "edit_script":
@@ -1723,20 +1760,26 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.RemoveFromOutfit(item);
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.RemoveFromOutfit(item, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, true);
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.AddToOutfit(item, true, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        instance.COF.AddToOutfit(item, false);
-                        invTree.SelectedNode.Text = ItemLabel(item, false);
+                        RunBackgroundTask(async (cancellationToken) =>
+                        {
+                            await instance.COF.AddToOutfit(item, false, cancellationToken);
+                        }, UpdateWornLabels);
                         break;
 
                     case "lm_teleport":
