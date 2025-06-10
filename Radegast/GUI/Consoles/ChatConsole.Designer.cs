@@ -233,7 +233,7 @@ namespace Radegast
             this.ctxTextures.Name = "ctxTextures";
             this.ctxTextures.Size = new System.Drawing.Size(162, 22);
             this.ctxTextures.Text = "Textures";
-            this.ctxTextures.Click += new System.EventHandler(this.dumpOufitBtn_Click);
+            this.ctxTextures.Click += new System.EventHandler(this.dumpOutfitBtn_Click);
             // 
             // ctxAttach
             // 

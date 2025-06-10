@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -92,7 +93,7 @@ namespace Radegast
             client.Network.SimChanged += Network_SimChanged;
             client.Self.MuteListUpdated += Self_MuteListUpdated;
             instance.Names.NameUpdated += Avatars_UUIDNameReply;
-            instance.State.OnWalkStateCanged += State_OnWalkStateCanged;
+            instance.State.OnWalkStateChanged += State_OnWalkStateChanged;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -115,7 +116,7 @@ namespace Radegast
             client.Network.SimChanged -= Network_SimChanged;
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;
-            instance.State.OnWalkStateCanged -= State_OnWalkStateCanged;
+            instance.State.OnWalkStateChanged -= State_OnWalkStateChanged;
         }
 
         private void State_SitStateChanged(object sender, SitEventArgs e)
@@ -137,9 +138,9 @@ namespace Radegast
             btnRefresh_Click(this, EventArgs.Empty);
         }
 
-        public List<Primitive> GetObjectList()
+        public FrozenSet<Primitive> GetObjects()
         {
-            return new List<Primitive>(Prims);
+            return Prims.ToFrozenSet();
         }
 
         private void propRequester_OnTick(int remaining)
@@ -188,19 +189,19 @@ namespace Radegast
 
         private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
-            int minIndex = -1;
-            int maxIndex = -1;
-            bool updated = false;
+            var minIndex = -1;
+            var maxIndex = -1;
+            var updated = false;
 
             lock (Prims)
             {
-                for (int i = 0; i < Prims.Count; i++)
+                for (var i = 0; i < Prims.Count; i++)
                 {
-                    Primitive prim = Prims[i];
+                    var prim = Prims[i];
                     if (prim.Properties != null && e.Names.ContainsKey(prim.Properties.OwnerID))
                     {
-                        if (minIndex == -1 || i < minIndex) minIndex = i;
-                        if (i > maxIndex) maxIndex = i;
+                        if (minIndex == -1 || i < minIndex) { minIndex = i; }
+                        if (i > maxIndex) { maxIndex = i; }
                         updated = true;
                     }
                 }
@@ -230,7 +231,7 @@ namespace Radegast
         {
             lock (Prims)
             {
-                for (int i = 0; i < Prims.Count; i++)
+                for (var i = 0; i < Prims.Count; i++)
                 {
                     if (Prims[i].ID == props.ObjectID)
                     {
@@ -725,7 +726,7 @@ namespace Radegast
 
             lock (Prims)
             {
-                List<Primitive> killed = Prims.FindAll((p) =>
+                List<Primitive> killed = Prims.FindAll(p =>
                 {
                     return e.ObjectLocalIDs.Any(t => p.LocalID == t);
                 });
@@ -850,7 +851,7 @@ namespace Radegast
         {
             instance.State.SetDefaultCamera();
             Cursor.Current = Cursors.WaitCursor;
-            Prims.Clear();
+            lock (Prims) { Prims.Clear(); }
             AddAllObjects();
 
             Cursor.Current = Cursors.Default;
@@ -1035,11 +1036,11 @@ namespace Radegast
             }
         }
 
-        private void State_OnWalkStateCanged(bool walking)
+        private void State_OnWalkStateChanged(bool walking)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate() { State_OnWalkStateCanged(walking); }));
+                BeginInvoke(new MethodInvoker(delegate() { State_OnWalkStateChanged(walking); }));
                 return;
             }
 

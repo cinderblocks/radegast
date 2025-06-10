@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -23,24 +23,20 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    class AutoPilot
+    internal class AutoPilot
     {
-        GridClient Client;
-        List<Vector3> Waypoints = new List<Vector3>();
-        System.Timers.Timer Ticker = new System.Timers.Timer(500);
-        Vector3 mypos;
-        int nwp = 0;
+        private readonly GridClient Client;
+        private readonly List<Vector3> Waypoints = new List<Vector3>();
+        private readonly System.Timers.Timer Ticker = new System.Timers.Timer(500);
+        private Vector3 AgentPosition;
+        private int nwp = 0;
 
-        int NextWaypoint
+        private int NextWaypoint
         {
             set
             {
-                if (value == Waypoints.Count) {
-                    nwp = 0;
-                } else {
-                    nwp = value;
-                }
-                System.Console.WriteLine("Way point " + nwp + " " + Waypoints[nwp]);
+                nwp = value == Waypoints.Count ? 0 : value;
+                System.Console.WriteLine($"Way point {nwp} {Waypoints[nwp]}");
                 Client.Self.AutoPilotCancel();
                 Client.Self.Movement.TurnToward(Waypoints[nwp]);
                 System.Threading.Thread.Sleep(500);
@@ -57,17 +53,17 @@ namespace Radegast
             Client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
         }
 
-        void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
             if (e.Update.Avatar && e.Update.LocalID == Client.Self.LocalID) {
-                mypos = e.Update.Position;
-                if (Vector3.Distance(mypos, Waypoints[NextWaypoint]) < 2f) {
+                AgentPosition = e.Update.Position;
+                if (Vector3.Distance(AgentPosition, Waypoints[NextWaypoint]) < 2f) {
                     NextWaypoint++;
                 }
             }
         }
 
-        void Ticker_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        private void Ticker_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
         }
 

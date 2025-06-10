@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,6 @@ using System.Drawing;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
-using Radegast;
 using OpenMetaverse;
 using Radegast.Core;
 
@@ -33,14 +32,14 @@ namespace Radegast
 {
     public partial class ChatConsole : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private Radegast.Netcom netcom => instance.Netcom;
         private GridClient client => instance.Client;
         private TabsConsole tabConsole;
         private Avatar currentAvatar;
         private RadegastMovement movement => instance.Movement;
-        private Regex chatRegex = new Regex(@"^/(\d+)\s*(.*)", RegexOptions.Compiled);
-        private List<string> chatHistory = new List<string>();
+        private readonly Regex chatRegex = new Regex(@"^/(\d+)\s*(.*)", RegexOptions.Compiled);
+        private readonly List<string> chatHistory = new List<string>();
         private int chatPointer;
 
         public readonly Dictionary<UUID, ulong> agentSimHandle = new Dictionary<UUID, ulong>();
@@ -92,13 +91,13 @@ namespace Radegast
             client.Network.SimDisconnected -= Network_SimDisconnected;
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(client);
         }
 
-        void ChatConsole_Disposed(object sender, EventArgs e)
+        private void ChatConsole_Disposed(object sender, EventArgs e)
         {
             instance.ClientChanged -= instance_ClientChanged;
             netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
@@ -123,7 +122,7 @@ namespace Radegast
             return font;
         }
 
-        void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
         {
         }
 
@@ -141,7 +140,7 @@ namespace Radegast
             }
         }
 
-        void Self_TeleportProgress(object sender, TeleportEventArgs e)
+        private void Self_TeleportProgress(object sender, TeleportEventArgs e)
         {
             if (e.Status == TeleportStatus.Progress || e.Status == TeleportStatus.Finished)
             {
@@ -222,7 +221,7 @@ namespace Radegast
             }
         }
 
-        void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
+        private void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
         {
             try
             {
@@ -231,7 +230,7 @@ namespace Radegast
             catch { }
         }
 
-        void UpdateRadar(CoarseLocationUpdateEventArgs e)
+        private void UpdateRadar(CoarseLocationUpdateEventArgs e)
         {
             if (client.Network.CurrentSim == null /*|| client.Network.CurrentSim.Handle != sim.Handle*/)
             {
@@ -401,7 +400,7 @@ namespace Radegast
             lvwObjects.Items.Clear();
         }
 
-        void ChatHistoryPrev()
+        private void ChatHistoryPrev()
         {
             if (chatPointer == 0) return;
             chatPointer--;
@@ -413,7 +412,7 @@ namespace Radegast
             }
         }
 
-        void ChatHistoryNext()
+        private void ChatHistoryNext()
         {
             if (chatPointer == chatHistory.Count) return;
             chatPointer++;
@@ -461,9 +460,7 @@ namespace Radegast
             chatPointer = chatHistory.Count;
             ClearChatInput();
 
-            string msg;
-
-            msg = input.Length >= 1000 ? input.Substring(0, 1000) : input;
+            var msg = input.Length >= 1000 ? input.Substring(0, 1000) : input;
             msg = msg.Replace(ChatInputBox.NewlineMarker, Environment.NewLine);
 
             if (instance.GlobalSettings["mu_emotes"].AsBoolean() && msg.StartsWith(":"))
@@ -503,8 +500,7 @@ namespace Radegast
                         {
                             foreach (var rchanstr in opt)
                             {
-                                int rchat = 0;
-                                if (int.TryParse(rchanstr, out rchat) && rchat > 0)
+                                if (int.TryParse(rchanstr, out var rchat) && rchat > 0)
                                 {
                                     client.Self.Chat(msg, rchat, type);
                                 }
@@ -520,8 +516,7 @@ namespace Radegast
                         {
                             foreach (var rchanstr in opt)
                             {
-                                int rchat = 0;
-                                if (int.TryParse(rchanstr, out rchat) && rchat > 0)
+                                if (int.TryParse(rchanstr, out var rchat) && rchat > 0)
                                 {
                                     client.Self.Chat(msg, rchat, type);
                                 }
@@ -676,16 +671,16 @@ namespace Radegast
             instance.MainForm.ShowAgentProfile(name, av);
         }
 
-        private void dumpOufitBtn_Click(object sender, EventArgs e)
+        private void dumpOutfitBtn_Click(object sender, EventArgs e)
         {
             Avatar av = currentAvatar;
             if (av == null) return;
 
-            if (!instance.TabConsole.TabExists("OT: " + av.Name))
+            if (!instance.TabConsole.TabExists($"OT: {av.Name}"))
             {
                 instance.TabConsole.AddOTTab(av);
             }
-            instance.TabConsole.SelectTab("OT: " + av.Name);
+            instance.TabConsole.SelectTab($"OT: {av.Name}");
         }
 
         private void tbtnMaster_Click(object sender, EventArgs e)
@@ -693,11 +688,11 @@ namespace Radegast
             Avatar av = currentAvatar;
             if (av == null) return;
 
-            if (!instance.TabConsole.TabExists("MS: " + av.Name))
+            if (!instance.TabConsole.TabExists($"MS: {av.Name}"))
             {
                 instance.TabConsole.AddMSTab(av);
             }
-            instance.TabConsole.SelectTab("MS: " + av.Name);
+            instance.TabConsole.SelectTab($"MS: {av.Name}");
         }
 
         private void tbtnAttach_Click(object sender, EventArgs e)
@@ -705,12 +700,12 @@ namespace Radegast
             Avatar av = currentAvatar;
             if (av == null) return;
 
-            if (!instance.TabConsole.TabExists("AT: " + av.ID))
+            if (!instance.TabConsole.TabExists($"AT: {av.ID}"))
             {
-                instance.TabConsole.AddTab("AT: " + av.ID, "AT: " + av.Name, new AttachmentTab(instance, av));
+                instance.TabConsole.AddTab($"AT: {av.ID}", $"AT: {av.Name}", new AttachmentTab(instance, av));
 
             }
-            instance.TabConsole.SelectTab("AT: " + av.ID);
+            instance.TabConsole.SelectTab($"AT: {av.ID}");
         }
 
         private void tbtnAnim_Click(object sender, EventArgs e)
@@ -718,11 +713,11 @@ namespace Radegast
             Avatar av = currentAvatar;
             if (av == null) return;
 
-            if (!instance.TabConsole.TabExists("Anim: " + av.Name))
+            if (!instance.TabConsole.TabExists($"Anim: {av.Name}"))
             {
                 instance.TabConsole.AddAnimTab(av);
             }
-            instance.TabConsole.SelectTab("Anim: " + av.Name);
+            instance.TabConsole.SelectTab($"Anim: {av.Name}");
 
 
         }
@@ -801,19 +796,18 @@ namespace Radegast
         {
             Point local = lvwObjects.PointToClient(new Point(e.X, e.Y));
             ListViewItem litem = lvwObjects.GetItemAt(local.X, local.Y);
-            if (litem == null) return;
-            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            if (node == null) return;
+            if (litem == null) { return; }
+            if (!(e.Data.GetData(typeof(TreeNode)) is TreeNode node)) { return; }
 
             if (node.Tag is InventoryItem item)
             {
                 client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, (UUID)litem.Tag, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered item " + item.Name + " to " + instance.Names.Get((UUID)litem.Tag) + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered item {item.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
             }
             else if (node.Tag is InventoryFolder folder)
             {
                 client.Inventory.GiveFolder(folder.UUID, folder.Name, (UUID)litem.Tag, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered folder " + folder.Name + " to " + instance.Names.Get((UUID)litem.Tag) + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
             }
         }
 
@@ -821,9 +815,9 @@ namespace Radegast
         {
             Point local = lvwObjects.PointToClient(new Point(e.X, e.Y));
             ListViewItem litem = lvwObjects.GetItemAt(local.X, local.Y);
-            if (litem == null) return;
+            if (litem == null) { return; }
 
-            if (!e.Data.GetDataPresent(typeof(TreeNode))) return;
+            if (!e.Data.GetDataPresent(typeof(TreeNode))) { return; }
 
             e.Effect = DragDropEffects.Copy;
         }
@@ -905,10 +899,8 @@ namespace Radegast
             if (lvwObjects.SelectedItems.Count != 1) return;
             UUID person = (UUID)lvwObjects.SelectedItems[0].Tag;
             string pname = instance.Names.Get(person);
-            Simulator sim = null;
-            Vector3 pos;
 
-            if (instance.State.TryFindAvatar(person, out sim, out pos))
+            if (instance.State.TryFindAvatar(person, out var sim, out var pos))
             {
                 tabConsole.DisplayNotificationInChat($"Teleporting to {pname}");
                 instance.State.MoveTo(sim, pos, true);
@@ -963,8 +955,7 @@ namespace Radegast
             UUID person = (UUID)lvwObjects.SelectedItems[0].Tag;
             string pname = instance.Names.Get(person);
 
-            Vector3 targetPos;
-            if (instance.State.TryFindAvatar(person, out targetPos))
+            if (instance.State.TryFindAvatar(person, out var targetPos))
             {
                 client.Self.Movement.TurnToward(targetPos);
                 instance.TabConsole.DisplayNotificationInChat("Facing " + pname);
@@ -977,9 +968,7 @@ namespace Radegast
             UUID person = (UUID)lvwObjects.SelectedItems[0].Tag;
             string pname = instance.Names.Get(person);
 
-            Vector3 targetPos;
-            Simulator sim;
-            if (instance.State.TryFindAvatar(person, out sim, out targetPos))
+            if (instance.State.TryFindAvatar(person, out var sim, out var targetPos))
             {
                 instance.State.MoveTo(sim, targetPos, false);
             }
@@ -995,9 +984,9 @@ namespace Radegast
 
     public class SorterClass : System.Collections.IComparer
     {
-        private static Regex distanceRegex = new Regex(@"\((?<dist>\d+)\s*m\)", RegexOptions.Compiled);
+        private static readonly Regex distanceRegex = new Regex(@"\((?<dist>\d+)\s*m\)", RegexOptions.Compiled);
         private Match match;
-        readonly RadegastInstance instance;
+        private readonly RadegastInstance instance;
 
         public SorterClass(RadegastInstance instance)
         {
@@ -1031,7 +1020,7 @@ namespace Radegast
             else if (distance1 > distance2)
                 return 1;
             else
-                return String.CompareOrdinal(item1.Text, item2.Text);
+                return string.CompareOrdinal(item1.Text, item2.Text);
 
         }
     }
