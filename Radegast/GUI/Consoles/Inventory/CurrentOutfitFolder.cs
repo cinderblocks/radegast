@@ -737,26 +737,6 @@ namespace Radegast
             await AddToOutfit(new List<InventoryItem>(1) { item }, replace, cancellationToken);
         }
 
-        private async Task<InventoryBase> FollowItemLink(InventoryItem itemLink, CancellationToken cancellationToken = default)
-        {
-            if (!itemLink.IsLink())
-            {
-                return itemLink;
-            }
-
-            if (itemLink.AssetUUID == UUID.Zero)
-            {
-                return itemLink;
-            }
-
-            if (Client.Inventory.Store.TryGetValue(itemLink.AssetUUID, out var remoteInventoryItem))
-            {
-                return remoteInventoryItem;
-            }
-
-            return await Client.Inventory.FetchItemHttpAsync(itemLink.AssetUUID, itemLink.OwnerID, cancellationToken);
-        }
-
         private async Task<InventoryBase> FetchParent(InventoryBase item, CancellationToken cancellationToken = default)
         {
             if (!Client.Inventory.Store.TryGetNodeFor(item.ParentUUID, out var parent))
