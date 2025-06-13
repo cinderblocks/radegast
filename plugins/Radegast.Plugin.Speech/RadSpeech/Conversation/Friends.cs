@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Radegast;
 using OpenMetaverse;
 
@@ -136,16 +137,10 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         private void ListFriends()
         {
-            // A filtered query of the Freidns list to select the
-            // ones online.
-            List<FriendInfo> onlineFriends =
-                control.instance.Client.Friends.FriendList.FindAll(delegate(FriendInfo f) { return f.IsOnline; });
+            var onlineFriends = (from friend in control.instance.Client.Friends.FriendList 
+                where friend.Value != null && friend.Value.IsOnline select friend.Value).ToList();
 
-            string list = "";
-            foreach (FriendInfo f in onlineFriends)
-            {
-                list += f.Name + ", ";
-            }
+            string list = onlineFriends.Aggregate("", (current, f) => current + (f.Name + ", "));
             list += "are online.";
             Talker.SayMore(list);
         }

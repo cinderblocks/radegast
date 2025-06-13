@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -22,6 +22,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
@@ -30,15 +31,15 @@ namespace Radegast
 {
     public partial class GroupDetails : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient client => instance.Client;
         private Group group;
         private Dictionary<UUID, GroupTitle> titles;
         private Dictionary<UUID, Group> myGroups => instance.Groups;
         private List<KeyValuePair<UUID, UUID>> roleMembers;
         private Dictionary<UUID, GroupRole> roles;
-        private bool isMember;
-        private GroupMemberSorter memberSorter = new GroupMemberSorter();
+        private readonly bool isMember;
+        private readonly GroupMemberSorter memberSorter = new GroupMemberSorter();
         private System.Threading.Timer nameUpdateTimer;
 
         private UUID groupTitlesRequest, groupMembersRequest, groupRolesRequest, groupRolesMembersRequest;

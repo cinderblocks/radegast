@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2023, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -21,9 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Security.Cryptography.X509Certificates;
 using System.Windows.Forms;
-using System.Net;
 using System.IO;
 using System.Threading;
 using CoreJ2K;
@@ -35,32 +33,32 @@ namespace Radegast
 {
     public partial class MapControl : UserControl
     {
-        RadegastInstance Instance;
-        GridClient Client => Instance.Client;
-        Color background;
-        float zoom;
-        Font textFont;
-        Brush textBrush;
-        Brush textBackgroudBrush;
-        Brush dotBrush;
-        Pen blackPen;
-        uint regionSize = 256;
-        float pixelsPerMeter;
-        double centerX, centerY, targetX, targetY;
+        private readonly RadegastInstance Instance;
+        private GridClient Client => Instance.Client;
+        private readonly Color background;
+        private float zoom;
+        private readonly Font textFont;
+        private readonly Brush textBrush;
+        private readonly Brush textBackgroundBrush;
+        private readonly Brush dotBrush;
+        private readonly Pen blackPen;
+        private const uint regionSize = 256;
+        private float pixelsPerMeter;
+        private double centerX, centerY, targetX, targetY;
 #pragma warning disable 0649
-        GridRegion targetRegion, nullRegion;
-        bool centered = false;
-        int PixRegS;
-        string targetParcelName = null;
-        System.Threading.Timer repaint;
-        bool needRepaint = false;
-        CancellationTokenSource mapTileCts = new CancellationTokenSource();
+        private GridRegion targetRegion, nullRegion;
+        private bool centered = false;
+        private int PixRegS;
+        private string targetParcelName = null;
+        private System.Threading.Timer repaint;
+        private bool needRepaint = false;
+        private readonly CancellationTokenSource mapTileCts = new CancellationTokenSource();
 
         public bool UseExternalTiles = false;
         public event EventHandler<MapTargetChangedEventArgs> MapTargetChanged;
         public event EventHandler<EventArgs> ZoomChanged;
-        public float MaxZoom { get; } = 6f;
-        public float MinZoom { get; } = 0.5f;
+        public float MaxZoom => 6f;
+        public float MinZoom => 0.5f;
 
         public MapControl(RadegastInstance instance)
         {
@@ -74,7 +72,7 @@ namespace Radegast
             textBrush = new SolidBrush(Color.FromArgb(255, 200, 200, 200));
             dotBrush = new SolidBrush(Color.FromArgb(255, 30, 210, 30));
             blackPen = new Pen(Color.Black, 2.0f);
-            textBackgroudBrush = new SolidBrush(Color.Black);
+            textBackgroundBrush = new SolidBrush(Color.Black);
 
             repaint = new System.Threading.Timer(RepaintTick, null, 1000, 1000);
 
@@ -84,7 +82,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void MapControl_Disposed(object sender, EventArgs e)
+        private void MapControl_Disposed(object sender, EventArgs e)
         {
             UnregisterClientEvents(Client);
 
@@ -108,7 +106,7 @@ namespace Radegast
             }
         }
 
-        void RegisterClientEvents()
+        private void RegisterClientEvents()
         {
             Client.Grid.GridItems += Grid_GridItems;
             Client.Grid.GridRegion += Grid_GridRegion;
@@ -116,7 +114,7 @@ namespace Radegast
         }
 
 
-        void UnregisterClientEvents(GridClient Client)
+        private void UnregisterClientEvents(GridClient Client)
         {
             if (Client == null) return;
             Client.Grid.GridItems -= Grid_GridItems;
@@ -124,7 +122,7 @@ namespace Radegast
             Client.Grid.GridLayer -= Grid_GridLayer;
         }
 
-        void RepaintTick(object sync)
+        private void RepaintTick(object sync)
         {
             if (needRepaint)
             {
@@ -133,23 +131,22 @@ namespace Radegast
             }
         }
 
-        void Grid_GridLayer(object sender, GridLayerEventArgs e)
+        private void Grid_GridLayer(object sender, GridLayerEventArgs e)
         {
         }
 
-        Dictionary<ulong, List<MapItem>> regionMapItems = new Dictionary<ulong, List<MapItem>>();
-        Dictionary<ulong, GridRegion> regions = new Dictionary<ulong, GridRegion>();
+        private readonly Dictionary<ulong, List<MapItem>> regionMapItems = new Dictionary<ulong, List<MapItem>>();
+        private readonly Dictionary<ulong, GridRegion> regions = new Dictionary<ulong, GridRegion>();
 
-        void Grid_GridItems(object sender, GridItemsEventArgs e)
+        private void Grid_GridItems(object sender, GridItemsEventArgs e)
         {
             foreach (MapItem item in e.Items)
             {
-                if (item is MapAgentLocation)
+                if (item is MapAgentLocation loc)
                 {
-                    MapAgentLocation loc = (MapAgentLocation)item;
                     lock (regionMapItems)
                     {
-                        if (!regionMapItems.ContainsKey(item.RegionHandle))
+                        if (!regionMapItems.ContainsKey(loc.RegionHandle))
                         {
                             regionMapItems[loc.RegionHandle] = new List<MapItem>();
                         }
@@ -160,7 +157,7 @@ namespace Radegast
             }
         }
 
-        void Grid_GridRegion(object sender, GridRegionEventArgs e)
+        private void Grid_GridRegion(object sender, GridRegionEventArgs e)
         {
             needRepaint = true;
             regions[e.Region.RegionHandle] = e.Region;
@@ -172,7 +169,7 @@ namespace Radegast
                 DownloadRegionTile(e.Region.RegionHandle, e.Region.MapImageID);
         }
 
-        void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents();
@@ -222,8 +219,7 @@ namespace Radegast
 
         public void CenterMap(ulong regionHandle, uint localX, uint localY, bool setTarget)
         {
-            uint regionX, regionY;
-            Utils.LongToUInts(regionHandle, out regionX, out regionY);
+            Utils.LongToUInts(regionHandle, out var regionX, out var regionY);
             CenterMap(regionX, regionY, localX, localY, setTarget);
         }
 
@@ -236,9 +232,9 @@ namespace Radegast
             if (setTarget)
             {
                 ulong handle = Utils.UIntsToLong(regionX * 256, regionY * 256);
-                if (regions.ContainsKey(handle))
+                if (regions.TryGetValue(handle, out var region))
                 {
-                    targetRegion = regions[handle];
+                    targetRegion = region;
                     GetTargetParcel();
                     MapTargetChanged?.Invoke(this, new MapTargetChangedEventArgs(targetRegion, (int)localX, (int)localY));
                 }
@@ -267,29 +263,26 @@ namespace Radegast
             return Utils.UIntsToLong(x, y);
         }
 
-        void Print(Graphics g, float x, float y, string text)
+        private void Print(Graphics g, float x, float y, string text)
         {
             Print(g, x, y, text, textBrush);
         }
 
-        void Print(Graphics g, float x, float y, string text, Brush brush)
+        private void Print(Graphics g, float x, float y, string text, Brush brush)
         {
-            g.DrawString(text, textFont, textBackgroudBrush, x + 1, y + 1);
+            g.DrawString(text, textFont, textBackgroundBrush, x + 1, y + 1);
             g.DrawString(text, textFont, brush, x, y);
         }
 
-        string GetRegionName(ulong handle)
+        private string GetRegionName(ulong handle)
         {
-            if (regions.ContainsKey(handle))
-                return regions[handle].Name;
-            else
-                return string.Empty;
+            return regions.TryGetValue(handle, out var region) ? region.Name : string.Empty;
         }
 
-        Dictionary<ulong, Image> regionTiles = new Dictionary<ulong, Image>();
-        List<ulong> tileRequests = new List<ulong>();
+        private Dictionary<ulong, Image> regionTiles = new Dictionary<ulong, Image>();
+        private readonly List<ulong> tileRequests = new List<ulong>();
 
-        void DownloadRegionTile(ulong handle, UUID imageID)
+        private void DownloadRegionTile(ulong handle, UUID imageID)
         {
             if (regionTiles.ContainsKey(handle)) return;
 
@@ -317,7 +310,11 @@ namespace Radegast
                 }
                 else
                 {
-                    Client.HttpCapsClient.GetRequestAsync(new Uri($"{url}/?texture_id={imageID}"), mapTileCts.Token,
+                    var uriBuilder = new UriBuilder(url)
+                    {
+                        Query = $"texture_id={imageID}"
+                    };
+                    _ = Client.HttpCapsClient.GetRequestAsync(uriBuilder.Uri, mapTileCts.Token,
                         (response, responseData, error) =>
                         {
                             if (error == null && responseData != null)
@@ -370,72 +367,64 @@ namespace Radegast
             }
         }
 
-        Image GetRegionTile(ulong handle)
+        private Image GetRegionTile(ulong handle)
         {
-            if (regionTiles.ContainsKey(handle))
+            return regionTiles.TryGetValue(handle, out var tile) ? tile : null;
+        }
+
+        private Image GetRegionTileExternal(ulong handle)
+        {
+            if (regionTiles.TryGetValue(handle, out var tile))
             {
-                return regionTiles[handle];
+                return tile;
             }
+
+            lock (tileRequests)
+            {
+                if (tileRequests.Contains(handle)) return null;
+                tileRequests.Add(handle);
+            }
+
+            Utils.LongToUInts(handle, out var regX, out var regY);
+            regX /= regionSize;
+            regY /= regionSize;
+            const int zoomLevel = 1;
+
+            Client.HttpCapsClient.GetRequestAsync(
+                new Uri($"http://map.secondlife.com/map-{zoomLevel}-{regX}-{regY}-objects.jpg"), mapTileCts.Token,
+                (response, responseData, error) =>
+                {
+                    if (error == null && responseData != null)
+                    {
+                        try
+                        {
+                            using (MemoryStream s = new MemoryStream(responseData))
+                            {
+                                lock (regionTiles)
+                                {
+                                    regionTiles[handle] = Image.FromStream(s);
+                                    needRepaint = true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            ).ConfigureAwait(false);
+
+            lock (regionTiles)
+            {
+                regionTiles[handle] = null;
+            }
+
             return null;
         }
 
-        Image GetRegionTileExternal(ulong handle)
+        private readonly Dictionary<string, Image> smallerTiles = new Dictionary<string, Image>();
+
+        private void DrawRegion(Graphics g, int x, int y, ulong handle)
         {
-            if (regionTiles.ContainsKey(handle))
-            {
-                return regionTiles[handle];
-            }
-            else
-            {
-                lock (tileRequests)
-                {
-                    if (tileRequests.Contains(handle)) return null;
-                    tileRequests.Add(handle);
-                }
-
-                uint regX, regY;
-                Utils.LongToUInts(handle, out regX, out regY);
-                regX /= regionSize;
-                regY /= regionSize;
-                int zoomlevel = 1;
-
-                Client.HttpCapsClient.GetRequestAsync(
-                    new Uri($"http://map.secondlife.com/map-{zoomlevel}-{regX}-{regY}-objects.jpg"), mapTileCts.Token,
-                    (response, responseData, error) =>
-                    {
-                        if (error == null && responseData != null)
-                        {
-                            try
-                            {
-                                using (MemoryStream s = new MemoryStream(responseData))
-                                {
-                                    lock (regionTiles)
-                                    {
-                                        regionTiles[handle] = Image.FromStream(s);
-                                        needRepaint = true;
-                                    }
-                                }
-                            }
-                            catch { }
-                        }
-                    }
-                );
-
-                lock (regionTiles)
-                {
-                    regionTiles[handle] = null;
-                }
-
-                return null;
-            }
-        }
-
-        Dictionary<string, Image> smallerTiles = new Dictionary<string, Image>();
-
-        void DrawRegion(Graphics g, int x, int y, ulong handle)
-        {
-            uint regX, regY;
-            Utils.LongToUInts(handle, out regX, out regY);
+            Utils.LongToUInts(handle, out var regX, out var regY);
             regX /= regionSize;
             regY /= regionSize;
 
@@ -457,9 +446,9 @@ namespace Radegast
                 if (targetSize != 256)
                 {
                     string id = $"{handle},{targetSize}";
-                    if (smallerTiles.ContainsKey(id))
+                    if (smallerTiles.TryGetValue(id, out var smallerTile))
                     {
-                        tile = smallerTiles[id];
+                        tile = smallerTile;
                     }
                     else
                     {
@@ -483,21 +472,19 @@ namespace Radegast
             }
         }
 
-        List<string> requestedBlocks = new List<string>();
-        List<ulong> requestedLocations = new List<ulong>();
+        private readonly List<string> requestedBlocks = new List<string>();
+        private readonly List<ulong> requestedLocations = new List<ulong>();
 
         public void RefreshRegionAgents()
         {
             if (!centered) return;
             int h = Height, w = Width;
 
-            float localX, localY;
-            ulong centerRegion = GlobalPosToRegionHandle(centerX, centerY, out localX, out localY);
+            ulong centerRegion = GlobalPosToRegionHandle(centerX, centerY, out var localX, out var localY);
             int pixCenterRegionX = (int)(w / 2 - localX / zoom);
             int pixCenterRegionY = (int)(h / 2 + localY / zoom);
 
-            uint regX, regY;
-            Utils.LongToUInts(centerRegion, out regX, out regY);
+            Utils.LongToUInts(centerRegion, out var regX, out var regY);
             regX /= regionSize;
             regY /= regionSize;
 
@@ -550,13 +537,11 @@ namespace Radegast
             //Client.Grid.RequestMapLayer(GridLayerType.Objects);
 
 
-            float localX, localY;
-            ulong centerRegion = GlobalPosToRegionHandle(centerX, centerY, out localX, out localY);
+            ulong centerRegion = GlobalPosToRegionHandle(centerX, centerY, out var localX, out var localY);
             int pixCenterRegionX = (int)(w / 2 - localX / zoom);
             int pixCenterRegionY = (int)(h / 2 + localY / zoom);
 
-            uint regX, regY;
-            Utils.LongToUInts(centerRegion, out regX, out regY);
+            Utils.LongToUInts(centerRegion, out var regX, out var regY);
             regX /= regionSize;
             regY /= regionSize;
 
@@ -616,9 +601,9 @@ namespace Radegast
 
                     lock (regionMapItems)
                     {
-                        if (regionMapItems.ContainsKey(handle))
+                        if (regionMapItems.TryGetValue(handle, out var mapItem))
                         {
-                            foreach (MapItem i in regionMapItems[handle])
+                            foreach (MapItem i in mapItem)
                             {
                                 if (i is MapAgentLocation loc)
                                 {
@@ -663,7 +648,7 @@ namespace Radegast
                     );
                 if (!string.IsNullOrEmpty(targetRegion.Name))
                 {
-                    string label = string.Format("{0} ({1:0}, {2:0})", targetRegion.Name, targetX % regionSize, targetY % regionSize);
+                    string label = $"{targetRegion.Name} ({targetX % regionSize:0}, {targetY % regionSize:0})";
                     if (!string.IsNullOrEmpty(targetParcelName))
                     {
                         label += Environment.NewLine + targetParcelName;
@@ -674,7 +659,7 @@ namespace Radegast
 
             if (!dragging)
             {
-                string block = string.Format("{0},{1},{2},{3}", (ushort)regLeft, (ushort)regBottom, (ushort)regXMax, (ushort)regYMax);
+                string block = $"{(ushort)regLeft},{(ushort)regBottom},{(ushort)regXMax},{(ushort)regYMax}";
                 lock (requestedBlocks)
                 {
                     if (!requestedBlocks.Contains(block))
@@ -698,8 +683,8 @@ namespace Radegast
             ZoomChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        bool dragging = false;
-        int dragX, dragY, downX, downY;
+        private bool dragging = false;
+        private int dragX, dragY, downX, downY;
 
         private void MapControl_MouseDown(object sender, MouseEventArgs e)
         {
@@ -711,7 +696,7 @@ namespace Radegast
             }
         }
 
-        void GetTargetParcel()
+        private void GetTargetParcel()
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
@@ -749,13 +734,12 @@ namespace Radegast
                     double ratio = (float)PixRegS / (float)regionSize;
                     targetX = centerX + (double)(e.X - Width / 2) / ratio;
                     targetY = centerY - (double)(e.Y - Height / 2) / ratio;
-                    float localX, localY;
-                    ulong handle = Helpers.GlobalPosToRegionHandle((float)targetX, (float)targetY, out localX, out localY);
+                    ulong handle = Helpers.GlobalPosToRegionHandle((float)targetX, (float)targetY, out var localX, out var localY);
                     uint regX, regY;
                     Utils.LongToUInts(handle, out regX, out regY);
-                    if (regions.ContainsKey(handle))
+                    if (regions.TryGetValue(handle, out var region))
                     {
-                        targetRegion = regions[handle];
+                        targetRegion = region;
                         GetTargetParcel();
                         MapTargetChanged?.Invoke(this, new MapTargetChangedEventArgs(targetRegion, (int)localX, (int)localY));
                     }

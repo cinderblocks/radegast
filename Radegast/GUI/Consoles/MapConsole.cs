@@ -1,7 +1,7 @@
-/**
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -23,6 +23,7 @@ using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -525,16 +526,13 @@ namespace Radegast
                 ddOnlineFriends.Items.Add("Online Friends");
                 ddOnlineFriends.SelectedIndex = 0;
 
-                var friends = client.Friends.FriendList.FindAll(f => f.CanSeeThemOnMap && f.IsOnline);
-                if (friends != null)
+                var friends = (from friend in client.Friends.FriendList 
+                    where friend.Value != null && friend.Value.CanSeeMeOnMap && friend.Value.IsOnline 
+                    select friend.Value).ToList();
+
+                foreach (var f in friends.Where(f => f.Name != null))
                 {
-                    foreach (var f in friends)
-                    {
-                        if (f.Name != null)
-                        {
-                            ddOnlineFriends.Items.Add(f.Name);
-                        }
-                    }
+                    ddOnlineFriends.Items.Add(f.Name);
                 }
             }
 
@@ -591,21 +589,26 @@ namespace Radegast
             x /= 256;
             y /= 256;
             ulong hndle = Utils.UIntsToLong(x, y);
-            foreach (KeyValuePair<string, ulong> kvp in regionHandles)
+            foreach (var kvp in regionHandles.Where(kvp => kvp.Value == hndle))
             {
-                if (kvp.Value == hndle)
-                {
-                    txtRegion.Text = kvp.Key;
-                    btnTeleport.Enabled = true;
-                }
+                txtRegion.Text = kvp.Key;
+                btnTeleport.Enabled = true;
             }
             mmap.CenterMap(x, y, (uint)e.Location.X, (uint)e.Location.Y, true);
         }
 
         private void ddOnlineFriends_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (ddOnlineFriends.SelectedIndex < 1) return;
-            mapFriend = client.Friends.FriendList.Find(f => f.Name == ddOnlineFriends.SelectedItem.ToString());
+            if (ddOnlineFriends.SelectedIndex < 1) { return; }
+
+            foreach (var friend in client.Friends.FriendList)
+            {
+                if (string.Equals(friend.Value?.Name, ddOnlineFriends.SelectedItem.ToString(), StringComparison.InvariantCulture))
+                {
+                    mapFriend = friend.Value;
+                    break;
+                }
+            }
             if (mapFriend != null)
             {
                 targetRegionHandle = 0;

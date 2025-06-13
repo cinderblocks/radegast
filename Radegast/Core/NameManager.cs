@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -68,11 +68,11 @@ namespace Radegast
         private GridClient client => instance.Client;
         private Timer requestTimer;
         private Timer cacheTimer;
-        private string cacheFileName;
+        private readonly string cacheFileName;
 
         private readonly Queue<UUID> requests = new Queue<UUID>();
 
-        private readonly int MaxNameRequests = 80;
+        private const int MaxNameRequests = 80;
 
         // Queue up name request for this many ms, and send a batch request
         private const int REQUEST_DELAY = 100;
@@ -126,25 +126,25 @@ namespace Radegast
 
         #region private methods
 
-        void RegisterEvents(GridClient c)
+        private void RegisterEvents(GridClient c)
         {
             c.Avatars.UUIDNameReply += Avatars_UUIDNameReply;
             c.Avatars.DisplayNameUpdate += Avatars_DisplayNameUpdate;
         }
 
-        void DeregisterEvents(GridClient c)
+        private void DeregisterEvents(GridClient c)
         {
             c.Avatars.UUIDNameReply -= Avatars_UUIDNameReply;
             c.Avatars.DisplayNameUpdate -= Avatars_DisplayNameUpdate;
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             DeregisterEvents(e.OldClient);
             RegisterEvents(e.Client);
         }
 
-        void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
+        private void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
         {
             lock (names)
             {
@@ -157,7 +157,7 @@ namespace Radegast
             TriggerEvent(ret);
         }
 
-        void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
             var ret = new Dictionary<UUID, string>();
 
@@ -207,7 +207,7 @@ namespace Radegast
             TriggerCacheSave();
         }
 
-        string FormatName(AgentDisplayName n)
+        private string FormatName(AgentDisplayName n)
         {
             switch (Mode)
             {
@@ -226,14 +226,14 @@ namespace Radegast
             }
         }
 
-        bool InvalidName(string displayName)
+        private bool InvalidName(string displayName)
         {
             return string.IsNullOrEmpty(displayName) ||
                    displayName == "???" ||
                    displayName == RadegastInstance.INCOMPLETE_NAME;
         }
 
-        void ProcessDisplayNames(AgentDisplayName[] names)
+        private void ProcessDisplayNames(IEnumerable<AgentDisplayName> names)
         {
             var ret = new Dictionary<UUID, string>();
 
@@ -260,7 +260,7 @@ namespace Radegast
             TriggerCacheSave();
         }
 
-        void MakeRequest(object sync)
+        private void MakeRequest(object sync)
         {
             var req = new List<UUID>();
             lock (requests)
@@ -277,7 +277,7 @@ namespace Radegast
             }
             else // Use display names
             {
-                client.Avatars.GetDisplayNames(req, (success, names, badIDs) =>
+                _ = client.Avatars.GetDisplayNames(req, (success, names, badIDs) =>
                 {
                     if (success)
                     {
@@ -291,7 +291,7 @@ namespace Radegast
             }
         }
 
-        void SaveCache(object sync)
+        private void SaveCache(object sync)
         {
             ThreadPool.QueueUserWorkItem(syncx =>
             {
@@ -319,7 +319,7 @@ namespace Radegast
             });
         }
 
-        void LoadCachedNames()
+        private void LoadCachedNames()
         {
             ThreadPool.QueueUserWorkItem(syncx =>
             {
@@ -353,7 +353,7 @@ namespace Radegast
             });
         }
 
-        void TriggerEvent(Dictionary<UUID, string> ret)
+        private void TriggerEvent(Dictionary<UUID, string> ret)
         {
             if (NameUpdated == null || ret.Count == 0) return;
 
@@ -367,24 +367,24 @@ namespace Radegast
             }
         }
 
-        void TriggerNameRequest()
+        private void TriggerNameRequest()
         {
             requestTimer?.Change(REQUEST_DELAY, Timeout.Infinite);
         }
 
-        void TriggerCacheSave()
+        private void TriggerCacheSave()
         {
             cacheTimer?.Change(CACHE_DELAY, Timeout.Infinite);
         }
 
-        void QueueNameRequest(UUID agentID)
+        private void QueueNameRequest(UUID agentID)
         {
             // Check if we're already waiting for an answer on this one
             lock (activeRequests)
             {
-                if (activeRequests.ContainsKey(agentID))
+                if (activeRequests.TryGetValue(agentID, out var request))
                 {
-                    if (Environment.TickCount - activeRequests[agentID] < MAX_REQ_AGE) // Not timeout yet
+                    if (Environment.TickCount - request < MAX_REQ_AGE) // Not timeout yet
                     {
                         return;
                     }
@@ -442,9 +442,9 @@ namespace Radegast
 
             lock (names)
             {
-                if (names.ContainsKey(agentID))
+                if (names.TryGetValue(agentID, out var name))
                 {
-                    return names[agentID].LegacyFullName;
+                    return name.LegacyFullName;
                 }
             }
 
@@ -463,9 +463,9 @@ namespace Radegast
 
             lock (names)
             {
-                if (names.ContainsKey(agentID))
+                if (names.TryGetValue(agentID, out var name))
                 {
-                    return names[agentID].UserName;
+                    return name.UserName;
                 }
             }
 
@@ -484,9 +484,9 @@ namespace Radegast
 
             lock (names)
             {
-                if (names.ContainsKey(agentID))
+                if (names.TryGetValue(agentID, out var name))
                 {
-                    return names[agentID].DisplayName;
+                    return name.DisplayName;
                 }
             }
 
@@ -543,9 +543,9 @@ namespace Radegast
 
                 EventHandler<UUIDNameReplyEventArgs> handler = (sender, e) =>
                 {
-                    if (e.Names.ContainsKey(agentID))
+                    if (e.Names.TryGetValue(agentID, out var found))
                     {
-                        name = e.Names[agentID];
+                        name = found;
                         gotName.Set();
                     }
                 };
@@ -582,7 +582,7 @@ namespace Radegast
         /// Get avatar display name, or queue fetching of the name
         /// </summary>
         /// <param name="agentID">UUID of avatar to lookup</param>
-        /// <param name="blocking">If true, wait until name is recieved, otherwise return immediately</param>
+        /// <param name="blocking">If true, wait until name is received, otherwise return immediately</param>
         /// <param name="defaultValue">If name failed to retrieve, use this</param>
         /// <returns></returns>
         public string Get(UUID agentID, bool blocking, string defaultValue)
