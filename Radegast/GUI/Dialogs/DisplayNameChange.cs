@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -76,11 +77,11 @@ namespace Radegast
 
         }
 
-        private void StartDisplayNameChage(string name)
+        private void StartDisplayNameChange(string name)
         {
-            ThreadPool.QueueUserWorkItem(sync =>
+            Task.Run(async () =>
                 {
-                    Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID },
+                    await Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID },
                         (success, names, badIDs) =>
                         {
                             if (!success || names.Length < 1)
@@ -112,7 +113,7 @@ namespace Radegast
             }
 
             UpdateStatus("Requested display name update...");
-            StartDisplayNameChage(txtDN1.Text);
+            StartDisplayNameChange(txtDN1.Text);
 
         }
 
@@ -124,7 +125,7 @@ namespace Radegast
         private void button2_Click(object sender, EventArgs e)
         {
             UpdateStatus("Requested display name reset...");
-            StartDisplayNameChage(string.Empty);
+            StartDisplayNameChange(string.Empty);
         }
     }
 }

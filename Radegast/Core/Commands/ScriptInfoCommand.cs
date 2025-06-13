@@ -1,7 +1,7 @@
-﻿/**
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -20,48 +20,45 @@
 
 using System.Collections.Generic;
 using System.Text;
+using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.Messages.Linden;
 
 namespace Radegast.Commands
 {
-    public class ScriptInfoCommand : RadegastCommand
+    public sealed class ScriptInfoCommand : RadegastCommand
     {
-        private RadegastInstance instance;
-
         public ScriptInfoCommand(RadegastInstance instance)
             : base(instance)
         {
             Name = "scriptinfo";
             Description = "Prints out available information about the current script usage";
             Usage = "scriptinfo (avatar|parcel) - display script resource usage details about your avatar or parcel you are on. If not specified avatar is assumed";
-
-            this.instance = instance;
         }
 
         public override void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)
         {
             if (cmdArgs.Length == 0)
             {
-                AttachmentInfo(WriteLine);
+                _ = AttachmentInfo(WriteLine);
             }
             else switch (cmdArgs[0])
             {
                 case "avatar":
-                    AttachmentInfo(WriteLine);
+                    _ = AttachmentInfo(WriteLine);
                     break;
                 case "parcel":
-                    ParcelInfo(WriteLine);
+                    _ = ParcelInfo(WriteLine);
                     break;
             }
 
         }
 
-        public void ParcelInfo(ConsoleWriteLine WriteLine)
+        public async Task ParcelInfo(ConsoleWriteLine WriteLine)
         {
             WriteLine("Requesting script resources information...");
-            UUID currectParcel = Client.Parcels.RequestRemoteParcelID(Client.Self.SimPosition, Client.Network.CurrentSim.Handle, Client.Network.CurrentSim.ID);
-            Client.Parcels.GetParcelResources(currectParcel, true, (success, info) =>
+            UUID currentParcel = Client.Parcels.RequestRemoteParcelID(Client.Self.SimPosition, Client.Network.CurrentSim.Handle, Client.Network.CurrentSim.ID);
+            await Client.Parcels.GetParcelResources(currentParcel, true, (success, info) =>
             {
                 if (!success || info == null) return;
 
@@ -74,11 +71,11 @@ namespace Radegast.Commands
 
                 if (info.Parcels != null)
                 {
-                    foreach (ParcelResourcesDetail parcelresource in info.Parcels)
+                    foreach (ParcelResourcesDetail resource in info.Parcels)
                     {
                         sb.AppendLine();
-                        sb.AppendLine("Detailed usage for parcel " + parcelresource.Name);
-                        foreach (ObjectResourcesDetail ord in parcelresource.Objects)
+                        sb.AppendLine($"Detailed usage for parcel {resource.Name}");
+                        foreach (ObjectResourcesDetail ord in resource.Objects)
                         {
                             sb.AppendFormat("{0} KB - {1}", ord.Resources["memory"] / 1024, ord.Name);
                             sb.AppendLine();
@@ -89,9 +86,9 @@ namespace Radegast.Commands
             });
         }
 
-        public void AttachmentInfo(ConsoleWriteLine WriteLine)
+        public async Task AttachmentInfo(ConsoleWriteLine WriteLine)
         {
-            Client.Self.GetAttachmentResources((success, info) =>
+            await Client.Self.GetAttachmentResources((success, info) =>
             {
                 if (!success || info == null)
                 {
@@ -107,13 +104,13 @@ namespace Radegast.Commands
                 sb.AppendLine();
                 sb.AppendLine("Details:");
 
-                foreach (KeyValuePair<AttachmentPoint, ObjectResourcesDetail[]> kvp in info.Attachments)
+                foreach (var kvp in info.Attachments)
                 {
                     sb.AppendLine();
-                    sb.AppendLine($"Attached to {Utils.EnumToText(kvp.Key)} " + ":");
+                    sb.AppendLine($"Attached to {Utils.EnumToText(kvp.Key)}:");
                     foreach (var obj in kvp.Value)
                     {
-                        sb.AppendLine(obj.Name + " using " + obj.Resources["memory"] / 1024 + " KB");
+                        sb.AppendLine($"{obj.Name} using {obj.Resources["memory"] / 1024}KB");
                     }
                 }
 

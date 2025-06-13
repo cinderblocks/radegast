@@ -60,7 +60,7 @@ namespace Radegast
 
             if (!client.Self.GroupChatSessions.ContainsKey(session))
             {
-                client.Self.ChatterBoxAcceptInvite(session);
+                _ = client.Self.ChatterBoxAcceptInvite(session);
             }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);

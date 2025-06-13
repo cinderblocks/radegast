@@ -499,13 +499,10 @@ namespace RadegastSpeech.Conversation
         }
         private void ListFriends()
         {
-            List<FriendInfo> onlineFriends =
-                control.instance.Client.Friends.FriendList.FindAll(delegate(FriendInfo f) { return f.IsOnline; });
-            string list = "";
-            foreach (FriendInfo f in onlineFriends)
-            {
-                list += f.Name + ", ";
-            }
+            List<FriendInfo> onlineFriends = (from friend in control.instance.Client.Friends.FriendList 
+                where friend.Value != null && friend.Value.IsOnline select friend.Value).ToList();
+
+            string list = onlineFriends.Aggregate("", (current, f) => current + (f.Name + ", "));
             list += "are online.";
             Talker.Say(list);
         }

@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse.StructuredData;
 using System.Threading;
@@ -67,16 +68,7 @@ namespace Radegast
 
         void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
-            bool moded = false;
-
-            foreach (var id in e.Names.Keys)
-            {
-                if (client.Friends.FriendList.ContainsKey(id))
-                {
-                    moded = true;
-                    break;
-                }
-            }
+            bool moded = e.Names.Keys.Any(id => client.Friends.FriendList.ContainsKey(id));
 
             if (moded)
             {
@@ -105,7 +97,7 @@ namespace Radegast
         private void InitializeFriendsList()
         {
             if (!Monitor.TryEnter(lockOneAtaTime)) return;
-            List<FriendInfo> friends = client.Friends.FriendList.FindAll((FriendInfo f) => true);
+            var friends = client.Friends.FriendList.Values.ToList();
             
             friends.Sort((fi1, fi2) =>
                 {
