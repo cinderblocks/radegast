@@ -36,7 +36,7 @@
     <PackageReference Include="LibreMetaverse" Version="2.3.2.987" />
     <PackageReference Include="LibreMetaverse.StructuredData" Version="2.3.2.987" />
     <PackageReference Include="LibreMetaverse.Types" Version="2.3.2.987" />
-    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.5" />
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.6" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
   <ItemGroup>
