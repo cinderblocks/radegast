@@ -36,7 +36,7 @@ Pull requests are nice. Try not to be a dick, and we will all get along just fin
 
 ### Current maintainer and lead developer:
 
-* **Cinder Roxley** (email cinder cinderblocks.biz)
+* **Cinder Roxley** (email cinder sdf.org)
 
 ### Contributors:
 
