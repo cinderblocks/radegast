@@ -199,7 +199,6 @@ namespace Radegast
             client.Objects.AvatarSitChanged += Objects_AvatarSitChanged;
             client.Self.AlertMessage += Self_AlertMessage;
             client.Self.TeleportProgress += Self_TeleportProgress;
-            client.Network.EventQueueRunning += Network_EventQueueRunning;
             client.Network.SimChanged += Network_SimChanged;
         }
 
@@ -210,7 +209,6 @@ namespace Radegast
             client.Objects.AvatarSitChanged -= Objects_AvatarSitChanged;
             client.Self.AlertMessage -= Self_AlertMessage;
             client.Self.TeleportProgress -= Self_TeleportProgress;
-            client.Network.EventQueueRunning -= Network_EventQueueRunning;
             client.Network.SimChanged -= Network_SimChanged;
         }
 
@@ -451,14 +449,6 @@ namespace Radegast
         {
             Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.NextDouble(), true);
             LookInFront();
-        }
-
-        private void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
-        {
-            if (e.Simulator == Client.Network.CurrentSim)
-            {
-                SetRandomHeading();
-            }
         }
 
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
