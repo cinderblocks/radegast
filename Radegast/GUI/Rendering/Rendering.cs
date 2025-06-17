@@ -288,16 +288,8 @@ namespace Radegast.Rendering
             if (glControl != null)
             {
                 glControl_UnhookEvents();
-                try
-                {
-                    glControl.MakeCurrent();
-                }
-                catch { }
-                try
-                {
-                    glControl.Dispose();
-                }
-                catch { }
+                glControl?.MakeCurrent();
+                glControl?.Dispose();
             }
             glControl = null;
 
