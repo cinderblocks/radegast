@@ -22,7 +22,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using OpenMetaverse;
 using OpenMetaverse.Packets;
@@ -68,8 +67,7 @@ namespace Radegast
 
             lblGroupName.Text = group.Name;
 
-            bool hasGroupBans = null != client.Groups.GetGroupAPIUri(group.ID);
-            if (!hasGroupBans)
+            if (client.Network.CurrentSim.Caps.CapabilityURI("GroupAPIv1") == null)
             {
                 lblGroupBansTitle.Text = "Region does not support group bans";
                 pnlBannedBottom.Enabled = pnlBannedTop.Enabled = lwBannedMembers.Enabled = false;
@@ -749,10 +747,11 @@ namespace Radegast
 
         private void btnSave_Click(object sender, EventArgs e)
         {
-            if (btnSave.Tag is InstantMessage)
+            if (btnSave.Tag is InstantMessage msg)
             {
-                InstantMessage msg = (InstantMessage)btnSave.Tag;
-                client.Self.InstantMessage(client.Self.Name, msg.FromAgentID, string.Empty, msg.IMSessionID, InstantMessageDialog.GroupNoticeInventoryAccepted, InstantMessageOnline.Offline, client.Self.SimPosition, client.Network.CurrentSim.RegionID, destinationFolderID.GetBytes());
+                client.Self.InstantMessage(client.Self.Name, msg.FromAgentID, string.Empty, msg.IMSessionID,
+                    InstantMessageDialog.GroupNoticeInventoryAccepted, InstantMessageOnline.Offline, client.Self.SimPosition,
+                    client.Network.CurrentSim.RegionID, destinationFolderID.GetBytes());
                 btnSave.Enabled = false;
                 btnClose.Focus();
             }
@@ -1228,7 +1227,7 @@ namespace Radegast
         #region Group Bans
         public void RefreshBans()
         {
-            client.Groups.RequestBannedAgents(group.ID, (xs, xe) =>
+            _ = client.Groups.RequestBannedAgents(group.ID, (xs, xe) =>
             {
                 UpdateBannedAgents(xe);
             });
@@ -1274,7 +1273,7 @@ namespace Radegast
 
             if (toUnban.Count > 0)
             {
-                client.Groups.RequestBanAction(group.ID, GroupBanAction.Unban, toUnban.ToArray(), (xs, se) =>
+                _ = client.Groups.RequestBanAction(group.ID, GroupBanAction.Unban, toUnban.ToArray(), (xs, se) =>
                 {
                     RefreshBans();
                 });
@@ -1300,7 +1299,7 @@ namespace Radegast
 
                 if (toBan.Count > 0)
                 {
-                    client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
+                    _ = client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
                     {
                         RefreshBans();
                     });

@@ -83,7 +83,7 @@ namespace Radegast
             this.btnBan.TabIndex = 1;
             this.btnBan.Text = "Ban";
             this.btnBan.UseVisualStyleBackColor = true;
-            this.btnBan.Click += new System.EventHandler(this.btnIvite_Click);
+            this.btnBan.Click += new System.EventHandler(this.btnBan_Click);
             // 
             // BanGroupMember
             // 
