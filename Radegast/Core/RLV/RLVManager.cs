@@ -170,9 +170,30 @@ namespace Radegast
         readonly List<RLVRule> rules = new List<RLVRule>();
         System.Timers.Timer CleanupTimer;
 
+        public class RLVCOFPolicy : ICOFPolicy
+        {
+            private RLVManager rlvManager;
+
+            public RLVCOFPolicy(RLVManager rlvManager)
+            {
+                this.rlvManager = rlvManager;
+            }
+
+            public bool CanAttach(InventoryItem item)
+            {
+                return true;
+            }
+
+            public bool CanDetach(InventoryItem item)
+            {
+                return rlvManager.AllowDetach(item);
+            }
+        }
+
         public RLVManager(RadegastInstance instance)
         {
             this.instance = instance;
+            instance.COF.AddPolicy(new RLVCOFPolicy(this));
 
             if (Enabled)
             {
@@ -351,9 +372,9 @@ namespace Radegast
                             if (kvp.Value != null)
                             {
                                 var attachment = kvp.Value;
-                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment))) {
+                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItemID(attachment))) {
                                     var item = client.Inventory.Store.GetNodeFor(
-                                        CurrentOutfitFolder.GetAttachmentItem(attachment));
+                                        CurrentOutfitFolder.GetAttachmentItemID(attachment));
                                     var path = FindFullInventoryPath(item, "").Substring(5);
                                     Respond(chan, path);
                                 }
@@ -372,10 +393,10 @@ namespace Radegast
                                 {
                                     var attachment = kvp.Value;
                                     if (client.Inventory.Store.Contains(
-                                            CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                            CurrentOutfitFolder.GetAttachmentItemID(attachment)))
                                     {
                                         var item = client.Inventory.Store.GetNodeFor(
-                                            CurrentOutfitFolder.GetAttachmentItem(attachment));
+                                            CurrentOutfitFolder.GetAttachmentItemID(attachment));
                                         var path = FindFullInventoryPath(item, "");
                                         if (path.StartsWith("#RLV"))
                                         {
@@ -610,12 +631,12 @@ namespace Radegast
                                     {
                                         var attachment = kvp.Value;
                                         if (client.Inventory.Store.Contains(
-                                                CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                                CurrentOutfitFolder.GetAttachmentItemID(attachment)))
                                         {
                                             await instance.COF.Detach(
                                                 client.Inventory.Store[
                                                     CurrentOutfitFolder
-                                                        .GetAttachmentItem(attachment)] as InventoryItem, cancellationToken);
+                                                        .GetAttachmentItemID(attachment)] as InventoryItem, cancellationToken);
                                         }
                                     }
                                 }
@@ -625,7 +646,7 @@ namespace Radegast
                                     if (folder != null)
                                     {
                                         var outfit = (from item in folder.Nodes.Values 
-                                            where CurrentOutfitFolder.CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
+                                            where CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
                                         await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
                                 }
@@ -638,10 +659,10 @@ namespace Radegast
                                     select p.Value);
                                 foreach (var attachment in attachments)
                                 {
-                                    if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                    if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItemID(attachment)))
                                     {
                                         await instance.COF.Detach(
-                                            client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItem(attachment)] as InventoryItem,
+                                            client.Inventory.Store[CurrentOutfitFolder.GetAttachmentItemID(attachment)] as InventoryItem,
                                             cancellationToken
                                         );
                                     }
@@ -659,7 +680,7 @@ namespace Radegast
                                 {
                                     List<InventoryItem> allItems = new List<InventoryItem>();
                                     AllSubfolderWearables(folder, ref allItems);
-                                    List<InventoryItem> allSubfolderWorn = allItems.Where(n => CurrentOutfitFolder.CanBeWorn(n)).ToList();
+                                    List<InventoryItem> allSubfolderWorn = allItems.Where(n => CanBeWorn(n)).ToList();
                                     await instance.COF.RemoveFromOutfit(allSubfolderWorn, cancellationToken);
                                 }
                             }
@@ -674,10 +695,10 @@ namespace Radegast
                             if (kvp.Value != null)
                             {
                                 var attachment = kvp.Value;
-                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItem(attachment)))
+                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItemID(attachment)))
                                 {
                                     var folder = client.Inventory.Store
-                                        .GetNodeFor(CurrentOutfitFolder.GetAttachmentItem(attachment)).Parent;
+                                        .GetNodeFor(CurrentOutfitFolder.GetAttachmentItemID(attachment)).Parent;
                                     if (folder != null)
                                     {
                                         var outfit = new List<InventoryItem>();
@@ -837,7 +858,7 @@ namespace Radegast
         {
             foreach (var item in root.Nodes.Values)
             {
-                if (CurrentOutfitFolder.CanBeWorn(item.Data))
+                if (CanBeWorn(item.Data))
                 {
                     items.Add((InventoryItem)item.Data);
                 }
@@ -879,6 +900,38 @@ namespace Radegast
 
         }
 
+        /// <summary>
+        /// Is an inventory item currently attached
+        /// </summary>
+        /// <param name="attachments">List of root prims that are attached to our avatar</param>
+        /// <param name="item">Inventory item to check</param>
+        /// <returns>True if the inventory item is attached to avatar</returns>
+        private static bool IsAttached(IEnumerable<Primitive> attachments, InventoryItem item)
+        {
+            return attachments.Any(prim => CurrentOutfitFolder.GetAttachmentItemID(prim) == item.UUID);
+        }
+
+        /// <summary>
+        /// Checks if inventory item of Wearable type is worn
+        /// </summary>
+        /// <param name="currentlyWorn">Current outfit</param>
+        /// <param name="item">Item to check</param>
+        /// <returns>True if the item is worn</returns>
+        private static bool IsWorn(IEnumerable<AppearanceManager.WearableData> currentlyWorn, InventoryItem item)
+        {
+            return currentlyWorn.Any(worn => worn.ItemID == item.UUID);
+        }
+
+        /// <summary>
+        /// Can this inventory type be worn
+        /// </summary>
+        /// <param name="item">Item to check</param>
+        /// <returns>True if the inventory item can be worn</returns>
+        public static bool CanBeWorn(InventoryBase item)
+        {
+            return item is InventoryWearable || item is InventoryAttachment || item is InventoryObject || item is InventoryGesture;
+        }
+
         protected string GetWornIndicator(InventoryNode node)
         {
             var currentOutfit = new List<AppearanceManager.WearableData>(client.Appearance.GetWearables());
@@ -891,12 +944,12 @@ namespace Radegast
 
             foreach (var n in node.Nodes.Values)
             {
-                if (CurrentOutfitFolder.CanBeWorn(n.Data) && !n.Data.Name.StartsWith("."))
+                if (CanBeWorn(n.Data) && !n.Data.Name.StartsWith("."))
                 {
                     myItemsCount++;
                     if ((n.Data is InventoryWearable wearable 
-                            && CurrentOutfitFolder.IsWorn(currentOutfit, wearable))
-                        || CurrentOutfitFolder.IsAttached(currentAttachments, (InventoryItem)n.Data))
+                            && IsWorn(currentOutfit, wearable))
+                        || IsAttached(currentAttachments, (InventoryItem)n.Data))
                     {
                         myItemsWornCount++;
                     }
@@ -916,11 +969,11 @@ namespace Radegast
             int allItemsWornCount = 0;
 
             foreach (var n in allItems.Where(n => 
-                CurrentOutfitFolder.CanBeWorn(n) && !n.Name.StartsWith(".")))
+                CanBeWorn(n) && !n.Name.StartsWith(".")))
             {
                 allItemsCount++;
-                if ((n is InventoryWearable && CurrentOutfitFolder.IsWorn(currentOutfit, n)) ||
-                    CurrentOutfitFolder.IsAttached(currentAttachments, n))
+                if ((n is InventoryWearable && IsWorn(currentOutfit, n)) ||
+                    IsAttached(currentAttachments, n))
                 {
                     allItemsWornCount++;
                 }
@@ -1066,9 +1119,9 @@ namespace Radegast
             var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
                 where p.Value != null
                 where p.Value.ParentID == client.Self.LocalID
-                where CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID
+                where CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID
                 select p.Value);
-            foreach (var att in attachments.Where(att => CurrentOutfitFolder.GetAttachmentItem(att) == item.UUID))
+            foreach (var att in attachments.Where(att => CurrentOutfitFolder.GetAttachmentItemID(att) == item.UUID))
             {
                 if (rules.FindAll(r => r.Behaviour == "detach" && r.Sender == att.ID).Count > 0)
                 {
