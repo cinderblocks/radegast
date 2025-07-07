@@ -960,7 +960,7 @@ namespace Radegast
 
         private void btnDetach_Click(object sender, EventArgs e)
         {
-            var toDetach = CurrentOutfitFolder.GetAttachmentItem(CurrentPrim);
+            var toDetach = CurrentOutfitFolder.GetAttachmentItemID(CurrentPrim);
             if (toDetach == UUID.Zero)
             {
                 return;
