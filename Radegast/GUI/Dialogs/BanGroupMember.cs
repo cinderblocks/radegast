@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -84,16 +85,12 @@ namespace Radegast
             picker.txtSearch.Focus();
         }
 
-        private void btnIvite_Click(object sender, EventArgs e)
+        private void btnBan_Click(object sender, EventArgs e)
         {
-            List<UUID> toBan = new List<UUID>();
-            foreach (UUID key in picker.SelectedAvatars.Keys)
-            {
-                toBan.Add(key);
-            }
+            var toBan = picker.SelectedAvatars.Keys.ToList();
             if (toBan.Count > 0)
             {
-                Client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
+                _ = Client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
                 {
                     parent.RefreshBans();
                 });
