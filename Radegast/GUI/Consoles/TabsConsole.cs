@@ -661,12 +661,48 @@ namespace Radegast
             }
         }
 
+        private bool ShouldIgnoreConference(UUID fromAgentId)
+        {
+            var ignoreConferenceChats = instance.GlobalSettings["ignore_conference_chats"].AsBoolean();
+            var allowConferenceChatsFromFriends = instance.GlobalSettings["allow_conference_chats_from_friends"].AsBoolean();
+
+            if (ignoreConferenceChats)
+            {
+                if (allowConferenceChatsFromFriends)
+                {
+                    var isConferenceFromFriend = instance.Client.Friends.FriendList.ContainsKey(fromAgentId);
+                    if (!isConferenceFromFriend)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private void HandleConferenceIM(InstantMessageEventArgs e)
         {
             if (TabExists(e.IM.IMSessionID.ToString()))
             {
                 RadegastTab tab = Tabs[e.IM.IMSessionID.ToString()];
                 tab.Highlight();
+                return;
+            }
+
+            if (ShouldIgnoreConference(e.IM.FromAgentID))
+            {
+                var logIgnoredConferencesToChat = instance.GlobalSettings["log_ignored_conferences_to_chat"].AsBoolean();
+                if (logIgnoredConferencesToChat)
+                {
+                    instance.TabConsole.DisplayNotificationInChat($"Your settings have prevented an unsolicited conference request from {e.IM.FromAgentName}.", ChatBufferTextStyle.Alert);
+                }
+
+                instance.Client.Self.RequestLeaveGroupChat(e.IM.IMSessionID);
                 return;
             }
 

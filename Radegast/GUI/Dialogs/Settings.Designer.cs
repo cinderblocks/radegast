@@ -88,6 +88,11 @@ namespace Radegast
             this.cbMinToTrey = new System.Windows.Forms.CheckBox();
             this.cbSyntaxHighlight = new System.Windows.Forms.CheckBox();
             this.Chat = new System.Windows.Forms.GroupBox();
+            this.cbLogIgnoredConferencesToChat = new System.Windows.Forms.CheckBox();
+            this.cbAllowConferenceChatsFromFriends = new System.Windows.Forms.CheckBox();
+            this.cbIgnoreConferenceChats = new System.Windows.Forms.CheckBox();
+            this.txtMentionMeSoundUUID = new System.Windows.Forms.TextBox();
+            this.cbMentionMeSound = new System.Windows.Forms.CheckBox();
             this.btnChatLogDir = new System.Windows.Forms.Button();
             this.cbGroupIMSound = new System.Windows.Forms.CheckBox();
             this.cbNameLinks = new System.Windows.Forms.CheckBox();
@@ -154,8 +159,6 @@ namespace Radegast
             this.cbxFontSize = new System.Windows.Forms.ComboBox();
             this.cbxFont = new System.Windows.Forms.ComboBox();
             this.fontDialog1 = new System.Windows.Forms.FontDialog();
-            this.cbMentionMeSound = new System.Windows.Forms.CheckBox();
-            this.txtMentionMeSoundUUID = new System.Windows.Forms.TextBox();
             this.tcGraphics.SuspendLayout();
             this.tbpGeneral.SuspendLayout();
             this.cbHighLight.SuspendLayout();
@@ -197,7 +200,7 @@ namespace Radegast
             this.tbpGeneral.Controls.Add(this.gbDisplayNames);
             this.tbpGeneral.Location = new System.Drawing.Point(4, 22);
             this.tbpGeneral.Name = "tbpGeneral";
-            this.tbpGeneral.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
+            this.tbpGeneral.Padding = new System.Windows.Forms.Padding(3);
             this.tbpGeneral.Size = new System.Drawing.Size(522, 489);
             this.tbpGeneral.TabIndex = 1;
             this.tbpGeneral.Text = "General";
@@ -210,7 +213,7 @@ namespace Radegast
             this.cbHighLight.Controls.Add(this.cbHighlightChat);
             this.cbHighLight.Controls.Add(this.cbFriendsHighlight);
             this.cbHighLight.Controls.Add(this.cbTaskBarHighLight);
-            this.cbHighLight.Location = new System.Drawing.Point(8, 240);
+            this.cbHighLight.Location = new System.Drawing.Point(8, 345);
             this.cbHighLight.Name = "cbHighLight";
             this.cbHighLight.Size = new System.Drawing.Size(256, 136);
             this.cbHighLight.TabIndex = 1;
@@ -291,7 +294,7 @@ namespace Radegast
             this.cbMisc.Controls.Add(this.cbSyntaxHighlight);
             this.cbMisc.Location = new System.Drawing.Point(270, 6);
             this.cbMisc.Name = "cbMisc";
-            this.cbMisc.Size = new System.Drawing.Size(244, 477);
+            this.cbMisc.Size = new System.Drawing.Size(244, 370);
             this.cbMisc.TabIndex = 2;
             this.cbMisc.TabStop = false;
             // 
@@ -495,6 +498,9 @@ namespace Radegast
             // 
             // Chat
             // 
+            this.Chat.Controls.Add(this.cbLogIgnoredConferencesToChat);
+            this.Chat.Controls.Add(this.cbAllowConferenceChatsFromFriends);
+            this.Chat.Controls.Add(this.cbIgnoreConferenceChats);
             this.Chat.Controls.Add(this.txtMentionMeSoundUUID);
             this.Chat.Controls.Add(this.cbMentionMeSound);
             this.Chat.Controls.Add(this.btnChatLogDir);
@@ -509,16 +515,67 @@ namespace Radegast
             this.Chat.Controls.Add(this.cbNoTyping);
             this.Chat.Location = new System.Drawing.Point(8, 5);
             this.Chat.Name = "Chat";
-            this.Chat.Size = new System.Drawing.Size(256, 229);
+            this.Chat.Size = new System.Drawing.Size(256, 334);
             this.Chat.TabIndex = 0;
             this.Chat.TabStop = false;
             this.Chat.Text = "Chat";
+            // 
+            // cbLogIgnoredConferencesToChat
+            // 
+            this.cbLogIgnoredConferencesToChat.AutoSize = true;
+            this.cbLogIgnoredConferencesToChat.Location = new System.Drawing.Point(27, 186);
+            this.cbLogIgnoredConferencesToChat.Name = "cbLogIgnoredConferencesToChat";
+            this.cbLogIgnoredConferencesToChat.Size = new System.Drawing.Size(205, 17);
+            this.cbLogIgnoredConferencesToChat.TabIndex = 17;
+            this.cbLogIgnoredConferencesToChat.Text = "Log ignored conferences to local chat";
+            this.cbLogIgnoredConferencesToChat.UseVisualStyleBackColor = true;
+            this.cbLogIgnoredConferencesToChat.CheckedChanged += new System.EventHandler(this.cbLogIgnoredConferencesToChat_CheckedChanged);
+            // 
+            // cbAllowConferenceChatsFromFriends
+            // 
+            this.cbAllowConferenceChatsFromFriends.AutoSize = true;
+            this.cbAllowConferenceChatsFromFriends.Location = new System.Drawing.Point(27, 167);
+            this.cbAllowConferenceChatsFromFriends.Name = "cbAllowConferenceChatsFromFriends";
+            this.cbAllowConferenceChatsFromFriends.Size = new System.Drawing.Size(194, 17);
+            this.cbAllowConferenceChatsFromFriends.TabIndex = 16;
+            this.cbAllowConferenceChatsFromFriends.Text = "Allow conference chats from friends";
+            this.cbAllowConferenceChatsFromFriends.UseVisualStyleBackColor = true;
+            // 
+            // cbIgnoreConferenceChats
+            // 
+            this.cbIgnoreConferenceChats.AutoSize = true;
+            this.cbIgnoreConferenceChats.Location = new System.Drawing.Point(8, 148);
+            this.cbIgnoreConferenceChats.Name = "cbIgnoreConferenceChats";
+            this.cbIgnoreConferenceChats.Size = new System.Drawing.Size(142, 17);
+            this.cbIgnoreConferenceChats.TabIndex = 15;
+            this.cbIgnoreConferenceChats.Text = "Ignore conference chats";
+            this.cbIgnoreConferenceChats.UseVisualStyleBackColor = true;
+            // 
+            // txtMentionMeSoundUUID
+            // 
+            this.txtMentionMeSoundUUID.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
+            | System.Windows.Forms.AnchorStyles.Right)));
+            this.txtMentionMeSoundUUID.Location = new System.Drawing.Point(6, 232);
+            this.txtMentionMeSoundUUID.MaxLength = 36;
+            this.txtMentionMeSoundUUID.Name = "txtMentionMeSoundUUID";
+            this.txtMentionMeSoundUUID.Size = new System.Drawing.Size(242, 20);
+            this.txtMentionMeSoundUUID.TabIndex = 14;
+            // 
+            // cbMentionMeSound
+            // 
+            this.cbMentionMeSound.AutoSize = true;
+            this.cbMentionMeSound.Location = new System.Drawing.Point(6, 209);
+            this.cbMentionMeSound.Name = "cbMentionMeSound";
+            this.cbMentionMeSound.Size = new System.Drawing.Size(133, 17);
+            this.cbMentionMeSound.TabIndex = 13;
+            this.cbMentionMeSound.Text = "Play sound on mention";
+            this.cbMentionMeSound.UseVisualStyleBackColor = true;
             // 
             // btnChatLogDir
             // 
             this.btnChatLogDir.AccessibleDescription = "Browse for chat log directory";
             this.btnChatLogDir.AccessibleName = "Browse Chat Log Directory";
-            this.btnChatLogDir.Location = new System.Drawing.Point(193, 199);
+            this.btnChatLogDir.Location = new System.Drawing.Point(191, 258);
             this.btnChatLogDir.Name = "btnChatLogDir";
             this.btnChatLogDir.Size = new System.Drawing.Size(57, 23);
             this.btnChatLogDir.TabIndex = 12;
@@ -551,7 +608,7 @@ namespace Radegast
             this.txtChatLogDir.AccessibleDescription = "Directory storing chat logs";
             this.txtChatLogDir.AccessibleName = "Chat Log Location";
             this.txtChatLogDir.Enabled = false;
-            this.txtChatLogDir.Location = new System.Drawing.Point(99, 200);
+            this.txtChatLogDir.Location = new System.Drawing.Point(97, 259);
             this.txtChatLogDir.Name = "txtChatLogDir";
             this.txtChatLogDir.Size = new System.Drawing.Size(91, 20);
             this.txtChatLogDir.TabIndex = 11;
@@ -579,7 +636,7 @@ namespace Radegast
             // lblChatLog
             // 
             this.lblChatLog.AutoSize = true;
-            this.lblChatLog.Location = new System.Drawing.Point(6, 203);
+            this.lblChatLog.Location = new System.Drawing.Point(4, 262);
             this.lblChatLog.Name = "lblChatLog";
             this.lblChatLog.Size = new System.Drawing.Size(94, 13);
             this.lblChatLog.TabIndex = 10;
@@ -623,9 +680,9 @@ namespace Radegast
             this.gbDisplayNames.Controls.Add(this.rbDNDandUsernme);
             this.gbDisplayNames.Controls.Add(this.rbDNSmart);
             this.gbDisplayNames.Controls.Add(this.rbDNOff);
-            this.gbDisplayNames.Location = new System.Drawing.Point(8, 382);
+            this.gbDisplayNames.Location = new System.Drawing.Point(270, 380);
             this.gbDisplayNames.Name = "gbDisplayNames";
-            this.gbDisplayNames.Size = new System.Drawing.Size(256, 101);
+            this.gbDisplayNames.Size = new System.Drawing.Size(244, 101);
             this.gbDisplayNames.TabIndex = 3;
             this.gbDisplayNames.TabStop = false;
             this.gbDisplayNames.Text = "Display names";
@@ -686,8 +743,8 @@ namespace Radegast
             this.tbpAutoResponse.Controls.Add(this.gbAutoResponse);
             this.tbpAutoResponse.Location = new System.Drawing.Point(4, 22);
             this.tbpAutoResponse.Name = "tbpAutoResponse";
-            this.tbpAutoResponse.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
-            this.tbpAutoResponse.Size = new System.Drawing.Size(522, 433);
+            this.tbpAutoResponse.Padding = new System.Windows.Forms.Padding(3);
+            this.tbpAutoResponse.Size = new System.Drawing.Size(522, 489);
             this.tbpAutoResponse.TabIndex = 2;
             this.tbpAutoResponse.Text = "Auto Response";
             this.tbpAutoResponse.UseVisualStyleBackColor = true;
@@ -799,8 +856,8 @@ namespace Radegast
             // 
             this.tbpGraphics.Location = new System.Drawing.Point(4, 22);
             this.tbpGraphics.Name = "tbpGraphics";
-            this.tbpGraphics.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
-            this.tbpGraphics.Size = new System.Drawing.Size(522, 433);
+            this.tbpGraphics.Padding = new System.Windows.Forms.Padding(3);
+            this.tbpGraphics.Size = new System.Drawing.Size(522, 489);
             this.tbpGraphics.TabIndex = 3;
             this.tbpGraphics.Text = "Graphics Settings";
             this.tbpGraphics.UseVisualStyleBackColor = true;
@@ -1091,8 +1148,8 @@ namespace Radegast
             this.tbpChat.Controls.Add(this.cbxFont);
             this.tbpChat.Location = new System.Drawing.Point(4, 22);
             this.tbpChat.Name = "tbpChat";
-            this.tbpChat.Padding = new System.Windows.Forms.Padding(3, 3, 3, 3);
-            this.tbpChat.Size = new System.Drawing.Size(522, 433);
+            this.tbpChat.Padding = new System.Windows.Forms.Padding(3);
+            this.tbpChat.Size = new System.Drawing.Size(522, 489);
             this.tbpChat.TabIndex = 5;
             this.tbpChat.Text = "Chat";
             this.tbpChat.UseVisualStyleBackColor = true;
@@ -1264,26 +1321,6 @@ namespace Radegast
             // 
             this.fontDialog1.ShowColor = true;
             // 
-            // cbMentionMeSound
-            // 
-            this.cbMentionMeSound.AutoSize = true;
-            this.cbMentionMeSound.Location = new System.Drawing.Point(8, 150);
-            this.cbMentionMeSound.Name = "cbMentionMeSound";
-            this.cbMentionMeSound.Size = new System.Drawing.Size(133, 17);
-            this.cbMentionMeSound.TabIndex = 13;
-            this.cbMentionMeSound.Text = "Play sound on mention";
-            this.cbMentionMeSound.UseVisualStyleBackColor = true;
-            // 
-            // txtMentionMeSoundUUID
-            // 
-            this.txtMentionMeSoundUUID.Anchor = ((System.Windows.Forms.AnchorStyles)(((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Left) 
-            | System.Windows.Forms.AnchorStyles.Right)));
-            this.txtMentionMeSoundUUID.Location = new System.Drawing.Point(8, 173);
-            this.txtMentionMeSoundUUID.MaxLength = 36;
-            this.txtMentionMeSoundUUID.Name = "txtMentionMeSoundUUID";
-            this.txtMentionMeSoundUUID.Size = new System.Drawing.Size(242, 20);
-            this.txtMentionMeSoundUUID.TabIndex = 14;
-            // 
             // frmSettings
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
@@ -1421,5 +1458,8 @@ namespace Radegast
         public System.Windows.Forms.CheckBox cbGroupIMSound;
         public System.Windows.Forms.TextBox txtMentionMeSoundUUID;
         public System.Windows.Forms.CheckBox cbMentionMeSound;
+        public System.Windows.Forms.CheckBox cbIgnoreConferenceChats;
+        public System.Windows.Forms.CheckBox cbAllowConferenceChatsFromFriends;
+        public System.Windows.Forms.CheckBox cbLogIgnoredConferencesToChat;
     }
 }
