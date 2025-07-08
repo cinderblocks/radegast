@@ -52,7 +52,7 @@ namespace Radegast
             SessionId = session;
 
             TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Conference, SessionId, sessionName);
-            
+
             // Callbacks
             netcom.ClientLoginStatus += netcom_ClientLoginStatus;
             netcom.ClientDisconnected += netcom_ClientDisconnected;
@@ -92,6 +92,11 @@ namespace Radegast
 
         public void CleanUp()
         {
+            if (instance.Netcom.IsLoggedIn)
+            {
+                instance.Client.Self.RequestLeaveGroupChat(this.SessionId);
+            }
+
             TextManager.CleanUp();
             TextManager = null;
         }
