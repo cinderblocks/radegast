@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -19,12 +19,13 @@
  */
 
 using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Windows.Forms;
+using System.Collections.Frozen;
+using System.ComponentModel;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.ComponentModel;
+using System.Text;
+using System.Windows.Forms;
+using LibreMetaverse;
 using LibreMetaverse.LslTools;
 
 namespace Radegast
@@ -37,14 +38,28 @@ namespace Radegast
         /// </summary>
         private IContainer components = null;
 
-        private bool supressOnTextChanged = false;
+        private bool suppressOnTextChanged = false;
         private bool syntaxHighLightEnabled = false;
-        private bool monoRuntime = false;
-        private string rtfHeader;
+        private readonly bool monoRuntime = false;
+        private readonly string rtfHeader;
+        private FrozenDictionary<string, LslSyntax.LslKeyword> Keywords;
 
         //  Tool tip related private members
         private System.Threading.Timer ttTimer;
         private ToolTip ttKeyWords;
+
+        private static Color StateColor = Color.FromArgb(127, 26, 77);
+        private static Color DataTypeColor = Color.FromArgb(125, 75, 255);
+        private static Color EventColor = Color.FromArgb(0, 77, 128);
+        private static Color ConstantColor = Color.FromArgb(26, 26, 127);
+        private static Color FunctionColor = Color.FromArgb(128, 0, 38);
+        private static Color FlowColor = Color.FromArgb(0, 0, 204);
+        private static Color CommentColor = Color.FromArgb(203, 76, 37);
+        private static Color LiteralColor = Color.FromArgb(0, 51, 0);
+        private static Color[] UsedColors = new Color[] {
+            StateColor, DataTypeColor, EventColor, ConstantColor, FunctionColor, FlowColor, CommentColor, LiteralColor
+        };
+
 
         #region Public properties
         [Browsable(true), Category("Behavior"), DefaultValue(false)]
@@ -87,6 +102,7 @@ namespace Radegast
 
         private void InitializeComponent()
         {
+            Keywords = LslSyntax.Keywords;
             components = new Container();
             ttKeyWords = new ToolTip(components);
             ttTimer = new System.Threading.Timer(ttTimerElapsed, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
@@ -173,36 +189,32 @@ namespace Radegast
             return RtfUnicode(s.Replace(@"\", @"\\").Replace("{", @"\{").Replace("}", @"\}").Replace("\n", "\\par\n"));
         }
 
-        public Color CommentColor = Color.FromArgb(204, 76, 38);
-        public Color StringColor = Color.FromArgb(0, 51, 0);
-
-        private List<Color> usedColors;
-        private List<Color> UsedColors
+        private string colorTag(LslSyntax.LslCategory c, string s)
         {
-            get
+            switch (c)
             {
-                if (usedColors == null)
-                {
-                    usedColors = new List<Color> {ForeColor, CommentColor, StringColor};
-
-                    foreach (LSLKeyWord w in KeyWords.Values)
-                    {
-                        if (!usedColors.Contains(w.Color))
-                        {
-                            usedColors.Add(w.Color);
-                        }
-                    }
-                }
-                return usedColors;
+                case LslSyntax.LslCategory.Function:
+                    return colorTag(FunctionColor, s);
+                case LslSyntax.LslCategory.Control:
+                    return colorTag(StateColor, s);
+                case LslSyntax.LslCategory.Event:
+                    return colorTag(EventColor, s);
+                case LslSyntax.LslCategory.Datatype:
+                    return colorTag(DataTypeColor, s);
+                case LslSyntax.LslCategory.Constant:
+                    return colorTag(ConstantColor, s);
+                case LslSyntax.LslCategory.Flow:
+                    return colorTag(FlowColor, s);
+                default: 
+                    return s;
             }
         }
 
-        private string colorTag(Color c, string s)
+        private string colorTag(Color color, string s)
         {
-            return "\\cf" + (UsedColors.IndexOf(c) +1) + " " + rtfEscaped(s) + "\\cf1 ";
+            var idx = Array.IndexOf(UsedColors, color);
+            return $"\\cf{idx+1} {rtfEscaped(s)}\\cf1 ";
         }
-
-        public Dictionary<string, LSLKeyWord> KeyWords = LSLKeywordParser.KeyWords;
 
         private string ReHighlight(string text)
         {
@@ -217,9 +229,9 @@ namespace Radegast
                 switch (token.Kind)
                 {
                     case TokenKind.Word:
-                        if (KeyWords.ContainsKey(token.Value))
+                        if (Keywords.TryGetValue(token.Value, out var keyword))
                         {
-                            body.Append(colorTag(KeyWords[token.Value].Color, token.Value));
+                            body.Append(colorTag(keyword.Category, token.Value));
                         }
                         else
                         {
@@ -228,7 +240,7 @@ namespace Radegast
                         break;
 
                     case TokenKind.QuotedString:
-                        body.Append(colorTag(StringColor, token.Value));
+                        body.Append(colorTag(LiteralColor, token.Value));
                         break;
 
                     case TokenKind.Comment:
@@ -287,7 +299,7 @@ namespace Radegast
 
         protected override void OnTextChanged(EventArgs e)
         {
-            if (supressOnTextChanged || Updating) return;
+            if (suppressOnTextChanged || Updating) return;
 
             if (!syntaxHighLightEnabled || monoRuntime || Lines.Length == 0)
             {
@@ -295,14 +307,14 @@ namespace Radegast
                 return;
             }
 
-            supressOnTextChanged = true;
+            suppressOnTextChanged = true;
             BeginUpdate();
 
             // Save selection
             int selectionStart = SelectionStart;
             int selectionLength = SelectionLength;
 
-            // Rehighlught line
+            // Re-highlight line
             int currentLineNr = GetLineFromCharIndex(selectionStart);
             string currentLine = Lines[currentLineNr];
             int firstCharIndex = GetFirstCharIndexOfCurrentLine();
@@ -318,7 +330,7 @@ namespace Radegast
             base.OnTextChanged(e);
 
             EndUpdate();
-            supressOnTextChanged = false;
+            suppressOnTextChanged = false;
         }
 
         #endregion
@@ -393,10 +405,10 @@ namespace Radegast
 
         public override void InsertImage(Image _image)
         {
-            supressOnTextChanged = true;
+            suppressOnTextChanged = true;
             if (!monoRuntime)
                 base.InsertImage(_image);
-            supressOnTextChanged = false;
+            suppressOnTextChanged = false;
         }
 
         #region ToolTips
@@ -435,12 +447,12 @@ namespace Radegast
             for (endPos = trackedPos; endPos < trackedString.Length && validWordChar(trackedString[endPos]); endPos++) { }
             string word = trackedString.Substring(starPos + 1, endPos - starPos - 1);
 
-            if (!KeyWords.ContainsKey(word) || KeyWords[word].ToolTip == string.Empty)
+            if (!Keywords.ContainsKey(word) || Keywords[word].Tooltip == string.Empty)
             {
                 return;
             }
 
-            ttKeyWords.Show(KeyWords[word].ToolTip, this, new Point(trackedMousePos.X, trackedMousePos.Y + 15), 120 * 1000);
+            ttKeyWords.Show(Keywords[word].Tooltip, this, new Point(trackedMousePos.X, trackedMousePos.Y + 15), 120 * 1000);
         }
 
         private Point trackedMousePos = new Point(0, 0);
@@ -487,7 +499,7 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Insert a given text at at the current input position as a link.
+        /// Insert a given text at the current input position as a link.
         /// The link text is followed by a hash (#) and the given hyperlink text, both of
         /// them invisible.
         /// When clicked on, the whole link text and hyperlink string are given in the
@@ -601,10 +613,7 @@ namespace Radegast
             // dwMask holds the information which properties are consistent throughout the selection:
             if ((cf.dwMask & mask) == mask)
             {
-                if ((cf.dwEffects & effect) == effect)
-                    state = 1;
-                else
-                    state = 0;
+                state = (cf.dwEffects & effect) == effect ? 1 : 0;
             }
             else
             {
@@ -618,9 +627,9 @@ namespace Radegast
 
         #region Scrollbar positions functions
         /// <summary>
-        /// Sends a win32 message to get the scrollbars' position.
+        /// Sends a win32 message to get the scrollbar's position.
         /// </summary>
-        /// <returns>a POINT structre containing horizontal
+        /// <returns>a POINT structure containing horizontal
         ///       and vertical scrollbar position.</returns>
         private unsafe Win32.POINT GetScrollPos()
         {
@@ -635,7 +644,7 @@ namespace Radegast
         /// Sends a win32 message to set scrollbars position.
         /// </summary>
         /// <param name="point">a POINT
-        ///        conatining H/Vscrollbar scrollpos.</param>
+        ///        containing H/Vscrollbar scrollpos.</param>
         private unsafe void SetScrollPos(Win32.POINT point)
         {
             IntPtr ptr = new IntPtr(&point);

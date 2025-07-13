@@ -283,7 +283,7 @@ namespace Radegast
             this.syntaxHiglightingToolStripMenuItem.Name = "syntaxHiglightingToolStripMenuItem";
             this.syntaxHiglightingToolStripMenuItem.Size = new System.Drawing.Size(183, 22);
             this.syntaxHiglightingToolStripMenuItem.Text = "Syntax Higlighting";
-            this.syntaxHiglightingToolStripMenuItem.Click += new System.EventHandler(this.syntaxHiglightingToolStripMenuItem_Click);
+            this.syntaxHiglightingToolStripMenuItem.Click += new System.EventHandler(this.syntaxHighlightingToolStripMenuItem_Click);
             // 
             // tbtnAttach
             // 

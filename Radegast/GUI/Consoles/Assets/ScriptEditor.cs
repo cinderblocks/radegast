@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -32,12 +32,12 @@ namespace Radegast
 
     public partial class ScriptEditor : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstance instance;
         private GridClient client => instance.Client;
-        private InventoryLSL script;
+        private readonly InventoryLSL script;
         private string scriptName;
         private string fileName;
-        private Primitive prim;
+        private readonly Primitive prim;
 
         public ScriptEditor(RadegastInstance instance)
             : this(instance, null, null)
@@ -53,7 +53,7 @@ namespace Radegast
         public ScriptEditor(RadegastInstance instance, InventoryLSL script, Primitive prim)
         {
             InitializeComponent();
-            Disposed += SscriptEditor_Disposed;
+            Disposed += ScriptEditor_Disposed;
 
             this.instance = instance;
             this.script = script;
@@ -98,12 +98,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void SscriptEditor_Disposed(object sender, EventArgs e)
+        private void ScriptEditor_Disposed(object sender, EventArgs e)
         {
             client.Inventory.ScriptRunningReply -= OnScriptRunningReplyReceived;
         }
 
-        void OnScriptRunningReplyReceived(object sender, ScriptRunningReplyEventArgs e)
+        private void OnScriptRunningReplyReceived(object sender, ScriptRunningReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -116,7 +116,7 @@ namespace Radegast
             cbMono.Checked = e.IsMono;
         }
 
-        void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
         {
             if (InvokeRequired)
             {
@@ -141,7 +141,7 @@ namespace Radegast
         {
             if (detached)
             {
-                FindForm().Text = scriptName + " - " + Properties.Resources.ProgramName + " script editor";
+                FindForm().Text = $"{scriptName} - {Properties.Resources.ProgramName} script editor";
             }
         }
 
@@ -214,7 +214,7 @@ namespace Radegast
             }
         }
 
-        void originalParent_ControlAdded(object sender, ControlEventArgs e)
+        private void originalParent_ControlAdded(object sender, ControlEventArgs e)
         {
             if (detachedForm != null)
             {
@@ -224,7 +224,7 @@ namespace Radegast
             tbtnAttach.Visible = false;
         }
 
-        void detachedForm_FormClosing(object sender, FormClosingEventArgs e)
+        private void detachedForm_FormClosing(object sender, FormClosingEventArgs e)
         {
             Retach();
         }
@@ -327,8 +327,8 @@ namespace Radegast
         private void rtb_SelectionChanged(object sender, EventArgs e)
         {
             RRichTextBox.CursorLocation c = rtb.CursorPosition;
-            lblLine.Text = string.Format("Ln {0}", c.Line + 1);
-            lblCol.Text = string.Format("Col {0}", c.Column + 1);
+            lblLine.Text = $"Ln {c.Line + 1}";
+            lblCol.Text = $"Col {c.Column + 1}";
         }
 
         private bool spaceOrTab(char c)
@@ -496,9 +496,9 @@ namespace Radegast
                 SelLength = sl;
             }
 
-            public string Term;
-            public int SelStart;
-            public int SelLength;
+            public readonly string Term;
+            public readonly int SelStart;
+            public readonly int SelLength;
 
             public override string ToString()
             {
@@ -506,9 +506,9 @@ namespace Radegast
             }
         }
 
-        Dictionary<string, FindHistoryItem> FindHistory = new Dictionary<string, FindHistoryItem>();
-        FindHistoryItem startPos;
-        int searchFrom = 0;
+        private readonly Dictionary<string, FindHistoryItem> FindHistory = new Dictionary<string, FindHistoryItem>();
+        private FindHistoryItem startPos;
+        private int searchFrom = 0;
 
         private void tfindFindText_TextChanged(object sender, EventArgs e)
         {
@@ -667,23 +667,16 @@ namespace Radegast
             }
         }
 
-        private void syntaxHiglightingToolStripMenuItem_Click(object sender, EventArgs e)
+        private void syntaxHighlightingToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            if (rtb.SyntaxHighlightEnabled)
-            {
-                rtb.SyntaxHighlightEnabled = false;
-            }
-            else
-            {
-                rtb.SyntaxHighlightEnabled = true;
-            }
+            rtb.SyntaxHighlightEnabled = !rtb.SyntaxHighlightEnabled;
             syntaxHiglightingToolStripMenuItem.Checked = rtb.SyntaxHighlightEnabled;
         }
 
         private void ReadCursorPosition()
         {
             instance.TabConsole.DisplayNotificationInChat(
-                string.Format("Cursor at line {0}, column {1}", rtb.CursorPosition.Line + 1, rtb.CursorPosition.Column + 1),
+                $"Cursor at line {rtb.CursorPosition.Line + 1}, column {rtb.CursorPosition.Column + 1}",
                 ChatBufferTextStyle.Invisible);
         }
 
@@ -719,9 +712,9 @@ namespace Radegast
                                         string kind = m.Groups["kind"].Value;
                                         string msg = m.Groups["msg"].Value;
                                         instance.TabConsole.DisplayNotificationInChat(
-                                            string.Format("{0} on line {1}, column {2}: {3}", kind, line, column, msg),
+                                            $"{kind} on line {line}, column {column}: {msg}",
                                             ChatBufferTextStyle.Invisible);
-                                        txtStatus.Text += string.Format("{0} (Ln {1}, Col {2}): {3}", kind, line, column, msg);
+                                        txtStatus.Text += $"{kind} (Ln {line}, Col {column}): {msg}";
 
                                         if (i == 0)
                                         {

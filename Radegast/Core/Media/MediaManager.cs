@@ -31,7 +31,7 @@ namespace Radegast.Media
     public class MediaManager : MediaObject
     {
         /// <summary>
-        /// Indicated wheather sound sytem is ready for use
+        /// Indicated whether sound system is ready for use
         /// </summary>
         public bool SoundSystemAvailable { get; private set; } = false;
         public RadegastInstance Instance;

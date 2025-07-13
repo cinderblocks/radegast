@@ -620,19 +620,17 @@ namespace Radegast.Properties {
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap inv_item_material
-        {
-            get
-            {
+        internal static System.Drawing.Bitmap inv_item_material {
+            get {
                 object obj = ResourceManager.GetObject("inv_item_material", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
@@ -702,55 +700,47 @@ namespace Radegast.Properties {
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap inv_item_settings
-        {
-            get
-            {
+        internal static System.Drawing.Bitmap inv_item_settings {
+            get {
                 object obj = ResourceManager.GetObject("inv_item_settings", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap inv_item_settings_day
-        {
-            get
-            {
+        internal static System.Drawing.Bitmap inv_item_settings_day {
+            get {
                 object obj = ResourceManager.GetObject("inv_item_settings_day", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap inv_item_settings_sky
-        {
-            get
-            {
+        internal static System.Drawing.Bitmap inv_item_settings_sky {
+            get {
                 object obj = ResourceManager.GetObject("inv_item_settings_sky", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
-        internal static System.Drawing.Bitmap inv_item_settings_water
-        {
-            get
-            {
+        internal static System.Drawing.Bitmap inv_item_settings_water {
+            get {
                 object obj = ResourceManager.GetObject("inv_item_settings_water", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
             }
         }
-
+        
         /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Bitmap.
         /// </summary>
@@ -868,28 +858,6 @@ namespace Radegast.Properties {
             get {
                 object obj = ResourceManager.GetObject("inv_item_undershirt", resourceCulture);
                 return ((System.Drawing.Bitmap)(obj));
-            }
-        }
-        
-        /// <summary>
-        ///   Looks up a localized string similar to # $Id$
-        ///# sections
-        ///[word .5, .1, .3]
-        ///default 		Name of default state that all scripts must have
-        ///state 			Keyword to indicate state block or state transition
-        ///
-        ///# data types
-        ///[word .1, .3, .1]
-        ///integer			Integer type
-        ///float			Floating-point type
-        ///string			String type
-        ///key				Key type.  Use NULL_KEY to test for empty keys.
-        ///vector			Vector type of 3 floats.  Used to represent 3D motion, Euler angles, and color.:Access components by .x, .y. or .z
-        ///rotation		Rotation type of 4 floats.  Used to represent rota [rest of string was truncated]&quot;;.
-        /// </summary>
-        internal static string lsl_keywords {
-            get {
-                return ResourceManager.GetString("lsl_keywords", resourceCulture);
             }
         }
         
