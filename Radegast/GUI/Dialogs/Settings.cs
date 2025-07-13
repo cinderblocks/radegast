@@ -190,7 +190,7 @@ namespace Radegast
 
                 foreach (var fontSetting in Settings.DefaultFontSettings)
                 {
-                    if(!chatFontSettings.ContainsKey(fontSetting.Key))
+                    if (!chatFontSettings.ContainsKey(fontSetting.Key))
                     {
                         chatFontSettings.Add(fontSetting.Key, fontSetting.Value);
                     }
@@ -247,6 +247,17 @@ namespace Radegast
 
             cbHideLoginGraphics.Checked = s["hide_login_graphics"].AsBoolean();
             cbHideLoginGraphics.CheckedChanged += cbHideLoginGraphics_CheckedChanged;
+
+            cbIgnoreConferenceChats.Checked = s["ignore_conference_chats"].AsBoolean();
+            cbIgnoreConferenceChats.CheckedChanged += cbIgnoreConferenceChats_CheckedChanged;
+
+            cbAllowConferenceChatsFromFriends.Enabled = cbIgnoreConferenceChats.Checked;
+            cbAllowConferenceChatsFromFriends.Checked = s["allow_conference_chats_from_friends"].AsBoolean();
+            cbAllowConferenceChatsFromFriends.CheckedChanged += cbAllowConferenceChatsFromFriends_CheckedChanged;
+
+            cbLogIgnoredConferencesToChat.Enabled = cbIgnoreConferenceChats.Checked;
+            cbLogIgnoredConferencesToChat.Checked = s["log_ignored_conferences_to_chat"].AsBoolean();
+            cbLogIgnoredConferencesToChat.CheckedChanged += cbLogIgnoredConferencesToChat_CheckedChanged;
 
             cbRLV.Checked = s["rlv_enabled"].AsBoolean();
             cbRLV.CheckedChanged += (sender, e) =>
@@ -536,6 +547,24 @@ namespace Radegast
                 Instance.Names.CleanCache();
                 s["display_name_mode"] = (int)NameMode.OnlyDisplayName;
             }
+        }
+
+        private void cbIgnoreConferenceChats_CheckedChanged(object sender, EventArgs e)
+        {
+            cbAllowConferenceChatsFromFriends.Enabled = cbIgnoreConferenceChats.Checked;
+            cbLogIgnoredConferencesToChat.Enabled = cbIgnoreConferenceChats.Checked;
+
+            s["ignore_conference_chats"] = OSD.FromBoolean(cbIgnoreConferenceChats.Checked);
+        }
+
+        private void cbAllowConferenceChatsFromFriends_CheckedChanged(object sender, EventArgs e)
+        {
+            s["allow_conference_chats_from_friends"] = OSD.FromBoolean(cbAllowConferenceChatsFromFriends.Checked);
+        }
+
+        private void cbLogIgnoredConferencesToChat_CheckedChanged(object sender, EventArgs e)
+        {
+            s["log_ignored_conferences_to_chat"] = OSD.FromBoolean(cbLogIgnoredConferencesToChat.Checked);
         }
 
         private void txtReconnectTime_TextChanged(object sender, EventArgs e)

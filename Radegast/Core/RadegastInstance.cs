@@ -264,12 +264,14 @@ namespace Radegast
             InitializeLoggingAndConfig();
             InitializeClient(Client);
 
+            // COF must be created before RLV
+            COF = new CurrentOutfitFolder(this);
+
             RLV = new RLVManager(this);
             GridManger = new GridManager();
             GridManger.LoadGrids();
 
             Names = new NameManager(this);
-            COF = new CurrentOutfitFolder(this);
             LslSyntax = new LslSyntax(client0);
 
             MainForm = new frmMain(this);

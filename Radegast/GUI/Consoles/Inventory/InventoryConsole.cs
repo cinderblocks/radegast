@@ -917,7 +917,7 @@ namespace Radegast
         private void invTree_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             if (!(invTree.SelectedNode.Tag is InventoryItem item)) { return; }
-            item = instance.COF.OriginalInventoryItem(item);
+            item = instance.COF.ResolveInventoryLink(item) ?? item;
 
             switch (item.AssetType)
             {
@@ -1030,7 +1030,7 @@ namespace Radegast
             if (item.IsLink())
             {
                 raw += " (link)";
-                item = instance.COF.OriginalInventoryItem(item);
+                item = instance.COF.ResolveInventoryLink(item) ?? item;
                 if (Inventory.Contains(item.AssetUUID) && Inventory[item.AssetUUID] is InventoryItem)
                 {
                     item = (InventoryItem)Inventory[item.AssetUUID];
@@ -1084,7 +1084,7 @@ namespace Radegast
                 invTree.SelectedNode = node;
                 if (node.Tag is InventoryItem tag)
                 {
-                    UpdateItemInfo(instance.COF.OriginalInventoryItem(tag));
+                    UpdateItemInfo(instance.COF.ResolveInventoryLink(tag) ?? tag);
                 }
                 else
                 {
@@ -1236,10 +1236,11 @@ namespace Radegast
                 else if (node.Tag is InventoryItem tag)
                 {
                     #region Item context menu
-                    InventoryItem item = instance.COF.OriginalInventoryItem(tag);
+                    var item = instance.COF.ResolveInventoryLink(tag) ?? tag;
                     ctxInv.Items.Clear();
 
                     ToolStripMenuItem ctxItem;
+
 
                     if (item.InventoryType == InventoryType.LSL)
                     {
@@ -1354,7 +1355,7 @@ namespace Radegast
                         //TODO: add RLV support
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID 
-                                 && CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID);
+                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
@@ -1660,7 +1661,11 @@ namespace Radegast
                 // The rest operate on the item that is pointed by the link
                 if (cmd != "copy_item" && cmd != "cut_item" && cmd != "delete_item")
                 {
-                    item = instance.COF.OriginalInventoryItem(item);
+                    item = instance.COF.ResolveInventoryLink(item);
+                    if(item == null)
+                    {
+                        return;
+                    }
                 }
 
                 switch (cmd)
@@ -1706,7 +1711,7 @@ namespace Radegast
                     case "touch":
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID 
-                                 && CurrentOutfitFolder.GetAttachmentItem(p.Value) == item.UUID);
+                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
