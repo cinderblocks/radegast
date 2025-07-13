@@ -239,7 +239,7 @@ namespace Radegast
             this.uploadmeshToolStripMenuItem.Name = "uploadmeshToolStripMenuItem";
             this.uploadmeshToolStripMenuItem.Size = new System.Drawing.Size(157, 22);
             this.uploadmeshToolStripMenuItem.Text = "Upload &mesh...";
-            this.uploadmeshToolStripMenuItem.Click += new System.EventHandler(this.uploadmeshToolStripMenuItem_Click);
+            this.uploadmeshToolStripMenuItem.Click += new System.EventHandler(this.uploadMeshToolStripMenuItem_Click);
             // 
             // tmnuImport
             // 

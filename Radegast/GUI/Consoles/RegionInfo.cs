@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,8 +26,8 @@ namespace Radegast
 {
     public partial class RegionInfo : RadegastTabControl
     {
-        Timer refresh;
-        UUID parcelGroupID = UUID.Zero;
+        private Timer refresh;
+        private UUID parcelGroupID = UUID.Zero;
 
         public RegionInfo()
             : this(null)
@@ -57,7 +57,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void RegionInfo_Disposed(object sender, EventArgs e)
+        private void RegionInfo_Disposed(object sender, EventArgs e)
         {
             client.Groups.GroupNamesReply -= Groups_GroupNamesReply;
             client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
@@ -67,9 +67,9 @@ namespace Radegast
             refresh = null;
         }
 
-        void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
+        private void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
         {
-            if (instance.MainForm.PreventParcelUpdate || e.Result != ParcelResult.Single) return;
+            if (instance.MainForm.PreventParcelUpdate || e.Result != ParcelResult.Single) { return; }
             if (InvokeRequired)
             {
                 if (IsHandleCreated || !instance.MonoRuntime)
@@ -80,7 +80,7 @@ namespace Radegast
             UpdateParcelDisplay();
         }
 
-        void Parcels_ParcelDwellReply(object sender, ParcelDwellReplyEventArgs e)
+        private void Parcels_ParcelDwellReply(object sender, ParcelDwellReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -92,9 +92,9 @@ namespace Radegast
             lblTraffic.Text = e.Dwell.ToString("0");
         }
 
-        void Groups_GroupNamesReply(object sender, GroupNamesEventArgs e)
+        private void Groups_GroupNamesReply(object sender, GroupNamesEventArgs e)
         {
-            if (!e.GroupNames.ContainsKey(parcelGroupID)) return;
+            if (!e.GroupNames.ContainsKey(parcelGroupID)) { return; }
 
             if (InvokeRequired)
             {
@@ -108,7 +108,7 @@ namespace Radegast
             lblGroup.Text = e.GroupNames[parcelGroupID];
         }
 
-        void refresh_Tick(object sender, EventArgs e)
+        private void refresh_Tick(object sender, EventArgs e)
         {
             UpdateSimDisplay();
         }
@@ -119,7 +119,7 @@ namespace Radegast
             UpdateParcelDisplay();
         }
 
-        void UpdateSimDisplay()
+        private void UpdateSimDisplay()
         {
             if (!client.Network.Connected) return;
             if (!Visible) return;
@@ -127,7 +127,7 @@ namespace Radegast
             var s = client.Network.CurrentSim.Stats;
 
             lblRegionName.Text = client.Network.CurrentSim.Name;
-            lblDilation.Text = string.Format("{0:0.000}", s.Dilation);
+            lblDilation.Text = $"{s.Dilation:0.000}";
             lblFPS.Text = s.FPS.ToString();
             lblMainAgents.Text = s.Agents.ToString();
             lblChildAgents.Text = s.ChildAgents.ToString();
@@ -139,21 +139,21 @@ namespace Radegast
 
             float total = s.NetTime + s.PhysicsTime + s.OtherTime + s.AgentTime + s.AgentTime +
                 s.ImageTime + s.ImageTime + s.ScriptTime;
-            lblTotalTime.Text = string.Format("{0:0.0} ms", s.FrameTime);
-            lblNetTime.Text = string.Format("{0:0.0} ms", s.NetTime);
-            lblPhysicsTime.Text = string.Format("{0:0.0} ms", s.PhysicsTime);
-            lblSimTime.Text = string.Format("{0:0.0} ms", s.OtherTime);
-            lblAgentTime.Text = string.Format("{0:0.0} ms", s.AgentTime);
-            lblImagesTime.Text = string.Format("{0:0.0} ms", s.ImageTime);
-            lblScriptTime.Text = string.Format("{0:0.0} ms", s.ScriptTime);
-            lblSpareTime.Text = string.Format("{0:0.0} ms", Math.Max(0f, 1000f / 45f - total));
+            lblTotalTime.Text = $"{s.FrameTime:0.0} ms";
+            lblNetTime.Text = $"{s.NetTime:0.0} ms";
+            lblPhysicsTime.Text = $"{s.PhysicsTime:0.0} ms";
+            lblSimTime.Text = $"{s.OtherTime:0.0} ms";
+            lblAgentTime.Text = $"{s.AgentTime:0.0} ms";
+            lblImagesTime.Text = $"{s.ImageTime:0.0} ms";
+            lblScriptTime.Text = $"{s.ScriptTime:0.0} ms";
+            lblSpareTime.Text = $"{Math.Max(0f, 1000f / 45f - total):0.0} ms";
 
             lblCPUClass.Text = client.Network.CurrentSim.CPUClass.ToString();
             lblDataCenter.Text = client.Network.CurrentSim.ColoLocation;
             lblVersion.Text = client.Network.CurrentSim.SimVersion;
         }
 
-        void UpdateParcelDisplay()
+        private void UpdateParcelDisplay()
         {
             Parcel p = instance.State.Parcel;
             txtParcelTitle.Text = p.Name;
@@ -184,9 +184,9 @@ namespace Radegast
                 client.Groups.RequestGroupName(p.GroupID);
             }
 
-            lblTraffic.Text = string.Format("{0:0}", p.Dwell);
-            lblSimPrims.Text = string.Format("{0} / {1}", p.SimWideTotalPrims, p.SimWideMaxPrims);
-            lblParcelPrims.Text = string.Format("{0} / {1}", p.TotalPrims, p.MaxPrims);
+            lblTraffic.Text = $"{p.Dwell:0}";
+            lblSimPrims.Text = $"{p.SimWideTotalPrims} / {p.SimWideMaxPrims}";
+            lblParcelPrims.Text = $"{p.TotalPrims} / {p.MaxPrims}";
             lblAutoReturn.Text = p.OtherCleanTime.ToString();
             lblArea.Text = p.Area.ToString();
         }
@@ -194,7 +194,7 @@ namespace Radegast
         private void btnRestart_Click(object sender, EventArgs e)
         {
             if (MessageBox.Show(new WindowWrapper(Handle),
-                "Do you want to restart region " + client.Network.CurrentSim.Name + "?",
+                $"Do you want to restart region {client.Network.CurrentSim.Name}?",
                 "Confirm restart", MessageBoxButtons.YesNo) == DialogResult.Yes)
             {
                 client.Estate.RestartRegion();

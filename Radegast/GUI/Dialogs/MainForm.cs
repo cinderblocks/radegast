@@ -23,7 +23,6 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Timers;
 using System.Threading;
 
@@ -31,7 +30,6 @@ using System.Windows.Forms;
 using System.Resources;
 using System.IO;
 using System.Linq;
-using System.Web;
 using OpenMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
 using System.Runtime.InteropServices;
@@ -1590,7 +1588,7 @@ namespace Radegast
             {
                 if (res.Success)
                 {
-                    TabConsole.DisplayNotificationInChat("Successfully changed maturity access level to " + res.NewLevel);
+                    TabConsole.DisplayNotificationInChat($"Successfully changed maturity access level to {res.NewLevel}");
                 }
                 else
                 {
@@ -1614,7 +1612,7 @@ namespace Radegast
             setMaturityLevel("A");
         }
 
-        private void uploadmeshToolStripMenuItem_Click(object sender, EventArgs e)
+        private void uploadMeshToolStripMenuItem_Click(object sender, EventArgs e)
         {
             if (!TabConsole.TabExists("mesh upload console"))
             {
