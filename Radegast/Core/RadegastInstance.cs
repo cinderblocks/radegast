@@ -25,6 +25,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
+using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Media;
 using OpenMetaverse;
@@ -166,6 +167,11 @@ namespace Radegast
         public CurrentOutfitFolder COF;
 
         /// <summary>
+        /// LSL Syntax manager
+        /// </summary>
+        public LslSyntax LslSyntax;
+
+        /// <summary>
         /// Did we report crash to the grid login service
         /// </summary>
         public bool ReportedCrash = false;
@@ -226,7 +232,7 @@ namespace Radegast
 
         public RadegastInstance(GridClient client0)
         {
-            // incase something else calls GlobalInstance while we are loading
+            // in case something else calls GlobalInstance while we are loading
             globalInstance = this;
 
             if (!System.Diagnostics.Debugger.IsAttached)
@@ -264,6 +270,7 @@ namespace Radegast
 
             Names = new NameManager(this);
             COF = new CurrentOutfitFolder(this);
+            LslSyntax = new LslSyntax(client0);
 
             MainForm = new frmMain(this);
             MainForm.InitializeControls();
@@ -481,6 +488,7 @@ namespace Radegast
         void netcom_ClientConnected(object sender, EventArgs e)
         {
             Client.Self.RequestMuteList();
+
         }
 
         void Network_LoginProgress(object sender, LoginProgressEventArgs e)
@@ -604,7 +612,7 @@ namespace Radegast
 
         public bool AnotherInstanceRunning()
         {
-            // We have successfuly obtained lock
+            // We have successfully obtained lock
             if (MarkerLock?.CanWrite == true)
             {
                 Logger.Log("No other instances detected, marker file already locked", Helpers.LogLevel.Debug);
@@ -620,7 +628,7 @@ namespace Radegast
             catch
             {
                 MarkerLock = null;
-                Logger.Log($"Another instance detected, marker fils {CrashMarkerFileName} locked", Helpers.LogLevel.Debug);
+                Logger.Log($"Another instance detected, marker file {CrashMarkerFileName} locked", Helpers.LogLevel.Debug);
                 return true;
             }
         }
