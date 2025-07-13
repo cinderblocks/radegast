@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2023, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -109,7 +109,7 @@ namespace Radegast
         public CommandsManager CommandsManager { get; private set; }
 
         /// <summary>
-        /// Radegast ContextAction manager for context sensitive actions
+        /// Radegast ContextAction manager for context-sensitive actions
         /// </summary>
         public ContextActionsManager ContextActionManager { get; private set; }
 
@@ -156,12 +156,12 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Keyaboard handling manager (used in 3D scene viewer)
+        /// Keyboard handling manager (used in 3D scene viewer)
         /// </summary>
         public Keyboard Keyboard;
 
         /// <summary>
-        /// Current Outfit Folder (appearnce) manager
+        /// Current Outfit Folder (appearance) manager
         /// </summary>
         public CurrentOutfitFolder COF;
 
