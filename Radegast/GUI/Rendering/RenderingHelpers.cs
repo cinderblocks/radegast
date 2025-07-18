@@ -1243,7 +1243,7 @@ namespace Radegast.Rendering
                 VFSblock block = new VFSblock();
                 offset = block.Readblock(blockdata, offset);
 
-                FileStream writer = File.Open(OpenMetaverse.Settings.RESOURCE_DIR + System.IO.Path.DirectorySeparatorChar + block.mFileID, FileMode.Create);
+                FileStream writer = File.Open(System.IO.Path.Combine(OpenMetaverse.Settings.RESOURCE_DIR, block.mFileID.ToString()), FileMode.Create);
                 byte[] data = new byte[block.mSize];
                 datastream.Seek(block.mLocation, SeekOrigin.Begin);
                 datastream.Read(data, 0, block.mSize);

@@ -520,7 +520,7 @@ namespace Radegast.Rendering
             attachment_points.Clear();
 
 
-            string basedir = Path.Combine(Directory.GetCurrentDirectory(), "character");
+            string basedir = Path.Combine(OpenMetaverse.Settings.RESOURCE_DIR, "character");
 
             XmlDocument lad = new XmlDocument();
             lad.Load(Path.Combine(basedir, LODfilename));
@@ -530,7 +530,7 @@ namespace Radegast.Rendering
 
             XmlNodeList skeleton = lad.GetElementsByTagName("skeleton");
             string skeletonfilename = skeleton[0].Attributes?.GetNamedItem("file_name").Value;
-            Bone.loadbones(skeletonfilename);
+            Bone.loadBones(skeletonfilename);
 
             // Next read all the skeleton child nodes, we have attachment points and bone deform params
             // attachment points are an offset and rotation from a bone location
@@ -1604,17 +1604,17 @@ namespace Radegast.Rendering
             mDeformMatrix = new Matrix4(source.mDeformMatrix);
         }
 
-        public static void loadbones(string skeletonfilename)
+        public static void loadBones(string skeletonfilename)
         {
             lock (mBones) mBones.Clear();
-            string basedir = Path.Combine(Directory.GetCurrentDirectory(), "character");
+            string basedir = Path.Combine(Directory.GetCurrentDirectory(), "linden", "character");
             XmlDocument skeleton = new XmlDocument();
             skeleton.Load(Path.Combine(basedir, skeletonfilename));
             XmlNode boneslist = skeleton.GetElementsByTagName("linden_skeleton")[0];
-            addbone(boneslist.ChildNodes[0], null);
+            addBone(boneslist.ChildNodes[0], null);
         }
 
-        public static void addbone(XmlNode bone, Bone parent)
+        public static void addBone(XmlNode bone, Bone parent)
         {
 
             if (bone.Name != "bone")
@@ -1658,7 +1658,7 @@ namespace Radegast.Rendering
 
             foreach (XmlNode childbone in bone.ChildNodes)
             {
-                addbone(childbone, b);
+                addBone(childbone, b);
             }
 
         }
