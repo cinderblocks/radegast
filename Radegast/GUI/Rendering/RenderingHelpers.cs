@@ -30,7 +30,6 @@ using System.Drawing.Imaging;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using SkiaSharp;
-using Path = OpenMetaverse.Rendering.Path;
 
 namespace Radegast.Rendering
 {

@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -229,7 +229,7 @@ namespace Radegast
 
         private void Inventory_InventoryObjectAdded(object sender, InventoryObjectAddedEventArgs e)
         {
-            if (e.Obj is InventoryFolder folder 
+            if (e.Obj is InventoryFolder folder
                 && folder.PreferredType == FolderType.Trash)
             {
                 trashCreated.Set();
@@ -723,7 +723,7 @@ namespace Radegast
             invRootNode = AddDir(null, Inventory.RootFolder);
             Inventory.RootNode.NeedsUpdate = true;
 
-            Task inventoryUpdateTask = Task.Factory.StartNew(StartTraverseNodes, 
+            Task inventoryUpdateTask = Task.Factory.StartNew(StartTraverseNodes,
                 inventoryUpdateCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
 
             invRootNode.Expand();
@@ -860,6 +860,13 @@ namespace Radegast
                     pnlDetail.Controls.Add(gesture);
                     break;
 
+                case AssetType.Bodypart:
+                case AssetType.Clothing:
+                    WearableTextures wearable = new WearableTextures(instance, (InventoryWearable)item);
+                    wearable.Dock = DockStyle.Fill;
+                    pnlDetail.Controls.Add(wearable);
+                    break;
+
             }
 
             tabsInventory.SelectedTab = tabDetail;
@@ -985,7 +992,7 @@ namespace Radegast
                     fetchedFolders.Add(folderID);
                 }
 
-                Task task = Client.Inventory.RequestFolderContents(folderID, ownerID, 
+                Task task = Client.Inventory.RequestFolderContents(folderID, ownerID,
                     true, true, InventorySortOrder.ByDate, inventoryUpdateCancelToken.Token);
             }
         }
@@ -1008,7 +1015,7 @@ namespace Radegast
 
         public InventoryItem AttachmentAt(AttachmentPoint point)
         {
-            return (from attachment in Client.Appearance.GetAttachmentsByAttachmentPoint() 
+            return (from attachment in Client.Appearance.GetAttachmentsByAttachmentPoint()
                 where attachment.Key == point select attachment.Value.First()).FirstOrDefault();
         }
 
@@ -1354,7 +1361,7 @@ namespace Radegast
                         ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
                         //TODO: add RLV support
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
-                            p => p.Value.ParentID == Client.Self.LocalID 
+                            p => p.Value.ParentID == Client.Self.LocalID
                                  && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
@@ -1468,7 +1475,7 @@ namespace Radegast
                                     ctxInv.Items.Add(ctxItem);
                                     break;
                             }
-                            
+
                         }
                     }
 
@@ -1710,16 +1717,16 @@ namespace Radegast
 
                     case "touch":
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
-                            p => p.Value.ParentID == Client.Self.LocalID 
+                            p => p.Value.ParentID == Client.Self.LocalID
                                  && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
-                            Client.Self.Grab(attached.LocalID, 
+                            Client.Self.Grab(attached.LocalID,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero, 0,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero);
                             Thread.Sleep(100);
-                            Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0, 
+                            Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero);
                         }
                         break;
@@ -2334,8 +2341,8 @@ namespace Radegast
                     }
 
                     if (cbSrchWorn.Checked && add &&
-                        !(it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID) 
-                          || (it.InventoryType == InventoryType.Attachment 
+                        !(it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID)
+                          || (it.InventoryType == InventoryType.Attachment
                               || it.InventoryType == InventoryType.Object) && IsAttached(it)))
                     {
                         add = false;

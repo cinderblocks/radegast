@@ -61,7 +61,7 @@ namespace Radegast
             HelpText header = new HelpText(Properties.Resources.RadegastTitle)
             {
                 AdditionalNewLineAfterOption = true,
-                Copyright = new CopyrightInfo("Radegast Development Team, Sjofn LLC", 2009, 2021)
+                Copyright = new CopyrightInfo("Radegast Development Team, Sjofn LLC", 2009, 2025)
             };
             header.AddPreOptionsLine("https://radegast.life/");
             return header;
