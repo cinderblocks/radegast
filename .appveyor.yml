@@ -103,7 +103,7 @@ deploy:
       secure: KPXQ74CJ+1aD3/H12JeVwMedPvcyr4aL9O/CFL8sGJHN/WZCYjKw92m8CodgO90D
     artifact: /.*Radegast(Setup_|_).*(exe|msi|tbz)/
     skip_symbols: false
-    draft: false
-    prerelease: true
+    draft: true
+    prerelease: false
     on:
       APPVEYOR_REPO_TAG: true
