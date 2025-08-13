@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2006-2016, openmetaverse.co
- * Copyright (c) 2021, Sjofn LLC.
+ * Copyright (c) 2021-2025, Sjofn LLC.
  * All rights reserved.
  *
  * - Redistribution and use in source and binary forms, with or without 
@@ -25,7 +25,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
@@ -42,7 +41,7 @@ namespace Radegast.WinForms
     /// </summary>
     public class MiniMap : PictureBox
     {
-        private static Brush BG_COLOR = Brushes.Navy;
+        private static readonly Brush BG_COLOR = Brushes.Navy;
 
         private UUID _MapImageID;
         private GridClient _Client;
@@ -53,7 +52,7 @@ namespace Radegast.WinForms
         /// </summary>
         public GridClient Client
         {
-            get { return _Client; }
+            get => _Client;
             set { if (value != null) InitializeClient(value); }
         }
 
@@ -85,7 +84,7 @@ namespace Radegast.WinForms
                 {
                     Bitmap bmp = new Bitmap(256, 256);
                     Graphics g = Graphics.FromImage(bmp);
-                    g.Clear((System.Drawing.Color)(object)this.BackColor); // *HACK:
+                    g.Clear(this.BackColor); // *HACK:
                     g.FillRectangle(BG_COLOR, 0f, 0f, 256f, 256f);
                     g.DrawImage(bmp, 0, 0);
 
@@ -198,8 +197,7 @@ namespace Radegast.WinForms
         {
             if (!_Client.Network.Connected) { return; }
 
-            GridRegion region;
-            if (Client.Grid.GetGridRegion(Client.Network.CurrentSim.Name, GridLayerType.Objects, out region))
+            if (Client.Grid.GetGridRegion(Client.Network.CurrentSim.Name, GridLayerType.Objects, out var region))
             {
                 SetMapLayer(null);
 

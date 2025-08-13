@@ -172,7 +172,7 @@ namespace Radegast
 
         public class RLVCOFPolicy : ICOFPolicy
         {
-            private RLVManager rlvManager;
+            private readonly RLVManager rlvManager;
 
             public RLVCOFPolicy(RLVManager rlvManager)
             {
@@ -315,10 +315,9 @@ namespace Radegast
                 switch (rule.Behaviour)
                 {
                     case "version":
-                        int chan = 0;
-                        if (int.TryParse(rule.Param, out chan) && chan > 0)
+                        if (int.TryParse(rule.Param, out var chan) && chan > 0)
                         {
-                            Respond(chan, "RestrainedLife viewer v1.23 (" + Properties.Resources.RadegastTitle + " " + Assembly.GetExecutingAssembly().GetName().Version + ")");
+                            Respond(chan, $"RestrainedLife viewer v1.23 ({Properties.Resources.RadegastTitle} {Assembly.GetExecutingAssembly().GetName().Version})");
                         }
                         break;
 
@@ -326,7 +325,7 @@ namespace Radegast
                         chan = 0;
                         if (int.TryParse(rule.Param, out chan) && chan > 0)
                         {
-                            Respond(chan, "RestrainedLove viewer v1.23 (" + Properties.Resources.RadegastTitle + " " + Assembly.GetExecutingAssembly().GetName().Version + ")");
+                            Respond(chan, $"RestrainedLife viewer v1.23 ({Properties.Resources.RadegastTitle} {Assembly.GetExecutingAssembly().GetName().Version})");
                         }
                         break;
 
@@ -473,9 +472,8 @@ namespace Radegast
                         break;
 
                     case "sit":
-                        UUID sitTarget = UUID.Zero;
 
-                        if (rule.Param == "force" && UUID.TryParse(rule.Option, out sitTarget) && sitTarget != UUID.Zero)
+                        if (rule.Param == "force" && UUID.TryParse(rule.Option, out var sitTarget) && sitTarget != UUID.Zero)
                         {
                             instance.State.SetSitting(true, sitTarget);
                         }
@@ -489,9 +487,8 @@ namespace Radegast
                         break;
 
                     case "setrot":
-                        double rot = 0.0;
 
-                        if (rule.Param == "force" && double.TryParse(rule.Option, System.Globalization.NumberStyles.Float, Utils.EnUsCulture, out rot))
+                        if (rule.Param == "force" && double.TryParse(rule.Option, System.Globalization.NumberStyles.Float, Utils.EnUsCulture, out var rot))
                         {
                             client.Self.Movement.UpdateFromHeading(Math.PI / 2d - rot, true);
                         }
@@ -509,10 +506,9 @@ namespace Radegast
                                     float gx = float.Parse(coord[0], Utils.EnUsCulture);
                                     float gy = float.Parse(coord[1], Utils.EnUsCulture);
                                     float z = float.Parse(coord[2], Utils.EnUsCulture);
-                                    float x = 0, y = 0;
 
                                     instance.TabConsole.DisplayNotificationInChat("Starting teleport...");
-                                    ulong h = Helpers.GlobalPosToRegionHandle(gx, gy, out x, out y);
+                                    ulong h = Helpers.GlobalPosToRegionHandle(gx, gy, out var x, out var y);
                                     client.Self.RequestTeleport(h, new Vector3(x, y, z));
                                 }
                                 else if (
@@ -525,8 +521,7 @@ namespace Radegast
                                     float y = float.Parse(coord[2], Utils.EnUsCulture);
                                     float z = float.Parse(coord[3], Utils.EnUsCulture);
 
-                                    GridRegion r;
-                                    client.Grid.GetGridRegion(n, GridLayerType.Objects, out r);
+                                    client.Grid.GetGridRegion(n, GridLayerType.Objects, out var r);
 
                                     instance.TabConsole.DisplayNotificationInChat("Starting teleport...");
                                     client.Self.RequestTeleport(r.RegionHandle, new Vector3(x, y, z));
