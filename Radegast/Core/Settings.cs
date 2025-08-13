@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2023, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -33,8 +33,8 @@ namespace Radegast
 {
     public class Settings : IDictionary<string, OSD>
     {
-        private string SettingsFile;
-        private OSDMap SettingsData;
+        private readonly string SettingsFile;
+        private readonly OSDMap SettingsData;
 
         public delegate void SettingChangedCallback(object sender, SettingsEventArgs e);
         public event SettingChangedCallback OnSettingChanged;
@@ -166,7 +166,7 @@ namespace Radegast
             public Color BackColor;
 
 
-            public String Name;
+            public string Name;
 
             public string ForeColorString
             {
@@ -223,7 +223,7 @@ namespace Radegast
             }
             catch
             {
-                Logger.DebugLog("Failed opening Settings file: " + fileName);
+                Logger.DebugLog($"Failed opening Settings file: {fileName}");
                 SettingsData = new OSDMap();
                 Save();
             }
@@ -233,7 +233,7 @@ namespace Radegast
         {
             try
             {
-                File.WriteAllText(SettingsFile, SerializeLLSDXmlStringFormated(SettingsData));
+                File.WriteAllText(SettingsFile, SerializeLLSDXmlStringFormatted(SettingsData.Copy()));
             }
             catch (Exception ex)
             {
@@ -241,7 +241,7 @@ namespace Radegast
             }
         }
 
-        public static string SerializeLLSDXmlStringFormated(OSD data)
+        public static string SerializeLLSDXmlStringFormatted(OSD data)
         {
             using (StringWriter sw = new StringWriter())
             {
@@ -251,7 +251,7 @@ namespace Radegast
                     writer.Indentation = 4;
                     writer.IndentChar = ' ';
 
-                    writer.WriteStartElement(String.Empty, "llsd", String.Empty);
+                    writer.WriteStartElement(string.Empty, "llsd", string.Empty);
                     OSDParser.SerializeLLSDXmlElement(writer, data);
                     writer.WriteEndElement();
 
@@ -285,7 +285,7 @@ namespace Radegast
             {
                 if (string.IsNullOrEmpty(key))
                 {
-                    Logger.DebugLog("Warning: trying to set an emprty setting: " + Environment.StackTrace);
+                    Logger.DebugLog("Warning: trying to set an empty setting: " + Environment.StackTrace);
                 }
                 else
                 {

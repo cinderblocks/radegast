@@ -31,15 +31,14 @@ namespace Radegast
 {
     public partial class MapConsole : UserControl
     {
-        RadegastInstance instance;
-        GridClient client => instance.Client;
-        bool Active => client.Network.Connected;
-        WebBrowser map;
-        MapControl mmap;
-        Regex slscheme = new Regex("^secondlife://(.+)/([0-9]+)/([0-9]+)");
-        bool InTeleport = false;
-        bool mapCreated = false;
-        Dictionary<string, ulong> regionHandles = new Dictionary<string, ulong>();
+        private readonly RadegastInstance instance;
+        private GridClient client => instance.Client;
+        private bool Active => client.Network.Connected;
+        private WebBrowser map;
+        private MapControl mapCtrl;
+        private bool InTeleport = false;
+        private bool mapCreated = false;
+        private readonly Dictionary<string, ulong> regionHandles = new Dictionary<string, ulong>();
 
         public MapConsole(RadegastInstance inst)
         {
@@ -58,63 +57,63 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        private void RegisterClientEvents(GridClient client)
+        private void RegisterClientEvents(GridClient gridClient)
         {
-            client.Grid.GridRegion += Grid_GridRegion;
-            client.Self.TeleportProgress += Self_TeleportProgress;
-            client.Network.SimChanged += Network_SimChanged;
-            client.Friends.FriendFoundReply += Friends_FriendFoundReply;
+            gridClient.Grid.GridRegion += Grid_GridRegion;
+            gridClient.Self.TeleportProgress += Self_TeleportProgress;
+            gridClient.Network.SimChanged += Network_SimChanged;
+            gridClient.Friends.FriendFoundReply += Friends_FriendFoundReply;
         }
 
-        private void UnregisterClientEvents(GridClient client)
+        private void UnregisterClientEvents(GridClient gridClient)
         {
-            client.Grid.GridRegion -= Grid_GridRegion;
-            client.Self.TeleportProgress -= Self_TeleportProgress;
-            client.Network.SimChanged -= Network_SimChanged;
-            client.Friends.FriendFoundReply -= Friends_FriendFoundReply;
+            gridClient.Grid.GridRegion -= Grid_GridRegion;
+            gridClient.Self.TeleportProgress -= Self_TeleportProgress;
+            gridClient.Network.SimChanged -= Network_SimChanged;
+            gridClient.Friends.FriendFoundReply -= Friends_FriendFoundReply;
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(client);
         }
 
-        void createMap()
+        private void createMap()
         {
             if (map == null)
             {
-                mmap = new MapControl(instance);
-                mmap.MapTargetChanged += (sender, e) =>
+                mapCtrl = new MapControl(instance);
+                mapCtrl.MapTargetChanged += (sender, e) =>
                 {
                     txtRegion.Text = e.Region.Name;
                     nudX.Value = e.LocalX;
                     nudY.Value = e.LocalY;
-                    lblStatus.Text = "Ready for " + e.Region.Name;
+                    lblStatus.Text = $"Ready for {e.Region.Name}";
                 };
 
-                mmap.ZoomChanged += mmap_ZoomChaged;
+                mapCtrl.ZoomChanged += MapCtrlZoomChanged;
 
                 if (instance.Netcom.Grid.ID == "agni")
                 {
-                    mmap.UseExternalTiles = true;
+                    mapCtrl.UseExternalTiles = true;
                 }
-                mmap.Dock = DockStyle.Fill;
-                pnlMap.Controls.Add(mmap);
-                mmap_ZoomChaged(null, null);
+                mapCtrl.Dock = DockStyle.Fill;
+                pnlMap.Controls.Add(mapCtrl);
+                MapCtrlZoomChanged(null, null);
                 zoomTracker.Visible = true;
             }
 
         }
 
-        void mmap_ZoomChaged(object sender, EventArgs e)
+        private void MapCtrlZoomChanged(object sender, EventArgs e)
         {
-            int newval = (int)(100f * (mmap.Zoom - mmap.MinZoom) / (mmap.MaxZoom - mmap.MinZoom));
+            int newval = (int)(100f * (mapCtrl.Zoom - mapCtrl.MinZoom) / (mapCtrl.MaxZoom - mapCtrl.MinZoom));
             if (newval >= zoomTracker.Minimum && newval <= zoomTracker.Maximum)
                 zoomTracker.Value = newval;
         }
 
-        void map_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
+        private void map_DocumentCompleted(object sender, WebBrowserDocumentCompletedEventArgs e)
         {
             map.DocumentCompleted -= map_DocumentCompleted;
             map.AllowWebBrowserDrop = false;
@@ -148,7 +147,7 @@ namespace Radegast
             );
         }
 
-        void frmMap_Disposed(object sender, EventArgs e)
+        private void frmMap_Disposed(object sender, EventArgs e)
         {
             // Unregister callbacks
             UnregisterClientEvents(client);
@@ -167,10 +166,10 @@ namespace Radegast
                 map = null;
             }
 
-            if (mmap != null)
+            if (mapCtrl != null)
             {
-                mmap.Dispose();
-                mmap = null;
+                mapCtrl.Dispose();
+                mapCtrl = null;
             }
         }
 
@@ -200,10 +199,10 @@ namespace Radegast
                 Logger.Log("Failed setting map position controls: ", Helpers.LogLevel.Warning, instance.Client, ex);
             }
 
-            gotoRegion(txtRegion.Text, x, y);
+            gotoRegion(region, x, y);
             btnTeleport.Enabled = true;
             btnTeleport.Focus();
-            lblStatus.Text = "Ready for " + region;
+            lblStatus.Text = $"Ready for {region}";
         }
 
         public void SetStatus(string msg)
@@ -234,14 +233,14 @@ namespace Radegast
                     btnTeleport.Enabled = true;
                 }
             }
-            mmap.CenterMap(rx, ry, (uint)gx % 256, (uint)gy % 256, true);
+            mapCtrl.CenterMap(rx, ry, (uint)gx % 256, (uint)gy % 256, true);
         }
 
         #endregion
 
         #region NetworkEvents
 
-        void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -253,9 +252,9 @@ namespace Radegast
             lblStatus.Text = $"Now in {client.Network.CurrentSim.Name}";
         }
 
-        int lastTick = 0;
+        private int lastTick = 0;
 
-        void Self_TeleportProgress(object sender, TeleportEventArgs e)
+        private void Self_TeleportProgress(object sender, TeleportEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -291,7 +290,7 @@ namespace Radegast
                     lastTick = Environment.TickCount;
                     InTeleport = false;
                     Network_SimChanged(null, null);
-                    mmap?.ClearTarget();
+                    mapCtrl?.ClearTarget();
                     break;
 
                 default:
@@ -305,7 +304,7 @@ namespace Radegast
             }
         }
 
-        void Grid_GridRegion(object sender, GridRegionEventArgs e)
+        private void Grid_GridRegion(object sender, GridRegionEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -333,7 +332,7 @@ namespace Radegast
         }
         #endregion NetworkEvents
 
-        void map_Navigating(object sender, WebBrowserNavigatingEventArgs e)
+        private void map_Navigating(object sender, WebBrowserNavigatingEventArgs e)
         {
             e.Cancel = true;
             Regex r = new Regex(@"^(http://slurl.com/secondlife/|secondlife://)([^/]+)/(\d+)/(\d+)(/(\d+))?");
@@ -353,7 +352,7 @@ namespace Radegast
                     Logger.Log("Failed setting map position controls: ", Helpers.LogLevel.Warning, instance.Client, ex);
                 }
 
-                if (m.Groups.Count > 5 && m.Groups[6].Value != String.Empty)
+                if (m.Groups.Count > 5 && m.Groups[6].Value != string.Empty)
                 {
                     nudZ.Value = int.Parse(m.Groups[6].Value);
                 }
@@ -361,7 +360,7 @@ namespace Radegast
             }
         }
 
-        void DoSearch()
+        private void DoSearch()
         {
             if (!Active || txtRegion.Text.Length < 2) return;
             lstRegions.Clear();
@@ -378,7 +377,7 @@ namespace Radegast
                 map?.Navigate(Path.GetDirectoryName(Application.ExecutablePath) + @"/worldmap.html");
             }
 
-            lblStatus.Text = "Teleporting to " + txtRegion.Text;
+            lblStatus.Text = $"Teleporting to {txtRegion.Text}";
             prgTeleport.Style = ProgressBarStyle.Marquee;
 
             ThreadPool.QueueUserWorkItem(state =>
@@ -393,10 +392,11 @@ namespace Radegast
         }
 
         #region JavascriptHooks
-        string savedRegion = null;
-        int savedX, savedY;
 
-        void gotoRegion(string regionName, int simX, int simY)
+        private string savedRegion = null;
+        private int savedX, savedY;
+
+        private void gotoRegion(string regionName, int simX, int simY)
         {
             savedRegion = regionName;
             savedX = simX;
@@ -404,7 +404,7 @@ namespace Radegast
 
             if (!Visible) return;
 
-            if (mmap != null)
+            if (mapCtrl != null)
             {
                 if (!regionHandles.ContainsKey(regionName))
                 {
@@ -419,7 +419,7 @@ namespace Radegast
                                 };
                             client.Grid.GridRegion += handler;
                             client.Grid.RequestMapRegion(regionName, GridLayerType.Objects);
-                            if (done.WaitOne(30 * 1000, false))
+                            if (done.WaitOne(TimeSpan.FromSeconds(30), false))
                             {
                                 if (!instance.MonoRuntime || IsHandleCreated)
                                     BeginInvoke(new MethodInvoker(() => gotoRegion(regionName, simX, simY)));
@@ -429,7 +429,7 @@ namespace Radegast
                     );
                     return;
                 }
-                mmap.CenterMap(regionHandles[regionName], (uint)simX, (uint)simY, true);
+                mapCtrl.CenterMap(regionHandles[regionName], (uint)simX, (uint)simY, true);
                 return;
             }
 
@@ -437,7 +437,7 @@ namespace Radegast
 
             if (instance.MonoRuntime)
             {
-                map.Document.InvokeScript(string.Format("gReg = \"{0}\"; gSimX = {1}; gSimY = {2}; monosucks", regionName, simX, simY));
+                map.Document.InvokeScript($"gReg = \"{regionName}\"; gSimX = {simX}; gSimY = {simY}; monosucks");
             }
             else
             {
@@ -549,24 +549,25 @@ namespace Radegast
 
         private void zoomTracker_Scroll(object sender, EventArgs e)
         {
-            if (mmap != null)
+            if (mapCtrl != null)
             {
-                mmap.Zoom = mmap.MinZoom + (mmap.MaxZoom - mmap.MinZoom) * ((float)zoomTracker.Value / 100f);
+                mapCtrl.Zoom = mapCtrl.MinZoom + (mapCtrl.MaxZoom - mapCtrl.MinZoom) * ((float)zoomTracker.Value / 100f);
             }
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)
         {
-            mmap?.RefreshRegionAgents();
+            mapCtrl?.RefreshRegionAgents();
         }
 
         #endregion GUIEvents
 
         #region Map friends
-        FriendInfo mapFriend = null;
-        ulong targetRegionHandle = 0;
 
-        void Friends_FriendFoundReply(object sender, FriendFoundReplyEventArgs e)
+        private FriendInfo mapFriend = null;
+        private ulong targetRegionHandle = 0;
+
+        private void Friends_FriendFoundReply(object sender, FriendFoundReplyEventArgs e)
         {
             if (mapFriend == null || mapFriend.UUID != e.AgentID) return;
 
@@ -594,7 +595,7 @@ namespace Radegast
                 txtRegion.Text = kvp.Key;
                 btnTeleport.Enabled = true;
             }
-            mmap.CenterMap(x, y, (uint)e.Location.X, (uint)e.Location.Y, true);
+            mapCtrl.CenterMap(x, y, (uint)e.Location.X, (uint)e.Location.Y, true);
         }
 
         private void ddOnlineFriends_SelectedIndexChanged(object sender, EventArgs e)
