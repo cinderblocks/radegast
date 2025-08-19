@@ -92,6 +92,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LibreMetaverse.LslTools", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibreMetaverse.Voice.Vivox", "libremetaverse\LibreMetaverse.Voice.Vivox\LibreMetaverse.Voice.Vivox.csproj", "{EBA4BE7A-447B-4B0E-B61E-6E2A46E74005}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LibreMetaverse.RLV", "..\libremetaverse\LibreMetaverse.RLV\LibreMetaverse.RLV.csproj", "{D31A723F-A710-6EF4-567A-74536C90D677}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -796,6 +798,46 @@ Global
 		{EBA4BE7A-447B-4B0E-B61E-6E2A46E74005}.ReleaseWindows|x64.Build.0 = Release|Any CPU
 		{EBA4BE7A-447B-4B0E-B61E-6E2A46E74005}.ReleaseWindows|x86.ActiveCfg = Release|Any CPU
 		{EBA4BE7A-447B-4B0E-B61E-6E2A46E74005}.ReleaseWindows|x86.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|x64.Build.0 = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Debug|x86.Build.0 = Debug|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|ARM64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|x64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|x64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|x86.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.Release|x86.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|Any CPU.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|Any CPU.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|ARM64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|ARM64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|x64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|x64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|x86.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseLinux|x86.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|Any CPU.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|Any CPU.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|ARM64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|ARM64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|x64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|x64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|x86.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseMacOS|x86.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|Any CPU.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|Any CPU.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|ARM64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|ARM64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|x64.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|x64.Build.0 = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|x86.ActiveCfg = Release|Any CPU
+		{D31A723F-A710-6EF4-567A-74536C90D677}.ReleaseWindows|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
