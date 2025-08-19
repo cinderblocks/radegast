@@ -247,33 +247,26 @@ namespace Radegast
                 return;
             }
 
-            if (instance.RLV.Enabled
-                && e.Type == ChatType.OwnerSay
-                && e.Message.StartsWith("@"))
+            if (instance.RLV.Enabled && e.Type == ChatType.OwnerSay && e.Message.StartsWith("@"))
             {
                 Task.Run(async () =>
                 {
                     try
                     {
-                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120)))
+                        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
                         {
-                            await instance.RLV.TryProcessCMD(e, cts.Token);
+                            await instance.RLV.TryProcessCMD(e);
                         }
                     }
                     catch (TaskCanceledException ex)
                     {
-                        Logger.LogInstance.Error("Timed out running RLV command background task", ex);
+                        Logger.LogInstance.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogInstance.Error("Exception while running RLV command background task", ex);
+                        Logger.LogInstance.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                 });
-#if !DEBUG
-                if (!instance.RLV.EnabledDebugCommands) {
-                    return;
-                }
-#endif
             }
 
             ChatBufferItem item = new ChatBufferItem { ID = e.SourceID, RawMessage = e };
@@ -302,8 +295,7 @@ namespace Radegast
 
             if (isEmote)
             {
-                if (e.SourceType == ChatSourceType.Agent &&
-                    instance.RLV.RestictionActive("recvemote", e.SourceID.ToString()))
+                if (instance.RLV.Enabled && !instance.RLV.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
                 {
                     sb.Append(" ...");
                 }
@@ -314,15 +306,13 @@ namespace Radegast
             }
             else
             {
-                sb.Append(": ");
-                if (e.SourceType == ChatSourceType.Agent && !e.Message.StartsWith("/") &&
-                    instance.RLV.RestictionActive("recvchat", e.SourceID.ToString()))
+                if (instance.RLV.Enabled && !instance.RLV.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
                 {
-                    sb.Append("...");
+                    sb.Append(": ...");
                 }
                 else
                 {
-                    sb.Append(e.Message);
+                    sb.Append(": " + e.Message);
                 }
             }
 

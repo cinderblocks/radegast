@@ -1371,7 +1371,7 @@ namespace Radegast
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (IsAttached(item) && instance.RLV.AllowDetach(item))
+                    if (IsAttached(item) && instance.COF.CanDetachItem(item).Result)
                     {
                         ctxItem =
                             new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };

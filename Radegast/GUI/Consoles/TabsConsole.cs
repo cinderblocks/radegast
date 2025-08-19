@@ -244,12 +244,12 @@ namespace Radegast
                 )) return;
 
             if (instance.GlobalSettings["on_script_question"] == "Auto Decline"
-                || instance.RLV.RestictionActive("denypermission"))
+                || (instance.RLV.Enabled && instance.RLV.Permissions.IsAutoDenyPermissions()))
             {
                 instance.Client.Self.ScriptQuestionReply(e.Simulator, e.ItemID, e.TaskID, 0);
             }
             else if (instance.GlobalSettings["on_script_question"] == "Auto Accept"
-                || instance.RLV.RestictionActive("acceptpermission"))
+                || (instance.RLV.Enabled && instance.RLV.Permissions.IsAutoAcceptPermissions()))
             {
                 instance.Client.Self.ScriptQuestionReply(e.Simulator, e.ItemID, e.TaskID, e.Questions);
             }
@@ -436,7 +436,7 @@ namespace Radegast
                     break;
 
                 case InstantMessageDialog.RequestTeleport:
-                    if (instance.RLV.AutoAcceptTP(e.IM.FromAgentID))
+                    if (instance.RLV.Enabled && instance.RLV.Permissions.IsAutoAcceptTp(e.IM.FromAgentID.Guid))
                     {
                         DisplayNotificationInChat($"Automatically accepted a teleport request from {e.IM.FromAgentName}");
                         instance.Client.Self.TeleportLureRespond(e.IM.FromAgentID, e.IM.IMSessionID, true);

@@ -211,7 +211,7 @@ namespace Radegast
         /// </summary>
         /// <returns>List of <see cref="InventoryItem"/> that can be part of appearance (attachments, wearables)</returns>
         /// <param name="cancellationToken"></param>
-        private async Task<List<InventoryItem>> GetCurrentOutfitLinks(CancellationToken cancellationToken = default)
+        public async Task<List<InventoryItem>> GetCurrentOutfitLinks(CancellationToken cancellationToken = default)
         {
             if (COF == null)
             {
