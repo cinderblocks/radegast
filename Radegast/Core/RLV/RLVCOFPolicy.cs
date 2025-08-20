@@ -40,7 +40,7 @@ namespace Radegast.Core.RLV
 
         public bool CanAttach(InventoryItem item)
         {
-            if(!_rlvService.Enabled)
+            if (!_instance.RLV.Enabled)
             {
                 return true;
             }
@@ -69,7 +69,7 @@ namespace Radegast.Core.RLV
 
         public bool CanDetach(InventoryItem item)
         {
-            if (!_rlvService.Enabled)
+            if (!_instance.RLV.Enabled)
             {
                 return true;
             }

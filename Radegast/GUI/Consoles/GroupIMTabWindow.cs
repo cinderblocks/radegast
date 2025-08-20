@@ -364,7 +364,6 @@ namespace Radegast
             ClearIMInput();
 
 
-            // TODO: Get group name...
             string groupName = null;
             if(instance.Groups.TryGetValue(SessionId, out var group))
             {
