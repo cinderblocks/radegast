@@ -129,9 +129,11 @@ namespace Radegast
                 Generated.BugsplatDatabase, "Radegast",
                 Assembly.GetExecutingAssembly().GetName().Version.ToString())
                 {
-                    User = "cinder@cinderblocks.biz",
+                    User = string.IsNullOrWhiteSpace(instance.Client.Self.Name) ? "Unknown" : instance.Client.Self.Name,
                     ExceptionType = BugSplatDotNetStandard.BugSplat.ExceptionTypeId.DotNetStandard,
                 };
+                s_BugSplat.Attributes.Add("mono", instance.MonoRuntime.ToString());
+                s_BugSplat.Attributes.Add("run", (DateTime.Now - instance.StartupTimeUTC).ToString("c"));
                 if (instance.GlobalLogFile != null)
                 {
                     s_BugSplat.Attachments.Add(new FileInfo(instance.GlobalLogFile));
