@@ -396,11 +396,6 @@ namespace Radegast
         private string savedRegion = null;
         private int savedX, savedY;
 
-        private void gotoRegion(ulong regionHandle, int x, int y)
-        {
-            mapCtrl?.CenterMap(regionHandle, (uint)x, (uint)y, true);
-        }
-
         private void gotoRegion(string regionName, int simX, int simY)
         {
             savedRegion = regionName;
