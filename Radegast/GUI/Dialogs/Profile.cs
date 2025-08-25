@@ -394,7 +394,8 @@ namespace Radegast
 
             try
             {
-                parcelCache.Add(e.Parcel.ID, e.Parcel);
+                if (!parcelCache.ContainsKey(e.Parcel.ID))
+                    parcelCache.Add(e.Parcel.ID, e.Parcel);
             }
             catch (ArgumentException) { /* ignore. faster than lock and check for duplicates. */ }
 
