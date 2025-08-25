@@ -26,6 +26,7 @@ using CommandLine;
 using CommandLine.Text;
 using System.Threading;
 using CoreJ2K.Util;
+using OpenMetaverse;
 
 namespace Radegast
 {
@@ -132,7 +133,8 @@ namespace Radegast
                     User = string.IsNullOrWhiteSpace(instance.Client.Self.Name) ? "Unknown" : instance.Client.Self.Name,
                     ExceptionType = BugSplatDotNetStandard.BugSplat.ExceptionTypeId.DotNetStandard,
                 };
-                s_BugSplat.Attributes.Add("mono", instance.MonoRuntime.ToString());
+                s_BugSplat.Attributes.Add("platform", Utils.GetRunningPlatform().ToString());
+                s_BugSplat.Attributes.Add("runtime", Utils.GetRunningRuntime().ToString());
                 s_BugSplat.Attributes.Add("run", (DateTime.Now - instance.StartupTimeUTC).ToString("c"));
                 if (instance.GlobalLogFile != null)
                 {
