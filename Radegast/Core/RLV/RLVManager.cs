@@ -795,7 +795,7 @@ namespace Radegast
                                     if (folder != null)
                                     {
                                         var outfit = new List<InventoryItem>();
-                                        GetAllItems(folder, true, ref outfit);
+                                        AllSubfolderWearables(folder, ref outfit);
                                         await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
                                 }
@@ -833,7 +833,7 @@ namespace Radegast
                                     List<InventoryItem> outfit = new List<InventoryItem>();
                                     if(rule.Behaviour == "attachall" || rule.Behaviour == "attachallover")
                                     {
-                                        GetAllItems(folder, true, ref outfit);
+                                        AllSubfolderWearables(folder, ref outfit);
                                     }
                                     else
                                     {
@@ -989,9 +989,10 @@ namespace Radegast
 
         private void Respond(int chan, string msg)
         {
-#if DEBUG
-            instance.TabConsole.DisplayNotificationInChat($"{chan}: {msg}", ChatBufferTextStyle.OwnerSay);
-#endif
+            if (instance.RLV.EnabledDebugCommands)
+            {
+                instance.TabConsole.DisplayNotificationInChat($"{chan}: {msg}", ChatBufferTextStyle.OwnerSay);
+            }
             client.Self.Chat(msg, chan, ChatType.Normal);
         }
 
@@ -1023,7 +1024,7 @@ namespace Radegast
         /// <returns>True if the inventory item is attached to avatar</returns>
         private static bool IsAttached(IEnumerable<Primitive> attachments, InventoryItem item)
         {
-            return attachments.Any(prim => CurrentOutfitFolder.GetAttachmentItemID(prim) == item.UUID);
+            return attachments.Any(prim => CurrentOutfitFolder.GetAttachmentItemID(prim) == item.ActualUUID);
         }
 
         /// <summary>
@@ -1034,7 +1035,7 @@ namespace Radegast
         /// <returns>True if the item is worn</returns>
         private static bool IsWorn(IEnumerable<AppearanceManager.WearableData> currentlyWorn, InventoryItem item)
         {
-            return currentlyWorn.Any(worn => worn.ItemID == item.UUID);
+            return currentlyWorn.Any(worn => worn.ItemID == item.ActualUUID);
         }
 
         /// <summary>
