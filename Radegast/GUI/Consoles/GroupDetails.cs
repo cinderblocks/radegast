@@ -421,6 +421,7 @@ namespace Radegast
 
         void Groups_GroupMembersReply(object sender, GroupMembersReplyEventArgs e)
         {
+            if (group.ID != e.GroupID) return;
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(() => Groups_GroupMembersReply(sender, e)));
