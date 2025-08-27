@@ -356,11 +356,6 @@ namespace Radegast
         /// <returns>True if we are able to attach this object</returns>
         public async Task<bool> CanAttachItem(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            if (!(item is InventoryObject))
-            {
-                return false;
-            }
-
             var trashFolderId = client.Inventory.FindFolderForType(FolderType.Trash);
             var rootFolderId = client.Inventory.FindFolderForType(FolderType.Root);
 
@@ -391,18 +386,33 @@ namespace Radegast
             }
 
             var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
-            var numAttachedObjects = cofLinks
-                .Count(n => n is InventoryObject);
-
-            if (numAttachedObjects + 1 >= client.Self.Benefits.AttachmentLimit)
-            {
-                Logger.Log($"Cannot attach any more objects. Maximum of {client.Self.Benefits.AttachmentLimit} attached objects has been reached", Helpers.LogLevel.Warning, client);
-                return false;
-            }
 
             if (cofLinks.FirstOrDefault(n => n.ActualUUID == item.ActualUUID) != null)
             {
                 return false;
+            }
+
+            if (item is InventoryObject obj)
+            {
+                var numAttachedObjects = cofLinks
+                    .Count(n => n is InventoryObject);
+
+                if (numAttachedObjects + 1 >= client.Self.Benefits.AttachmentLimit)
+                {
+                    return false;
+                }
+            }
+            else if (item is InventoryWearable wearable)
+            {
+                var numClothingLayers = cofLinks
+                    .Count(n => n is InventoryWearable);
+
+                numClothingLayers++;
+
+                if (numClothingLayers + 1 >= MaxClothingLayers)
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -416,14 +426,14 @@ namespace Radegast
         /// <returns>True if we are able to detach this object</returns>
         public async Task<bool> CanDetachItem(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            var realItem = instance.COF.ResolveInventoryLink(item);
-
-            if (!(realItem is InventoryObject))
+            if (!policy.CanDetach(item))
             {
                 return false;
             }
 
-            if (!policy.CanDetach(realItem))
+            var realItem = instance.COF.ResolveInventoryLink(item);
+
+            if (!(realItem is InventoryItem))
             {
                 return false;
             }

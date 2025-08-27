@@ -44,7 +44,7 @@ namespace Radegast.Core.RLV
                 {
                     groupName = groupNameTemp;
                 }
-                tcs.TrySetResult(true);
+                var unused = tcs.TrySetResult(true);
             }
 
             try
@@ -79,7 +79,7 @@ namespace Radegast.Core.RLV
 
             foreach (var item in objectPrimitivesSnapshot)
             {
-                if(!item.IsAttachment)
+                if (!item.IsAttachment)
                 {
                     continue;
                 }
@@ -89,12 +89,12 @@ namespace Radegast.Core.RLV
                     .Select(n => n.Value)
                     .FirstOrDefault();
 
-                if(attachItemID == null)
+                if (attachItemID == null)
                 {
                     continue;
                 }
 
-                if(!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
                 {
                     continue;
                 }
@@ -105,65 +105,6 @@ namespace Radegast.Core.RLV
             return attachedItemMap;
         }
 
-        public async Task<(bool Success, IReadOnlyList<RlvInventoryItem> CurrentOutfit)> TryGetCurrentOutfitAsync(CancellationToken cancellationToken)
-        {
-            var currentOutfitLinks = await _instance.COF.GetCurrentOutfitLinks(cancellationToken);
-            var currentOutfitConverted = new List<RlvInventoryItem>();
-
-            var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
-
-            foreach (var link in currentOutfitLinks)
-            {
-                var item = _instance.COF.ResolveInventoryLink(link);
-                if (item == null)
-                {
-                    continue;
-                }
-
-                if (item is InventoryWearable wearable)
-                {
-                    currentOutfitConverted.Add(new RlvInventoryItem(
-                        item.UUID.Guid,
-                        item.Name,
-                        item.ParentUUID.Guid,
-                        null,
-                        null,
-                        (RlvWearableType)wearable.WearableType
-                    ));
-                }
-                else if (item is InventoryAttachment attachment)
-                {
-                    currentOutfitConverted.Add(new RlvInventoryItem(
-                        item.UUID.Guid,
-                        item.Name,
-                        item.ParentUUID.Guid,
-                        (RlvAttachmentPoint)attachment.AttachmentPoint,
-                        null,
-                        null
-                    ));
-                }
-                else if (item is InventoryObject obj)
-                {
-                    Guid? primId = null;
-                    if(attachmentIdToInventoryIdMap.TryGetValue(item.UUID, out var primIdTemp))
-                    {
-                        primId = primIdTemp.Guid;
-                    }
-
-                    currentOutfitConverted.Add(new RlvInventoryItem(
-                        item.UUID.Guid,
-                        item.Name,
-                        item.ParentUUID.Guid,
-                        (RlvAttachmentPoint)obj.AttachPoint,
-                        primId,
-                        null
-                    ));
-                }
-            }
-
-            return (true, currentOutfitConverted);
-        }
-
         public Task<(bool Success, string DebugSettingValue)> TryGetDebugSettingValueAsync(string settingName, CancellationToken cancellationToken)
         {
             return Task.FromResult((false, string.Empty));
@@ -172,79 +113,6 @@ namespace Radegast.Core.RLV
         public Task<(bool Success, string EnvironmentSettingValue)> TryGetEnvironmentSettingValueAsync(string settingName, CancellationToken cancellationToken)
         {
             return Task.FromResult((false, string.Empty));
-        }
-
-        private void BuildSharedFolder(Dictionary<Guid, RlvInventoryItem> currentOutfitMap, InventoryNode root, RlvSharedFolder rootConverted)
-        {
-            foreach (var node in root.Nodes.Values)
-            {
-                if (node.Data is InventoryFolder)
-                {
-                    var newChild = rootConverted.AddChild(node.Data.UUID.Guid, node.Data.Name);
-                    BuildSharedFolder(currentOutfitMap, node, newChild);
-                    continue;
-                }
-
-                if (!(node.Data is InventoryItem item))
-                {
-                    continue;
-                }
-
-                if (currentOutfitMap.TryGetValue(item.ActualUUID.Guid, out var currentOutfitItem))
-                {
-                    rootConverted.AddItem(
-                        currentOutfitItem.Id,
-                        currentOutfitItem.Name,
-                        currentOutfitItem.AttachedTo,
-                        currentOutfitItem.AttachedPrimId,
-                        currentOutfitItem.WornOn
-                    );
-                    continue;
-                }
-
-                if(item.IsLink())
-                {
-                    item = _instance.COF.ResolveInventoryLink(item);
-                }
-                if(item == null)
-                {
-                    continue;
-                }
-
-                if (item.AssetType != AssetType.Bodypart &&
-                    item.AssetType != AssetType.Clothing &&
-                    item.AssetType != AssetType.Object)
-                {
-                    continue;
-                }
-
-                rootConverted.AddItem(
-                    item.UUID.Guid,
-                    item.Name,
-                    null,
-                    null,
-                    null
-                );
-            }
-        }
-        public async Task<(bool Success, RlvSharedFolder SharedFolder)> TryGetSharedFolderAsync(CancellationToken cancellationToken)
-        {
-            var (currentOutfitSuccess, currentOutfit) = await TryGetCurrentOutfitAsync(cancellationToken);
-            if (!currentOutfitSuccess)
-            {
-                return (false, null);
-            }
-
-            var currentOutfitMap = currentOutfit.ToDictionary(k => k.Id, v => v);
-
-            var sharedFolder = _instance.Client.Inventory.Store.RootNode.Nodes.Values
-                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
-
-            var sharedFolderConverted = new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "");
-
-            BuildSharedFolder(currentOutfitMap, sharedFolder, sharedFolderConverted);
-
-            return (true, sharedFolderConverted);
         }
 
         public Task<(bool Success, Guid SitId)> TryGetSitIdAsync(CancellationToken cancellationToken)
@@ -258,6 +126,173 @@ namespace Radegast.Core.RLV
             }
 
             return Task.FromResult((false, Guid.Empty));
+        }
+
+        private void GetItemAttachmentInfo(
+            InventoryItem item,
+            Dictionary<UUID, UUID> attachmentIdToInventoryIdMap,
+            out RlvWearableType? wornOn,
+            out RlvAttachmentPoint? attachedTo,
+            out Guid? attachedPrimId,
+            out RlvGestureState? gestureState)
+        {
+            wornOn = null;
+            attachedTo = null;
+            attachedPrimId = null;
+            gestureState = null;
+            if (item is InventoryWearable wearable)
+            {
+                wornOn = (RlvWearableType)wearable.WearableType;
+            }
+            else if (item is InventoryAttachment attachment)
+            {
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                {
+                    attachedPrimId = primIdTemp.Guid;
+                }
+
+                attachedTo = (RlvAttachmentPoint)attachment.AttachmentPoint;
+            }
+            else if (item is InventoryObject obj)
+            {
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                {
+                    attachedPrimId = primIdTemp.Guid;
+                }
+
+                attachedTo = (RlvAttachmentPoint)obj.AttachPoint;
+            }
+            else if (item is InventoryGesture)
+            {
+                gestureState = _instance.Client.Self.ActiveGestures.ContainsKey(item.UUID) ? RlvGestureState.Active : RlvGestureState.Inactive;
+            }
+        }
+
+        private void BuildSharedFolder(
+            Dictionary<UUID, InventoryItem> currentOutfitMap,
+            Dictionary<UUID, UUID> attachmentIdToInventoryIdMap,
+            InventoryNode root,
+            RlvSharedFolder rootConverted,
+            Dictionary<Guid, RlvSharedFolder> folderMap,
+            Dictionary<Guid, RlvInventoryItem> itemMap
+        )
+        {
+            folderMap[root.Data.UUID.Guid] = rootConverted;
+
+            foreach (var node in root.Nodes.Values)
+            {
+                if (node.Data is InventoryFolder)
+                {
+                    var newChild = rootConverted.AddChild(node.Data.UUID.Guid, node.Data.Name);
+                    BuildSharedFolder(currentOutfitMap, attachmentIdToInventoryIdMap, node, newChild, folderMap, itemMap);
+                    continue;
+                }
+
+                if (!(node.Data is InventoryItem item))
+                {
+                    continue;
+                }
+
+                var realItem = _instance.COF.ResolveInventoryLink(item);
+                if (realItem == null)
+                {
+                    continue;
+                }
+
+                if (realItem.AssetType != AssetType.Bodypart &&
+                    realItem.AssetType != AssetType.Clothing &&
+                    realItem.AssetType != AssetType.Gesture &&
+                    realItem.AssetType != AssetType.Object)
+                {
+                    continue;
+                }
+
+                if (currentOutfitMap.ContainsKey(item.ActualUUID))
+                {
+                    // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
+                    GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var isActiveGesture);
+
+                    var newItem = rootConverted.AddItem(
+                        item.ActualUUID.Guid,
+                        item.Name,
+                        item.IsLink(),
+                        attachedTo,
+                        attachedPrimId,
+                        wornOn,
+                        isActiveGesture
+                     );
+                    itemMap[newItem.Id] = newItem;
+                }
+                else
+                {
+                    var newItem = rootConverted.AddItem(
+                        item.ActualUUID.Guid,
+                        item.Name,
+                        item.IsLink(),
+                        null,
+                        null,
+                        null,
+                        realItem.AssetType == AssetType.Gesture ? RlvGestureState.Inactive : (RlvGestureState?)null
+                    );
+                    itemMap[newItem.Id] = newItem;
+                }
+            }
+        }
+
+        public async Task<(bool Success, InventoryMap InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
+        {
+            // Get current attached items <InventoryItem>
+            var currentOutfitLinks = await _instance.COF.GetCurrentOutfitLinks(cancellationToken);
+            var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
+
+            // Build shared folder
+            var sharedFolder = _instance.Client.Inventory.Store.RootNode.Nodes.Values
+                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
+
+            var currentOutfitMap = currentOutfitLinks.ToDictionary(k => k.ActualUUID, v => v);
+
+            var sharedFolderConverted = new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "");
+
+            var itemMap = new Dictionary<Guid, RlvInventoryItem>();
+            var folderMap = new Dictionary<Guid, RlvSharedFolder>();
+
+            BuildSharedFolder(currentOutfitMap, attachmentIdToInventoryIdMap, sharedFolder, sharedFolderConverted, folderMap, itemMap);
+
+            // Gather external attached items
+            var externalItems = new List<RlvInventoryItem>();
+
+            foreach (var item in currentOutfitLinks)
+            {
+                if (itemMap.ContainsKey(item.ActualUUID.Guid))
+                {
+                    continue;
+                }
+
+                var realItem = _instance.COF.ResolveInventoryLink(item);
+                if (realItem == null)
+                {
+                    continue;
+                }
+
+                // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
+                GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var gestureState);
+                var newItem = new RlvInventoryItem(
+                    item.ActualUUID.Guid,
+                    item.Name,
+                    item.IsLink(),
+                    item.ParentUUID.Guid,
+                    attachedTo,
+                    attachedPrimId,
+                    wornOn,
+                    gestureState
+                 );
+
+                itemMap.Add(item.ActualUUID.Guid, newItem);
+                externalItems.Add(newItem);
+            }
+
+            var inventoryContext = new InventoryMap(sharedFolderConverted, externalItems);
+            return (true, inventoryContext);
         }
     }
 }

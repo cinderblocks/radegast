@@ -20,7 +20,6 @@
 
 using LibreMetaverse.RLV;
 using OpenMetaverse;
-using System.Linq;
 using System.Threading;
 
 namespace Radegast.Core.RLV
@@ -45,20 +44,25 @@ namespace Radegast.Core.RLV
                 return true;
             }
 
-            var (hasSharedFolder, sharedFolder) = _queryCallbacks.TryGetSharedFolderAsync(CancellationToken.None).Result;
-            if (hasSharedFolder && sharedFolder != null)
+            var (hasInventoryMap, inventoryMap) = _queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            if (hasInventoryMap && inventoryMap != null)
             {
-                var inventoryMap = new InventoryMap(sharedFolder);
-
-                if (inventoryMap.Items.TryGetValue(item.UUID.Guid, out var rlvItem))
+                if (inventoryMap.TryGetItem(item.UUID.Guid, out var rlvItems))
                 {
-                    if (rlvItem.AttachedTo != null || rlvItem.WornOn != null)
+                    foreach (var rlvItem in rlvItems)
                     {
-                        return false;
+                        if (rlvItem.AttachedTo != null || rlvItem.WornOn != null || rlvItem.GestureState == RlvGestureState.Active)
+                        {
+                            return false;
+                        }
+
+                        if (!_rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn))
+                        {
+                            return false;
+                        }
                     }
 
-                    // TODO: Return false if we already have it attached/worn?
-                    return _rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn);
+                    return true;
                 }
             }
 
@@ -74,17 +78,31 @@ namespace Radegast.Core.RLV
                 return true;
             }
 
-            var (hasCurrentOutfit, currentOutfit) = _queryCallbacks.TryGetCurrentOutfitAsync(CancellationToken.None).Result;
-            if (hasCurrentOutfit && currentOutfit != null)
+            var (hasInventoryMap, inventoryMap) = _queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            if (!hasInventoryMap || inventoryMap == null)
             {
-                var foundItem = currentOutfit.FirstOrDefault(n => n.Id == item.UUID.Guid);
-                if (foundItem != null)
+                return false;
+            }
+
+            if (!inventoryMap.TryGetItem(item.UUID.Guid, out var foundItems))
+            {
+                return false;
+            }
+
+            foreach (var foundItem in foundItems)
+            {
+                if (foundItem.WornOn == null && foundItem.AttachedTo == null && foundItem.GestureState != RlvGestureState.Active)
                 {
-                    return _rlvService.Permissions.CanDetach(foundItem, foundItem.Folder != null);
+                    return false;
+                }
+
+                if (!_rlvService.Permissions.CanDetach(foundItem))
+                {
+                    return false;
                 }
             }
 
-            return false;
+            return true;
         }
     }
 }
