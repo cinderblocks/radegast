@@ -442,6 +442,9 @@ namespace Radegast
                 Flags = profile.Flags,
             };
             populateFields();
+
+            // populate notes
+            rtbNotes.Text = profile.Notes;
         }
 
         private void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
@@ -555,9 +558,9 @@ namespace Radegast
             else
             {
                 client.Avatars.RequestAvatarProperties(AgentID);
+                client.Avatars.RequestAvatarNotes(AgentID);
             }
 
-            client.Avatars.RequestAvatarNotes(AgentID);
             UpdateMuteButton();
 
             if (AgentID == client.Self.AgentID)
