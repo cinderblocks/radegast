@@ -54,7 +54,7 @@
     <PackageReference Include="C5" Version="3.0.0" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.8" />
-    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.4" />
+    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.5" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
