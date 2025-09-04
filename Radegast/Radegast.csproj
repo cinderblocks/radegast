@@ -57,7 +57,7 @@
     <PackageReference Include="LibreMetaverse.LslTools" Version="2.4.2.1063" />
     <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.4.3.1065" />
     <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.4.3.1065" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="2.4.6.1084" />
+    <PackageReference Include="LibreMetaverse.RLV" Version="2.4.7.1093" />
     <PackageReference Include="LibreMetaverse.StructuredData" Version="2.4.3.1065" />
     <PackageReference Include="LibreMetaverse.Types" Version="2.4.3.1065" />
     <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.4.3.1065" />
