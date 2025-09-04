@@ -7,10 +7,10 @@
     <Name>RadegastSetup</Name>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.1" />
-    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.1" />
-    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.1" />
-    <PackageReference Include="WixToolset.Heat" Version="6.0.1" />
+    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Heat" Version="6.0.2" />
   </ItemGroup>
   <ItemGroup>
     <Folder Include="vcredist" />

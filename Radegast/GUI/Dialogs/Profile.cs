@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -20,26 +20,28 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using Radegast;
 using OpenMetaverse;
+using OpenMetaverse.Messages.Linden;
 
 
 namespace Radegast
 {
     public partial class frmProfile : RadegastForm
     {
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom;
+        private readonly RadegastInstance instance;
+        private readonly Netcom netcom;
         private readonly GridClient client;
         private readonly string fullName;
 
         public UUID AgentID { get; }
-        private Avatar.AvatarProperties Profile;
+        private Avatar.AvatarProperties AvatarProperties;
         private Avatar.Interests Interests;
-        bool myProfile = false;
-        UUID newPickID = UUID.Zero;
+        private readonly bool myProfile = false;
+        private UUID newPickID = UUID.Zero;
 
         private UUID FLImageID;
         private UUID SLImageID;
@@ -47,8 +49,8 @@ namespace Radegast
         private bool gotPicks = false;
         private UUID requestedPick;
         private ProfilePick currentPick;
-        private Dictionary<UUID, ProfilePick> pickCache = new Dictionary<UUID, ProfilePick>();
-        private Dictionary<UUID, ParcelInfo> parcelCache = new Dictionary<UUID, ParcelInfo>();
+        private readonly Dictionary<UUID, ProfilePick> pickCache = new Dictionary<UUID, ProfilePick>();
+        private readonly Dictionary<UUID, ParcelInfo> parcelCache = new Dictionary<UUID, ParcelInfo>();
 
         public frmProfile(RadegastInstance instance, string fullName, UUID agentID)
             : base(instance)
@@ -64,7 +66,7 @@ namespace Radegast
             this.fullName = fullName;
             AgentID = agentID;
 
-            Text = fullName + " (profile) - " + Properties.Resources.ProgramName;
+            Text = $"{fullName} (profile) - {Properties.Resources.ProgramName}";
             txtUUID.Text = agentID.ToString();
 
             if (client.Friends.FriendList.ContainsKey(agentID))
@@ -126,7 +128,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void frmProfile_Disposed(object sender, EventArgs e)
+        private void frmProfile_Disposed(object sender, EventArgs e)
         {
             client.Avatars.AvatarPropertiesReply -= Avatars_AvatarPropertiesReply;
             client.Avatars.AvatarPicksReply -= Avatars_AvatarPicksReply;
@@ -141,7 +143,7 @@ namespace Radegast
             instance.InventoryClipboardUpdated -= instance_InventoryClipboardUpdated;
         }
 
-        void Self_MuteListUpdated(object sender, EventArgs e)
+        private void Self_MuteListUpdated(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -155,9 +157,9 @@ namespace Radegast
             UpdateMuteButton();
         }
 
-        void UpdateMuteButton()
+        private void UpdateMuteButton()
         {
-            bool isMuted = client.Self.MuteList.Find(me => (me.Type == MuteType.Resident && me.ID == AgentID)) != null;
+            bool isMuted = client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == AgentID) != null;
 
             if (isMuted)
             {
@@ -171,12 +173,12 @@ namespace Radegast
             }
         }
 
-        void instance_InventoryClipboardUpdated(object sender, EventArgs e)
+        private void instance_InventoryClipboardUpdated(object sender, EventArgs e)
         {
             btnGive.Enabled = instance.InventoryClipboard != null;
         }
 
-        void Avatars_AvatarGroupsReply(object sender, AvatarGroupsReplyEventArgs e)
+        private void Avatars_AvatarGroupsReply(object sender, AvatarGroupsReplyEventArgs e)
         {
             if (e.AvatarID != AgentID) return;
 
@@ -203,7 +205,7 @@ namespace Radegast
 
         }
 
-        void Avatars_AvatarInterestsReply(object sender, AvatarInterestsReplyEventArgs e)
+        private void Avatars_AvatarInterestsReply(object sender, AvatarInterestsReplyEventArgs e)
         {
             if (e.AvatarID != AgentID) return;
 
@@ -238,7 +240,7 @@ namespace Radegast
             txtLanguages.Text = Interests.LanguagesText;
         }
 
-        void Avatars_AvatarNotesReply(object sender, AvatarNotesReplyEventArgs e)
+        private void Avatars_AvatarNotesReply(object sender, AvatarNotesReplyEventArgs e)
         {
             if (e.AvatarID != AgentID) return;
 
@@ -250,7 +252,7 @@ namespace Radegast
             rtbNotes.Text = e.Notes;
         }
 
-        void Avatars_AvatarPicksReply(object sender, AvatarPicksReplyEventArgs e)
+        private void Avatars_AvatarPicksReply(object sender, AvatarPicksReplyEventArgs e)
         {
             if (e.AvatarID != AgentID) return;
 
@@ -265,10 +267,7 @@ namespace Radegast
 
         private void ClearPicks()
         {
-            List<Control> controls = new List<Control>();
-            foreach (Control c in pickListPanel.Controls)
-                if (c != btnNewPick)
-                    controls.Add(c);
+            List<Control> controls = pickListPanel.Controls.Cast<Control>().Where(c => c != btnNewPick).ToList();
             foreach (Control c in controls)
                 c.Dispose();
             pickDetailPanel.Visible = false;
@@ -310,7 +309,7 @@ namespace Radegast
             firstButton?.PerformClick();
         }
 
-        void PickButtonClick(object sender, EventArgs e)
+        private void PickButtonClick(object sender, EventArgs e)
         {
             pickDetailPanel.Visible = true;
             Button b = (Button)sender;
@@ -326,7 +325,7 @@ namespace Radegast
             }
         }
 
-        void Avatars_PickInfoReply(object sender, PickInfoReplyEventArgs e)
+        private void Avatars_PickInfoReply(object sender, PickInfoReplyEventArgs e)
         {
             if (e.PickID != requestedPick) return;
 
@@ -375,12 +374,8 @@ namespace Radegast
 
             if (!parcelCache.ContainsKey(e.Pick.ParcelID))
             {
-                pickLocation.Text = string.Format("Unkown parcel, {0} ({1}, {2}, {3})",
-                    e.Pick.SimName,
-                    ((int)e.Pick.PosGlobal.X) % 256,
-                    ((int)e.Pick.PosGlobal.Y) % 256,
-                    ((int)e.Pick.PosGlobal.Z) % 256
-                );
+                pickLocation.Text =
+                    $"Unkown parcel, {e.Pick.SimName} ({(int)e.Pick.PosGlobal.X % 256}, {(int)e.Pick.PosGlobal.Y % 256}, {(int)e.Pick.PosGlobal.Z % 256})";
                 client.Parcels.RequestParcelInfo(e.Pick.ParcelID);
             }
             else
@@ -389,7 +384,7 @@ namespace Radegast
             }
         }
 
-        void Parcels_ParcelInfoReply(object sender, ParcelInfoReplyEventArgs e)
+        private void Parcels_ParcelInfoReply(object sender, ParcelInfoReplyEventArgs e)
         {
             if (currentPick.ParcelID != e.Parcel.ID) return;
 
@@ -399,22 +394,24 @@ namespace Radegast
                 return;
             }
 
-            lock (parcelCache)
+            try
             {
                 if (!parcelCache.ContainsKey(e.Parcel.ID))
                     parcelCache.Add(e.Parcel.ID, e.Parcel);
             }
+            catch (ArgumentException) { /* ignore. faster than lock and check for duplicates. */ }
 
-            pickLocation.Text = string.Format("{0}, {1} ({2}, {3}, {4})",
-                e.Parcel.Name,
-                currentPick.SimName,
-                ((int)currentPick.PosGlobal.X) % 256,
-                ((int)currentPick.PosGlobal.Y) % 256,
-                ((int)currentPick.PosGlobal.Z) % 256
-            );
+            // PickInfoReply packet always sends empty SimName. Why and when did that start? Dumb. Update it from parcel info.
+            if (string.IsNullOrWhiteSpace(currentPick.SimName))
+            {
+                currentPick.SimName = e.Parcel.SimName;
+            }
+
+            pickLocation.Text =
+                $"{e.Parcel.Name}, {currentPick.SimName} ({(int)currentPick.PosGlobal.X % 256}, {(int)currentPick.PosGlobal.Y % 256}, {(int)currentPick.PosGlobal.Z % 256})";
         }
 
-        void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -426,7 +423,31 @@ namespace Radegast
             }
         }
 
-        void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
+        private void Avatars_AvatarProfileReply(bool success, AgentProfileMessage profile)
+        {
+            if (!success)
+            {
+                return;
+            }
+
+            AvatarProperties = new Avatar.AvatarProperties
+            {
+                AboutText = profile.SecondLifeAboutText,
+                FirstLifeText = profile.FirstLifeAboutText,
+                ProfileImage = profile.SecondLifeImageID,
+                FirstLifeImage = profile.FirstLifeImageID,
+                CharterMember = profile.CustomerType,
+                BornOn = profile.MemberSince.ToShortDateString(),
+                Partner = profile.PartnerID,
+                Flags = profile.Flags,
+            };
+            populateFields();
+
+            // populate notes
+            rtbNotes.Text = profile.Notes;
+        }
+
+        private void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
         {
             if (e.AvatarID != AgentID) return;
 
@@ -435,23 +456,28 @@ namespace Radegast
                 Invoke(new MethodInvoker(() => Avatars_AvatarPropertiesReply(sender, e)));
                 return;
             }
-            Profile = e.Properties;
+            AvatarProperties = e.Properties;
 
-            FLImageID = e.Properties.FirstLifeImage;
-            SLImageID = e.Properties.ProfileImage;
+            populateFields();
+        }
+
+        private void populateFields()
+        {
+            FLImageID = AvatarProperties.FirstLifeImage;
+            SLImageID = AvatarProperties.ProfileImage;
 
             if (AgentID == client.Self.AgentID || SLImageID != UUID.Zero)
             {
                 SLImageHandler pic = new SLImageHandler(instance, SLImageID, "");
-                
+
                 if (AgentID == client.Self.AgentID)
                 {
                     pic.AllowUpdateImage = true;
                     pic.ImageUpdated += (usender, ue) =>
                     {
-                        Profile.ProfileImage = ue.NewImageID;
+                        AvatarProperties.ProfileImage = ue.NewImageID;
                         pic.UpdateImage(ue.NewImageID);
-                        client.Self.UpdateProfile(Profile);
+                        client.Self.UpdateProfile(AvatarProperties);
                     };
                 }
 
@@ -467,16 +493,16 @@ namespace Radegast
 
             if (AgentID == client.Self.AgentID || FLImageID != UUID.Zero)
             {
-                SLImageHandler pic = new SLImageHandler(instance, FLImageID, "") {Dock = DockStyle.Fill};
+                SLImageHandler pic = new SLImageHandler(instance, FLImageID, string.Empty) { Dock = DockStyle.Fill };
 
                 if (AgentID == client.Self.AgentID)
                 {
                     pic.AllowUpdateImage = true;
                     pic.ImageUpdated += (usender, ue) =>
                     {
-                        Profile.FirstLifeImage = ue.NewImageID;
+                        AvatarProperties.FirstLifeImage = ue.NewImageID;
                         pic.UpdateImage(ue.NewImageID);
-                        client.Self.UpdateProfile(Profile);
+                        client.Self.UpdateProfile(AvatarProperties);
                     };
                 }
 
@@ -490,7 +516,7 @@ namespace Radegast
 
             BeginInvoke(
                 new OnSetProfileProperties(SetProfileProperties),
-                new object[] { e.Properties });
+                new object[] { AvatarProperties });
         }
 
         //called on GUI thread
@@ -514,7 +540,7 @@ namespace Radegast
             rtbAbout.AppendText(properties.AboutText);
 
             txtWebURL.Text = properties.ProfileURL;
-            btnWebView.Enabled = btnWebOpen.Enabled = (txtWebURL.TextLength > 0);
+            btnWebView.Enabled = btnWebOpen.Enabled = txtWebURL.TextLength > 0;
 
             rtbAboutFL.AppendText(properties.FirstLifeText);
         }
@@ -523,10 +549,18 @@ namespace Radegast
         {
             txtFullName.Text = fullName;
             txtFullName.AgentID = AgentID;
-            btnOfferTeleport.Enabled = btnPay.Enabled = (AgentID != client.Self.AgentID);
+            btnOfferTeleport.Enabled = btnPay.Enabled = AgentID != client.Self.AgentID;
 
-            client.Avatars.RequestAvatarProperties(AgentID);
-            client.Avatars.RequestAvatarNotes(AgentID);
+            if (client.Avatars.AgentProfileAvailable())
+            {
+                Task profileReq = client.Avatars.RequestAgentProfile(AgentID, Avatars_AvatarProfileReply);
+            }
+            else
+            {
+                client.Avatars.RequestAvatarProperties(AgentID);
+                client.Avatars.RequestAvatarNotes(AgentID);
+            }
+
             UpdateMuteButton();
 
             if (AgentID == client.Self.AgentID)
@@ -576,7 +610,7 @@ namespace Radegast
 
         private void btnPay_Click(object sender, EventArgs e)
         {
-            (new frmPay(instance, AgentID, fullName, false)).ShowDialog();
+            new frmPay(instance, AgentID, fullName, false).ShowDialog();
         }
 
         private void textBox1_DragEnter(object sender, DragEventArgs e)
@@ -600,12 +634,12 @@ namespace Radegast
             if (node.Tag is InventoryItem item)
             {
                 client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, AgentID, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered item " + item.Name + " to " + fullName + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered item {item.Name} to {fullName}.");
             }
             else if (node.Tag is InventoryFolder folder)
             {
                 client.Inventory.GiveFolder(folder.UUID, folder.Name, AgentID, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered folder " + folder.Name + " to " + fullName + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {fullName}.");
             }
         }
 
@@ -640,9 +674,9 @@ namespace Radegast
             instance.MainForm.MapTab.Select();
             instance.MainForm.WorldMap.DisplayLocation(
                 currentPick.SimName,
-                ((int)currentPick.PosGlobal.X) % 256,
-                ((int)currentPick.PosGlobal.Y) % 256,
-                ((int)currentPick.PosGlobal.Z) % 256
+                (int)currentPick.PosGlobal.X % 256,
+                (int)currentPick.PosGlobal.Y % 256,
+                (int)currentPick.PosGlobal.Z % 256
             );
         }
 
@@ -670,13 +704,13 @@ namespace Radegast
             {
                 InventoryItem item = inv as InventoryItem;
                 client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, AgentID, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered item " + item.Name + " to " + fullName + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered item {item.Name} to {fullName}.");
             }
             else if (inv is InventoryFolder)
             {
                 InventoryFolder folder = inv as InventoryFolder;
                 client.Inventory.GiveFolder(folder.UUID, folder.Name, AgentID, true);
-                instance.TabConsole.DisplayNotificationInChat("Offered folder " + folder.Name + " to " + fullName + ".");
+                instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {fullName}.");
             }
 
         }
@@ -684,23 +718,23 @@ namespace Radegast
         private void rtbAbout_Leave(object sender, EventArgs e)
         {
             if (!myProfile) return;
-            Profile.AboutText = rtbAbout.Text;
-            client.Self.UpdateProfile(Profile);
+            AvatarProperties.AboutText = rtbAbout.Text;
+            client.Self.UpdateProfile(AvatarProperties);
         }
 
         private void rtbAboutFL_Leave(object sender, EventArgs e)
         {
             if (!myProfile) return;
-            Profile.FirstLifeText = rtbAboutFL.Text;
-            client.Self.UpdateProfile(Profile);
+            AvatarProperties.FirstLifeText = rtbAboutFL.Text;
+            client.Self.UpdateProfile(AvatarProperties);
         }
 
         private void txtWebURL_Leave(object sender, EventArgs e)
         {
             if (!myProfile) return;
-            btnWebView.Enabled = btnWebOpen.Enabled = (txtWebURL.TextLength > 0);
-            Profile.ProfileURL = txtWebURL.Text;
-            client.Self.UpdateProfile(Profile);
+            btnWebView.Enabled = btnWebOpen.Enabled = txtWebURL.TextLength > 0;
+            AvatarProperties.ProfileURL = txtWebURL.Text;
+            client.Self.UpdateProfile(AvatarProperties);
         }
 
         private void pickTitle_Leave(object sender, EventArgs e)
@@ -732,7 +766,8 @@ namespace Radegast
         {
             ThreadPool.QueueUserWorkItem(sync =>
                 {
-                    UUID parcelID = client.Parcels.RequestRemoteParcelID(client.Self.SimPosition, client.Network.CurrentSim.Handle, client.Network.CurrentSim.ID);
+                    UUID parcelID = client.Parcels.RequestRemoteParcelID(
+                        client.Self.SimPosition, client.Network.CurrentSim.Handle, client.Network.CurrentSim.ID);
                     newPickID = UUID.Random();
 
                     client.Self.PickInfoUpdate(
@@ -757,21 +792,21 @@ namespace Radegast
                 return;
             }
 
-            uint wantto = ((checkBoxBuild.Checked ? 1u << 0 : 0u)
-                            | (checkBoxExplore.Checked ? 1u << 1 : 0u)
-                            | (checkBoxMeet.Checked ? 1u << 2 : 0u)
-                            | (checkBoxGroup.Checked ? 1u << 3 : 0u)
-                            | (checkBoxBuy.Checked ? 1u << 4 : 0u)
-                            | (checkBoxSell.Checked ? 1u << 5 : 0u)
-                            | (checkBoxBeHired.Checked ? 1u << 6 : 0u)
-                            | (checkBoxHire.Checked ? 1u << 7 : 0u));
+            uint wantto = (checkBoxBuild.Checked ? 1u << 0 : 0u)
+                          | (checkBoxExplore.Checked ? 1u << 1 : 0u)
+                          | (checkBoxMeet.Checked ? 1u << 2 : 0u)
+                          | (checkBoxGroup.Checked ? 1u << 3 : 0u)
+                          | (checkBoxBuy.Checked ? 1u << 4 : 0u)
+                          | (checkBoxSell.Checked ? 1u << 5 : 0u)
+                          | (checkBoxBeHired.Checked ? 1u << 6 : 0u)
+                          | (checkBoxHire.Checked ? 1u << 7 : 0u);
 
-            uint skills = ((checkBoxTextures.Checked ? 1u << 0 : 0u)
-                            | (checkBoxArchitecture.Checked ? 1u << 1 : 0u)
-                            | (checkBoxEventPlanning.Checked ? 1u << 2 : 0u)
-                            | (checkBoxModeling.Checked ? 1u << 3 : 0u)
-                            | (checkBoxScripting.Checked ? 1u << 4 : 0u)
-                            | (checkBoxCustomCharacters.Checked ? 1u << 5 : 0u));
+            uint skills = (checkBoxTextures.Checked ? 1u << 0 : 0u)
+                          | (checkBoxArchitecture.Checked ? 1u << 1 : 0u)
+                          | (checkBoxEventPlanning.Checked ? 1u << 2 : 0u)
+                          | (checkBoxModeling.Checked ? 1u << 3 : 0u)
+                          | (checkBoxScripting.Checked ? 1u << 4 : 0u)
+                          | (checkBoxCustomCharacters.Checked ? 1u << 5 : 0u);
 
             var interests = new Avatar.Interests
             {

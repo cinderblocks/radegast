@@ -26,6 +26,7 @@ using CommandLine;
 using CommandLine.Text;
 using System.Threading;
 using CoreJ2K.Util;
+using OpenMetaverse;
 
 namespace Radegast
 {
@@ -61,7 +62,7 @@ namespace Radegast
             HelpText header = new HelpText(Properties.Resources.RadegastTitle)
             {
                 AdditionalNewLineAfterOption = true,
-                Copyright = new CopyrightInfo("Radegast Development Team, Sjofn LLC", 2009, 2021)
+                Copyright = new CopyrightInfo("Radegast Development Team, Sjofn LLC", 2009, 2025)
             };
             header.AddPreOptionsLine("https://radegast.life/");
             return header;
@@ -129,9 +130,12 @@ namespace Radegast
                 Generated.BugsplatDatabase, "Radegast",
                 Assembly.GetExecutingAssembly().GetName().Version.ToString())
                 {
-                    User = "cinder@cinderblocks.biz",
+                    User = string.IsNullOrWhiteSpace(instance.Client.Self.Name) ? "Unknown" : instance.Client.Self.Name,
                     ExceptionType = BugSplatDotNetStandard.BugSplat.ExceptionTypeId.DotNetStandard,
                 };
+                s_BugSplat.Attributes.Add("platform", Utils.GetRunningPlatform().ToString());
+                s_BugSplat.Attributes.Add("runtime", Utils.GetRunningRuntime().ToString());
+                s_BugSplat.Attributes.Add("run", (DateTime.Now - instance.StartupTimeUTC).ToString("c"));
                 if (instance.GlobalLogFile != null)
                 {
                     s_BugSplat.Attachments.Add(new FileInfo(instance.GlobalLogFile));
