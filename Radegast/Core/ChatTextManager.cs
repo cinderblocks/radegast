@@ -267,6 +267,11 @@ namespace Radegast
                         Logger.LogInstance.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                 });
+
+                if (!instance.RLV.EnabledDebugCommands)
+                {
+                    return;
+                }
             }
 
             ChatBufferItem item = new ChatBufferItem { ID = e.SourceID, RawMessage = e };

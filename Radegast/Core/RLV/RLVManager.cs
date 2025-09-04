@@ -110,7 +110,10 @@ namespace Radegast.Core.RLV
 
         private void Restrictions_RestrictionUpdated(object sender, LibreMetaverse.RLV.EventArguments.RestrictionUpdatedEventArgs e)
         {
-            _instance.TabConsole.DisplayNotificationInChat($"RLV: {e.Restriction}", ChatBufferTextStyle.OwnerSay);
+            if (EnabledDebugCommands)
+            {
+                _instance.TabConsole.DisplayNotificationInChat($"[RLV] Restriction Updated: {e.Restriction}");
+            }
         }
 
         public void Dispose()
@@ -175,9 +178,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            _instance.TabConsole.DisplayNotificationInChat($"[RLV] Executing: {e.Message}", ChatBufferTextStyle.OwnerSay);
             var result = await _rlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
-
             return result;
         }
     }

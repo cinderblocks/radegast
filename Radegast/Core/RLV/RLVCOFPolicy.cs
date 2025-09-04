@@ -47,23 +47,21 @@ namespace Radegast.Core.RLV
             var (hasInventoryMap, inventoryMap) = _queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
             if (hasInventoryMap && inventoryMap != null)
             {
-                if (inventoryMap.TryGetItem(item.UUID.Guid, out var rlvItems))
+                var rlvItems = inventoryMap.GetItemsById(item.UUID.Guid);
+                foreach (var rlvItem in rlvItems)
                 {
-                    foreach (var rlvItem in rlvItems)
+                    if (rlvItem.AttachedTo != null || rlvItem.WornOn != null || rlvItem.GestureState == RlvGestureState.Active)
                     {
-                        if (rlvItem.AttachedTo != null || rlvItem.WornOn != null || rlvItem.GestureState == RlvGestureState.Active)
-                        {
-                            return false;
-                        }
-
-                        if (!_rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
 
-                    return true;
+                    if (!_rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn))
+                    {
+                        return false;
+                    }
                 }
+
+                return true;
             }
 
             return item is InventoryWearable wearable
@@ -84,11 +82,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            if (!inventoryMap.TryGetItem(item.UUID.Guid, out var foundItems))
-            {
-                return false;
-            }
-
+            var foundItems = inventoryMap.GetItemsById(item.UUID.Guid);
             foreach (var foundItem in foundItems)
             {
                 if (foundItem.WornOn == null && foundItem.AttachedTo == null && foundItem.GestureState != RlvGestureState.Active)
