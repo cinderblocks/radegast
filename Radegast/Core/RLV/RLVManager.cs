@@ -3,21 +3,23 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -26,8 +28,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -79,7 +79,7 @@ namespace Radegast
 
         public static readonly List<RLVWearable> RLVWearables;
         public static readonly List<RLVAttachment> RLVAttachments;
-        
+
         static RLVManager()
         {
             RLVWearables = new List<RLVWearable>();
@@ -166,7 +166,7 @@ namespace Radegast
 
         readonly RadegastInstance instance;
         GridClient client => instance.Client;
-        readonly Regex rlv_regex = new Regex(@"(?<behaviour>[^:=]+)(:(?<option>[^=]*))?=(?<param>\w+)", RegexOptions.Compiled);
+        readonly Regex rlv_regex = new Regex(@"(?<behaviour>[^:=]+)(:(?<option>[^=;]*))?(;(?<word>[^=;]*))?=(?<param>\w+)", RegexOptions.Compiled);
         readonly List<RLVRule> rules = new List<RLVRule>();
         System.Timers.Timer CleanupTimer;
 
@@ -194,6 +194,7 @@ namespace Radegast
         {
             this.instance = instance;
             instance.COF.AddPolicy(new RLVCOFPolicy(this));
+            client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
 
             if (Enabled)
             {
@@ -201,9 +202,97 @@ namespace Radegast
             }
         }
 
+        public void OnItemNotification(InventoryBase baseItem, bool added, Legality? legally = null)
+        {
+            if (baseItem is InventoryItem item)
+            {
+                if (item.InventoryType == InventoryType.Object)
+                {
+                    var attachments = client.Appearance.GetAttachmentsByItemId();
+
+                    if (attachments.TryGetValue(item.ActualUUID, out AttachmentPoint attachmentPoint))
+                    {
+                        string action = added ? "attached" : "detached";
+                        if (attachmentPoint != AttachmentPoint.Default)
+                        {
+                            OnCommandNotify(new RLVRule
+                            {
+                                Notification = new RLVNotification(action, legallity: legally, param: attachmentPoint.ToString())
+                            });
+                        }
+                    }
+                }
+                else if (item.InventoryType == InventoryType.Wearable)
+                {
+                    var wearables = client.Appearance.GetWearables();
+                    var wearable = wearables.FirstOrDefault(w => w.ItemID == item.ActualUUID);
+
+                    if (wearable != null)
+                    {
+                        string action = added ? "worn" : "unworn";
+                        OnCommandNotify(new RLVRule
+                        {
+                            Notification = new RLVNotification(action, legallity: legally, param: wearable.WearableType.ToString().ToLower())
+                        });
+                    }
+                }
+            }
+        }
+
+        private void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
+        {
+            Primitive prim = e.Prim;
+
+            if (client.Self.LocalID == 0
+                || prim.ParentID != client.Self.LocalID
+                || prim.NameValues == null
+                || !prim.IsAttachment
+                || !e.IsNew)
+            {
+                return;
+            }
+
+            for (int i = 0; i < prim.NameValues.Length; ++i)
+            {
+                if (prim.NameValues[i].Name != "AttachItemID") { continue; }
+
+                var inventoryID = new UUID(prim.NameValues[i].Value.ToString());
+
+                if (client.Inventory.Store.TryGetValue(inventoryID, out InventoryItem item))
+                {
+                    if (item is InventoryObject inventoryObject)
+                    {
+                        if(inventoryObject.AttachPoint == AttachmentPoint.Default || inventoryObject.AttachPoint != e.Prim.PrimData.AttachmentPoint)
+                        {
+                            inventoryObject.AttachPoint = e.Prim.PrimData.AttachmentPoint;
+                        }
+
+                        AttachmentPoint attachmentPoint = inventoryObject.AttachPoint;
+
+                        bool isAttached = instance.Client.Appearance.isItemAttached(inventoryID);
+                        Legality legality = isAttached ? Legality.Legally : Legality.Illegally;
+
+                        if (attachmentPoint != AttachmentPoint.Default)
+                        {
+                            OnCommandNotify(new RLVRule
+                            {
+                                Notification = new RLVNotification("attached", legallity: legality, param: attachmentPoint.ToString())
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    client.Inventory.RequestFetchInventory(inventoryID, client.Self.AgentID);
+                }
+                break;
+            }
+        }
+
         public void Dispose()
         {
             StopTimer();
+            client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
         }
 
         void StartTimer()
@@ -229,7 +318,7 @@ namespace Radegast
                 }
             }
 
-            foreach (var obj in from obj in objects 
+            foreach (var obj in from obj in objects
                      let found = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                          p => p.Value.ID == obj) where found.Value == null select obj)
             {
@@ -254,6 +343,12 @@ namespace Radegast
             if (e.Message == "@clear")
             {
                 Clear(e.SourceID);
+                OnCommandNotify(new RLVRule
+                {
+                    Behaviour = "clear",
+                    Sender = e.SourceID,
+                    SenderName = e.FromName,
+                });
                 return true;
             }
 
@@ -267,17 +362,16 @@ namespace Radegast
                     Behaviour = m.Groups["behaviour"].ToString().ToLower(),
                     Option = m.Groups["option"].ToString(),
                     Param = m.Groups["param"].ToString().ToLower(),
+                    Notification = RLVNotification.Parse(m.Groups["word"].ToString()),
                     Sender = e.SourceID,
                     SenderName = e.FromName
                 };
 
                 Logger.DebugLog(rule.ToString());
 
-                if (rule.Param == "rem") rule.Param = "y";
-                if (rule.Param == "add") rule.Param = "n";
-
                 switch (rule.Param)
                 {
+                    case "add":
                     case "n":
                         lock (rules)
                         {
@@ -292,8 +386,10 @@ namespace Radegast
                             }
                             rules.Add(rule);
                             OnRLVRuleChanged(new RLVEventArgs(rule));
+                            OnCommandNotify(rule);
                         }
                         continue;
+                    case "rem":
                     case "y":
                         lock (rules)
                         {
@@ -308,6 +404,7 @@ namespace Radegast
                         }
 
                         OnRLVRuleChanged(new RLVEventArgs(rule));
+                        OnCommandNotify(rule);
                         continue;
                 }
 
@@ -371,7 +468,8 @@ namespace Radegast
                             if (kvp.Value != null)
                             {
                                 var attachment = kvp.Value;
-                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItemID(attachment))) {
+                                if (client.Inventory.Store.Contains(CurrentOutfitFolder.GetAttachmentItemID(attachment)))
+                                {
                                     var item = client.Inventory.Store.GetNodeFor(
                                         CurrentOutfitFolder.GetAttachmentItemID(attachment));
                                     var path = FindFullInventoryPath(item, "").Substring(5);
@@ -570,7 +668,7 @@ namespace Radegast
                         {
                             string res = "";
 
-                            var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives 
+                            var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
                                 where p.Value != null where p.Value.ParentID == client.Self.LocalID select p.Value).ToList();
 
                             if (attachments.Count > 0)
@@ -620,7 +718,7 @@ namespace Radegast
                                 if (point.Name == rule.Option)
                                 {
                                     var kvp = client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
-                                        p => p.Value.ParentID == client.Self.LocalID 
+                                        p => p.Value.ParentID == client.Self.LocalID
                                              && p.Value.PrimData.AttachmentPoint == point.Point);
                                     if (kvp.Value != null)
                                     {
@@ -640,7 +738,7 @@ namespace Radegast
                                     InventoryNode folder = FindFolder(rule.Option);
                                     if (folder != null)
                                     {
-                                        var outfit = (from item in folder.Nodes.Values 
+                                        var outfit = (from item in folder.Nodes.Values
                                             where CanBeWorn(item.Data) select (InventoryItem) (item.Data)).ToList();
                                         await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
@@ -697,7 +795,7 @@ namespace Radegast
                                     if (folder != null)
                                     {
                                         var outfit = new List<InventoryItem>();
-                                        GetAllItems(folder, true, ref outfit);
+                                        AllSubfolderWearables(folder, ref outfit);
                                         await instance.COF.RemoveFromOutfit(outfit, cancellationToken);
                                     }
                                 }
@@ -735,7 +833,7 @@ namespace Radegast
                                     List<InventoryItem> outfit = new List<InventoryItem>();
                                     if(rule.Behaviour == "attachall" || rule.Behaviour == "attachallover")
                                     {
-                                        GetAllItems(folder, true, ref outfit);
+                                        AllSubfolderWearables(folder, ref outfit);
                                     }
                                     else
                                     {
@@ -766,7 +864,7 @@ namespace Radegast
                                     f => f.Data is InventoryFolder && !f.Data.Name.StartsWith(".")).Aggregate(
                                         res, (current, f) => current + (f.Data.Name + ","));
                             }
-                            
+
                             Respond(chan, res.TrimEnd(','));
                         }
                         break;
@@ -849,6 +947,28 @@ namespace Radegast
             return true;
         }
 
+
+        public void OnCommandNotify(RLVRule rule)
+        {
+            RLVRule[] notifyRules = rules
+                .Where(r =>
+                    r.Behaviour == "notify" &&
+                    (string.IsNullOrEmpty(r.Notification.Value.Type) || r.Notification.Value.Type == rule.Notification.Value.Type) &&
+                    (r.Notification.Value.Legallity == null || r.Notification.Value.Legallity == rule.Notification.Value.Legallity) &&
+                    (string.IsNullOrEmpty(r.Notification.Value.Param) || r.Notification.Value.Param == rule.Notification.Value.Param)
+                )
+                .ToArray();
+
+            foreach (var notifyRule in notifyRules)
+            {
+                if (int.TryParse(notifyRule.Option, out int channel) && channel > 0)
+                {
+                    string message = rule.ToNotifyString();
+
+                    Respond(channel, message);
+                }
+            }
+        }
         private void GetAllItems(InventoryNode root, bool recursive, ref List<InventoryItem> items)
         {
             foreach (var item in root.Nodes.Values)
@@ -869,9 +989,10 @@ namespace Radegast
 
         private void Respond(int chan, string msg)
         {
-#if DEBUG
-            instance.TabConsole.DisplayNotificationInChat($"{chan}: {msg}", ChatBufferTextStyle.OwnerSay);
-#endif
+            if (instance.RLV.EnabledDebugCommands)
+            {
+                instance.TabConsole.DisplayNotificationInChat($"{chan}: {msg}", ChatBufferTextStyle.OwnerSay);
+            }
             client.Self.Chat(msg, chan, ChatType.Normal);
         }
 
@@ -903,7 +1024,7 @@ namespace Radegast
         /// <returns>True if the inventory item is attached to avatar</returns>
         private static bool IsAttached(IEnumerable<Primitive> attachments, InventoryItem item)
         {
-            return attachments.Any(prim => CurrentOutfitFolder.GetAttachmentItemID(prim) == item.UUID);
+            return attachments.Any(prim => CurrentOutfitFolder.GetAttachmentItemID(prim) == item.ActualUUID);
         }
 
         /// <summary>
@@ -914,7 +1035,7 @@ namespace Radegast
         /// <returns>True if the item is worn</returns>
         private static bool IsWorn(IEnumerable<AppearanceManager.WearableData> currentlyWorn, InventoryItem item)
         {
-            return currentlyWorn.Any(worn => worn.ItemID == item.UUID);
+            return currentlyWorn.Any(worn => worn.ItemID == item.ActualUUID);
         }
 
         /// <summary>
@@ -942,7 +1063,7 @@ namespace Radegast
                 if (CanBeWorn(n.Data) && !n.Data.Name.StartsWith("."))
                 {
                     myItemsCount++;
-                    if ((n.Data is InventoryWearable wearable 
+                    if ((n.Data is InventoryWearable wearable
                             && IsWorn(currentOutfit, wearable))
                         || IsAttached(currentAttachments, (InventoryItem)n.Data))
                     {
@@ -963,7 +1084,7 @@ namespace Radegast
             int allItemsCount = 0;
             int allItemsWornCount = 0;
 
-            foreach (var n in allItems.Where(n => 
+            foreach (var n in allItems.Where(n =>
                 CanBeWorn(n) && !n.Name.StartsWith(".")))
             {
                 allItemsCount++;
@@ -1008,9 +1129,12 @@ namespace Radegast
 
         public string FindFullInventoryPath(InventoryNode input, string pathConstruct)
         {
-            if (input.Parent == null) {
+            if (input.Parent == null)
+            {
                 return pathConstruct.TrimEnd('/');
-            } else {
+            }
+            else
+            {
                 pathConstruct = input.Data.Name + "/" + pathConstruct;
                 return FindFullInventoryPath (input.Parent, pathConstruct);
             }
@@ -1019,7 +1143,7 @@ namespace Radegast
         public InventoryNode FindFolder(string path)
         {
             var root = RLVRootFolder();
-            return root == null ? null : FindFolderInternal(root, "/", 
+            return root == null ? null : FindFolderInternal(root, "/",
                 "/" + Regex.Replace(path, @"^[/\s]*(.*)[/\s]*", @"$1").ToLower());
         }
 
@@ -1030,8 +1154,8 @@ namespace Radegast
                 return currentNode;
             }
             return currentNode.Nodes.Values.Select(
-                n => FindFolderInternal(n, (currentPath == "/" 
-                    ? currentPath 
+                n => FindFolderInternal(n, (currentPath == "/"
+                    ? currentPath
                     : currentPath + "/") + n.Data.Name.ToLower(), desiredPath))
                 .FirstOrDefault(res => res != null);
         }
@@ -1049,7 +1173,7 @@ namespace Radegast
             return matchingNodes;
         }
 
-        protected void FindFoldersKeywordsInternal(InventoryNode currentNode, string[] keywords, 
+        protected void FindFoldersKeywordsInternal(InventoryNode currentNode, string[] keywords,
             List<string> currentPathParts, ref List<InventoryNode> matchingNodes)
         {
             if (currentNode.Data is InventoryFolder &&

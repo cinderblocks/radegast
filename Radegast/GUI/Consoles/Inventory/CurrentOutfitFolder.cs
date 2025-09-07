@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -458,6 +458,7 @@ namespace Radegast
 
             client.Appearance.Attach(item, point, replace);
             await AddLink(item, cancellationToken);
+            instance.RLV.OnItemNotification(item, true, Legality.Legally);
         }
 
         /// <summary>
@@ -472,6 +473,7 @@ namespace Radegast
                 return;
             }
 
+            instance.RLV.OnItemNotification(item, false, Legality.Legally);
             client.Appearance.Detach(item);
             await RemoveLink(item.UUID, cancellationToken);
         }
@@ -903,7 +905,7 @@ namespace Radegast
                 }
             }
 
-            var linksToRemove = new List<UUID>();
+            var linksToRemove = new List<InventoryItem>();
             var outfit = new List<InventoryItem>();
 
             foreach (var item in itemsToAdd)
@@ -957,8 +959,7 @@ namespace Radegast
                                     }
 
                                     var clothingLinksToRemove = cofLinks
-                                        .Where(n => n.IsLink() && n.AssetUUID == clothingToRemove.UUID)
-                                        .Select(n => n.UUID);
+                                        .Where(n => n.IsLink() && n.AssetUUID == clothingToRemove.UUID);
                                     linksToRemove.AddRange(clothingLinksToRemove);
                                 }
                             }
@@ -983,8 +984,7 @@ namespace Radegast
                             }
 
                             var bodypartLinksToRemove = cofLinks
-                                .Where(n => n.IsLink() && n.AssetUUID == existingBodyPart.UUID)
-                                .Select(n => n.UUID);
+                                .Where(n => n.IsLink() && n.AssetUUID == existingBodyPart.UUID);
                             linksToRemove.AddRange(bodypartLinksToRemove);
                         }
                     }
@@ -1008,8 +1008,7 @@ namespace Radegast
                                 }
 
                                 var attachedObjectLinksToRemove = cofLinks
-                                    .Where(n => n.IsLink() && n.AssetUUID == attachedObject.UUID)
-                                    .Select(n => n.UUID);
+                                    .Where(n => n.IsLink() && n.AssetUUID == attachedObject.UUID);
                                 linksToRemove.AddRange(attachedObjectLinksToRemove);
                                 --numAttachedObjects;
                             }
@@ -1033,7 +1032,13 @@ namespace Radegast
 
             if (linksToRemove.Count > 0)
             {
-                await client.Inventory.RemoveItemsAsync(linksToRemove, cancellationToken);
+                var links = linksToRemove.Select(link => link.UUID);
+                await client.Inventory.RemoveItemsAsync(links, cancellationToken);
+
+                foreach(var link in linksToRemove)
+                {
+                    instance.RLV.OnItemNotification(link, added: true, Legality.Legally);
+                }
             }
 
             // Add links to new items
@@ -1048,6 +1053,11 @@ namespace Radegast
                 Thread.Sleep(2000);
                 client.Appearance.RequestSetAppearance(true);
             });
+
+            foreach(var item in outfit)
+            {
+                instance.RLV.OnItemNotification(item, added: true, Legality.Legally);
+            }
         }
 
         /// <summary>
@@ -1096,6 +1106,11 @@ namespace Radegast
                 .ToList();
 
             await RemoveLinks(itemIdsToRemove, cancellationToken);
+
+            foreach(var removedItem in itemsToRemove)
+            {
+                instance.RLV.OnItemNotification(removedItem, false, Legality.Legally);
+            }
             client.Appearance.RemoveFromOutfit(itemsToRemove);
         }
 
