@@ -61,7 +61,7 @@
     <PackageReference Include="LibreMetaverse.Types" Version="2.4.7.1093" />
     <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.4.7.1093" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.8" />
-    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.4" />
+    <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.5" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
