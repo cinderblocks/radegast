@@ -87,9 +87,9 @@ namespace Radegast.Core.RLV
 
         private readonly RlvQueryCallbacks _queryCallbacks;
         private readonly RlvActionCallbacks _actionCallbacks;
-        private readonly RlvService _rlvService;
 
-        public LibreMetaverse.RLV.RlvPermissionsService Permissions => _rlvService.Permissions;
+        public RlvService RlvService { get; }
+        public LibreMetaverse.RLV.RlvPermissionsService Permissions => RlvService.Permissions;
 
         public RLVManager(RadegastInstance instance)
         {
@@ -98,10 +98,10 @@ namespace Radegast.Core.RLV
             _queryCallbacks = new RlvQueryCallbacks(_instance);
             _actionCallbacks = new RlvActionCallbacks(_instance);
 
-            _rlvService = new RlvService(_queryCallbacks, _actionCallbacks, Enabled);
-            _rlvService.Restrictions.RestrictionUpdated += Restrictions_RestrictionUpdated;
+            RlvService = new RlvService(_queryCallbacks, _actionCallbacks, Enabled);
+            RlvService.Restrictions.RestrictionUpdated += Restrictions_RestrictionUpdated;
 
-            _ = instance.COF.AddPolicy(new RLVCOFPolicy(_rlvService, _instance, _queryCallbacks));
+            _ = instance.COF.AddPolicy(new RLVCOFPolicy(RlvService, _instance, _queryCallbacks));
             if (Enabled)
             {
                 StartTimer();
@@ -146,7 +146,7 @@ namespace Radegast.Core.RLV
         private void CleanupTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
             var objects = new List<UUID>();
-            var rlvTrackedPrimIds = _rlvService.Restrictions.GetTrackedPrimIds();
+            var rlvTrackedPrimIds = RlvService.Restrictions.GetTrackedPrimIds();
 
             var wornItems = _instance.COF.GetCurrentOutfitLinks().Result
                 .ToDictionary(k => k.UUID.Guid, v => v);
@@ -167,19 +167,21 @@ namespace Radegast.Core.RLV
 
             if (deadPrimIds.Count > 0)
             {
-                _rlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).Wait();
+                RlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).Wait();
             }
         }
 
-        public async Task<bool> TryProcessCMD(ChatEventArgs e, CancellationToken cancellationToken = default)
+        public async Task<bool> ProcessCMD(ChatEventArgs e, CancellationToken cancellationToken = default)
         {
             if (!Enabled || !e.Message.StartsWith("@"))
             {
                 return false;
             }
 
-            var result = await _rlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
+            var result = await RlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
             return result;
         }
+
+
     }
 }

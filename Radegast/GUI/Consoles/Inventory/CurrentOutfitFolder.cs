@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -130,10 +130,10 @@ namespace Radegast
 
             if (client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out var prim))
             {
-                var invItem = CurrentOutfitFolder.GetAttachmentItemID(prim);
-                if (invItem != UUID.Zero)
+                var invItemId = CurrentOutfitFolder.GetAttachmentItemID(prim);
+                if (invItemId != UUID.Zero)
                 {
-                    RemoveLink(invItem).Wait();
+                    RemoveLinksToByActualId(new List<UUID>() { invItemId }).Wait();
                 }
             }
         }
@@ -306,25 +306,39 @@ namespace Radegast
                     },
                     cancellationToken
                 );
+
+                await ReportItemChange(item, true, cancellationToken);
             }
         }
 
         /// <summary>
-        /// Removes all COF links to the specified actual item ID
+        /// Removes all COF links to the specified actual item IDs
         /// </summary>
-        /// <param name="itemID">Actual item ID of the inventory item we want to remove COF links to</param>
+        /// <param name="actualItemIdsToRemoveLinksTo">List of item IDs to remove all COF links to</param>
         /// <param name="cancellationToken"></param>
-        private async Task RemoveLink(UUID itemID, CancellationToken cancellationToken = default)
+        private async Task RemoveLinksToByActualId(IEnumerable<UUID> actualItemIdsToRemoveLinksTo, CancellationToken cancellationToken = default)
         {
-            await RemoveLinks(new List<UUID>(1) { itemID }, cancellationToken);
+            var actualItemIdsSet = actualItemIdsToRemoveLinksTo.ToHashSet();
+
+            var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
+            var linkIdsToRemove = cofLinks
+                .Where(n => n.IsLink() && actualItemIdsSet.Contains(n.ActualUUID))
+                .Select(n => n.UUID)
+                .Distinct()
+                .ToList();
+
+            if (linkIdsToRemove.Count > 0)
+            {
+                await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            }
         }
 
         /// <summary>
-        /// Removes all COF links to the specified item ID's
+        /// Removes all COF links to the specified items
         /// </summary>
-        /// <param name="itemIDsToRemove">List of actual item ID's we want to remove COF links to</param>
+        /// <param name="actualItemsToRemoveLinksTo">List of actual item we want to remove COF links to</param>
         /// <param name="cancellationToken"></param>
-        private async Task RemoveLinks(List<UUID> itemIDsToRemove, CancellationToken cancellationToken = default)
+        private async Task RemoveLinksTo(List<InventoryItem> actualItemsToRemoveLinksTo, CancellationToken cancellationToken = default)
         {
             if (COF == null)
             {
@@ -334,14 +348,25 @@ namespace Radegast
 
             var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
 
-            var itemIDsToRemoveSet = itemIDsToRemove.ToHashSet();
+            var actualItemIDsToRemoveLinksTo = new HashSet<UUID>();
+            foreach (var item in actualItemsToRemoveLinksTo)
+            {
+                if (actualItemIDsToRemoveLinksTo.Add(item.ActualUUID))
+                {
+                    await ReportItemChange(item, false, cancellationToken);
+                }
+            }
+
             var linkIdsToRemove = cofLinks
-                .Where(n => n.IsLink() && itemIDsToRemoveSet.Contains(n.AssetUUID))
+                .Where(n => n.IsLink() && actualItemIDsToRemoveLinksTo.Contains(n.ActualUUID))
                 .Select(n => n.UUID)
                 .Distinct()
                 .ToList();
 
-            await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            if (linkIdsToRemove.Count > 0)
+            {
+                await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            }
         }
 
         #endregion Private methods
@@ -468,6 +493,33 @@ namespace Radegast
 
             client.Appearance.Attach(item, point, replace);
             await AddLink(item, cancellationToken);
+
+            var isInSharedFolder = await IsInSharedFolder(item, cancellationToken);
+        }
+
+        private async Task<bool> IsInSharedFolder(InventoryItem item, CancellationToken cancellationToken = default)
+        {
+            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
+                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
+
+            if(sharedFolder == null)
+            {
+                return false;
+            }
+
+            var realItem = instance.COF.ResolveInventoryLink(item);
+            if (realItem == null)
+            {
+                return false;
+            }
+
+            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data.UUID, cancellationToken);
+            if (isInTrash)
+            {
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -482,8 +534,18 @@ namespace Radegast
                 return;
             }
 
+            var attachmentPoint = AttachmentPoint.Default;
+            if (item is InventoryAttachment attachedItem)
+            {
+                attachmentPoint = attachedItem.AttachmentPoint;
+            }
+            else if(item is InventoryObject attachedObject)
+            {
+                attachmentPoint = attachedObject.AttachPoint;
+            }
+
             client.Appearance.Detach(item);
-            await RemoveLink(item.UUID, cancellationToken);
+            await RemoveLinksTo(new List<InventoryItem>() { item }, cancellationToken);
         }
 
         /// <summary>
@@ -913,7 +975,7 @@ namespace Radegast
                 }
             }
 
-            var linksToRemove = new List<UUID>();
+            var itemsToRemove = new List<InventoryItem>();
             var outfit = new List<InventoryItem>();
 
             foreach (var item in itemsToAdd)
@@ -966,10 +1028,7 @@ namespace Radegast
                                         continue;
                                     }
 
-                                    var clothingLinksToRemove = cofLinks
-                                        .Where(n => n.IsLink() && n.AssetUUID == clothingToRemove.UUID)
-                                        .Select(n => n.UUID);
-                                    linksToRemove.AddRange(clothingLinksToRemove);
+                                    itemsToRemove.Add(clothingToRemove);
                                 }
                             }
                         }
@@ -992,10 +1051,7 @@ namespace Radegast
                                 continue;
                             }
 
-                            var bodypartLinksToRemove = cofLinks
-                                .Where(n => n.IsLink() && n.AssetUUID == existingBodyPart.UUID)
-                                .Select(n => n.UUID);
-                            linksToRemove.AddRange(bodypartLinksToRemove);
+                            itemsToRemove.Add(existingBodyPart);
                         }
                     }
                 }
@@ -1017,10 +1073,7 @@ namespace Radegast
                                     continue;
                                 }
 
-                                var attachedObjectLinksToRemove = cofLinks
-                                    .Where(n => n.IsLink() && n.AssetUUID == attachedObject.UUID)
-                                    .Select(n => n.UUID);
-                                linksToRemove.AddRange(attachedObjectLinksToRemove);
+                                itemsToRemove.Add(attachedObject);
                                 --numAttachedObjects;
                             }
                         }
@@ -1041,9 +1094,9 @@ namespace Radegast
                 outfit.Add(realItem);
             }
 
-            if (linksToRemove.Count > 0)
+            if (itemsToRemove.Count > 0)
             {
-                await client.Inventory.RemoveItemsAsync(linksToRemove, cancellationToken);
+                await RemoveLinksTo(itemsToRemove, cancellationToken);
             }
 
             // Add links to new items
@@ -1058,6 +1111,115 @@ namespace Radegast
                 Thread.Sleep(2000);
                 client.Appearance.RequestSetAppearance(true);
             });
+        }
+
+        private async Task ReportItemChange(InventoryItem item, bool isAdded, CancellationToken cancellationToken = default)
+        {
+            var isShared = await IsInSharedFolder(item, cancellationToken);
+
+            if(isAdded)
+            {
+                if (item is InventoryWearable wearable)
+                {
+                    await instance.RLV.RlvService.ReportItemWorn(
+                        wearable.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType,
+                        cancellationToken
+                    );
+                }
+                else if (item is InventoryAttachment attachment)
+                {
+                    await instance.RLV.RlvService.ReportItemAttached(
+                        attachment.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachment.AttachmentPoint,
+                        cancellationToken
+                    );
+                }
+                else if (item is InventoryObject obj)
+                {
+                    await instance.RLV.RlvService.ReportItemAttached(
+                        obj.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvAttachmentPoint)obj.AttachPoint,
+                        cancellationToken
+                    );
+                }
+            }
+            else
+            {
+                if (item is InventoryWearable wearable)
+                {
+                    await instance.RLV.RlvService.ReportItemUnworn(
+                        wearable.ActualUUID.Guid,
+                        wearable.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType,
+                        cancellationToken
+                    );
+                }
+                else if (item is InventoryAttachment attachment)
+                {
+                    var attachedPrimId = GetAttachedPrimId(item);
+
+                    await instance.RLV.RlvService.ReportItemDetached(
+                        attachment.ActualUUID.Guid,
+                        attachedPrimId.Guid,
+                        attachment.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachment.AttachmentPoint,
+                        cancellationToken
+                    );
+                }
+                else if (item is InventoryObject attachedObj)
+                {
+                    var attachedPrimId = GetAttachedPrimId(item);
+
+                    await instance.RLV.RlvService.ReportItemDetached(
+                        attachedObj.ActualUUID.Guid,
+                        attachedPrimId.Guid,
+                        attachedObj.ParentUUID.Guid,
+                        isShared,
+                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachedObj.AttachPoint,
+                        cancellationToken
+                    );
+                }
+            }
+        }
+
+        private UUID GetAttachedPrimId(InventoryItem attachedItem)
+        {
+            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
+
+            foreach (var item in objectPrimitivesSnapshot)
+            {
+                if (!item.IsAttachment)
+                {
+                    continue;
+                }
+
+                var attachItemID = item.NameValues
+                    .Where(n => n.Name == "AttachItemID")
+                    .Select(n => n.Value)
+                    .FirstOrDefault();
+                if (attachItemID == null)
+                {
+                    continue;
+                }
+
+                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                {
+                    continue;
+                }
+
+                if(attachmentId == attachedItem.ActualUUID)
+                {
+                    return attachmentId;
+                }
+            }
+
+            return UUID.Zero;
         }
 
         /// <summary>
@@ -1100,12 +1262,8 @@ namespace Radegast
                 }
             }
 
-            var itemIdsToRemove = itemsToRemove
-                .Select(n => n.ActualUUID)
-                .Distinct()
-                .ToList();
+            await RemoveLinksTo(itemsToRemove, cancellationToken);
 
-            await RemoveLinks(itemIdsToRemove, cancellationToken);
             client.Appearance.RemoveFromOutfit(itemsToRemove);
         }
 
