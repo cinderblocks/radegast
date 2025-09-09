@@ -30,11 +30,11 @@ namespace Radegast.Core.RLV
 {
     internal class RlvActionCallbacks : IRlvActionCallbacks
     {
-        private readonly RadegastInstance _instance;
+        private readonly RadegastInstance instance;
 
         public RlvActionCallbacks(RadegastInstance instance)
         {
-            _instance = instance;
+            this.instance = instance;
         }
 
         public Task AdjustHeightAsync(float distance, float factor, float delta, CancellationToken cancellationToken)
@@ -47,7 +47,7 @@ namespace Radegast.Core.RLV
         {
             foreach (var item in itemsToAttach)
             {
-                if (!_instance.Client.Inventory.Store.TryGetValue(new UUID(item.ItemId), out var foundItem))
+                if (!instance.Client.Inventory.Store.TryGetValue(new UUID(item.ItemId), out var foundItem))
                 {
                     continue;
                 }
@@ -59,11 +59,11 @@ namespace Radegast.Core.RLV
 
                 if (inventoryItem.InventoryType == InventoryType.Wearable)
                 {
-                    await _instance.COF.AddToOutfit(inventoryItem, item.ReplaceExistingAttachments, cancellationToken);
+                    await instance.COF.AddToOutfit(inventoryItem, item.ReplaceExistingAttachments, cancellationToken);
                 }
                 else
                 {
-                    await _instance.COF.Attach(inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments, cancellationToken);
+                    await instance.COF.Attach(inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments, cancellationToken);
                 }
             }
         }
@@ -71,30 +71,30 @@ namespace Radegast.Core.RLV
         public async Task DetachAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
             var items = GetInventoryItemsById(itemIds);
-            await _instance.COF.RemoveFromOutfit(items, cancellationToken);
+            await instance.COF.RemoveFromOutfit(items, cancellationToken);
         }
 
         public async Task RemOutfitAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
             var items = GetInventoryItemsById(itemIds);
-            await _instance.COF.RemoveFromOutfit(items);
+            await instance.COF.RemoveFromOutfit(items);
         }
 
         public Task SendInstantMessageAsync(Guid targetUser, string message, CancellationToken cancellationToken)
         {
-            _instance.Client.Self.InstantMessage(new UUID(targetUser), message);
+            instance.Client.Self.InstantMessage(new UUID(targetUser), message);
 
             return Task.CompletedTask;
         }
 
         public Task SendReplyAsync(int channel, string message, CancellationToken cancellationToken)
         {
-            if (_instance.RLV.EnabledDebugCommands)
+            if (instance.RLV.EnabledDebugCommands)
             {
-                _instance.TabConsole.DisplayNotificationInChat($"[RLV] Send channel {channel}: {message}");
+                instance.TabConsole.DisplayNotificationInChat($"[RLV] Send channel {channel}: {message}");
             }
 
-            _instance.Client.Self.Chat(message, channel, ChatType.Normal);
+            instance.Client.Self.Chat(message, channel, ChatType.Normal);
             return Task.CompletedTask;
         }
 
@@ -120,7 +120,7 @@ namespace Radegast.Core.RLV
                 return;
             }
 
-            if (!_instance.Groups.TryGetValue(new UUID(groupId), out var group))
+            if (!instance.Groups.TryGetValue(new UUID(groupId), out var group))
             {
                 return;
             }
@@ -135,10 +135,10 @@ namespace Radegast.Core.RLV
                 }
             }
 
-            _instance.Client.Groups.ActivateGroup(new UUID(groupId));
+            instance.Client.Groups.ActivateGroup(new UUID(groupId));
             if (roleId.HasValue && roleId.Value != UUID.Zero)
             {
-                _instance.Client.Groups.ActivateTitle(group.ID, roleId.Value);
+                instance.Client.Groups.ActivateTitle(group.ID, roleId.Value);
             }
         }
 
@@ -149,7 +149,7 @@ namespace Radegast.Core.RLV
                 return;
             }
 
-            var group = _instance.Groups.Values
+            var group = instance.Groups.Values
                 .Where(n => string.Equals(n.Name, groupName, StringComparison.InvariantCultureIgnoreCase))
                 .FirstOrDefault();
 
@@ -168,30 +168,30 @@ namespace Radegast.Core.RLV
                 }
             }
 
-            _instance.Client.Groups.ActivateGroup(new UUID(group.ID));
+            instance.Client.Groups.ActivateGroup(new UUID(group.ID));
             if (roleId.HasValue && roleId.Value != UUID.Zero)
             {
-                _instance.Client.Groups.ActivateTitle(group.ID, roleId.Value);
+                instance.Client.Groups.ActivateTitle(group.ID, roleId.Value);
             }
         }
 
         public Task SetRotAsync(float angleInRadians, CancellationToken cancellationToken)
         {
             // TODO: Why did the original code have pi/2 - angle?
-            _instance.Client.Self.Movement.UpdateFromHeading((Math.PI / 2d) - angleInRadians, true);
-            _instance.State.LookInFront();
+            instance.Client.Self.Movement.UpdateFromHeading((Math.PI / 2d) - angleInRadians, true);
+            instance.State.LookInFront();
             return Task.CompletedTask;
         }
 
         public Task SitAsync(Guid target, CancellationToken cancellationToken)
         {
-            _instance.State.SetSitting(true, new UUID(target));
+            instance.State.SetSitting(true, new UUID(target));
             return Task.CompletedTask;
         }
 
         public Task SitGroundAsync(CancellationToken cancellationToken)
         {
-            _instance.State.SetSitting(true, UUID.Zero);
+            instance.State.SetSitting(true, UUID.Zero);
             return Task.CompletedTask;
         }
 
@@ -209,11 +209,11 @@ namespace Radegast.Core.RLV
             if (string.IsNullOrEmpty(regionName))
             {
                 var regionHandle = Helpers.GlobalPosToRegionHandle(x, y, out var localX, out var localY);
-                _ = _instance.Client.Self.Teleport(regionHandle, new Vector3(localX, localY, z), vecLookAt);
+                _ = instance.Client.Self.Teleport(regionHandle, new Vector3(localX, localY, z), vecLookAt);
             }
             else
             {
-                _ = _instance.Client.Self.Teleport(regionName, new Vector3(x, y, z), vecLookAt);
+                _ = instance.Client.Self.Teleport(regionName, new Vector3(x, y, z), vecLookAt);
             }
 
             return Task.CompletedTask;
@@ -221,7 +221,7 @@ namespace Radegast.Core.RLV
 
         public Task UnsitAsync(CancellationToken cancellationToken)
         {
-            _instance.State.SetSitting(false, UUID.Zero);
+            instance.State.SetSitting(false, UUID.Zero);
             return Task.CompletedTask;
         }
 
@@ -231,9 +231,9 @@ namespace Radegast.Core.RLV
 
             foreach (var itemId in itemIds)
             {
-                if (!_instance.Client.Inventory.Store.TryGetValue(new UUID(itemId), out var foundItem))
+                if (!instance.Client.Inventory.Store.TryGetValue(new UUID(itemId), out var foundItem))
                 {
-                    foundItem = _instance.Client.Inventory.FetchItem(new UUID(itemId), _instance.Client.Self.AgentID, TimeSpan.FromSeconds(5));
+                    foundItem = instance.Client.Inventory.FetchItem(new UUID(itemId), instance.Client.Self.AgentID, TimeSpan.FromSeconds(5));
                     if (foundItem == null)
                     {
                         continue;
@@ -269,8 +269,8 @@ namespace Radegast.Core.RLV
 
             try
             {
-                _instance.Client.Groups.GroupRoleDataReply += OnGroupRoleDataReply;
-                var unused = _instance.Client.Groups.RequestGroupRoles(groupId);
+                instance.Client.Groups.GroupRoleDataReply += OnGroupRoleDataReply;
+                var unused = instance.Client.Groups.RequestGroupRoles(groupId);
 
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
                 if (completedTask != tcs.Task)
@@ -281,7 +281,7 @@ namespace Radegast.Core.RLV
             }
             finally
             {
-                _instance.Client.Groups.GroupRoleDataReply -= OnGroupRoleDataReply;
+                instance.Client.Groups.GroupRoleDataReply -= OnGroupRoleDataReply;
             }
 
             if (groupRoles == null)

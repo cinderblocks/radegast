@@ -30,21 +30,21 @@ namespace Radegast.Core.RLV
 {
     internal class RlvQueryCallbacks : IRlvQueryCallbacks
     {
-        private readonly RadegastInstance _instance;
+        private readonly RadegastInstance instance;
 
         public RlvQueryCallbacks(RadegastInstance instance)
         {
-            _instance = instance;
+            this.instance = instance;
         }
 
         public Task<bool> IsSittingAsync(CancellationToken cancellationToken)
         {
-            return Task.FromResult(_instance.State.IsSitting);
+            return Task.FromResult(instance.State.IsSitting);
         }
 
         public Task<bool> ObjectExistsAsync(Guid objectId, CancellationToken cancellationToken)
         {
-            var objectExistsInWorld = _instance.Client.Network.CurrentSim.ObjectsPrimitives
+            var objectExistsInWorld = instance.Client.Network.CurrentSim.ObjectsPrimitives
                 .Where(n => n.Value.ID.Guid == objectId)
                 .Any();
 
@@ -53,7 +53,7 @@ namespace Radegast.Core.RLV
 
         public async Task<(bool Success, string ActiveGroupName)> TryGetActiveGroupNameAsync(CancellationToken cancellationToken)
         {
-            var activeGroupId = _instance.Client.Self.ActiveGroup;
+            var activeGroupId = instance.Client.Self.ActiveGroup;
 
             string groupName = null;
 
@@ -69,13 +69,13 @@ namespace Radegast.Core.RLV
 
             try
             {
-                _instance.Client.Groups.GroupNamesReply += groupNameReply;
-                _instance.Client.Groups.RequestGroupName(activeGroupId);
+                instance.Client.Groups.GroupNamesReply += groupNameReply;
+                instance.Client.Groups.RequestGroupName(activeGroupId);
 
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(1000));
                 if (completedTask != tcs.Task)
                 {
-                    Logger.Log("Timed out while waiting for Group Name Reply", Helpers.LogLevel.Error, _instance.Client);
+                    Logger.Log("Timed out while waiting for Group Name Reply", Helpers.LogLevel.Error, instance.Client);
                     return (false, string.Empty);
                 }
 
@@ -83,7 +83,7 @@ namespace Radegast.Core.RLV
             }
             finally
             {
-                _instance.Client.Groups.GroupNamesReply -= groupNameReply;
+                instance.Client.Groups.GroupNamesReply -= groupNameReply;
             }
         }
 
@@ -95,7 +95,7 @@ namespace Radegast.Core.RLV
         private Dictionary<UUID, UUID> GetAttachedItemIdToPrimitiveIdMap()
         {
             var attachedItemMap = new Dictionary<UUID, UUID>();
-            var objectPrimitivesSnapshot = _instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
+            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
 
             foreach (var item in objectPrimitivesSnapshot)
             {
@@ -137,9 +137,9 @@ namespace Radegast.Core.RLV
 
         public Task<(bool Success, Guid SitId)> TryGetSitIdAsync(CancellationToken cancellationToken)
         {
-            if (_instance.Client.Self.SittingOn != 0)
+            if (instance.Client.Self.SittingOn != 0)
             {
-                if (_instance.Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(_instance.Client.Self.SittingOn, out var objectWeAreSittingOn))
+                if (instance.Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(instance.Client.Self.SittingOn, out var objectWeAreSittingOn))
                 {
                     return Task.FromResult((true, objectWeAreSittingOn.ID.Guid));
                 }
@@ -184,7 +184,7 @@ namespace Radegast.Core.RLV
             }
             else if (item is InventoryGesture)
             {
-                gestureState = _instance.Client.Self.ActiveGestures.ContainsKey(item.UUID) ? RlvGestureState.Active : RlvGestureState.Inactive;
+                gestureState = instance.Client.Self.ActiveGestures.ContainsKey(item.UUID) ? RlvGestureState.Active : RlvGestureState.Inactive;
             }
         }
 
@@ -213,7 +213,7 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                var realItem = _instance.COF.ResolveInventoryLink(item);
+                var realItem = instance.COF.ResolveInventoryLink(item);
                 if (realItem == null)
                 {
                     continue;
@@ -262,11 +262,11 @@ namespace Radegast.Core.RLV
         public async Task<(bool Success, InventoryMap InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
         {
             // Get current attached items <InventoryItem>
-            var currentOutfitLinks = await _instance.COF.GetCurrentOutfitLinks(cancellationToken);
+            var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinks(cancellationToken);
             var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
 
             // Build shared folder
-            var sharedFolder = _instance.Client.Inventory.Store.RootNode.Nodes.Values
+            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
                 .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
 
             var currentOutfitMap = currentOutfitLinks.ToDictionary(k => k.ActualUUID, v => v);
@@ -288,7 +288,7 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                var realItem = _instance.COF.ResolveInventoryLink(item);
+                var realItem = instance.COF.ResolveInventoryLink(item);
                 if (realItem == null)
                 {
                     continue;

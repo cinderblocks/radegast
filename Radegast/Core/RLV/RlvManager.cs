@@ -35,21 +35,22 @@ namespace Radegast.Core.RLV
         {
             get
             {
-                if (_instance.GlobalSettings["rlv_enabled"].Type == OSDType.Unknown)
+                if (instance.GlobalSettings["rlv_enabled"].Type == OSDType.Unknown)
                 {
-                    _instance.GlobalSettings["rlv_enabled"] = new OSDBoolean(false);
+                    instance.GlobalSettings["rlv_enabled"] = new OSDBoolean(false);
                 }
 
-                return _instance.GlobalSettings["rlv_enabled"].AsBoolean();
+                return instance.GlobalSettings["rlv_enabled"].AsBoolean();
             }
 
             set
             {
-                if (Enabled != _instance.GlobalSettings["rlv_enabled"].AsBoolean())
+                if (Enabled != instance.GlobalSettings["rlv_enabled"].AsBoolean())
                 {
-                    _instance.GlobalSettings["rlv_enabled"] = new OSDBoolean(value);
+                    instance.GlobalSettings["rlv_enabled"] = new OSDBoolean(value);
                 }
 
+                rlvService.Enabled = value;
                 if (value)
                 {
                     StartTimer();
@@ -65,43 +66,44 @@ namespace Radegast.Core.RLV
         {
             get
             {
-                if (_instance.GlobalSettings["rlv_debugcommands"].Type == OSDType.Unknown)
+                if (instance.GlobalSettings["rlv_debugcommands"].Type == OSDType.Unknown)
                 {
-                    _instance.GlobalSettings["rlv_debugcommands"] = new OSDBoolean(false);
+                    instance.GlobalSettings["rlv_debugcommands"] = new OSDBoolean(false);
                 }
 
-                return _instance.GlobalSettings["rlv_debugcommands"].AsBoolean();
+                return instance.GlobalSettings["rlv_debugcommands"].AsBoolean();
             }
 
             set
             {
-                if (EnabledDebugCommands != _instance.GlobalSettings["rlv_debugcommands"].AsBoolean())
+                if (EnabledDebugCommands != instance.GlobalSettings["rlv_debugcommands"].AsBoolean())
                 {
-                    _instance.GlobalSettings["rlv_debugcommands"] = new OSDBoolean(value);
+                    instance.GlobalSettings["rlv_debugcommands"] = new OSDBoolean(value);
                 }
             }
         }
 
-        private readonly RadegastInstance _instance;
-        private System.Timers.Timer CleanupTimer;
+        private readonly RadegastInstance instance;
+        private readonly RlvQueryCallbacks queryCallbacks;
+        private readonly RlvActionCallbacks actionCallbacks;
+        private readonly RlvService rlvService;
 
-        private readonly RlvQueryCallbacks _queryCallbacks;
-        private readonly RlvActionCallbacks _actionCallbacks;
+        private System.Timers.Timer cleanupTimer;
 
-        public RlvService RlvService { get; }
-        public LibreMetaverse.RLV.RlvPermissionsService Permissions => RlvService.Permissions;
+        public LibreMetaverse.RLV.RlvPermissionsService Permissions => rlvService.Permissions;
+        public LibreMetaverse.RLV.RlvRestrictionManager Restrictions => rlvService.Restrictions;
 
         public RlvManager(RadegastInstance instance)
         {
-            _instance = instance;
+            this.instance = instance;
 
-            _queryCallbacks = new RlvQueryCallbacks(_instance);
-            _actionCallbacks = new RlvActionCallbacks(_instance);
+            queryCallbacks = new RlvQueryCallbacks(this.instance);
+            actionCallbacks = new RlvActionCallbacks(this.instance);
 
-            RlvService = new RlvService(_queryCallbacks, _actionCallbacks, Enabled);
-            RlvService.Restrictions.RestrictionUpdated += Restrictions_RestrictionUpdated;
+            rlvService = new RlvService(queryCallbacks, actionCallbacks, Enabled);
+            rlvService.Restrictions.RestrictionUpdated += Restrictions_RestrictionUpdated;
 
-            instance.COF.AddPolicy(new RlvCOFPolicy(RlvService, _instance, _queryCallbacks));
+            instance.COF.AddPolicy(new RlvCOFPolicy(rlvService, this.instance, queryCallbacks));
             instance.Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
             instance.Client.Objects.KillObject += Objects_KillObject;
 
@@ -115,7 +117,7 @@ namespace Radegast.Core.RLV
         {
             if (EnabledDebugCommands)
             {
-                _instance.TabConsole.DisplayNotificationInChat($"[RLV] Restriction Updated: {e.Restriction}");
+                instance.TabConsole.DisplayNotificationInChat($"[RLV] Restriction Updated: {e.Restriction}");
             }
         }
 
@@ -132,8 +134,8 @@ namespace Radegast.Core.RLV
                 return;
             }
 
-            if (_instance.Client.Self.LocalID == 0
-                || prim.ParentID != _instance.Client.Self.LocalID
+            if (instance.Client.Self.LocalID == 0
+                || prim.ParentID != instance.Client.Self.LocalID
                 || prim.NameValues == null
                 || !prim.IsAttachment)
             {
@@ -145,12 +147,12 @@ namespace Radegast.Core.RLV
                 .Where(n => n.Name == "AttachItemID" && n.Value != null && n.Value is string)
                 .Select(n => new UUID(n.Value as string))
                 .FirstOrDefault();
-            if(attachItemId == null)
+            if (attachItemId == null)
             {
                 return;
             }
 
-            if (_instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
+            if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
                 ReportItemChange(item, false).Wait();
             }
@@ -165,8 +167,8 @@ namespace Radegast.Core.RLV
 
             Primitive prim = e.Prim;
 
-            if (_instance.Client.Self.LocalID == 0
-                || prim.ParentID != _instance.Client.Self.LocalID
+            if (instance.Client.Self.LocalID == 0
+                || prim.ParentID != instance.Client.Self.LocalID
                 || prim.NameValues == null
                 || !prim.IsAttachment
                 || !e.IsNew)
@@ -184,7 +186,7 @@ namespace Radegast.Core.RLV
                 return;
             }
 
-            if (_instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
+            if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
                 ReportItemChange(item, true).Wait();
             }
@@ -192,7 +194,7 @@ namespace Radegast.Core.RLV
 
         private async Task<bool> IsInSharedFolder(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            var sharedFolder = _instance.Client.Inventory.Store.RootNode.Nodes.Values
+            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
                 .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
 
             if (sharedFolder == null)
@@ -200,13 +202,13 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            var realItem = _instance.COF.ResolveInventoryLink(item);
+            var realItem = instance.COF.ResolveInventoryLink(item);
             if (realItem == null)
             {
                 return false;
             }
 
-            var isInTrash = await _instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data.UUID, cancellationToken);
+            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data.UUID, cancellationToken);
             if (isInTrash)
             {
                 return true;
@@ -223,7 +225,7 @@ namespace Radegast.Core.RLV
             {
                 if (item is InventoryWearable wearable)
                 {
-                    await _instance.RLV.RlvService.ReportItemWorn(
+                    await instance.RLV.rlvService.ReportItemWorn(
                         wearable.ParentUUID.Guid,
                         isShared,
                         (RlvWearableType)wearable.WearableType,
@@ -234,7 +236,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await _instance.RLV.RlvService.ReportItemAttached(
+                    await instance.RLV.rlvService.ReportItemAttached(
                         attachment.ParentUUID.Guid,
                         isShared,
                         attachmentPoint,
@@ -245,7 +247,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await _instance.RLV.RlvService.ReportItemAttached(
+                    await instance.RLV.rlvService.ReportItemAttached(
                         obj.ParentUUID.Guid,
                         isShared,
                         attachmentPoint,
@@ -257,7 +259,7 @@ namespace Radegast.Core.RLV
             {
                 if (item is InventoryWearable wearable)
                 {
-                    await _instance.RLV.RlvService.ReportItemUnworn(
+                    await instance.RLV.rlvService.ReportItemUnworn(
                         wearable.ActualUUID.Guid,
                         wearable.ParentUUID.Guid,
                         isShared,
@@ -269,7 +271,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await _instance.RLV.RlvService.ReportItemDetached(
+                    await instance.RLV.rlvService.ReportItemDetached(
                         attachment.ActualUUID.Guid,
                         attachedPrimId.Guid,
                         attachment.ParentUUID.Guid,
@@ -282,7 +284,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await _instance.RLV.RlvService.ReportItemDetached(
+                    await instance.RLV.rlvService.ReportItemDetached(
                         attachedObj.ActualUUID.Guid,
                         attachedPrimId.Guid,
                         attachedObj.ParentUUID.Guid,
@@ -296,7 +298,7 @@ namespace Radegast.Core.RLV
 
         private (UUID, RlvAttachmentPoint) GetAttachedPrimId(InventoryItem attachedItem)
         {
-            var objectPrimitivesSnapshot = _instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
+            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
 
             foreach (var item in objectPrimitivesSnapshot)
             {
@@ -337,23 +339,23 @@ namespace Radegast.Core.RLV
         private void StartTimer()
         {
             StopTimer();
-            CleanupTimer = new System.Timers.Timer()
+            cleanupTimer = new System.Timers.Timer()
             {
                 Enabled = true,
                 Interval = 120 * 1000 // two minutes
             };
 
-            CleanupTimer.Elapsed += CleanupTimer_Elapsed;
+            cleanupTimer.Elapsed += CleanupTimer_Elapsed;
         }
 
         private void StopTimer()
         {
-            if (CleanupTimer != null)
+            if (cleanupTimer != null)
             {
-                CleanupTimer.Elapsed -= CleanupTimer_Elapsed;
-                CleanupTimer.Enabled = false;
-                CleanupTimer.Dispose();
-                CleanupTimer = null;
+                cleanupTimer.Elapsed -= CleanupTimer_Elapsed;
+                cleanupTimer.Enabled = false;
+                cleanupTimer.Dispose();
+                cleanupTimer = null;
             }
         }
 
@@ -365,15 +367,15 @@ namespace Radegast.Core.RLV
             }
 
             var objects = new List<UUID>();
-            var rlvTrackedPrimIds = RlvService.Restrictions.GetTrackedPrimIds();
+            var rlvTrackedPrimIds = rlvService.Restrictions.GetTrackedPrimIds();
 
-            var wornItems = _instance.COF.GetCurrentOutfitLinks().Result
+            var wornItems = instance.COF.GetCurrentOutfitLinks().Result
                 .ToDictionary(k => k.UUID.Guid, v => v);
 
             var deadPrimIds = new List<Guid>();
             foreach (var primId in rlvTrackedPrimIds)
             {
-                var itemExistsInWorld = _instance.Client.Network.CurrentSim.ObjectsPrimitives
+                var itemExistsInWorld = instance.Client.Network.CurrentSim.ObjectsPrimitives
                     .Where(n => n.Value.ID.Guid == primId)
                     .Any();
                 if (itemExistsInWorld)
@@ -386,7 +388,7 @@ namespace Radegast.Core.RLV
 
             if (deadPrimIds.Count > 0)
             {
-                RlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).Wait();
+                rlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).Wait();
             }
         }
 
@@ -397,7 +399,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            var result = await RlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
+            var result = await rlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
             return result;
         }
     }

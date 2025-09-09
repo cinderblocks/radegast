@@ -26,25 +26,25 @@ namespace Radegast.Core.RLV
 {
     internal class RlvCOFPolicy : ICOFPolicy
     {
-        private readonly RlvService _rlvService;
-        private readonly RadegastInstance _instance;
-        private readonly RlvQueryCallbacks _queryCallbacks;
+        private readonly RlvService rlvService;
+        private readonly RadegastInstance instance;
+        private readonly RlvQueryCallbacks queryCallbacks;
 
         public RlvCOFPolicy(LibreMetaverse.RLV.RlvService rlvService, RadegastInstance instance, RlvQueryCallbacks queryCallbacks)
         {
-            _rlvService = rlvService;
-            _instance = instance;
-            _queryCallbacks = queryCallbacks;
+            this.rlvService = rlvService;
+            this.instance = instance;
+            this.queryCallbacks = queryCallbacks;
         }
 
         public bool CanAttach(InventoryItem item)
         {
-            if (!_instance.RLV.Enabled)
+            if (!instance.RLV.Enabled)
             {
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = _queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
             if (hasInventoryMap && inventoryMap != null)
             {
                 var rlvItems = inventoryMap.GetItemsById(item.UUID.Guid);
@@ -55,7 +55,7 @@ namespace Radegast.Core.RLV
                         return false;
                     }
 
-                    if (!_rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn))
+                    if (!rlvService.Permissions.CanAttach(rlvItem.FolderId, rlvItem.Folder != null, rlvItem.AttachedTo, rlvItem.WornOn))
                     {
                         return false;
                     }
@@ -65,18 +65,18 @@ namespace Radegast.Core.RLV
             }
 
             return item is InventoryWearable wearable
-                ? _rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, null, (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType)
-                : item is InventoryObject obj && _rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, (LibreMetaverse.RLV.RlvAttachmentPoint)obj.AttachPoint, null);
+                ? rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, null, (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType)
+                : item is InventoryObject obj && rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, (LibreMetaverse.RLV.RlvAttachmentPoint)obj.AttachPoint, null);
         }
 
         public bool CanDetach(InventoryItem item)
         {
-            if (!_instance.RLV.Enabled)
+            if (!instance.RLV.Enabled)
             {
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = _queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
             if (!hasInventoryMap || inventoryMap == null)
             {
                 return false;
@@ -90,7 +90,7 @@ namespace Radegast.Core.RLV
                     return false;
                 }
 
-                if (!_rlvService.Permissions.CanDetach(foundItem))
+                if (!rlvService.Permissions.CanDetach(foundItem))
                 {
                     return false;
                 }
