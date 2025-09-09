@@ -24,13 +24,13 @@ using System.Threading;
 
 namespace Radegast.Core.RLV
 {
-    internal class RLVCOFPolicy : ICOFPolicy
+    internal class RlvCOFPolicy : ICOFPolicy
     {
         private readonly RlvService _rlvService;
         private readonly RadegastInstance _instance;
         private readonly RlvQueryCallbacks _queryCallbacks;
 
-        public RLVCOFPolicy(LibreMetaverse.RLV.RlvService rlvService, RadegastInstance instance, RlvQueryCallbacks queryCallbacks)
+        public RlvCOFPolicy(LibreMetaverse.RLV.RlvService rlvService, RadegastInstance instance, RlvQueryCallbacks queryCallbacks)
         {
             _rlvService = rlvService;
             _instance = instance;

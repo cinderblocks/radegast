@@ -29,7 +29,7 @@ using System.Threading.Tasks;
 
 namespace Radegast.Core.RLV
 {
-    public class RLVManager : IDisposable
+    public class RlvManager : IDisposable
     {
         public bool Enabled
         {
@@ -91,7 +91,7 @@ namespace Radegast.Core.RLV
         public RlvService RlvService { get; }
         public LibreMetaverse.RLV.RlvPermissionsService Permissions => RlvService.Permissions;
 
-        public RLVManager(RadegastInstance instance)
+        public RlvManager(RadegastInstance instance)
         {
             _instance = instance;
 
@@ -101,7 +101,7 @@ namespace Radegast.Core.RLV
             RlvService = new RlvService(_queryCallbacks, _actionCallbacks, Enabled);
             RlvService.Restrictions.RestrictionUpdated += Restrictions_RestrictionUpdated;
 
-            instance.COF.AddPolicy(new RLVCOFPolicy(RlvService, _instance, _queryCallbacks));
+            instance.COF.AddPolicy(new RlvCOFPolicy(RlvService, _instance, _queryCallbacks));
             instance.Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
             instance.Client.Objects.KillObject += Objects_KillObject;
 
