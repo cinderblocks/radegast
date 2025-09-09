@@ -306,8 +306,6 @@ namespace Radegast
                     },
                     cancellationToken
                 );
-
-                await ReportItemChange(item, true, cancellationToken);
             }
         }
 
@@ -348,14 +346,9 @@ namespace Radegast
 
             var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
 
-            var actualItemIDsToRemoveLinksTo = new HashSet<UUID>();
-            foreach (var item in actualItemsToRemoveLinksTo)
-            {
-                if (actualItemIDsToRemoveLinksTo.Add(item.ActualUUID))
-                {
-                    await ReportItemChange(item, false, cancellationToken);
-                }
-            }
+            var actualItemIDsToRemoveLinksTo = actualItemsToRemoveLinksTo
+                .Select(n => n.ActualUUID)
+                .ToHashSet();
 
             var linkIdsToRemove = cofLinks
                 .Where(n => n.IsLink() && actualItemIDsToRemoveLinksTo.Contains(n.ActualUUID))
@@ -493,33 +486,6 @@ namespace Radegast
 
             client.Appearance.Attach(item, point, replace);
             await AddLink(item, cancellationToken);
-
-            var isInSharedFolder = await IsInSharedFolder(item, cancellationToken);
-        }
-
-        private async Task<bool> IsInSharedFolder(InventoryItem item, CancellationToken cancellationToken = default)
-        {
-            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
-                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
-
-            if(sharedFolder == null)
-            {
-                return false;
-            }
-
-            var realItem = instance.COF.ResolveInventoryLink(item);
-            if (realItem == null)
-            {
-                return false;
-            }
-
-            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data.UUID, cancellationToken);
-            if (isInTrash)
-            {
-                return true;
-            }
-
-            return false;
         }
 
         /// <summary>
@@ -1113,114 +1079,6 @@ namespace Radegast
             });
         }
 
-        private async Task ReportItemChange(InventoryItem item, bool isAdded, CancellationToken cancellationToken = default)
-        {
-            var isShared = await IsInSharedFolder(item, cancellationToken);
-
-            if(isAdded)
-            {
-                if (item is InventoryWearable wearable)
-                {
-                    await instance.RLV.RlvService.ReportItemWorn(
-                        wearable.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType,
-                        cancellationToken
-                    );
-                }
-                else if (item is InventoryAttachment attachment)
-                {
-                    await instance.RLV.RlvService.ReportItemAttached(
-                        attachment.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachment.AttachmentPoint,
-                        cancellationToken
-                    );
-                }
-                else if (item is InventoryObject obj)
-                {
-                    await instance.RLV.RlvService.ReportItemAttached(
-                        obj.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvAttachmentPoint)obj.AttachPoint,
-                        cancellationToken
-                    );
-                }
-            }
-            else
-            {
-                if (item is InventoryWearable wearable)
-                {
-                    await instance.RLV.RlvService.ReportItemUnworn(
-                        wearable.ActualUUID.Guid,
-                        wearable.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType,
-                        cancellationToken
-                    );
-                }
-                else if (item is InventoryAttachment attachment)
-                {
-                    var attachedPrimId = GetAttachedPrimId(item);
-
-                    await instance.RLV.RlvService.ReportItemDetached(
-                        attachment.ActualUUID.Guid,
-                        attachedPrimId.Guid,
-                        attachment.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachment.AttachmentPoint,
-                        cancellationToken
-                    );
-                }
-                else if (item is InventoryObject attachedObj)
-                {
-                    var attachedPrimId = GetAttachedPrimId(item);
-
-                    await instance.RLV.RlvService.ReportItemDetached(
-                        attachedObj.ActualUUID.Guid,
-                        attachedPrimId.Guid,
-                        attachedObj.ParentUUID.Guid,
-                        isShared,
-                        (LibreMetaverse.RLV.RlvAttachmentPoint)attachedObj.AttachPoint,
-                        cancellationToken
-                    );
-                }
-            }
-        }
-
-        private UUID GetAttachedPrimId(InventoryItem attachedItem)
-        {
-            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
-
-            foreach (var item in objectPrimitivesSnapshot)
-            {
-                if (!item.IsAttachment)
-                {
-                    continue;
-                }
-
-                var attachItemID = item.NameValues
-                    .Where(n => n.Name == "AttachItemID")
-                    .Select(n => n.Value)
-                    .FirstOrDefault();
-                if (attachItemID == null)
-                {
-                    continue;
-                }
-
-                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
-                {
-                    continue;
-                }
-
-                if(attachmentId == attachedItem.ActualUUID)
-                {
-                    return attachmentId;
-                }
-            }
-
-            return UUID.Zero;
-        }
 
         /// <summary>
         /// Removes specified item from the current outfit. All COF links to this item will be removed from the COF.
