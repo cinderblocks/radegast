@@ -130,10 +130,10 @@ namespace Radegast
 
             if (client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out var prim))
             {
-                var invItem = CurrentOutfitFolder.GetAttachmentItemID(prim);
-                if (invItem != UUID.Zero)
+                var invItemId = CurrentOutfitFolder.GetAttachmentItemID(prim);
+                if (invItemId != UUID.Zero)
                 {
-                    RemoveLink(invItem).Wait();
+                    RemoveLinksToByActualId(new List<UUID>() { invItemId }).Wait();
                 }
             }
         }
@@ -211,7 +211,7 @@ namespace Radegast
         /// </summary>
         /// <returns>List of <see cref="InventoryItem"/> that can be part of appearance (attachments, wearables)</returns>
         /// <param name="cancellationToken"></param>
-        private async Task<List<InventoryItem>> GetCurrentOutfitLinks(CancellationToken cancellationToken = default)
+        public async Task<List<InventoryItem>> GetCurrentOutfitLinks(CancellationToken cancellationToken = default)
         {
             if (COF == null)
             {
@@ -310,21 +310,33 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Removes all COF links to the specified actual item ID
+        /// Removes all COF links to the specified actual item IDs
         /// </summary>
-        /// <param name="itemID">Actual item ID of the inventory item we want to remove COF links to</param>
+        /// <param name="actualItemIdsToRemoveLinksTo">List of item IDs to remove all COF links to</param>
         /// <param name="cancellationToken"></param>
-        private async Task RemoveLink(UUID itemID, CancellationToken cancellationToken = default)
+        private async Task RemoveLinksToByActualId(IEnumerable<UUID> actualItemIdsToRemoveLinksTo, CancellationToken cancellationToken = default)
         {
-            await RemoveLinks(new List<UUID>(1) { itemID }, cancellationToken);
+            var actualItemIdsSet = actualItemIdsToRemoveLinksTo.ToHashSet();
+
+            var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
+            var linkIdsToRemove = cofLinks
+                .Where(n => n.IsLink() && actualItemIdsSet.Contains(n.ActualUUID))
+                .Select(n => n.UUID)
+                .Distinct()
+                .ToList();
+
+            if (linkIdsToRemove.Count > 0)
+            {
+                await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            }
         }
 
         /// <summary>
-        /// Removes all COF links to the specified item ID's
+        /// Removes all COF links to the specified items
         /// </summary>
-        /// <param name="itemIDsToRemove">List of actual item ID's we want to remove COF links to</param>
+        /// <param name="actualItemsToRemoveLinksTo">List of actual item we want to remove COF links to</param>
         /// <param name="cancellationToken"></param>
-        private async Task RemoveLinks(List<UUID> itemIDsToRemove, CancellationToken cancellationToken = default)
+        private async Task RemoveLinksTo(List<InventoryItem> actualItemsToRemoveLinksTo, CancellationToken cancellationToken = default)
         {
             if (COF == null)
             {
@@ -334,14 +346,20 @@ namespace Radegast
 
             var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
 
-            var itemIDsToRemoveSet = itemIDsToRemove.ToHashSet();
+            var actualItemIDsToRemoveLinksTo = actualItemsToRemoveLinksTo
+                .Select(n => n.ActualUUID)
+                .ToHashSet();
+
             var linkIdsToRemove = cofLinks
-                .Where(n => n.IsLink() && itemIDsToRemoveSet.Contains(n.AssetUUID))
+                .Where(n => n.IsLink() && actualItemIDsToRemoveLinksTo.Contains(n.ActualUUID))
                 .Select(n => n.UUID)
                 .Distinct()
                 .ToList();
 
-            await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            if (linkIdsToRemove.Count > 0)
+            {
+                await client.Inventory.RemoveItemsAsync(linkIdsToRemove, cancellationToken);
+            }
         }
 
         #endregion Private methods
@@ -356,11 +374,6 @@ namespace Radegast
         /// <returns>True if we are able to attach this object</returns>
         public async Task<bool> CanAttachItem(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            if (!(item is InventoryObject))
-            {
-                return false;
-            }
-
             var trashFolderId = client.Inventory.FindFolderForType(FolderType.Trash);
             var rootFolderId = client.Inventory.FindFolderForType(FolderType.Root);
 
@@ -391,18 +404,33 @@ namespace Radegast
             }
 
             var cofLinks = await GetCurrentOutfitLinks(cancellationToken);
-            var numAttachedObjects = cofLinks
-                .Count(n => n is InventoryObject);
-
-            if (numAttachedObjects + 1 >= client.Self.Benefits.AttachmentLimit)
-            {
-                Logger.Log($"Cannot attach any more objects. Maximum of {client.Self.Benefits.AttachmentLimit} attached objects has been reached", Helpers.LogLevel.Warning, client);
-                return false;
-            }
 
             if (cofLinks.FirstOrDefault(n => n.ActualUUID == item.ActualUUID) != null)
             {
                 return false;
+            }
+
+            if (item is InventoryObject obj)
+            {
+                var numAttachedObjects = cofLinks
+                    .Count(n => n is InventoryObject);
+
+                if (numAttachedObjects + 1 >= client.Self.Benefits.AttachmentLimit)
+                {
+                    return false;
+                }
+            }
+            else if (item is InventoryWearable wearable)
+            {
+                var numClothingLayers = cofLinks
+                    .Count(n => n is InventoryWearable);
+
+                numClothingLayers++;
+
+                if (numClothingLayers + 1 >= MaxClothingLayers)
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -416,14 +444,14 @@ namespace Radegast
         /// <returns>True if we are able to detach this object</returns>
         public async Task<bool> CanDetachItem(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            var realItem = instance.COF.ResolveInventoryLink(item);
-
-            if (!(realItem is InventoryObject))
+            if (!policy.CanDetach(item))
             {
                 return false;
             }
 
-            if (!policy.CanDetach(realItem))
+            var realItem = instance.COF.ResolveInventoryLink(item);
+
+            if (!(realItem is InventoryItem))
             {
                 return false;
             }
@@ -458,7 +486,6 @@ namespace Radegast
 
             client.Appearance.Attach(item, point, replace);
             await AddLink(item, cancellationToken);
-            instance.RLV.OnItemNotification(item, true, Legality.Legally);
         }
 
         /// <summary>
@@ -473,9 +500,18 @@ namespace Radegast
                 return;
             }
 
-            instance.RLV.OnItemNotification(item, false, Legality.Legally);
+            var attachmentPoint = AttachmentPoint.Default;
+            if (item is InventoryAttachment attachedItem)
+            {
+                attachmentPoint = attachedItem.AttachmentPoint;
+            }
+            else if(item is InventoryObject attachedObject)
+            {
+                attachmentPoint = attachedObject.AttachPoint;
+            }
+
             client.Appearance.Detach(item);
-            await RemoveLink(item.UUID, cancellationToken);
+            await RemoveLinksTo(new List<InventoryItem>() { item }, cancellationToken);
         }
 
         /// <summary>
@@ -905,7 +941,7 @@ namespace Radegast
                 }
             }
 
-            var linksToRemove = new List<InventoryItem>();
+            var itemsToRemove = new List<InventoryItem>();
             var outfit = new List<InventoryItem>();
 
             foreach (var item in itemsToAdd)
@@ -958,9 +994,7 @@ namespace Radegast
                                         continue;
                                     }
 
-                                    var clothingLinksToRemove = cofLinks
-                                        .Where(n => n.IsLink() && n.AssetUUID == clothingToRemove.UUID);
-                                    linksToRemove.AddRange(clothingLinksToRemove);
+                                    itemsToRemove.Add(clothingToRemove);
                                 }
                             }
                         }
@@ -983,9 +1017,7 @@ namespace Radegast
                                 continue;
                             }
 
-                            var bodypartLinksToRemove = cofLinks
-                                .Where(n => n.IsLink() && n.AssetUUID == existingBodyPart.UUID);
-                            linksToRemove.AddRange(bodypartLinksToRemove);
+                            itemsToRemove.Add(existingBodyPart);
                         }
                     }
                 }
@@ -1007,9 +1039,7 @@ namespace Radegast
                                     continue;
                                 }
 
-                                var attachedObjectLinksToRemove = cofLinks
-                                    .Where(n => n.IsLink() && n.AssetUUID == attachedObject.UUID);
-                                linksToRemove.AddRange(attachedObjectLinksToRemove);
+                                itemsToRemove.Add(attachedObject);
                                 --numAttachedObjects;
                             }
                         }
@@ -1030,15 +1060,9 @@ namespace Radegast
                 outfit.Add(realItem);
             }
 
-            if (linksToRemove.Count > 0)
+            if (itemsToRemove.Count > 0)
             {
-                var links = linksToRemove.Select(link => link.UUID);
-                await client.Inventory.RemoveItemsAsync(links, cancellationToken);
-
-                foreach(var link in linksToRemove)
-                {
-                    instance.RLV.OnItemNotification(link, added: true, Legality.Legally);
-                }
+                await RemoveLinksTo(itemsToRemove, cancellationToken);
             }
 
             // Add links to new items
@@ -1053,12 +1077,8 @@ namespace Radegast
                 Thread.Sleep(2000);
                 client.Appearance.RequestSetAppearance(true);
             });
-
-            foreach(var item in outfit)
-            {
-                instance.RLV.OnItemNotification(item, added: true, Legality.Legally);
-            }
         }
+
 
         /// <summary>
         /// Removes specified item from the current outfit. All COF links to this item will be removed from the COF.
@@ -1100,17 +1120,8 @@ namespace Radegast
                 }
             }
 
-            var itemIdsToRemove = itemsToRemove
-                .Select(n => n.ActualUUID)
-                .Distinct()
-                .ToList();
+            await RemoveLinksTo(itemsToRemove, cancellationToken);
 
-            await RemoveLinks(itemIdsToRemove, cancellationToken);
-
-            foreach(var removedItem in itemsToRemove)
-            {
-                instance.RLV.OnItemNotification(removedItem, false, Legality.Legally);
-            }
             client.Appearance.RemoveFromOutfit(itemsToRemove);
         }
 

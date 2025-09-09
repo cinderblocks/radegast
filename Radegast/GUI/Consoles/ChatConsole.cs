@@ -453,6 +453,8 @@ namespace Radegast
                 ProcessChatInput(cbxInput.Text, ChatType.Normal);
         }
 
+        private static readonly char[] InvalidRlvEmoteCharacters = { '(', ')', '"', '-', '*', '=', '_', '^' };
+
         public void ProcessChatInput(string input, ChatType type)
         {
             if (string.IsNullOrEmpty(input)) return;
@@ -484,60 +486,30 @@ namespace Radegast
             else
             {
                 #region RLV
-                if (instance.RLV.Enabled && ch != 0)
+                if (instance.RLV.Enabled)
                 {
-                    if (instance.RLV.RestictionActive("sendchannel", ch.ToString()))
-                        return;
-                }
-
-                if (instance.RLV.Enabled && ch == 0)
-                {
-                    // emote
-                    if (msg.ToLower().StartsWith("/me"))
+                    if ((type == ChatType.Normal || type == ChatType.Shout) && !instance.RLV.Permissions.CanChatNormal())
                     {
-                        var opt = instance.RLV.GetOptions("rediremote");
-                        if (opt.Count > 0)
-                        {
-                            foreach (var rchanstr in opt)
-                            {
-                                if (int.TryParse(rchanstr, out var rchat) && rchat > 0)
-                                {
-                                    client.Self.Chat(msg, rchat, type);
-                                }
-                            }
-                            return;
-                        }
+                        type = ChatType.Whisper;
                     }
-                    else if (!msg.StartsWith("/"))
+                    else if (type == ChatType.Shout && !instance.RLV.Permissions.CanChatShout())
                     {
-                        var opt = instance.RLV.GetOptions("redirchat");
+                        type = ChatType.Normal;
+                    }
+                    else if (type == ChatType.Whisper && !instance.RLV.Permissions.CanChatWhisper())
+                    {
+                        type = ChatType.Normal;
+                    }
 
-                        if (opt.Count > 0)
-                        {
-                            foreach (var rchanstr in opt)
-                            {
-                                if (int.TryParse(rchanstr, out var rchat) && rchat > 0)
-                                {
-                                    client.Self.Chat(msg, rchat, type);
-                                }
-                            }
-                            return;
-                        }
+                    if (ch == 0 && !instance.RLV.Permissions.CanSendChat())
+                    {
+                        var hasValidCharacters = input.IndexOfAny(InvalidRlvEmoteCharacters) == -1;
 
-                        if (instance.RLV.RestictionActive("sendchat"))
+                        // TODO: Make 'SplitMultibyteString' publicly accessible and use it here to truncate slash emotes and messages that start with '/'
+                        if (!hasValidCharacters || !input.StartsWith("/", StringComparison.OrdinalIgnoreCase))
                         {
                             msg = "...";
                         }
-
-                        if (type == ChatType.Whisper && instance.RLV.RestictionActive("chatwhisper"))
-                            type = ChatType.Normal;
-
-                        if (type == ChatType.Shout && instance.RLV.RestictionActive("chatshout"))
-                            type = ChatType.Normal;
-
-                        if (instance.RLV.RestictionActive("chatnormal"))
-                            type = ChatType.Whisper;
-
                     }
                 }
                 #endregion
@@ -548,7 +520,6 @@ namespace Radegast
                     netcom.ChatOut(processedMessage, type, ch);
                 }
             }
-
         }
 
         private void ClearChatInput()

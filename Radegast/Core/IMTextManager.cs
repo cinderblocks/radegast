@@ -128,7 +128,7 @@ namespace Radegast
         {
             string msg = e.IM.Message;
 
-            if (instance.RLV.RestictionActive("recvim", e.IM.FromAgentID.ToString()))
+            if (instance.RLV.Enabled && !instance.RLV.Permissions.CanReceiveIM(msg, e.IM.FromAgentID.Guid))
             {
                 msg = "*** IM blocked by your viewer";
 

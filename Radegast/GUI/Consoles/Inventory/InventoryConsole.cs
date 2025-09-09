@@ -1372,14 +1372,16 @@ namespace Radegast
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (IsAttached(item) && instance.RLV.AllowDetach(item))
+                    if (IsAttached(item) && instance.COF.CanDetachItem(item).Result)
                     {
                         ctxItem =
                             new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (!IsAttached(item) && (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment))
+                    if (!IsAttached(item) &&
+                        (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
+                        instance.COF.CanAttachItem(item).Result)
                     {
                         ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
                         ctxInv.Items.Add(ctxItemAttach);
@@ -1445,8 +1447,7 @@ namespace Radegast
 
                         if (IsWorn(wearable))
                         {
-                            ctxItem =
-                                new ToolStripMenuItem("Take off", null, OnInvContextClick) {Name = "wearable_take_off"};
+                            ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
                             ctxInv.Items.Add(ctxItem);
                         }
                         else
@@ -1476,7 +1477,6 @@ namespace Radegast
                                     ctxInv.Items.Add(ctxItem);
                                     break;
                             }
-
                         }
                     }
 

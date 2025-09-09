@@ -363,7 +363,17 @@ namespace Radegast
 
             ClearIMInput();
 
-            if (instance.RLV.RestictionActive("sendim")) return;
+
+            string groupName = null;
+            if(instance.Groups.TryGetValue(SessionId, out var group))
+            {
+                groupName = group.Name;
+            }
+
+            if (instance.RLV.Enabled && !instance.RLV.Permissions.CanSendIM(message, SessionId.Guid, groupName))
+            {
+                return;
+            }
 
             if (message.Length > 1023) message = message.Remove(1023);
 

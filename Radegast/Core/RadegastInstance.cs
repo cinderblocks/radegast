@@ -29,6 +29,7 @@ using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Media;
 using OpenMetaverse;
+using Radegast.Core.RLV;
 
 namespace Radegast
 {
@@ -138,7 +139,7 @@ namespace Radegast
         /// <summary>
         /// Manager for RLV functionality
         /// </summary>
-        public RLVManager RLV { get; private set; }
+        public RlvManager RLV { get; private set; }
 
         /// <summary>Manages default params for different grids</summary>
         public GridManager GridManger { get; private set; }
@@ -267,7 +268,7 @@ namespace Radegast
             // COF must be created before RLV
             COF = new CurrentOutfitFolder(this);
 
-            RLV = new RLVManager(this);
+            RLV = new RlvManager(this);
             GridManger = new GridManager();
             GridManger.LoadGrids();
 

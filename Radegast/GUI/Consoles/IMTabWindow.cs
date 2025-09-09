@@ -149,8 +149,10 @@ namespace Radegast
                 msg = "/me " + msg.Substring(1);
             }
 
-            if (instance.RLV.RestictionActive("sendim", target.ToString()))
+            if (instance.RLV.Enabled && !instance.RLV.Permissions.CanSendIM(msg, target.Guid))
+            {
                 msg = "*** IM blocked by sender's viewer";
+            }
 
             netcom.SendInstantMessage(msg, target, SessionId);
             ClearIMInput();
