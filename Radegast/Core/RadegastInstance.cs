@@ -520,7 +520,11 @@ namespace Radegast
         [Obsolete("Use Instance.Names.Get() instead")]
         public string getAvatarName(UUID key, bool blocking)
         {
-            return Names.Get(key, blocking);
+            if(!blocking)
+            {
+                return Names.Get(key);
+            }
+            return Names.GetAsync(key).GetAwaiter().GetResult();
         }
 
         /// <summary>

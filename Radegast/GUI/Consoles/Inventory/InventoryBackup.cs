@@ -171,8 +171,8 @@ namespace Radegast
                     else
                     {
                         InventoryItem item = (InventoryItem)n.Data;
-                        string creator = item.CreatorID == UUID.Zero ? string.Empty : instance.Names.Get(item.CreatorID, true);
-                        string lastOwner = item.LastOwnerID == UUID.Zero ? string.Empty : instance.Names.Get(item.LastOwnerID, true);
+                        string creator = item.CreatorID == UUID.Zero ? string.Empty : instance.Names.GetAsync(item.CreatorID).GetAwaiter().GetResult();
+                        string lastOwner = item.LastOwnerID == UUID.Zero ? string.Empty : instance.Names.GetAsync(item.LastOwnerID).GetAwaiter().GetResult();
                         string type = item.AssetType.ToString();
                         if (item.InventoryType == InventoryType.Wearable) type = ((WearableType)item.Flags).ToString();
                         string created = item.CreationDate.ToString("yyyy-MM-dd HH:mm:ss");

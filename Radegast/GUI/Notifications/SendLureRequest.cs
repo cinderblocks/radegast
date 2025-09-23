@@ -38,7 +38,7 @@ namespace Radegast
 
             txtHead.BackColor = instance.MainForm.NotificationBackground;
 
-            agentName = instance.Names.Get(agentID, true);
+            agentName = instance.Names.GetAsync(agentID).GetAwaiter().GetResult();
             txtHead.Text = String.Format("Request a teleport to {0}'s location with the following message:", agentName);
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnRequest.Focus();
