@@ -29,6 +29,7 @@ using System.Threading;
 using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using OpenMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -38,14 +39,17 @@ namespace Radegast
 
         public NameMode Mode
         {
-            get => !Client.Avatars.DisplayNamesAvailable()
-                ? NameMode.Standard
-                : (NameMode)instance.GlobalSettings["display_name_mode"].AsInteger();
+            get => Client.Avatars.DisplayNamesAvailable()
+                ? (NameMode)instance.GlobalSettings["display_name_mode"].AsInteger()
+                : NameMode.Standard;
 
             set => instance.GlobalSettings["display_name_mode"] = (int)value;
         }
 
         private GridClient Client => instance.Client;
+        private bool hasUpdates;
+        private DateTime lastUpdate = DateTime.Now;
+        private TimeSpan cacheInterval = TimeSpan.FromSeconds(30);
 
         private readonly RadegastInstance instance;
         private readonly string cacheFileName;
@@ -55,6 +59,7 @@ namespace Radegast
 
         private readonly Channel<UUID> backlog;
         private readonly Task backlogTask;
+        private readonly Task cacheUpdateTask;
         private readonly CancellationTokenSource backlogCts = new CancellationTokenSource();
 
         private readonly TokenBucketRateLimiter rateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions()
@@ -72,10 +77,13 @@ namespace Radegast
         {
             this.instance = instance;
             backlog = Channel.CreateUnbounded<UUID>();
+            cacheFileName = Path.Combine(instance.UserDir, "name.cache");
 
             instance.ClientChanged += Instance_ClientChanged;
             RegisterEvents(Client);
             backlogTask = Task.Run(() => ResolveNames(backlogCts.Token), backlogCts.Token);
+            cacheUpdateTask = Task.Run(() => UpdateCache(backlogCts.Token), backlogCts.Token);
+            LoadCachedNames();
         }
 
         private async Task ResolveNames(CancellationToken cancellationToken)
@@ -116,7 +124,7 @@ namespace Radegast
             }
             stopwatch.Stop();
 
-            // Not to happy with that, but can't do much as long as RequestAvatarNames and GetDisplayNames accept List<UUID>
+            // Not too happy with that, but can't do much as long as RequestAvatarNames and GetDisplayNames accept List<UUID>
             // instead of IEnumerable<UUID> or ICollection<UUID>...
             List<UUID> batchedList = batchedNames.ToList();
             if (Mode == NameMode.Standard || (!Client.Avatars.DisplayNamesAvailable()))
@@ -139,6 +147,80 @@ namespace Radegast
                 }, cancellationToken);
             }
         }
+        private void LoadCachedNames()
+        {
+            ThreadPool.QueueUserWorkItem(syncx =>
+            {
+                try
+                {
+                    byte[] data = File.ReadAllBytes(cacheFileName);
+                    OSDMap cache = (OSDMap)OSDParser.DeserializeLLSDBinary(data);
+                    OSDArray namesOSD = (OSDArray)cache["names"];
+                    DateTime now = DateTime.Now;
+                    TimeSpan maxAge = new TimeSpan(48, 0, 0);
+                    NameMode mode = (NameMode)(int)instance.GlobalSettings["display_name_mode"];
+
+                    foreach (var osdname in namesOSD)
+                    {
+                        AgentDisplayName name = AgentDisplayName.FromOSD(osdname);
+                        if (mode == NameMode.Standard || ((now - name.Updated) < maxAge))
+                        {
+                            names.AddOrUpdate(name.ID, name, (key, _) => name);
+                        }
+                    }
+
+                    Logger.DebugLog($"Restored {names.Count} names from the avatar name cache");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("Failed to load avatar name cache: " + ex.Message, Helpers.LogLevel.Warning, Client);
+                }
+            });
+        }
+
+        private async Task UpdateCache(CancellationToken cancellationToken = default)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                TimeSpan sinceLastUpdate = DateTime.Now - lastUpdate;
+                if (hasUpdates && sinceLastUpdate >= cacheInterval)
+                {
+                    SaveToCache();
+                }
+
+                await Task.Delay(cacheInterval, cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Saves name list to names.cache file.
+        /// </summary>
+        public void SaveToCache()
+        {
+            OSDArray namesOSD = new OSDArray(names.Count);
+            foreach (var name in names)
+            {
+                namesOSD.Add(name.Value.GetOSD());
+            }
+
+            OSDMap cache = new OSDMap(1) { ["names"] = namesOSD };
+            byte[] data = OSDParser.SerializeLLSDBinary(cache, false);
+            Logger.DebugLog($"Caching {namesOSD.Count} avatar names to {cacheFileName}");
+
+            try
+            {
+                hasUpdates = false;
+                File.WriteAllBytes(cacheFileName, data);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Failed to save avatar name cache: ", Helpers.LogLevel.Error, Client, ex);
+            }
+            finally
+            {
+                lastUpdate = DateTime.Now;
+            }
+        }
 
         /// <summary>
         /// Cleans avatar name cache
@@ -156,6 +238,10 @@ namespace Radegast
             }
         }
 
+        /// <summary>
+        /// Disposes managed resources
+        /// </summary>
+        /// <returns></returns>
         public void Dispose()
         {
             backlogCts.Cancel();
@@ -164,10 +250,14 @@ namespace Radegast
             rateLimiter.Dispose();
         }
 
+        /// <summary>
+        /// Disposes managed resources
+        /// </summary>
+        /// <returns></returns>
         public async ValueTask DisposeAsync()
         {
             backlogCts.Cancel();
-            await backlogTask;
+            await Task.WhenAll(backlogTask, cacheUpdateTask);
             instance.ClientChanged -= Instance_ClientChanged;
             DeregisterEvents(Client);
             rateLimiter.Dispose();
@@ -180,7 +270,10 @@ namespace Radegast
         /// <returns>Avatar display name or "Loading..." if not in cache</returns>
         public string Get(UUID agentID)
         {
-            if (agentID == UUID.Zero) { return "(???) (???)"; }
+            if (agentID == UUID.Zero)
+            {
+                return "(???) (???)";
+            }
 
             string name = null;
             bool requestName = true;
@@ -338,7 +431,10 @@ namespace Radegast
         /// <returns></returns>
         public string GetDisplayName(UUID agentID)
         {
-            if (agentID == UUID.Zero) { return "(???) (???)"; }
+            if (agentID == UUID.Zero)
+            {
+                return "(???) (???)";
+            }
 
             if (names.TryGetValue(agentID, out var name))
             {
@@ -356,11 +452,11 @@ namespace Radegast
                    displayName != RadegastInstance.INCOMPLETE_NAME;
         }
 
-        private void ProcessDisplayNames(IEnumerable<AgentDisplayName> names)
+        private void ProcessDisplayNames(IEnumerable<AgentDisplayName> displayNames)
         {
             Dictionary<UUID, string> updatedNames = new Dictionary<UUID, string>();
 
-            foreach (var name in names)
+            foreach (AgentDisplayName name in displayNames)
             {
                 if (!IsValidName(name.DisplayName))
                 {
@@ -370,7 +466,8 @@ namespace Radegast
                 updatedNames.Add(name.ID, FormatName(name));
                 name.Updated = DateTime.Now;
 
-                this.names.AddOrUpdate(name.ID, name, (id, old) => name);
+                names.AddOrUpdate(name.ID, name, (id, old) => name);
+                hasUpdates = true;
             }
 
             OnDisplayNamesChanged(updatedNames);
@@ -436,42 +533,49 @@ namespace Radegast
 
         private void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
         {
-            e.DisplayName.Updated = DateTime.Now;
-            names[e.DisplayName.ID] = e.DisplayName;
+            AgentDisplayName name = e.DisplayName;
+            name.Updated = DateTime.Now;
 
-            var results = new Dictionary<UUID, string>
+            names.AddOrUpdate(name.ID, name, (key, _) => name);
+            hasUpdates = true;
+
+            Dictionary<UUID, string> results = new Dictionary<UUID, string>
             {
-                {e.DisplayName.ID, FormatName(e.DisplayName) }
+                { e.DisplayName.ID, FormatName(e.DisplayName) }
             };
             OnDisplayNamesChanged(results);
         }
 
         private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
-            var results = new Dictionary<UUID, string>();
+            Dictionary<UUID, string> results = new Dictionary<UUID, string>();
 
             foreach (var kvp in e.Names)
             {
-                UpdateAvatarDisplayName(results, kvp);
+                string name = UpdateAvatarDisplayName(kvp.Key, kvp.Value);
+                if (!string.IsNullOrEmpty(name))
+                {
+                    results.Add(kvp.Key, name);
+                }
             }
 
             OnDisplayNamesChanged(results);
         }
 
-        private void UpdateAvatarDisplayName(Dictionary<UUID, string> results, KeyValuePair<UUID, string> kvp)
+        private string UpdateAvatarDisplayName(UUID avatarId, string name)
         {
-            AgentDisplayName agentDisplayName = names.GetOrAdd(kvp.Key, (avatarId) => new AgentDisplayName()
+            AgentDisplayName agentDisplayName = names.GetOrAdd(avatarId, (id) => new AgentDisplayName()
             {
-                ID = avatarId,
+                ID = id,
                 NextUpdate = UUIDNameOnly,
                 IsDefaultDisplayName = true,
                 Updated = DateTime.Now
             });
 
-            string[] parts = kvp.Value.Trim().Split(' ');
+            string[] parts = name.Trim().Split(' ');
             if (parts.Length != 2)
             {
-                return;
+                return null;
             }
 
             if (IsValidName(agentDisplayName.DisplayName))
@@ -485,7 +589,8 @@ namespace Radegast
                 ? agentDisplayName.LegacyFirstName.ToLower()
                 : $"{parts[0]}.{parts[1]}".ToLower();
 
-            results.Add(agentDisplayName.ID, FormatName(agentDisplayName));
+            hasUpdates = true;
+            return FormatName(agentDisplayName);
         }
     }
 }
