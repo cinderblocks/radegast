@@ -34,7 +34,6 @@ namespace Radegast
 {
     public class NameManager : IDisposable
     {
-        #region public fields and properties
         public event EventHandler<UUIDNameReplyEventArgs> NameUpdated;
 
         public NameMode Mode
@@ -45,16 +44,11 @@ namespace Radegast
 
             set => instance.GlobalSettings["display_name_mode"] = (int)value;
         }
-        #endregion public fields and properties
 
-
-        #region private fields and properties
         private GridClient Client => instance.Client;
 
         private readonly RadegastInstance instance;
         private readonly string cacheFileName;
-
-        private const int MaxNameRequests = 80;
 
         private readonly DateTime UUIDNameOnly = new DateTime(1970, 9, 4, 10, 0, 0, DateTimeKind.Utc);
         private readonly ConcurrentDictionary<UUID, AgentDisplayName> names = new ConcurrentDictionary<UUID, AgentDisplayName>();
@@ -66,7 +60,7 @@ namespace Radegast
         private readonly TokenBucketRateLimiter rateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions()
         {
             AutoReplenishment = true,
-            // Queue Limit shouldn't matter, since its only used in NameManager and from a single background thread/task
+            // Queue Limit shouldn't matter, since its only used in NameManager and from a single background task, a queue of 1 should be sufficient
             QueueLimit = 1,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
             ReplenishmentPeriod = TimeSpan.FromSeconds(1),
@@ -74,14 +68,12 @@ namespace Radegast
             TokensPerPeriod = 5
         });
 
-        #endregion private fields and properties
-
         public NameManager(RadegastInstance instance)
         {
             this.instance = instance;
             backlog = Channel.CreateUnbounded<UUID>();
 
-            instance.ClientChanged += instance_ClientChanged;
+            instance.ClientChanged += Instance_ClientChanged;
             RegisterEvents(Client);
             backlogTask = Task.Run(() => ResolveNames(backlogCts.Token), backlogCts.Token);
         }
@@ -116,6 +108,7 @@ namespace Radegast
         {
             HashSet<UUID> batchedNames = new HashSet<UUID>();
             Stopwatch stopwatch = Stopwatch.StartNew();
+
             while (stopwatch.ElapsedMilliseconds < 100 && batchedNames.Count < 100)
             {
                 if (!reader.TryRead(out UUID nextAvatarId))
@@ -128,7 +121,9 @@ namespace Radegast
             }
             stopwatch.Stop();
 
-            var batchedList = batchedNames.ToList();
+            // Not to happy with that, but can't do much as long as RequestAvatarNames and GetDisplayNames accept List<UUID>
+            // instead of IEnumerable<UUID> or ICollection<UUID>...
+            List<UUID> batchedList = batchedNames.ToList();
             if (Mode == NameMode.Standard || (!Client.Avatars.DisplayNamesAvailable()))
             {
                 Client.Avatars.RequestAvatarNames(batchedList);
@@ -160,12 +155,17 @@ namespace Radegast
                 names.Clear();
                 File.Delete(cacheFileName);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Log("Error cleaing name cache.", Helpers.LogLevel.Error, ex);
+            }
         }
 
         public void Dispose()
         {
+            instance.ClientChanged -= Instance_ClientChanged;
             rateLimiter.Dispose();
+            DeregisterEvents(Client);
         }
 
         /// <summary>
@@ -182,12 +182,12 @@ namespace Radegast
 
             if (names.TryGetValue(agentID, out AgentDisplayName displayName))
             {
-                if (Mode == NameMode.Standard || names[agentID].NextUpdate != UUIDNameOnly)
+                if (Mode == NameMode.Standard || displayName.NextUpdate != UUIDNameOnly)
                 {
                     requestName = false;
                 }
 
-                name = FormatName(names[agentID]);
+                name = FormatName(displayName);
             }
 
             if (requestName)
@@ -216,7 +216,12 @@ namespace Radegast
             }
         }
 
-
+        /// <summary>
+        /// Get avatar display name, or queue fetching of the name and waiting for the response in async non-blocking manner.
+        /// </summary>
+        /// <param name="agentID">UUID of avatar to lookup</param>
+        /// <param name="cancellationToken"></param>
+        /// <returns>Avatar display name or "Loading..." if not in cache or times out</returns>
         public async Task<string> GetAsync(UUID agentID, CancellationToken cancellationToken = default)
         {
             if (names.TryGetValue(agentID, out var displayName))
@@ -260,47 +265,6 @@ namespace Radegast
                     NameUpdated -= NameReplyHandler;
                 }
             }
-        }
-
-        /// <summary>
-        /// Get avatar display name, or queue fetching of the name
-        /// </summary>
-        /// <param name="agentID">UUID of avatar to lookup</param>
-        /// <param name="blocking">If true, wait until name is received, otherwise return immediately</param>
-        /// <returns>Avatar display name or "Loading..." if not in cache</returns>
-        [Obsolete("Deprecated. Use async version instead.")]
-        public string Get(UUID agentID, bool blocking)
-        {
-            if (!blocking)
-            {
-                Get(agentID);
-            }
-
-            string name = null;
-
-            using (ManualResetEvent gotName = new ManualResetEvent(false))
-            {
-
-                EventHandler<UUIDNameReplyEventArgs> handler = (sender, e) =>
-                {
-                    if (e.Names.TryGetValue(agentID, out var found))
-                    {
-                        name = found;
-                        gotName.Set();
-                    }
-                };
-
-                NameUpdated += handler;
-                name = Get(agentID);
-
-                if (name == RadegastInstance.INCOMPLETE_NAME)
-                {
-                    gotName.WaitOne(20 * 1000, false);
-                }
-
-                NameUpdated -= handler;
-            }
-            return name;
         }
 
         /// <summary>
@@ -404,20 +368,19 @@ namespace Radegast
                 this.names.AddOrUpdate(name.ID, name, (id, old) => name);
             }
 
-            TriggerEvent(updatedNames);
-            //TriggerCacheSave();
+            OnDisplayNamesChanged(updatedNames);
         }
 
-        private void TriggerEvent(Dictionary<UUID, string> ret)
+        private void OnDisplayNamesChanged(Dictionary<UUID, string> updatedNames)
         {
-            if (NameUpdated == null || ret.Count == 0)
+            if (NameUpdated == null || updatedNames.Count == 0)
             {
                 return;
             }
 
             try
             {
-                NameUpdated(this, new UUIDNameReplyEventArgs(ret));
+                NameUpdated(this, new UUIDNameReplyEventArgs(updatedNames));
             }
             catch (Exception ex)
             {
@@ -460,7 +423,7 @@ namespace Radegast
             c.Avatars.DisplayNameUpdate -= Avatars_DisplayNameUpdate;
         }
 
-        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             DeregisterEvents(e.OldClient);
             RegisterEvents(e.Client);
@@ -475,45 +438,49 @@ namespace Radegast
             {
                 {e.DisplayName.ID, FormatName(e.DisplayName) }
             };
-            TriggerEvent(results);
+            OnDisplayNamesChanged(results);
         }
 
         private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
-            var ret = new Dictionary<UUID, string>();
+            var results = new Dictionary<UUID, string>();
 
             foreach (var kvp in e.Names)
             {
-                if (!names.ContainsKey(kvp.Key))
-                {
-                    names[kvp.Key] = new AgentDisplayName
-                    {
-                        ID = kvp.Key,
-                        NextUpdate = UUIDNameOnly,
-                        IsDefaultDisplayName = true
-                    };
-                }
-
-                names[kvp.Key].Updated = DateTime.Now;
-
-                var parts = kvp.Value.Trim().Split(' ');
-                if (parts.Length != 2) continue;
-                if (IsValidName(names[kvp.Key].DisplayName))
-                {
-                    names[kvp.Key].DisplayName = $"{parts[0]} {parts[1]}";
-                }
-
-                names[kvp.Key].LegacyFirstName = parts[0];
-                names[kvp.Key].LegacyLastName = parts[1];
-                names[kvp.Key].UserName = names[kvp.Key].LegacyLastName == "Resident"
-                    ? names[kvp.Key].LegacyFirstName.ToLower()
-                    : $"{parts[0]}.{parts[1]}".ToLower();
-
-                ret.Add(kvp.Key, FormatName(names[kvp.Key]));
+                UpdateAvatarDisplayName(results, kvp);
             }
 
-            TriggerEvent(ret);
-            //TriggerCacheSave();
+            OnDisplayNamesChanged(results);
+        }
+
+        private void UpdateAvatarDisplayName(Dictionary<UUID, string> results, KeyValuePair<UUID, string> kvp)
+        {
+            AgentDisplayName agentDisplayName = names.GetOrAdd(kvp.Key, (avatarId) => new AgentDisplayName()
+            {
+                ID = avatarId,
+                NextUpdate = UUIDNameOnly,
+                IsDefaultDisplayName = true,
+                Updated = DateTime.Now
+            });
+
+            string[] parts = kvp.Value.Trim().Split(' ');
+            if (parts.Length != 2)
+            {
+                return;
+            }
+
+            if (IsValidName(agentDisplayName.DisplayName))
+            {
+                agentDisplayName.DisplayName = $"{parts[0]} {parts[1]}";
+            }
+
+            agentDisplayName.LegacyFirstName = parts[0];
+            agentDisplayName.LegacyLastName = parts[1];
+            agentDisplayName.UserName = agentDisplayName.LegacyLastName == "Resident"
+                ? agentDisplayName.LegacyFirstName.ToLower()
+                : $"{parts[0]}.{parts[1]}".ToLower();
+
+            results.Add(agentDisplayName.ID, FormatName(agentDisplayName));
         }
     }
 }
