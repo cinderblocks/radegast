@@ -32,7 +32,7 @@ using System.Threading.Tasks;
 
 namespace Radegast
 {
-    public class NameManager : IDisposable
+    public class NameManager : IDisposable, IAsyncDisposable
     {
         public event EventHandler<UUIDNameReplyEventArgs> NameUpdated;
 
@@ -81,13 +81,8 @@ namespace Radegast
         private async Task ResolveNames(CancellationToken cancellationToken)
         {
             ChannelReader<UUID> reader = backlog.Reader;
-            while (true)
+            while (!cancellationToken.IsCancellationRequested)
             {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
                 await reader.WaitToReadAsync(cancellationToken);
 
                 using (RateLimitLease lease = await rateLimiter.AcquireAsync(1, cancellationToken))
@@ -163,9 +158,19 @@ namespace Radegast
 
         public void Dispose()
         {
+            backlogCts.Cancel();
             instance.ClientChanged -= Instance_ClientChanged;
-            rateLimiter.Dispose();
             DeregisterEvents(Client);
+            rateLimiter.Dispose();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            backlogCts.Cancel();
+            await backlogTask;
+            instance.ClientChanged -= Instance_ClientChanged;
+            DeregisterEvents(Client);
+            rateLimiter.Dispose();
         }
 
         /// <summary>
