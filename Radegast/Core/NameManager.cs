@@ -26,6 +26,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
@@ -62,6 +63,16 @@ namespace Radegast
         private readonly Task backlogTask;
         private readonly CancellationTokenSource backlogCts = new CancellationTokenSource();
 
+        private readonly TokenBucketRateLimiter rateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions()
+        {
+            AutoReplenishment = true,
+            // Queue Limit shouldn't matter, since its only used in NameManager and from a single background thread/task
+            QueueLimit = 1,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+            TokenLimit = 20,
+            TokensPerPeriod = 5
+        });
 
         #endregion private fields and properties
 
@@ -69,14 +80,15 @@ namespace Radegast
         {
             this.instance = instance;
             backlog = Channel.CreateUnbounded<UUID>();
-            backlogTask = Task.Run(() => ResolveNames(backlogCts.Token), backlogCts.Token);
 
             instance.ClientChanged += instance_ClientChanged;
             RegisterEvents(Client);
+            backlogTask = Task.Run(() => ResolveNames(backlogCts.Token), backlogCts.Token);
         }
 
         private async Task ResolveNames(CancellationToken cancellationToken)
         {
+            ChannelReader<UUID> reader = backlog.Reader;
             while (true)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -84,43 +96,57 @@ namespace Radegast
                     break;
                 }
 
-                HashSet<UUID> batchedNames = new HashSet<UUID>();
-                UUID avatarId = await backlog.Reader.ReadAsync(cancellationToken);
-                batchedNames.Add(avatarId);
+                await reader.WaitToReadAsync(cancellationToken);
 
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                while (stopwatch.ElapsedMilliseconds < 100 && batchedNames.Count < 100)
+                using (RateLimitLease lease = await rateLimiter.AcquireAsync(1, cancellationToken))
                 {
-                    if (!backlog.Reader.TryRead(out UUID nextAvatarId))
+                    if (!lease.IsAcquired)
                     {
-                        await Task.Delay(5);
+                        Logger.Log("Unable to require rate limit lease in name manager.", Helpers.LogLevel.Warning, Client);
+                        await Task.Delay(1000);
                         continue;
                     }
-                    
-                    batchedNames.Add(nextAvatarId);
-                }
-                stopwatch.Stop();
 
-                var batchedList = batchedNames.ToList();
-                if (Mode == NameMode.Standard || (!Client.Avatars.DisplayNamesAvailable()))
-                {
-                    Client.Avatars.RequestAvatarNames(batchedList);
+                    await ProcessNameRequests(reader, cancellationToken);
                 }
-                else
+            }
+        }
+
+        private async Task ProcessNameRequests(ChannelReader<UUID> reader, CancellationToken cancellationToken = default)
+        {
+            HashSet<UUID> batchedNames = new HashSet<UUID>();
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            while (stopwatch.ElapsedMilliseconds < 100 && batchedNames.Count < 100)
+            {
+                if (!reader.TryRead(out UUID nextAvatarId))
                 {
-                    // use display names
-                    _ =  Client.Avatars.GetDisplayNames(batchedList, (success, names, badIDs) =>
+                    await Task.Delay(5);
+                    continue;
+                }
+
+                batchedNames.Add(nextAvatarId);
+            }
+            stopwatch.Stop();
+
+            var batchedList = batchedNames.ToList();
+            if (Mode == NameMode.Standard || (!Client.Avatars.DisplayNamesAvailable()))
+            {
+                Client.Avatars.RequestAvatarNames(batchedList);
+            }
+            else
+            {
+                // use display names
+                _ = Client.Avatars.GetDisplayNames(batchedList, (success, names, badIDs) =>
+                {
+                    if (success)
                     {
-                        if (success)
-                        {
-                            ProcessDisplayNames(names);
-                        }
-                        else
-                        {
-                            Logger.Log("Failed fetching display names", Helpers.LogLevel.Warning, Client);
-                        }
-                    });
-                }
+                        ProcessDisplayNames(names);
+                    }
+                    else
+                    {
+                        Logger.Log("Failed fetching display names", Helpers.LogLevel.Warning, Client);
+                    }
+                }, cancellationToken);
             }
         }
 
@@ -139,6 +165,7 @@ namespace Radegast
 
         public void Dispose()
         {
+            rateLimiter.Dispose();
         }
 
         /// <summary>
@@ -210,6 +237,7 @@ namespace Radegast
             using (cancellationToken.Register(tcs.SetCanceled))
             {
                 NameUpdated += NameReplyHandler;
+                await QueueNameRequestAsync(agentID, cancellationToken);
 
                 try
                 {
@@ -217,6 +245,12 @@ namespace Radegast
                     if (completedTask == tcs.Task)
                     {
                         return await tcs.Task;
+                    }
+
+                    // Maybe the name was fetched, before registering to the NameUpdated event
+                    if (names.TryGetValue(agentID, out var avatarDisplayName))
+                    {
+                        tcs.SetResult(FormatName(avatarDisplayName));
                     }
 
                     return RadegastInstance.INCOMPLETE_NAME;
@@ -293,7 +327,10 @@ namespace Radegast
         /// <returns></returns>
         public string GetLegacyName(UUID agentID)
         {
-            if (agentID == UUID.Zero) { return "(???) (???)"; }
+            if (agentID == UUID.Zero)
+            {
+                return "(???) (???)";
+            }
 
             if (names.TryGetValue(agentID, out var name))
             {
@@ -311,7 +348,10 @@ namespace Radegast
         /// <returns></returns>
         public string GetUserName(UUID agentID)
         {
-            if (agentID == UUID.Zero) { return "(???) (???)"; }
+            if (agentID == UUID.Zero)
+            {
+                return "(???) (???)";
+            }
 
             if (names.TryGetValue(agentID, out var name))
             {
@@ -387,7 +427,7 @@ namespace Radegast
 
         private void QueueNameRequest(UUID agentID)
         {
-            if (names.TryGetValue(agentID, out AgentDisplayName name) && !IsValidName(name.DisplayName))
+            if (names.TryGetValue(agentID, out AgentDisplayName name) && IsValidName(name.DisplayName))
             {
                 return;
             }
@@ -400,7 +440,7 @@ namespace Radegast
 
         private async ValueTask QueueNameRequestAsync(UUID agentID, CancellationToken cancellationToken = default)
         {
-            if (names.TryGetValue(agentID, out AgentDisplayName name) && !IsValidName(name.DisplayName))
+            if (names.TryGetValue(agentID, out AgentDisplayName name) && IsValidName(name.DisplayName))
             {
                 return;
             }
@@ -432,7 +472,8 @@ namespace Radegast
             names[e.DisplayName.ID] = e.DisplayName;
 
             var results = new Dictionary<UUID, string>
-                { {e.DisplayName.ID, FormatName(e.DisplayName) }
+            {
+                {e.DisplayName.ID, FormatName(e.DisplayName) }
             };
             TriggerEvent(results);
         }
