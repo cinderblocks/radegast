@@ -593,4 +593,19 @@ namespace Radegast
             return FormatName(agentDisplayName);
         }
     }
+
+    /// <summary>
+    /// Enum representing different modes of handling display names
+    /// </summary>
+    public enum NameMode
+    {
+        /// <summary> No display names </summary>
+        Standard,
+        /// <summary> Display name followed by (username) if display name is not default  </summary>
+        Smart,
+        /// <summary> Display name followed by (username) </summary>
+        OnlyDisplayName,
+        /// <summary> Only display </summary>
+        DisplayNameAndUserName,
+    }
 }
