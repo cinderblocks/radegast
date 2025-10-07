@@ -77,6 +77,11 @@ namespace Radegast
 
         private void UpdateControls()
         {
+            if (Disposing || IsDisposed)
+            {
+                return;
+            }
+
             if (InvokeRequired)
             {
                 Invoke(new MethodInvoker(UpdateControls));

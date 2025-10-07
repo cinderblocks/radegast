@@ -85,6 +85,7 @@
     <PackageReference Include="System.Security.Cryptography.Primitives" Version="4.3.0" />
     <PackageReference Include="System.Security.Cryptography.X509Certificates" Version="4.3.2" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <PackageReference Include="System.Threading.RateLimiting" Version="9.0.9" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="GUI\Controls\AgentNameTextBox.cs" />
@@ -870,6 +871,7 @@
     <Compile Remove="obj\x86\ReleaseWindows\TemporaryGeneratedFile_E7A71F73-0F8D-4B9B-B56E-8E70B10BC5D3.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\libremetaverse\LibreMetaverse.RLV\LibreMetaverse.RLV.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.LslTools\LibreMetaverse.LslTools.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.Rendering.Meshmerizer\LibreMetaverse.Rendering.Meshmerizer.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.StructuredData\LibreMetaverse.StructuredData.csproj" />

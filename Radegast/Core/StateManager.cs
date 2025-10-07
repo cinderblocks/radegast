@@ -864,7 +864,7 @@ namespace Radegast
         {
             Sitting = sit;
 
-            if (!instance.RLV.RestictionActive("unsit"))
+            if (instance.RLV.Enabled && instance.RLV.Permissions.CanUnsit())
             {
                 if (Sitting)
                 {

@@ -85,15 +85,12 @@ namespace Radegast
         public virtual IEnumerable<ToolStripMenuItem> GetToolItems(object target, Type type)
         {
             return new List<ToolStripMenuItem>()
-                       {
-                           new ToolStripMenuItem(
-                LabelFor(target), (Image) null,
-                (sender, e) => TCI(sender, e, target))
-                       {
-                           Enabled = IsEnabled(target),
-                                   ToolTipText = ToolTipText(target)
-                               }
-                       };
+            {
+                new ToolStripMenuItem(LabelFor(target), (Image) null, (sender, e) => TCI(sender, e, target))
+                {
+                    Enabled = IsEnabled(target), ToolTipText = ToolTipText(target)
+                }
+            };
         }
 
         private void TCI(object sender, EventArgs e, object target)

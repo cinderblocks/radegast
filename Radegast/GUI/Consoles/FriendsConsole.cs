@@ -178,7 +178,7 @@ namespace Radegast
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.Get(e.Friend.UUID, true);
+                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.Friend.UUID, name + " is offline");
@@ -202,7 +202,7 @@ namespace Radegast
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.Get(e.Friend.UUID, true);
+                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.Friend.UUID, name + " is online");
@@ -224,7 +224,7 @@ namespace Radegast
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.Get(e.AgentID, true);
+                string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.AgentID, name + " is no longer on your friend list");

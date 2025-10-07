@@ -195,7 +195,10 @@ namespace Radegast
             chatHistory.Add(msg);
             chatPointer = chatHistory.Count;
 
-            if (instance.RLV.RestictionActive("sendim")) return;
+            if (instance.RLV.Enabled && !instance.RLV.Permissions.CanSendIM(msg, null))
+            {
+                return;
+            }
 
             string message = msg.Replace(ChatInputBox.NewlineMarker, "\n");
 

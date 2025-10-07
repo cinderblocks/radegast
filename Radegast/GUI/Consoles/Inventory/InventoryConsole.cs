@@ -960,6 +960,7 @@ namespace Radegast
                         {
                             await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
                         }
+                        UpdateLabelsFor(item);
                     }, UpdateWornLabels);
                     break;
 
@@ -1371,14 +1372,16 @@ namespace Radegast
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (IsAttached(item) && instance.RLV.AllowDetach(item))
+                    if (IsAttached(item) && instance.COF.CanDetachItem(item).Result)
                     {
                         ctxItem =
                             new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (!IsAttached(item) && (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment))
+                    if (!IsAttached(item) &&
+                        (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
+                        instance.COF.CanAttachItem(item).Result)
                     {
                         ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
                         ctxInv.Items.Add(ctxItemAttach);
@@ -1444,8 +1447,7 @@ namespace Radegast
 
                         if (IsWorn(wearable))
                         {
-                            ctxItem =
-                                new ToolStripMenuItem("Take off", null, OnInvContextClick) {Name = "wearable_take_off"};
+                            ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
                             ctxInv.Items.Add(ctxItem);
                         }
                         else
@@ -1475,7 +1477,6 @@ namespace Radegast
                                     ctxInv.Items.Add(ctxItem);
                                     break;
                             }
-
                         }
                     }
 
@@ -1735,6 +1736,8 @@ namespace Radegast
                         RunBackgroundTask(async (cancellationToken) =>
                         {
                             await instance.COF.Detach(item, cancellationToken);
+
+                            UpdateLabelsFor(item);
                         }, UpdateWornLabels);
                         break;
 
@@ -1775,6 +1778,8 @@ namespace Radegast
                         RunBackgroundTask(async (cancellationToken) =>
                         {
                             await instance.COF.RemoveFromOutfit(item, cancellationToken);
+
+                            UpdateLabelsFor(item);
                         }, UpdateWornLabels);
                         break;
 
@@ -2014,14 +2019,63 @@ namespace Radegast
             invTree.BeginUpdate();
             foreach (var wearable in Client.Appearance.GetWearables())
             {
-                TreeNode node = FindNodeForItem(wearable.ItemID);
-                if (node != null)
-                {
-                    node.Text = ItemLabel((InventoryBase) node.Tag, false);
-                }
-
+                UpdateLabelsFor(wearable, suspendLayout: false);
             }
             invTree.EndUpdate();
+        }
+
+        private void UpdateLabelsFor(OpenMetaverse.AppearanceManager.WearableData wearable, bool suspendLayout = true)
+        {
+            UUID itemUUID = wearable.AssetType == AssetType.Link ? wearable.AssetID : wearable.ItemID;
+            UpdateLabelsFor(itemUUID, suspendLayout);
+        }
+
+        private void UpdateLabelsFor(InventoryBase item, bool suspendLayout = true)
+        {
+            UUID itemUUID = item.UUID;
+            if (item is InventoryItem inventoryItem)
+            {
+                itemUUID = inventoryItem.ActualUUID;
+            }
+
+            UpdateLabelsFor(itemUUID, suspendLayout);
+        }
+
+        private void UpdateLabelsFor(UUID assertId, bool suspendLayout = true)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new MethodInvoker(() => UpdateLabelsFor(assertId)));
+                return;
+            }
+
+            if (suspendLayout)
+            {
+                invTree.SuspendLayout();
+            }
+
+            TreeNode itemNode = FindNodeForItem(assertId);
+            if (itemNode != null)
+            {
+                itemNode.Text = ItemLabel((InventoryBase)itemNode.Tag, false);
+            }
+
+            List<InventoryNode> links = Client.Inventory.Store.FindAllLinks(assertId);
+            foreach (var link in links)
+            {
+                if (link.Data is InventoryItem item)
+                {
+                    TreeNode linkNode = FindNodeForItem(item.UUID);
+                    if (linkNode != null)
+                    {
+                        linkNode.Text = ItemLabel((InventoryBase)linkNode.Tag, false);
+                    }
+                }
+            }
+            if (suspendLayout)
+            {
+                invTree.EndUpdate();
+            }
         }
 
         private void TreeView_AfterExpand(object sender, TreeViewEventArgs e)
@@ -2084,6 +2138,12 @@ namespace Radegast
 
         private void invTree_AfterLabelEdit(object sender, NodeLabelEditEventArgs e)
         {
+            // Sometimes its null on inventory refresh.
+            if (e.Node is null)
+            {
+                return;
+            }
+
             if (string.IsNullOrEmpty(e.Label))
             {
                 if (e.Node.Tag is InventoryBase tag)

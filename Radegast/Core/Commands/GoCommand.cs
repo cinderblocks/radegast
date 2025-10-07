@@ -210,7 +210,7 @@ Examples:
                     Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
                     var target = Objects.GetObjects().FirstOrDefault(
                         prim => prim.Properties != null
-                                && prim.Properties.Name.IndexOf(cmd, StringComparison.OrdinalIgnoreCase) >= 0);
+                                && prim.Properties.Name.IndexOf(subarg, StringComparison.OrdinalIgnoreCase) >= 0);
                     if (target == null)
                     {
                         WriteLine("Could not find '{0}' nearby", subarg);

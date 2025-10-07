@@ -552,6 +552,11 @@ namespace Radegast.Rendering
                         SafeInvalidate();
                     });
 
+                    if (Disposing || IsDisposed)
+                    {
+                        break;
+                    }
+
                     if (!instance.MonoRuntime || IsHandleCreated)
                     {
                         BeginInvoke(loadOnMainThread);
