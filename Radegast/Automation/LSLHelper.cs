@@ -141,7 +141,7 @@ namespace Radegast.Automation
                                     client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, sendTo, true);
                                     ThreadPool.QueueUserWorkItem(sync =>
                                         instance.TabConsole.DisplayNotificationInChat(
-                                            $"Gave {item.Name} to {instance.Names.Get(sendTo, true)}",
+                                            $"Gave {item.Name} to {instance.Names.GetAsync(sendTo).GetAwaiter().GetResult()}",
                                             ChatBufferTextStyle.ObjectChat)
                                     );
                                     return true;
@@ -218,13 +218,13 @@ namespace Radegast.Automation
                         if (Members != null && Members.ContainsKey(invitee))
                         {
                             instance.TabConsole.DisplayNotificationInChat(
-                                $"Not inviting {instance.Names.Get(invitee, true)} ({invitee}) to {instance.Groups[groupID].Name} ({groupID}), already member",
+                                $"Not inviting {instance.Names.GetAsync(invitee).GetAwaiter().GetResult()} ({invitee}) to {instance.Groups[groupID].Name} ({groupID}), already member",
                                 ChatBufferTextStyle.ObjectChat);
                         }
                         else
                         {
                             instance.TabConsole.DisplayNotificationInChat(
-                                $"Inviting {instance.Names.Get(invitee, true)} ({invitee}) to {instance.Groups[groupID].Name} ({groupID})",
+                                $"Inviting {instance.Names.GetAsync(invitee).GetAwaiter().GetResult()} ({invitee}) to {instance.Groups[groupID].Name} ({groupID})",
                                 ChatBufferTextStyle.ObjectChat);
                             client.Groups.Invite(groupID, new List<UUID>(1) { roleID }, invitee);
                         }
