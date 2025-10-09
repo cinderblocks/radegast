@@ -813,25 +813,22 @@ namespace Radegast
             }
 
             // Add link to outfit folder we're putting on
-            if (newOutfitFolderNode != null)
-            {
-                client.Inventory.CreateLink(
-                    currentOutfitFolder.UUID,
-                    newOutfitFolderNode.Data.UUID,
-                    newOutfitFolderNode.Data.Name,
-                    "",
-                    InventoryType.Folder,
-                    UUID.Random(),
-                    (success, newItem) =>
+            client.Inventory.CreateLink(
+                currentOutfitFolder.UUID,
+                newOutfitFolderNode.Data.UUID,
+                newOutfitFolderNode.Data.Name,
+                "",
+                InventoryType.Folder,
+                UUID.Random(),
+                (success, newItem) =>
+                {
+                    if (success)
                     {
-                        if (success)
-                        {
-                            client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
-                        }
-                    },
-                    cancellationToken
-                );
-            }
+                        client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
+                    }
+                },
+                cancellationToken
+            );
 
             // Wear new outfit
             var tcs = new TaskCompletionSource<bool>();
@@ -845,7 +842,7 @@ namespace Radegast
                 client.Appearance.AppearanceSet += handleAppearanceSet;
                 client.Appearance.ReplaceOutfit(itemsToWear.Values.ToList(), false);
 
-                var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
+                var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000, cancellationToken));
                 if (completedTask != tcs.Task)
                 {
                     Logger.Log("Timed out while waiting for AppearanceSet confirmation. Are you changing outfits too quickly?", Helpers.LogLevel.Error, client);

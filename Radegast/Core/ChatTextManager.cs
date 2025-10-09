@@ -255,7 +255,7 @@ namespace Radegast
                     {
                         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
                         {
-                            await instance.RLV.ProcessCMD(e);
+                            await instance.RLV.ProcessCMD(e, cts.Token);
                         }
                     }
                     catch (TaskCanceledException ex)

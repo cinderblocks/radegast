@@ -147,10 +147,6 @@ namespace Radegast.Core.RLV
                 .Where(n => n.Name == "AttachItemID" && n.Value != null && n.Value is string)
                 .Select(n => new UUID(n.Value as string))
                 .FirstOrDefault();
-            if (attachItemId == null)
-            {
-                return;
-            }
 
             if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
@@ -181,10 +177,6 @@ namespace Radegast.Core.RLV
                 .Where(n => n.Name == "AttachItemID" && n.Value != null && n.Value is string)
                 .Select(n => new UUID(n.Value as string))
                 .FirstOrDefault();
-            if (attachItemId == null)
-            {
-                return;
-            }
 
             if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
