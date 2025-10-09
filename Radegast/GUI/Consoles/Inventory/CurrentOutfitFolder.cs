@@ -451,7 +451,7 @@ namespace Radegast
 
             var realItem = instance.COF.ResolveInventoryLink(item);
 
-            if (!(realItem is InventoryItem))
+            if (realItem == null)
             {
                 return false;
             }

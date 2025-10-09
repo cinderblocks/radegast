@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Text;
 
 using OpenMetaverse;
@@ -145,6 +146,8 @@ Example:
         {
             public int Compare(InventoryLandmark lm1, InventoryLandmark lm2)
             {
+                Debug.Assert(lm1 != null, nameof(lm1) + " != null");
+                Debug.Assert(lm2 != null, nameof(lm2) + " != null");
                 return DateTime.Compare(lm1.CreationDate, lm2.CreationDate);
             }
         }

@@ -2169,7 +2169,7 @@ namespace Radegast.Rendering
 
         public static Vector3 XmlParseVector(string data)
         {
-            string[] posparts = data.Split(new char[0], StringSplitOptions.RemoveEmptyEntries);
+            string[] posparts = data.Split(Array.Empty<char>(), StringSplitOptions.RemoveEmptyEntries);
             return new Vector3(float.Parse(posparts[0], Utils.EnUsCulture), float.Parse(posparts[1], Utils.EnUsCulture), float.Parse(posparts[2], Utils.EnUsCulture));
         }
 

@@ -43,15 +43,13 @@ namespace Radegast.Plugin.Alice
             }
             else
             {
-                FriendInfo fi = target as FriendInfo;
-                uuid =fi.UUID;
+                if (target is FriendInfo fi) { uuid = fi.UUID; }
                 username = instance.Names.Get(uuid);
 
             }
             if (username==null)
             {
-                instance.TabConsole.DisplayNotificationInChat("I dont know how to DeRef " + target + " bieng a  " +
-                                                              target.GetType());                               
+                instance.TabConsole.DisplayNotificationInChat($"I don't know how to DeRef {target} being a {target.GetType()}");                               
                 return;
             }
             string outp = username + ", " + aimlBot.Chat("INTERJECTION", username).Output;

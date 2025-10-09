@@ -186,7 +186,7 @@ namespace Radegast.Media
                 if (OnSpeechDone != null)
                     try
                     {
-                        OnSpeechDone(this, new EventArgs());
+                        OnSpeechDone(this, EventArgs.Empty);
                     }
                     catch (Exception) { }
             });
