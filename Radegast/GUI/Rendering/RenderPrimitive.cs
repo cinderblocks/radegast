@@ -120,14 +120,7 @@ namespace Radegast.Rendering
             float numFrames = 1f;
             float fullLength = 1f;
 
-            if (PrimAnimInfo.Length > 0)
-            {
-                numFrames = PrimAnimInfo.Length;
-            }
-            else
-            {
-                numFrames = Math.Max(1f, (float)(PrimAnimInfo.SizeX * PrimAnimInfo.SizeY));
-            }
+            numFrames = PrimAnimInfo.Length > 0 ? PrimAnimInfo.Length : Math.Max(1f, PrimAnimInfo.SizeX * PrimAnimInfo.SizeY);
 
             if ((PrimAnimInfo.Flags & Primitive.TextureAnimMode.PING_PONG) != 0)
             {

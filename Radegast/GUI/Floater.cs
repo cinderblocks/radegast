@@ -135,14 +135,7 @@ namespace Radegast
             Rectangle mainRect = new Rectangle(new Point(mainLeft, mainTop), mainSize);
             Rectangle myRect = new Rectangle(new Point(Left, Top), Size);
 
-            if (mainRect == Rectangle.Union(mainRect, myRect))
-            {
-                DockedToMain = true;
-            }
-            else
-            {
-                DockedToMain = false;
-            }
+            DockedToMain = mainRect == Rectangle.Union(mainRect, myRect);
         }
     }
 }

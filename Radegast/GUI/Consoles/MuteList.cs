@@ -140,14 +140,7 @@ namespace Radegast
 
         private void lvMuteList_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (lvMuteList.SelectedItems.Count == 0)
-            {
-                btnUnmute.Enabled = false;
-            }
-            else
-            {
-                btnUnmute.Enabled = true;
-            }
+            btnUnmute.Enabled = lvMuteList.SelectedItems.Count != 0;
         }
 
         private void txtMuteByName_KeyDown(object sender, KeyEventArgs e)

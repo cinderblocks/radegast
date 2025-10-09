@@ -165,10 +165,7 @@ namespace RadegastSpeech
 
                 // TODO Deal with neuter voices
                 // TODO Deal with multiple languages.
-                if (gender == NSSpeechSynthesizer.NSVoiceGenderMale)
-                    Male = true;
-                else
-                    Male = false;
+                Male = gender == NSSpeechSynthesizer.NSVoiceGenderMale;
             }
         }
     }

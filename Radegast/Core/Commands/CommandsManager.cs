@@ -222,12 +222,7 @@ namespace Radegast.Commands
 
         private void WriteLine(string fmt, object[] args)
         {
-            String str;
-
-            if (args.Length == 0)
-                str = fmt;
-            else
-                str = String.Format(fmt, args);
+            var str = args.Length == 0 ? fmt : string.Format(fmt, args);
 
             str = str.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", Environment.NewLine).TrimEnd();
             instance.TabConsole.DisplayNotificationInChat(str);

@@ -201,15 +201,9 @@ namespace Radegast
                     MeshedPrims.Add(mesh);
                 }
 
-                string msg;
-                if (MeshedPrims.Count == 0)
-                {
-                    msg = string.Format("Can export 0 out of {0} prims.{1}{1}Skipping.", Prims.Count, Environment.NewLine);
-                }
-                else
-                {
-                    msg = string.Format("Exported {0} out of {1} objects to{2}{2}{3}", MeshedPrims.Count, Prims.Count, Environment.NewLine, FileName);
-                }
+                string msg = MeshedPrims.Count == 0 
+                    ? string.Format("Can export 0 out of {0} prims.{1}{1}Skipping.", Prims.Count, Environment.NewLine) 
+                    : string.Format("Exported {0} out of {1} objects to{2}{2}{3}", MeshedPrims.Count, Prims.Count, Environment.NewLine, FileName);
                 GenerateCollada();
                 File.WriteAllText(FileName, DocToString(Doc));
                 OnProgress(msg);

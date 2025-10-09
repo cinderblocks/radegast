@@ -96,20 +96,9 @@ namespace Radegast
             lastPrimLLUUID.Text = selectedID.ToString();
             lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
             sitBitn.Enabled = true;
-            if (selectedPrim.ParentID != 0) {
-                objInfoBtn.Enabled = true;
-            } else {
-                objInfoBtn.Enabled = false;
-            }
+            objInfoBtn.Enabled = selectedPrim.ParentID != 0;
             touchBtn.Enabled = true;
-            if ((selectedPrim.Flags & PrimFlags.Money) != 0)
-            {
-                payBtn.Enabled = true;
-            }
-            else
-            {
-                payBtn.Enabled = false;
-            }
+            payBtn.Enabled = (selectedPrim.Flags & PrimFlags.Money) != 0;
             saveBtn.Enabled = true;
             if (selectedPrim.Textures != null) {
                 texturesBtn.Enabled = true;
