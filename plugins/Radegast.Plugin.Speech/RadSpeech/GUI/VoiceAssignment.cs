@@ -146,10 +146,7 @@ namespace RadegastSpeech.GUI
 
             voiceName = (string)voiceList.SelectedItem;
             voice = library[voiceName];
-            if (voice.Male)
-                gender.Text = "M";
-            else
-                gender.Text = "F";
+            gender.Text = voice.Male ? "M" : "F";
 
             // Reset the modifiers.
             rateModification = 0;

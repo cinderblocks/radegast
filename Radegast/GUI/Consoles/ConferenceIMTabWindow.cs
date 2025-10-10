@@ -125,14 +125,7 @@ namespace Radegast
 
             cbxInput.Enabled = true;
 
-            if (cbxInput.Text.Length > 0)
-            {
-                btnSend.Enabled = true;
-            }
-            else
-            {
-                btnSend.Enabled = false;
-            }
+            btnSend.Enabled = cbxInput.Text.Length > 0;
         }
 
         void ChatHistoryPrev()

@@ -311,14 +311,7 @@ namespace Radegast
                 nudEnrollmentFee.Value = 0;
             }
 
-            if (group.MaturePublish)
-            {
-                cbxMaturity.SelectedIndex = 1;
-            }
-            else
-            {
-                cbxMaturity.SelectedIndex = 0;
-            }
+            cbxMaturity.SelectedIndex = group.MaturePublish ? 1 : 0;
 
             btnJoin.Enabled = btnJoin.Visible = false;
 
@@ -654,10 +647,9 @@ namespace Radegast
                     break;
 
                 case 1:
-                    if (lb.Name == "lvwMemberDetails")
-                        memberSorter.SortBy = GroupMemberSorter.SortByColumn.Contribution;
-                    else
-                        memberSorter.SortBy = GroupMemberSorter.SortByColumn.Title;
+                    memberSorter.SortBy = lb.Name == "lvwMemberDetails"
+                        ? GroupMemberSorter.SortByColumn.Contribution 
+                        : GroupMemberSorter.SortByColumn.Title;
                     break;
 
                 case 2:
@@ -665,10 +657,9 @@ namespace Radegast
                     break;
             }
 
-            if (memberSorter.CurrentOrder == GroupMemberSorter.SortOrder.Ascending)
-                memberSorter.CurrentOrder = GroupMemberSorter.SortOrder.Descending;
-            else
-                memberSorter.CurrentOrder = GroupMemberSorter.SortOrder.Ascending;
+            memberSorter.CurrentOrder = memberSorter.CurrentOrder == GroupMemberSorter.SortOrder.Ascending 
+                ? GroupMemberSorter.SortOrder.Descending 
+                : GroupMemberSorter.SortOrder.Ascending;
 
             GroupMembers.Sort(memberSorter);
             lb.Invalidate();
@@ -694,10 +685,9 @@ namespace Radegast
                     break;
             }
 
-            if (sorter.CurrentOrder == GroupNoticeSorter.SortOrder.Ascending)
-                sorter.CurrentOrder = GroupNoticeSorter.SortOrder.Descending;
-            else
-                sorter.CurrentOrder = GroupNoticeSorter.SortOrder.Ascending;
+            sorter.CurrentOrder = sorter.CurrentOrder == GroupNoticeSorter.SortOrder.Ascending 
+                ? GroupNoticeSorter.SortOrder.Descending
+                : GroupNoticeSorter.SortOrder.Ascending;
 
             lvwNoticeArchive.Sort();
         }

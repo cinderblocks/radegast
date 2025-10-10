@@ -206,15 +206,8 @@ namespace Radegast.Rendering
 
             try
             {
-                if (GLMode == null)
-                {
-                    // Try default mode
-                    glControl = new OpenTK.GLControl();
-                }
-                else
-                {
-                    glControl = new OpenTK.GLControl(GLMode);
-                }
+                // Try default mode
+                glControl = GLMode == null ? new OpenTK.GLControl() : new OpenTK.GLControl(GLMode);
             }
             catch (Exception ex)
             {

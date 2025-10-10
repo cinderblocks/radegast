@@ -98,7 +98,7 @@ namespace Radegast
                     if (!lease.IsAcquired)
                     {
                         Logger.Log("Unable to require rate limit lease in name manager.", Helpers.LogLevel.Warning, Client);
-                        await Task.Delay(1000);
+                        await Task.Delay(1000, cancellationToken);
                         continue;
                     }
 
@@ -116,7 +116,7 @@ namespace Radegast
             {
                 if (!reader.TryRead(out UUID nextAvatarId))
                 {
-                    await Task.Delay(5);
+                    await Task.Delay(5, cancellationToken);
                     continue;
                 }
 
@@ -260,7 +260,7 @@ namespace Radegast
             await Task.WhenAll(backlogTask, cacheUpdateTask);
             instance.ClientChanged -= Instance_ClientChanged;
             DeregisterEvents(Client);
-            rateLimiter.Dispose();
+            await rateLimiter.DisposeAsync();
         }
 
         /// <summary>
@@ -344,7 +344,7 @@ namespace Radegast
 
                 try
                 {
-                    Task completedTask = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(5)));
+                    Task completedTask = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
                     if (completedTask == tcs.Task)
                     {
                         return await tcs.Task;

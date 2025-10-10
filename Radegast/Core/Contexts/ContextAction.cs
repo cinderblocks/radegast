@@ -182,7 +182,7 @@ namespace Radegast
         }
         public Primitive ToPrimitive(object target)
         {
-            Primitive prim = ((target is Primitive primitive) ? primitive : null);
+            Primitive prim = (target as Primitive);
             if (prim != null) { return prim; }
             var oo = DeRef(target);
             if (oo != target)
@@ -266,7 +266,7 @@ namespace Radegast
                 uuid = ToUUID(oo);
                 if (uuid != UUID.Zero) return uuid;
             }
-            string str = ((target is string s) ? s : null);
+            string str = (target as string);
             if (!string.IsNullOrEmpty(str))
             {
                 if (UUID.TryParse(str, out uuid))

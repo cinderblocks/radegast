@@ -63,8 +63,8 @@ namespace RadegastSpeech.Conversation
         void OnSessionCreate(object sender, EventArgs e)
         {
             session = sender as VoiceSession;
-            control.talker.Say("Voice started in " + session.RegionName);
-//            session.OnParticipantAdded += new EventHandler(session_OnParticipantAdded);
+            if (session != null) { control.talker.Say("Voice started in " + session.RegionName); }
+            //            session.OnParticipantAdded += new EventHandler(session_OnParticipantAdded);
         }
 
         void gateway_OnSessionRemove(object sender, EventArgs e)
@@ -76,10 +76,11 @@ namespace RadegastSpeech.Conversation
 
         void session_OnParticipantAdded(object sender, EventArgs e)
         {
-            VoiceParticipant p = sender as VoiceParticipant;
-
-            string pName = p.Name ?? control.instance.Names.Get(p.ID);
-            control.talker.SayMore(pName + " is in voice range.");
+            if (sender is VoiceParticipant p)
+            {
+                string pName = p.Name ?? control.instance.Names.Get(p.ID);
+                control.talker.SayMore(pName + " is in voice range.");
+            }
         }
 
         #endregion

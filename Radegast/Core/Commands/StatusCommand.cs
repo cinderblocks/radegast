@@ -179,11 +179,7 @@ namespace Radegast.Commands
                         }
                     }
 
-                    DateTime now;
-                    if (SLTime != null)
-                        now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, SLTime);
-                    else
-                        now = DateTime.UtcNow.AddHours(-7);
+                    DateTime now = SLTime != null ? TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, SLTime) : DateTime.UtcNow.AddHours(-7);
 
                     sb.AppendLine(string.Format("Current time is " + now.ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture)));
                 }

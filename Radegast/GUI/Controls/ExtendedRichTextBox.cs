@@ -1308,14 +1308,8 @@ namespace Radegast
 
             // If the font's family corresponds to an RTF family, append the
             // RTF family name, else, append the RTF for unknown font family.
-            if (rtfFontFamily.ContainsKey(_font.FontFamily.Name))
-            {
-                _fontTable.Append(rtfFontFamily[_font.FontFamily.Name]);
-            }
-            else
-            {
-                _fontTable.Append(rtfFontFamily[FF_UNKNOWN]);
-            }
+            _fontTable.Append(rtfFontFamily.TryGetValue(_font.FontFamily.Name, out var name)
+                ? name : rtfFontFamily[FF_UNKNOWN]);
 
             // \fcharset specifies the character set of a font in the font table.
             // 0 is for ANSI.

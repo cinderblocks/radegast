@@ -297,10 +297,7 @@ namespace RadegastSpeech.Talk
             bool male = control.env.people.isMale(id);
             if (GenderAvailable( male ))
             {
-                if (male)
-                    chosen = maleVoiceLibrary[maleIndex[GetRandom(maleIndex.Length)]];
-                else
-                    chosen = femaleVoiceLibrary[femaleIndex[GetRandom(femaleIndex.Length)]];
+                chosen = male ? maleVoiceLibrary[maleIndex[GetRandom(maleIndex.Length)]] : femaleVoiceLibrary[femaleIndex[GetRandom(femaleIndex.Length)]];
 
                 return AddVariation(chosen);
             }

@@ -520,16 +520,7 @@ namespace Radegast
                 FindHistory[startPos.Term] = startPos;
             }
 
-            StringComparison type;
-
-            if (tfindMatchCase.Checked)
-            {
-                type = StringComparison.Ordinal;
-            }
-            else
-            {
-                type = StringComparison.OrdinalIgnoreCase;
-            }
+            StringComparison type = tfindMatchCase.Checked ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
             if (FindHistory.ContainsKey(st))
             {

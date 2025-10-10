@@ -255,10 +255,7 @@ namespace Radegast
 
         private void txtSearchPlace_TextChanged(object sender, EventArgs e)
         {
-            if (txtSearchPlace.Text.Length > 0)
-                btnSearchPlace.Enabled = true;
-            else
-                btnSearchPlace.Enabled = false;
+            btnSearchPlace.Enabled = txtSearchPlace.Text.Length > 0;
         }
 
         // StartPlacesSearch(DirFindFlags findFlags, ParcelCategory searchCategory, string searchText, string simulatorName, UUID groupID, UUID transactionID)
@@ -351,10 +348,8 @@ namespace Radegast
                     break;
             }
 
-            if (sorter.CurrentOrder == PlaceSorter.SortOrder.Ascending)
-                sorter.CurrentOrder = PlaceSorter.SortOrder.Descending;
-            else
-                sorter.CurrentOrder = PlaceSorter.SortOrder.Ascending;
+            sorter.CurrentOrder = sorter.CurrentOrder == PlaceSorter.SortOrder.Ascending
+                ? PlaceSorter.SortOrder.Descending : PlaceSorter.SortOrder.Ascending;
 
             lvwPlaces.Sort();
 
@@ -442,14 +437,7 @@ namespace Radegast
 
         private void txtSearchGroup_TextChanged(object sender, EventArgs e)
         {
-            if (txtSearchGroup.Text.Length > 1)
-            {
-                btnSearchGroup.Enabled = true;
-            }
-            else
-            {
-                btnSearchGroup.Enabled = false;
-            }
+            btnSearchGroup.Enabled = txtSearchGroup.Text.Length > 1;
         }
 
         private void btnPrevGroup_Click(object sender, EventArgs e)
@@ -508,10 +496,8 @@ namespace Radegast
                     break;
             }
 
-            if (sorter.CurrentOrder == GroupSorter.SortOrder.Ascending)
-                sorter.CurrentOrder = GroupSorter.SortOrder.Descending;
-            else
-                sorter.CurrentOrder = GroupSorter.SortOrder.Ascending;
+            sorter.CurrentOrder = sorter.CurrentOrder == GroupSorter.SortOrder.Ascending 
+                ? GroupSorter.SortOrder.Descending : GroupSorter.SortOrder.Ascending;
 
             lvwGroups.Sort();
         }

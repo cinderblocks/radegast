@@ -623,14 +623,7 @@ namespace Radegast
                 return false;
             }
 
-            if (makeActive)
-            {
-                instance.MediaManager.PlayUISound(UISounds.IMWindow);
-            }
-            else
-            {
-                instance.MediaManager.PlayUISound(UISounds.IM);
-            }
+            instance.MediaManager.PlayUISound(makeActive ? UISounds.IMWindow : UISounds.IM);
 
             Control active = FindFocusedControl(instance.MainForm);
 

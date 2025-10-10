@@ -224,13 +224,12 @@ namespace Radegast
 						// TODO: Is there a way to set all of this at once, and update more ObjectProperties stuff?
 						Client.Objects.SetPosition(e.Simulator, prim.LocalID, currentPosition);
 						if (TextureUse == TextureSet.NewUUID)
-						{
-							if (Textures[currentPrim.Textures.DefaultTexture.TextureID] == UUID.Zero)
-								currentPrim.Textures.DefaultTexture.TextureID = Primitive.TextureEntry.WHITE_TEXTURE;
-							else
-								currentPrim.Textures.DefaultTexture.TextureID = Textures[currentPrim.Textures.DefaultTexture.TextureID];
-							
-							for (int j = 0; j < currentPrim.Textures.FaceTextures.Length; j++)
+                        {
+                            currentPrim.Textures.DefaultTexture.TextureID = Textures[currentPrim.Textures.DefaultTexture.TextureID] == UUID.Zero
+                                ? Primitive.TextureEntry.WHITE_TEXTURE 
+                                : Textures[currentPrim.Textures.DefaultTexture.TextureID];
+
+                            for (int j = 0; j < currentPrim.Textures.FaceTextures.Length; j++)
 							{
 								if (currentPrim.Textures.FaceTextures[j] != null &&
 								    currentPrim.Textures.FaceTextures[j].TextureID != Primitive.TextureEntry.WHITE_TEXTURE)
@@ -241,7 +240,7 @@ namespace Radegast
 										currentPrim.Textures.FaceTextures[j].TextureID = Textures[currentPrim.Textures.FaceTextures[j].TextureID];
 								}
 							}
-						}
+                        }
 						else if (TextureUse == TextureSet.WhiteUUID || TextureUse == TextureSet.SculptUUID)
 						{
 							currentPrim.Textures.DefaultTexture.TextureID = Primitive.TextureEntry.WHITE_TEXTURE;
@@ -265,12 +264,11 @@ namespace Radegast
 						if (currentPrim.Sculpt != null && currentPrim.Sculpt.SculptTexture != UUID.Zero)
 						{
 							if (TextureUse == TextureSet.NewUUID || TextureUse == TextureSet.SculptUUID)
-							{
-								if (Textures[currentPrim.Sculpt.SculptTexture] == UUID.Zero)
-									currentPrim.Sculpt.SculptTexture = Primitive.TextureEntry.WHITE_TEXTURE;
-								else
-									currentPrim.Sculpt.SculptTexture = Textures[currentPrim.Sculpt.SculptTexture];
-							}
+                            {
+                                currentPrim.Sculpt.SculptTexture = Textures[currentPrim.Sculpt.SculptTexture] == UUID.Zero 
+                                    ? Primitive.TextureEntry.WHITE_TEXTURE 
+                                    : Textures[currentPrim.Sculpt.SculptTexture];
+                            }
 							else if (TextureUse == TextureSet.WhiteUUID)
 								currentPrim.Sculpt.SculptTexture = Primitive.TextureEntry.WHITE_TEXTURE;
 							
