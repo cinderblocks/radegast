@@ -94,8 +94,6 @@ namespace Radegast
                 ThreadPool.SetMaxThreads(workerThreads, iocpThreads);
             }
 
-            SKBitmapImageCreator.Register();
-
             // Change current working directory to Radegast install dir
             Directory.SetCurrentDirectory(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) 
                                           ?? throw new InvalidOperationException());
