@@ -354,14 +354,9 @@ namespace Radegast
             return ret;
         }
 
-        public IDictionaryEnumerator GetEnumerator()
+        public IEnumerator<KeyValuePair<string, OSD>> GetEnumerator()
         {
-            return SettingsData.GetEnumerator();
-        }
-
-        IEnumerator<KeyValuePair<string, OSD>> IEnumerable<KeyValuePair<string, OSD>>.GetEnumerator()
-        {
-            return null;
+            throw new NotImplementedException();
         }
 
         IEnumerator IEnumerable.GetEnumerator()
