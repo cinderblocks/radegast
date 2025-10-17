@@ -21,7 +21,6 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using Radegast;
 using OpenMetaverse;
 
 namespace Radegast

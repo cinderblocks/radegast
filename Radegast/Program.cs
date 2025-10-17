@@ -25,7 +25,6 @@ using System.Reflection;
 using CommandLine;
 using CommandLine.Text;
 using System.Threading;
-using CoreJ2K.Util;
 using OpenMetaverse;
 
 namespace Radegast
