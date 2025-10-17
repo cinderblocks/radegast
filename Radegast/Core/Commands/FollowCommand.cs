@@ -25,7 +25,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class FollowCommand : RadegastCommand
+    public sealed class FollowCommand : RadegastCommand
     {
         TabsConsole TC => Instance.TabConsole;
         ChatConsole Chat;

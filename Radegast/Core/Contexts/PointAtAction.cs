@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class PointAtAction : ContextAction
+    public sealed class PointAtAction : ContextAction
     {
         public PointAtAction(RadegastInstance inst)
             : base(inst)

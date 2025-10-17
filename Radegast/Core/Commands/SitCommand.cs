@@ -24,7 +24,7 @@ using System.Windows.Forms;
 
 namespace Radegast.Commands
 {
-    public class SitCommand : RadegastCommand
+    public sealed class SitCommand : RadegastCommand
     {
         TabsConsole TC => Instance.TabConsole;
         ObjectsConsole Objects;

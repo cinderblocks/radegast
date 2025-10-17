@@ -24,7 +24,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class SimInfoCommand : RadegastCommand
+    public sealed class SimInfoCommand : RadegastCommand
     {
         private RadegastInstance instance;
 

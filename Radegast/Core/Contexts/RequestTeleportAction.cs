@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class RequestTeleportAction : ContextAction
+    public sealed class RequestTeleportAction : ContextAction
     {
         public RequestTeleportAction(RadegastInstance inst)
             : base(inst)
@@ -41,7 +41,7 @@ namespace Radegast
         {
             UUID id = ToUUID(target);
             instance.MainForm.AddNotification(new ntfSendLureRequest(instance, id));
-            instance.TabConsole.DisplayNotificationInChat(string.Format("Sent Teleport Request to {0}", id));
+            instance.TabConsole.DisplayNotificationInChat($"Sent Teleport Request to {id}");
         }
     }
 }

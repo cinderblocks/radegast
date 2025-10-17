@@ -171,7 +171,7 @@ namespace Radegast.Commands
         }
     }
 
-    public class PauseCommand : RadegastCommand
+    public sealed class PauseCommand : RadegastCommand
     {
         public PauseCommand(RadegastInstance inst)
             : base(inst)
