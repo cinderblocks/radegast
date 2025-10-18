@@ -1000,7 +1000,7 @@ namespace Radegast.Rendering
             GL.MatrixMode(MatrixMode.Projection);
             GL.PushMatrix();
             GL.LoadIdentity();
-            GL.Ortho(0, glControl != null ? glControl.Width : 0, 0, glControl != null ? glControl.Height : 0, -5, 1);
+            GL.Ortho(0, glControl?.Width ?? 0, 0, glControl?.Height ?? 0, -5, 1);
             GL.MatrixMode(MatrixMode.Modelview);
             GL.LoadIdentity();
         }
@@ -2283,7 +2283,7 @@ namespace Radegast.Rendering
             GL.EnableClientState(ArrayCap.NormalArray);
 
             var myPos = Vector3.Zero;
-            myPos = myself != null ? myself.RenderPosition : Client.Self.SimPosition;
+            myPos = myself?.RenderPosition ?? Client.Self.SimPosition;
 
             if (pass == RenderPass.Invisible)
             {

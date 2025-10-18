@@ -432,10 +432,7 @@ namespace Radegast
             Image tile = null;
 
             // Get and draw image tile
-            if (UseExternalTiles)
-                tile = GetRegionTileExternal(handle);
-            else
-                tile = GetRegionTile(handle);
+            tile = UseExternalTiles ? GetRegionTileExternal(handle) : GetRegionTile(handle);
 
             if (tile != null)
             {

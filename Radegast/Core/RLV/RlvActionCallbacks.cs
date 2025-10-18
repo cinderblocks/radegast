@@ -77,7 +77,7 @@ namespace Radegast.Core.RLV
         public async Task RemOutfitAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
             var items = GetInventoryItemsById(itemIds);
-            await instance.COF.RemoveFromOutfit(items);
+            await instance.COF.RemoveFromOutfit(items, cancellationToken);
         }
 
         public Task SendInstantMessageAsync(Guid targetUser, string message, CancellationToken cancellationToken)
@@ -115,7 +115,7 @@ namespace Radegast.Core.RLV
 
         public async Task SetGroupAsync(Guid groupId, string roleName, CancellationToken cancellationToken)
         {
-            if (groupId == null || groupId == Guid.Empty)
+            if (groupId == Guid.Empty)
             {
                 return;
             }

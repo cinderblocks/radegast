@@ -59,14 +59,7 @@ namespace Radegast
             }
 
 
-            if (msg.BinaryBucket.Length >= 18)
-            {
-                groupID = new UUID(msg.BinaryBucket, 2);
-            }
-            else
-            {
-                groupID = msg.FromAgentID;
-            }
+            groupID = msg.BinaryBucket.Length >= 18 ? new UUID(msg.BinaryBucket, 2) : msg.FromAgentID;
 
             int pos = msg.Message.IndexOf('|');
             string title = msg.Message.Substring(0, pos);
@@ -74,12 +67,12 @@ namespace Radegast
             string text = msg.Message.Replace("\n", System.Environment.NewLine);
             text = text.Remove(0, pos + 1);
 
-            lblSentBy.Text = string.Format("Sent by {0}", msg.FromAgentName);
+            lblSentBy.Text = $"Sent by {msg.FromAgentName}";
             txtNotice.Text = text;
 
-            if (instance.Groups.ContainsKey(groupID))
+            if (instance.Groups.TryGetValue(groupID, out var id))
             {
-                group = instance.Groups[groupID];
+                group = id;
                 ShowNotice();
             }
             else

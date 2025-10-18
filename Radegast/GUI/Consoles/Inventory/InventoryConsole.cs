@@ -622,17 +622,14 @@ namespace Radegast
                 {
                     var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
                     var tasks = folderKeys
-                        .Select(folderKey =>
-                        {
-                            return Client.Inventory.RequestFolderContents(
-                                folderKey,
-                                Client.Self.AgentID,
-                                true,
-                                true,
-                                InventorySortOrder.ByDate,
-                                inventoryUpdateCancelToken.Token
-                            );
-                        });
+                        .Select(folderKey => Client.Inventory.RequestFolderContents(
+                            folderKey,
+                            Client.Self.AgentID,
+                            true,
+                            true,
+                            InventorySortOrder.ByDate,
+                            inventoryUpdateCancelToken.Token
+                        ));
 
                     await Task.WhenAll(tasks);
                     TraverseAndQueueNodes(Client.Inventory.Store.RootNode);

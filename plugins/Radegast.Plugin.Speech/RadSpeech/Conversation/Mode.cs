@@ -117,11 +117,7 @@ namespace RadegastSpeech.Conversation
             // Say full name the first time we hear this person,
             // just the first name thereafter.  Non-persons always
             // say the full name.
-            string saythis;
-            if (Talker.voices.KnowThisPerson(id))
-                saythis = who.Split(' ')[0];
-            else
-                saythis = who;
+            string saythis = Talker.voices.KnowThisPerson(id) ? who.Split(' ')[0] : who;
 
             // Remove digits from names.
             saythis = BadNameChars.Replace(saythis, "");

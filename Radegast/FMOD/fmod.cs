@@ -10,6 +10,7 @@ using System;
 using System.Text;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace FMOD
 {
@@ -3899,23 +3900,14 @@ namespace FMOD
             }
         }
 
-        static List<ThreadSafeEncoding> encoders = new List<ThreadSafeEncoding>(1);
+        static readonly List<ThreadSafeEncoding> encoders = new List<ThreadSafeEncoding>(1);
 
         public static ThreadSafeEncoding GetFreeHelper()
         {
             lock (encoders)
             {
-                ThreadSafeEncoding helper = null;
-                // Search for not in use helper
-                for (int i = 0; i < encoders.Count; i++)
-                {
-                    if (!encoders[i].InUse())
-                    {
-                        helper = encoders[i];
-                        break;
-                    }
-                }
-                // Otherwise create another helper
+                // Search for not in use helper, otherwise create another helper
+                ThreadSafeEncoding helper = encoders.FirstOrDefault(encoder => !encoder.InUse());
                 if (helper == null)
                 {
                     helper = new ThreadSafeEncoding();

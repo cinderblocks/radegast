@@ -259,7 +259,7 @@ namespace Radegast.Plugin.IRC
                 newSource = new RelaySource(sourcetype + ": " + tab.Value.Label, sourcetype, sessionId);
 
                 if (sourcetype == RelaySourceType.IM)
-                    newSource.SessionId = (tab.Value.Control as IMTabWindow).TargetId;
+                    newSource.SessionId = ((IMTabWindow)tab.Value.Control).TargetId;
 
                 if (newSource == currentSource)
                     foundActive = true;

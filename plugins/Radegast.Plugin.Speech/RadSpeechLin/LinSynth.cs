@@ -66,10 +66,7 @@ namespace RadegastSpeech
 			string server = speech["server"].AsString() ?? "localhost:1314";
             string[] parts = server.Split(':');
 			serverhost = parts[0];
-			if (parts.Length>1)
-				serverport = parts[1];
-			else
-				serverport = "1314";
+			serverport = parts.Length>1 ? parts[1] : "1314";
             rateBias = speech["speed"].AsInteger();
  
             // Build the festival command line args

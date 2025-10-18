@@ -85,15 +85,12 @@ namespace Radegast
         public virtual IEnumerable<ToolStripMenuItem> GetToolItems(object target, Type type)
         {
             return new List<ToolStripMenuItem>()
-                       {
-                           new ToolStripMenuItem(
-                LabelFor(target), (Image) null,
-                (sender, e) => TCI(sender, e, target))
-                       {
-                           Enabled = IsEnabled(target),
-                                   ToolTipText = ToolTipText(target)
-                               }
-                       };
+            {
+                new ToolStripMenuItem(LabelFor(target), (Image) null, (sender, e) => TCI(sender, e, target))
+                {
+                    Enabled = IsEnabled(target), ToolTipText = ToolTipText(target)
+                }
+            };
         }
 
         private void TCI(object sender, EventArgs e, object target)
@@ -185,7 +182,7 @@ namespace Radegast
         }
         public Primitive ToPrimitive(object target)
         {
-            Primitive prim = ((target is Primitive primitive) ? primitive : null);
+            Primitive prim = (target as Primitive);
             if (prim != null) { return prim; }
             var oo = DeRef(target);
             if (oo != target)
@@ -269,7 +266,7 @@ namespace Radegast
                 uuid = ToUUID(oo);
                 if (uuid != UUID.Zero) return uuid;
             }
-            string str = ((target is string s) ? s : null);
+            string str = (target as string);
             if (!string.IsNullOrEmpty(str))
             {
                 if (UUID.TryParse(str, out uuid))

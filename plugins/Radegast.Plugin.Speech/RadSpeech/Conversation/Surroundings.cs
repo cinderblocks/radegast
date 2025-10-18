@@ -60,9 +60,6 @@ namespace RadegastSpeech.Conversation
         }
         #endregion
 
-        #region generalevents
-        #endregion
-
         #region focusevents
  
         /// <summary>
