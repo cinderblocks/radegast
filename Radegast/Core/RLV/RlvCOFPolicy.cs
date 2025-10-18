@@ -20,7 +20,9 @@
 
 using LibreMetaverse.RLV;
 using OpenMetaverse;
+using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast.Core.RLV
 {
@@ -97,6 +99,11 @@ namespace Radegast.Core.RLV
             }
 
             return true;
+        }
+
+        public async Task ReportItemChange(List<InventoryItem> addedItems, List<InventoryItem> removedItems, CancellationToken cancellationToken = default)
+        {
+            await instance.RLV.ReportItemChange(addedItems, removedItems, cancellationToken);
         }
     }
 }

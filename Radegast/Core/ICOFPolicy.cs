@@ -19,6 +19,9 @@
  */
 
 using OpenMetaverse;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -26,5 +29,7 @@ namespace Radegast
     {
         bool CanAttach(InventoryItem item);
         bool CanDetach(InventoryItem item);
+
+        Task ReportItemChange(List<InventoryItem> addedItems, List<InventoryItem> removedItems, CancellationToken cancellationToken = default);
     }
 }
