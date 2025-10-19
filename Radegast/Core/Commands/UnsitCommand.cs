@@ -22,7 +22,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class UnsitCommand : RadegastCommand
+    public sealed class UnsitCommand : RadegastCommand
     {
         public UnsitCommand(RadegastInstance instance)
             : base(instance)

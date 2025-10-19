@@ -29,7 +29,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class FindCommand : RadegastCommand
+    public sealed class FindCommand : RadegastCommand
     {
         TabsConsole TC => Instance.TabConsole;
         ObjectsConsole Objects;

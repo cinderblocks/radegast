@@ -680,7 +680,7 @@ namespace Radegast.Rendering
                     {
                         if (morph.Name == vpx.Name)
                         {
-                            if (mesh.Name == "skirtMesh" && _showSkirt == false)
+                            if (mesh.Name == "skirtMesh" && !_showSkirt)
                                 return;
 
                             // Logger.Log(String.Format("Applying morph {0} ID {2} weight {1} mesh {3}",morph.Name,weight,vpx.ParamID,mesh.Name),Helpers.LogLevel.Debug);
@@ -711,7 +711,7 @@ namespace Radegast.Rendering
                     //  | min1   max1    max2  min2
 
 
-                    if (child.hasMinMax == false)
+                    if (!child.hasMinMax)
                     {
                         applyMorph(av, child.id, weight);
                         continue;
@@ -1486,7 +1486,7 @@ namespace Radegast.Rendering
                             Vector3 rotlerpv = Vector3.Lerp(rot_last.key_element, rot_next.key_element, delta);
                             // rotlerp = Quaternion.Slerp(Quaternion.Identity,new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z), factor);
 
-                            if (easeoutset == false && ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
+                            if (!easeoutset && ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
                             {
                                 easeoutset = true;
                                 state.easeoutrot = new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z);
@@ -1750,12 +1750,12 @@ namespace Radegast.Rendering
         // Try to save some cycles by not recalculating positions and rotations every time
         public Vector3 getTotalOffset()
         {
-            return posdirty == false ? mTotalPos : getOffset();
+            return !posdirty ? mTotalPos : getOffset();
         }
 
         public Vector3 getDeltaOffset()
         {
-            if (posdirty == false)
+            if (!posdirty)
             {
                 return mDeltaPos;
             }
@@ -1815,7 +1815,7 @@ namespace Radegast.Rendering
 
         public Quaternion getTotalRotation()
         {
-            return rotdirty == false ? mTotalRot : getRotation();
+            return !rotdirty ? mTotalRot : getRotation();
         }
     }
 

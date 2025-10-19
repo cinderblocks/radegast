@@ -19,15 +19,12 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
 
-using OpenMetaverse;
-
 namespace Radegast.Commands
 {
-    public class SitCommand : RadegastCommand
+    public sealed class SitCommand : RadegastCommand
     {
         TabsConsole TC => Instance.TabConsole;
         ObjectsConsole Objects;

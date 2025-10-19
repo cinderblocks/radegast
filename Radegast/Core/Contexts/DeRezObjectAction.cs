@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class DeRezObjectAction : ContextAction
+    public sealed class DeRezObjectAction : ContextAction
     {
         public DeRezObjectAction(RadegastInstance inst)
             : base(inst)

@@ -669,8 +669,7 @@ namespace Radegast
             {
                 if (de.Entry.Value is Image)
                 {
-                    Bitmap bitMap = de.Entry.Value as Bitmap;
-                    ResourceImages.Images.Add(bitMap);
+                    if (de.Entry.Value is Bitmap bitMap) { ResourceImages.Images.Add(bitMap); }
                     ImageNames.Add(de.Entry.Key.ToString());
                 }
             }

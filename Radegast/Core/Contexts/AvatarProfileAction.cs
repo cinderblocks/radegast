@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class AvatarProfileAction : ContextAction
+    public sealed class AvatarProfileAction : ContextAction
     {
         public AvatarProfileAction(RadegastInstance inst)
             : base(inst)

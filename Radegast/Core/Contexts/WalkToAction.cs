@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class WalkToAction : ContextAction
+    public sealed class WalkToAction : ContextAction
     {
         public WalkToAction(RadegastInstance inst)
             : base(inst)
