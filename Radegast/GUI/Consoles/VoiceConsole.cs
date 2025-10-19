@@ -22,7 +22,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
-using Radegast;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using LibreMetaverse.Voice.Vivox;
@@ -227,7 +226,7 @@ namespace Radegast
 
         void gateway_OnSessionCreate(object sender, EventArgs e)
         {
-            if (queriedDevices == false)
+            if (!queriedDevices)
             {
                 queriedDevices = true;
                 Logger.Log("Voice session started, asking for device info", Helpers.LogLevel.Debug);

@@ -26,7 +26,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class StatusCommand : RadegastCommand
+    public sealed class StatusCommand : RadegastCommand
     {
         private RadegastInstance instance;
         private List<string> args;

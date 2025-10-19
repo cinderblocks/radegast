@@ -27,7 +27,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class TPCommand : RadegastCommand
+    public sealed class TPCommand : RadegastCommand
     {
         TabsConsole TC => Instance.TabConsole;
         public static string FolderName = "Radegast Landmarks";

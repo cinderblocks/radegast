@@ -5,9 +5,9 @@ using OpenMetaverse;
 
 namespace Radegast.Plugin.Alice
 {
-    public class TalkToAvatar : ContextAction
+    public sealed class TalkToAvatar : ContextAction
     {
-        private AIMLBot aimlBot;
+        private readonly AIMLBot aimlBot;
         public TalkToAvatar(RadegastInstance inst, AIMLBot bot)
             : base(inst)
         {
@@ -29,7 +29,7 @@ namespace Radegast.Plugin.Alice
             return (a != null && !string.IsNullOrEmpty(a.Name)) || base.IsEnabled(target);
         }
 
-        protected bool IsEnabledInRadegast => Instance.GlobalSettings["plugin.alice.enabled"].AsBoolean();
+        private bool IsEnabledInRadegast => Instance.GlobalSettings["plugin.alice.enabled"].AsBoolean();
 
         public override void OnInvoke(object sender, System.EventArgs e, object target)
         {

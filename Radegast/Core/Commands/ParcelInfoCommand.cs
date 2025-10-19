@@ -25,7 +25,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class ParcelInfoCommand : RadegastCommand
+    public sealed class ParcelInfoCommand : RadegastCommand
     {
         private ManualResetEvent ParcelsDownloaded = new ManualResetEvent(false);
         private RadegastInstance instance;

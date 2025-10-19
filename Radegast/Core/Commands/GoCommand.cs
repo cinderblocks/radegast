@@ -28,7 +28,7 @@ using OpenMetaverse;
 
 namespace Radegast.Commands
 {
-    public class GoCommand : RadegastCommand
+    public sealed class GoCommand : RadegastCommand
     {
         Regex subCommand;
         RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;

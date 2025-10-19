@@ -3320,7 +3320,7 @@ namespace FMOD
         }
         public RESULT getInfo(out uint version, out int channels, out int configwidth, out int configheight)
         {
-            return FMOD5_DSP_GetInfo(this.handle, IntPtr.Zero, out version, out channels, out configwidth, out configheight); ;
+            return FMOD5_DSP_GetInfo(this.handle, IntPtr.Zero, out version, out channels, out configwidth, out configheight);
         }
         public RESULT getType(out DSP_TYPE type)
         {

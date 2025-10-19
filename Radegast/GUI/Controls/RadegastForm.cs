@@ -24,7 +24,6 @@ using System.ComponentModel;
 using System.Drawing;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
-using Radegast;
 
 namespace Radegast
 {
@@ -45,7 +44,7 @@ namespace Radegast
 
             set
             {
-                if (value == false)
+                if (!value)
                 {
                     ClearSavedPosition();
                 }

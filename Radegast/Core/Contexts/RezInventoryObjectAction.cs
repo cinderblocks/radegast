@@ -23,7 +23,7 @@ using OpenMetaverse;
 
 namespace Radegast
 {
-    public class RezInventoryObjectAction : ContextAction
+    public sealed class RezInventoryObjectAction : ContextAction
     {
         public RezInventoryObjectAction(RadegastInstance inst)
             : base(inst)
