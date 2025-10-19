@@ -269,7 +269,11 @@ namespace Radegast.Core.RLV
             var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
                 .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
 
-            var currentOutfitMap = currentOutfitLinks.ToDictionary(k => k.ActualUUID, v => v);
+            var currentOutfitMap = new Dictionary<UUID, InventoryItem>();
+            foreach (var item in currentOutfitLinks)
+            {
+                currentOutfitMap[item.ActualUUID] = item;
+            }
 
             var sharedFolderConverted = new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "");
 

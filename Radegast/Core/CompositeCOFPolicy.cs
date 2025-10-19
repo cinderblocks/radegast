@@ -20,8 +20,11 @@
 
 using OpenMetaverse;
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -81,6 +84,17 @@ namespace Radegast
 
             return GetCurrentPolicies()
                 .All(n => n.CanDetach(item));
+        }
+
+        public async Task ReportItemChange(List<InventoryItem> addedItems, List<InventoryItem> removedItems, CancellationToken cancellationToken = default)
+        {
+            var policies = GetCurrentPolicies();
+
+            foreach (var policy in policies)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await policy.ReportItemChange(addedItems, removedItems, cancellationToken);
+            }
         }
     }
 }
