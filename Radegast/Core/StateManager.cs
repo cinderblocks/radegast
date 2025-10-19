@@ -27,7 +27,6 @@ using System.Threading;
 using OpenMetaverse;
 
 using Radegast.Automation;
-using Radegast.Core.RLV;
 
 namespace Radegast
 {
@@ -445,7 +444,6 @@ namespace Radegast
             }
         }
 
-
         public void SetRandomHeading()
         {
             Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.NextDouble(), true);
@@ -601,7 +599,6 @@ namespace Radegast
             return rot;
         }
 
-
         public Vector3 AvatarPosition(Simulator sim, UUID avID)
         {
             var pos = Vector3.Zero;
@@ -704,7 +701,7 @@ namespace Radegast
 
         #region Walking (move to)
 
-        private System.Threading.Timer walkTimer;
+        private Timer walkTimer;
         private readonly int walkChekInterval = 500;
         private Vector3d walkToTarget;
         private int lastDistance = 0;
@@ -740,14 +737,14 @@ namespace Radegast
 
             if (walkTimer == null)
             {
-                walkTimer = new System.Threading.Timer(WalkTimerElapsed, null, walkChekInterval, Timeout.Infinite);
+                walkTimer = new Timer(WalkTimerElapsed, null, walkChekInterval, Timeout.Infinite);
             }
 
             lastDistanceChanged = Environment.TickCount;
             Client.Self.AutoPilotCancel();
             IsWalking = true;
             Client.Self.AutoPilot(walkToTarget.X, walkToTarget.Y, walkToTarget.Z);
-            FireWalkStateCanged();
+            FireWalkStateChanged();
         }
 
         private void WalkTimerElapsed(object sender)
@@ -788,7 +785,7 @@ namespace Radegast
             }
         }
 
-        private void FireWalkStateCanged()
+        private void FireWalkStateChanged()
         {
             if (OnWalkStateChanged != null)
             {
@@ -799,51 +796,62 @@ namespace Radegast
 
         public void EndWalking()
         {
-            if (IsWalking)
-            {
-                IsWalking = false;
-                Logger.Log("Finished walking.", Helpers.LogLevel.Debug, Client);
-                walkTimer.Dispose();
-                walkTimer = null;
-                Client.Self.AutoPilotCancel();
+            if (!IsWalking) { return; }
+
+            IsWalking = false;
+            Logger.Log("Finished walking.", Helpers.LogLevel.Debug, Client);
+            walkTimer.Dispose();
+            walkTimer = null;
+            Client.Self.AutoPilotCancel();
                 
-                if (displayEndWalk)
+            if (displayEndWalk)
+            {
+                displayEndWalk = false;
+                string msg = "Finished walking";
+
+                if (walkToTarget != Vector3d.Zero)
                 {
-                    displayEndWalk = false;
-                    string msg = "Finished walking";
-
-                    if (walkToTarget != Vector3d.Zero)
-                    {
-                        Thread.Sleep(1000);
-                        msg += $" {Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget):0} meters from destination";
-                        walkToTarget = Vector3d.Zero;
-                    }
-
-                    instance.TabConsole.DisplayNotificationInChat(msg);
+                    Thread.Sleep(1000);
+                    msg += $" {Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget):0} meters from destination";
+                    walkToTarget = Vector3d.Zero;
                 }
 
-                FireWalkStateCanged();
+                instance.TabConsole.DisplayNotificationInChat(msg);
             }
+
+            FireWalkStateChanged();
         }
         #endregion
 
+        /// <summary>
+        /// Set typing state
+        /// </summary>
+        /// <param name="typing">state</param>
         public void SetTyping(bool typing)
         {
-            if (!Client.Network.Connected) return;
+            if (!Client.Network.Connected) { return; }
             var typingAnim = new Dictionary<UUID, bool> {{Animations.TYPE, typing}};
             Client.Self.Animate(typingAnim, false);
             Client.Self.Chat(string.Empty, 0, typing ? ChatType.StartTyping : ChatType.StopTyping);
             IsTyping = typing;
         }
 
+        /// <summary>
+        /// Set away state
+        /// </summary>
+        /// <param name="away">state</param>
         public void SetAway(bool away)
         {
             var awayAnim = new Dictionary<UUID, bool> {{Animations.AWAY, away}};
             Client.Self.Animate(awayAnim, true);
-            if (UseMoveControl) Client.Self.Movement.Away = away;
-            this.Away = away;
+            if (UseMoveControl) { Client.Self.Movement.Away = away; }
+            Away = away;
         }
 
+        /// <summary>
+        /// Set busy state
+        /// </summary>
+        /// <param name="busy">state</param>
         public void SetBusy(bool busy)
         {
             var busyAnim = new Dictionary<UUID, bool> {{Animations.BUSY, busy}};
@@ -851,11 +859,19 @@ namespace Radegast
             IsBusy = busy;
         }
 
+        /// <summary>
+        /// Set flying state
+        /// </summary>
+        /// <param name="fly">state</param>
         public void SetFlying(bool fly)
         {
             Flying = Client.Self.Movement.Fly = fly;
         }
 
+        /// <summary>
+        /// Set always run state
+        /// </summary>
+        /// <param name="always_run">state</param>
         public void SetAlwaysRun(bool always_run)
         {
             AlwaysRun = Client.Self.Movement.AlwaysRun = always_run;
@@ -899,6 +915,9 @@ namespace Radegast
             SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
         }
 
+        /// <summary>
+        /// Stop all currently signaled animations
+        /// </summary>
         public void StopAllAnimations()
         {
             var stop = new Dictionary<UUID, bool>();
@@ -917,6 +936,12 @@ namespace Radegast
             }
         }
 
+        /// <summary>
+        /// Get global position of a given simulator and coordinate
+        /// </summary>
+        /// <param name="sim"></param>
+        /// <param name="pos"></param>
+        /// <returns>Global position</returns>
         public static Vector3d GlobalPosition(Simulator sim, Vector3 pos)
         {
             Utils.LongToUInts(sim.Handle, out var globalX, out var globalY);
@@ -927,6 +952,11 @@ namespace Radegast
                 (double)pos.Z);
         }
 
+        /// <summary>
+        /// Return global position of given primitive
+        /// </summary>
+        /// <param name="prim"></param>
+        /// <returns></returns>
         public Vector3d GlobalPosition(Primitive prim)
         {
             return GlobalPosition(Client.Network.CurrentSim, prim.Position);
@@ -938,7 +968,7 @@ namespace Radegast
         private UUID pointID;
         private UUID sphereID;
         private List<UUID> beamID;
-        private int numBeans;
+        private int numBeams;
         private readonly Color4[] beamColors = new Color4[] { new Color4(0, 255, 0, 255), new Color4(255, 0, 0, 255), new Color4(0, 0, 255, 255) };
         private Primitive targetPrim;
 
@@ -976,7 +1006,7 @@ namespace Radegast
             {
                 Client.Self.SphereEffect(GlobalPosition(targetPrim), beamColors[beamRandom.Next(0, 3)], 0.85f, sphereID);
                 int i = 0;
-                for (i = 0; i < numBeans; i++)
+                for (i = 0; i < numBeams; i++)
                 {
                     Vector3d scatter;
 
@@ -994,7 +1024,7 @@ namespace Radegast
                     Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Next(0, 3)], 1.0f, beamID[i]);
                 }
 
-                for (int j = 1; j < numBeans; j++)
+                for (int j = 1; j < numBeams; j++)
                 {
                     Vector3d cross = new Vector3d(0, 0, 1);
                     cross.Normalize();
@@ -1007,7 +1037,12 @@ namespace Radegast
 
         }
 
-        public void SetPointing(Primitive prim, int num_beans)
+        /// <summary>
+        /// Command agent to set pointing at a given object primitive
+        /// </summary>
+        /// <param name="prim">target prim</param>
+        /// <param name="num_beams">Number of beams to cast</param>
+        public void SetPointing(Primitive prim, int num_beams)
         {
             UnSetPointing();
             Client.Self.Movement.TurnToward(prim.Position);
@@ -1016,18 +1051,18 @@ namespace Radegast
             beamID = new List<UUID>();
             beamTarget = new List<Vector3d>();
             targetPrim = prim;
-            numBeans = num_beans;
+            numBeams = num_beams;
 
             Client.Self.PointAtEffect(Client.Self.AgentID, prim.ID, Vector3d.Zero, PointAtType.Select, pointID);
 
-            for (int i = 0; i < numBeans; i++)
+            for (int i = 0; i < numBeams; i++)
             {
                 UUID newBeam = UUID.Random();
                 beamID.Add(newBeam);
                 beamTarget.Add(Vector3d.Zero);
             }
 
-            for (int i = 1; i < numBeans; i++)
+            for (int i = 1; i < numBeams; i++)
             {
                 UUID newBeam = UUID.Random();
                 beamID.Add(newBeam);
