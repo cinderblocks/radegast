@@ -27,6 +27,7 @@ using System.Threading;
 using OpenMetaverse;
 
 using Radegast.Automation;
+using Radegast.Core.RLV;
 
 namespace Radegast
 {
@@ -860,35 +861,42 @@ namespace Radegast
             AlwaysRun = Client.Self.Movement.AlwaysRun = always_run;
         }
 
-        public void SetSitting(bool sit, UUID target)
+        /// <summary>
+        /// Command target to statefully sit/unsit
+        /// </summary>
+        /// <param name="sit">Sit or unsit state</param>
+        /// <param name="target">If <see cref="UUID.Zero"/> or default, sit on ground. Not needed if <see cref="sit"/> is false</param>
+        public void SetSitting(bool sit, UUID target = default)
         {
-            Sitting = sit;
-
-            if (instance.RLV.Enabled && instance.RLV.Permissions.CanUnsit())
+            if (sit)
             {
-                if (Sitting)
+                if (!instance.RLV.Enabled || instance.RLV.Permissions.CanSit())
                 {
+                    Sitting = true;
                     Client.Self.RequestSit(target, Vector3.Zero);
                     Client.Self.Sit();
                 }
                 else
                 {
-                    Client.Self.Stand();
+                    instance.TabConsole.DisplayNotificationInChat("Sit prevented by RLV");
+                    return;
                 }
             }
-            else
+            else // stand
             {
-                instance.TabConsole.DisplayNotificationInChat("Unsit prevented by RLV");
-                Sitting = true;
-                return;
+                if (!instance.RLV.Enabled || instance.RLV.Permissions.CanUnsit())
+                {
+                    Sitting = false;
+                    Client.Self.Stand();
+                    StopAllAnimations(); // FIXME: Hamfisted. i don't like this...
+                }
+                else
+                {
+                    instance.TabConsole.DisplayNotificationInChat("Unsit prevented by RLV");
+                    return;
+                }
             }
-
             SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
-
-            if (!Sitting)
-            {
-                StopAllAnimations();
-            }
         }
 
         public void StopAllAnimations()
