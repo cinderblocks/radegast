@@ -18,6 +18,8 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using LibreMetaverse.RLV;
+using LibreMetaverse.RLV.EventArguments;
 using OpenMetaverse;
 using System;
 using System.Collections.Generic;
@@ -485,6 +487,8 @@ namespace Radegast
             }
 
             client.Appearance.Attach(item, point, replace);
+
+            await policy.ReportItemChange(new List<InventoryItem>() { item }, new List<InventoryItem>(), cancellationToken);
             await AddLink(item, cancellationToken);
         }
 
@@ -511,6 +515,8 @@ namespace Radegast
             }
 
             client.Appearance.Detach(item);
+
+            await policy.ReportItemChange(new List<InventoryItem>(), new List<InventoryItem>() { item }, cancellationToken);
             await RemoveLinksTo(new List<InventoryItem>() { item }, cancellationToken);
         }
 
@@ -617,12 +623,18 @@ namespace Radegast
                 return false;
             }
 
-            var itemsToWear = new Dictionary<UUID, InventoryItem>();
+            var itemsToRemove = new List<InventoryItem>();
+
+            var newOutfitItemMap = new Dictionary<UUID, InventoryItem>();
             var existingBodypartLinks = new List<InventoryItem>();
             var bodypartsToWear = new Dictionary<WearableType, InventoryWearable>();
             var gesturesToActivate = new Dictionary<UUID, InventoryItem>();
             var numClothingLayers = 0;
             var numAttachedObjects = 0;
+
+
+            var itemsBeingAdded = new Dictionary<UUID, InventoryItem>();
+            var itemsBeingRemoved = new Dictionary<UUID, InventoryItem>();
 
             foreach (var item in newOutfit)
             {
@@ -691,15 +703,17 @@ namespace Radegast
                     ++numAttachedObjects;
                 }
 
-                itemsToWear[inventoryItem.UUID] = inventoryItem;
+                itemsBeingAdded[inventoryItem.UUID] = inventoryItem;
+                newOutfitItemMap[inventoryItem.UUID] = inventoryItem;
             }
 
             var existingLinkTargets = currentOutfitContents
                 .OfType<InventoryItem>()
                 .Where(n => !n.IsLink())
                 .ToDictionary(k => k.UUID, v => v);
-            var linksToRemove = new List<InventoryBase>();
+            var linksToRemove = new List<InventoryItem>();
             var gesturesToDeactivate = new HashSet<UUID>();
+
 
             foreach (var item in currentOutfitContents)
             {
@@ -719,15 +733,22 @@ namespace Radegast
                     continue;
                 }
 
+                if (newOutfitItemMap.ContainsKey(realItem.UUID))
+                {
+                    // We're already wearing the item that exists in the new outfit, don't re-add links to it
+                    itemsBeingAdded.Remove(realItem.UUID);
+                    continue;
+                }
+
                 if (!policy.CanDetach(realItem))
                 {
-                    if (itemsToWear.ContainsKey(realItem.UUID))
+                    if (newOutfitItemMap.ContainsKey(realItem.UUID))
                     {
-                        itemsToWear[realItem.UUID] = realItem;
+                        newOutfitItemMap[realItem.UUID] = realItem;
                     }
                     else
                     {
-                        itemsToWear[realItem.UUID] = realItem;
+                        newOutfitItemMap[realItem.UUID] = realItem;
                     }
 
                     if (realItem is InventoryWearable bodypartItem)
@@ -753,6 +774,7 @@ namespace Radegast
                     }
                 }
 
+                itemsBeingRemoved[realItem.UUID] = realItem;
                 linksToRemove.Add(itemLink);
             }
 
@@ -781,6 +803,8 @@ namespace Radegast
                             continue;
                         }
                     }
+
+                    itemsBeingRemoved[realItem.UUID] = realItem;
                 }
 
                 linksToRemove.Add(existingLink);
@@ -802,12 +826,12 @@ namespace Radegast
                 .Distinct();
             await client.Inventory.RemoveItemsAsync(toRemoveIds, cancellationToken);
 
-            // Add new outfit links
+            // Add body parts from current outfit to new outfit if it's lacking those essential body parts
             foreach (var item in bodypartsToWear)
             {
-                itemsToWear.Add(item.Value.UUID, item.Value);
+                itemsBeingAdded.Add(item.Value.UUID, item.Value);
             }
-            foreach (var item in itemsToWear)
+            foreach (var item in itemsBeingAdded)
             {
                 await AddLink(item.Value, cancellationToken);
             }
@@ -837,10 +861,12 @@ namespace Radegast
                 tcs.TrySetResult(true);
             }
 
+            await policy.ReportItemChange(new List<InventoryItem>(), itemsBeingRemoved.Values.ToList(), cancellationToken);
+
             try
             {
                 client.Appearance.AppearanceSet += handleAppearanceSet;
-                client.Appearance.ReplaceOutfit(itemsToWear.Values.ToList(), false);
+                client.Appearance.ReplaceOutfit(newOutfitItemMap.Values.ToList(), false);
 
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000, cancellationToken));
                 if (completedTask != tcs.Task)
@@ -854,6 +880,7 @@ namespace Radegast
                 client.Appearance.AppearanceSet -= handleAppearanceSet;
             }
 
+            await policy.ReportItemChange(itemsBeingAdded.Values.ToList(), new List<InventoryItem>(), cancellationToken);
             return true;
         }
 
@@ -871,10 +898,10 @@ namespace Radegast
         /// <summary>
         /// Add items to current outfit
         /// </summary>
-        /// <param name="itemsToAdd">List of items to add</param>
+        /// <param name="requestedItemsToAdd">List of items to add</param>
         /// <param name="replace">Should existing wearable of the same type be removed</param>
         /// <param name="cancellationToken"></param>
-        public async Task AddToOutfit(List<InventoryItem> itemsToAdd, bool replace, CancellationToken cancellationToken = default)
+        public async Task AddToOutfit(List<InventoryItem> requestedItemsToAdd, bool replace, CancellationToken cancellationToken = default)
         {
             // TODO: Copy from library if necessary
 
@@ -939,9 +966,9 @@ namespace Radegast
             }
 
             var itemsToRemove = new List<InventoryItem>();
-            var outfit = new List<InventoryItem>();
+            var itemsToAdd = new List<InventoryItem>();
 
-            foreach (var item in itemsToAdd)
+            foreach (var item in requestedItemsToAdd)
             {
                 var realItem = instance.COF.ResolveInventoryLink(item);
                 if (realItem == null)
@@ -970,7 +997,7 @@ namespace Radegast
                 {
                     continue;
                 }
-                if (outfit.FirstOrDefault(n => n.UUID == realItem.UUID) != null)
+                if (itemsToAdd.FirstOrDefault(n => n.UUID == realItem.UUID) != null)
                 {
                     continue;
                 }
@@ -1054,7 +1081,7 @@ namespace Radegast
                     continue;
                 }
 
-                outfit.Add(realItem);
+                itemsToAdd.Add(realItem);
             }
 
             if (itemsToRemove.Count > 0)
@@ -1063,16 +1090,18 @@ namespace Radegast
             }
 
             // Add links to new items
-            foreach (var item in outfit)
+            foreach (var item in itemsToAdd)
             {
                 await AddLink(item, cancellationToken);
             }
 
-            client.Appearance.AddToOutfit(outfit, replace);
+            client.Appearance.AddToOutfit(itemsToAdd, replace);
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 Thread.Sleep(2000);
                 client.Appearance.RequestSetAppearance(true);
+
+                policy.ReportItemChange(itemsToAdd, itemsToRemove, cancellationToken).Wait();
             });
         }
 
@@ -1094,9 +1123,9 @@ namespace Radegast
         /// The specified items may either be actual items, or links to actual items. Links will be resolved to actual
         /// items internally.
         /// </summary>
-        /// <param name="itemsToRemoveFromOutfit">List of items (or item links) we want to remove all links to from our COF</param>
+        /// <param name="requestedItemsToRemove">List of items (or item links) we want to remove all links to from our COF</param>
         /// <param name="cancellationToken"></param>
-        public async Task RemoveFromOutfit(List<InventoryItem> itemsToRemoveFromOutfit, CancellationToken cancellationToken = default)
+        public async Task RemoveFromOutfit(List<InventoryItem> requestedItemsToRemove, CancellationToken cancellationToken = default)
         {
             if (COF == null)
             {
@@ -1104,7 +1133,7 @@ namespace Radegast
                 return;
             }
 
-            var itemsToRemove = itemsToRemoveFromOutfit
+            var itemsToRemove = requestedItemsToRemove
                 .Select(n => instance.COF.ResolveInventoryLink(n))
                 .Where(n => n != null && !IsBodyPart(n) && policy.CanDetach(n))
                 .Distinct()
@@ -1118,6 +1147,7 @@ namespace Radegast
             }
 
             await RemoveLinksTo(itemsToRemove, cancellationToken);
+            await policy.ReportItemChange(new List<InventoryItem>(), itemsToRemove, cancellationToken);
 
             client.Appearance.RemoveFromOutfit(itemsToRemove);
         }

@@ -163,6 +163,8 @@ namespace Radegast.Core.RLV
 
             Primitive prim = e.Prim;
 
+            // TODO: We need a way to detect attaching temporary objects from in-world. Temporary objects attached from in-world will have IsNew=false
+
             if (instance.Client.Self.LocalID == 0
                 || prim.ParentID != instance.Client.Self.LocalID
                 || prim.NameValues == null
@@ -207,6 +209,29 @@ namespace Radegast.Core.RLV
             }
 
             return false;
+        }
+
+        public async Task ReportItemChange(List<InventoryItem> itemsBeingAdded, List<InventoryItem> itemsBeingRemoved, CancellationToken cancellationToken = default)
+        {
+            foreach (var item in itemsBeingRemoved)
+            {
+                if (!(item is InventoryWearable))
+                {
+                    continue;
+                }
+
+                await ReportItemChange(item, false, cancellationToken);
+            }
+
+            foreach (var item in itemsBeingAdded)
+            {
+                if (!(item is InventoryWearable))
+                {
+                    continue;
+                }
+
+                await ReportItemChange(item, true, cancellationToken);
+            }
         }
 
         private async Task ReportItemChange(InventoryItem item, bool isAdded, CancellationToken cancellationToken = default)

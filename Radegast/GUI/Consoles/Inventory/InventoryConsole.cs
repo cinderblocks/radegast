@@ -1504,7 +1504,7 @@ namespace Radegast
 
                 if (uiCallback != null)
                 {
-                    Invoke(new Action(() => uiCallback()));
+                    BeginInvoke(new Action(() => uiCallback()));
                 }
             });
         }
