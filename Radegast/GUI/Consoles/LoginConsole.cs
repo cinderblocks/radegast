@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -158,9 +158,9 @@ namespace Radegast
                     ? cbxLocation.Text : string.Empty;
                 savedLogin.StartLocationType = cbxLocation.SelectedIndex;
                 var savedLogins = (OSDMap)globalSettings["saved_logins"];
-                if (savedLogins.ContainsKey(savedLoginsKey))
+                if (savedLogins.TryGetValue(savedLoginsKey, out var loginKey))
                 {
-                    var sl = SavedLogin.FromOSD(savedLogins[savedLoginsKey]);
+                    var sl = SavedLogin.FromOSD(loginKey);
                     if (!string.IsNullOrWhiteSpace(sl.MfaHash))
                     {
                         savedLogin.MfaHash = sl.MfaHash;
@@ -350,7 +350,6 @@ namespace Radegast
 
                     btnLogin.Text = "Logout";
                     btnLogin.Enabled = true;
-                    instance.Client.Groups.RequestCurrentGroups();
                     break;
 
                 case LoginStatus.Failed:
@@ -426,18 +425,17 @@ namespace Radegast
             if (!string.IsNullOrWhiteSpace(replyData.MfaHash))
             {
                 var settings = instance.GlobalSettings;
-                if (settings.ContainsKey("saved_logins") 
-                    && settings.ContainsKey("username") 
-                    && settings.ContainsKey("login_grid"))
+                if (settings.TryGetValue("saved_logins", out var savedLogins) 
+                    && settings.TryGetValue("username", out var username) 
+                    && settings.TryGetValue("login_grid", out var loginGrid))
                 {
-                    string username = settings["username"];
-                    string grid = settings["login_grid"];
+                    string grid = loginGrid;
                     var savedLoginsKey = $"{username}%{grid}";
 
-                    var loginsMap = (OSDMap)settings["saved_logins"];
-                    if (loginsMap.ContainsKey(savedLoginsKey))
+                    var loginsMap = (OSDMap)savedLogins;
+                    if (loginsMap.TryGetValue(savedLoginsKey, out var loginKey))
                     {
-                        var sl = (OSDMap)loginsMap[savedLoginsKey];
+                        var sl = (OSDMap)loginKey;
                         sl["mfa_hash"] = replyData.MfaHash;
                     }
                 }
@@ -505,15 +503,15 @@ namespace Radegast
                 netcom.LoginOptions.Grid = cbxGrid.SelectedItem as Grid;
             }
 
-            if (instance.GlobalSettings.ContainsKey("saved_logins"))
+            if (instance.GlobalSettings.TryGetValue("saved_logins", out var savedLogins))
             {
-                var logins = (OSDMap)instance.GlobalSettings["saved_logins"];
+                var logins = (OSDMap)savedLogins;
                 var gridId = cbxGrid.SelectedIndex == cbxGrid.Items.Count - 1 
                     ? "custom_login_uri" : (cbxGrid.SelectedItem as Grid)?.ID;
                 var savedLoginsKey = $"{username}%{gridId}";
-                if (logins.ContainsKey(savedLoginsKey))
+                if (logins.TryGetValue(savedLoginsKey, out var loginKey))
                 {
-                    var sl = SavedLogin.FromOSD(logins[savedLoginsKey]);
+                    var sl = SavedLogin.FromOSD(loginKey);
                     netcom.LoginOptions.MfaHash = sl.MfaHash;
                 }
             }
@@ -646,13 +644,13 @@ namespace Radegast
                 GridID = osd["grid"],
                 CustomURI = osd["custom_url"]
             };
-            if (osd.ContainsKey("mfa_hash"))
+            if (osd.TryGetValue("mfa_hash", out var mfaHash))
             {
-                ret.MfaHash = osd["mfa_hash"];
+                ret.MfaHash = mfaHash;
             }
-            if (osd.ContainsKey("location_type"))
+            if (osd.TryGetValue("location_type", out var locationType))
             {
-                ret.StartLocationType = osd["location_type"];
+                ret.StartLocationType = locationType;
             }
             else
             {
