@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -22,14 +22,14 @@ using System.Collections.Generic;
 
 namespace Radegast
 {
-    class RadegastMisc
+    public static class Utilities
     {
         public static string SafeFileName(string original)
         {
-            string fileName = string.Empty;
-            List<char> invalid = new List<char>(System.IO.Path.GetInvalidFileNameChars());
-            
-            foreach(char c in original)
+            var fileName = string.Empty;
+            var invalid = new List<char>(System.IO.Path.GetInvalidFileNameChars());
+
+            foreach (var c in original)
             {
                 if (invalid.Contains(c))
                 {
@@ -46,10 +46,10 @@ namespace Radegast
 
         public static string SafeDirName(string original)
         {
-            string fileName = string.Empty;
-            List<char> invalid = new List<char>(System.IO.Path.GetInvalidPathChars());
+            var fileName = string.Empty;
+            var invalid = new List<char>(System.IO.Path.GetInvalidPathChars());
 
-            foreach (char c in original)
+            foreach (var c in original)
             {
                 if (invalid.Contains(c))
                 {

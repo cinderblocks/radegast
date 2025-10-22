@@ -284,7 +284,7 @@ namespace Radegast
             {
                 Title = "Save script",
                 Filter = "LSL script file (*.lsl)|*.lsl|Plain text file (*.txt)|*.txt",
-                FileName = RadegastMisc.SafeFileName(scriptName)
+                FileName = Utilities.SafeFileName(scriptName)
             };
             DialogResult res = dlg.ShowDialog();
 
@@ -749,6 +749,5 @@ namespace Radegast
                 client.Inventory.RequestUpdateScriptAgentInventory(n.AssetData, script.UUID, cbMono.Checked, handler);
             }
         }
-
     }
 }

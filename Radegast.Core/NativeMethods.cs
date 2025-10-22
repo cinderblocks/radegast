@@ -21,7 +21,7 @@ using System.Runtime.InteropServices;
 
 namespace Radegast.Core
 {
-    internal sealed class NativeMethods
+    public sealed class NativeMethods
     {
         #region Fields
 

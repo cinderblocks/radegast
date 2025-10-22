@@ -2,10 +2,11 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
-	<AssemblyTitle>Radegast-ng</AssemblyTitle>
-	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-	<UseWindowsForms>true</UseWindowsForms>
-	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+	  <AssemblyTitle>Radegast-ng</AssemblyTitle>
+    <ApplicationIcon>radegast.ico</ApplicationIcon>
+	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	  <UseWindowsForms>true</UseWindowsForms>
+	  <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
 	<OutputPath>..\bin\$(Configuration)\</OutputPath>
@@ -17,9 +18,6 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
     <DebugType>portable</DebugType>
     <DefineConstants>TRACE</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup>
-    <ApplicationIcon>radegast.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseLinux|x86'">
     <DefineConstants>TRACE</DefineConstants>
@@ -53,47 +51,16 @@
     <PackageReference Include="BugSplatDotNetStandard" Version="4.2.3" />
     <PackageReference Include="C5" Version="3.0.0" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="LibreMetaverse" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.Types" Version="2.4.12.1124" />
-    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.4.12.1124" />
     <PackageReference Include="Microsoft.Windows.Compatibility" Version="9.0.9" />
     <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.6" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
-    <PackageReference Include="RoslynCodeTaskFactory" Version="2.0.7" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
     <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.1" />
-    <PackageReference Include="System.Collections" Version="4.3.0" />
-    <PackageReference Include="System.ComponentModel.Composition" Version="9.0.9" />
     <PackageReference Include="System.Console" Version="4.3.1" />
-    <PackageReference Include="System.Diagnostics.Debug" Version="4.3.0" />
-    <PackageReference Include="System.Globalization" Version="4.3.0" />
-    <PackageReference Include="System.IO" Version="4.3.0" />
-    <PackageReference Include="System.Linq" Version="4.3.0" />
-    <PackageReference Include="System.Linq.Expressions" Version="4.3.0" />
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <PackageReference Include="System.Net.NameResolution" Version="4.3.0" />
-    <PackageReference Include="System.Reflection" Version="4.3.0" />
-    <PackageReference Include="System.Reflection.Extensions" Version="4.3.0" />
-    <PackageReference Include="System.Reflection.TypeExtensions" Version="4.7.0" />
     <PackageReference Include="System.Resources.Extensions" Version="9.0.9" />
     <PackageReference Include="System.Resources.ResourceManager" Version="4.3.0" />
     <PackageReference Include="System.Runtime" Version="4.3.1" />
     <PackageReference Include="System.Runtime.Extensions" Version="4.3.1" />
-    <PackageReference Include="System.Security.Cryptography.Algorithms" Version="4.3.1" />
-    <PackageReference Include="System.Security.Cryptography.Encoding" Version="4.3.0" />
-    <PackageReference Include="System.Security.Cryptography.Primitives" Version="4.3.0" />
-    <PackageReference Include="System.Security.Cryptography.X509Certificates" Version="4.3.2" />
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
-    <PackageReference Include="System.Threading.RateLimiting" Version="9.0.9" />
   </ItemGroup>
   <ItemGroup>
     <Compile Update="GUI\Controls\AgentNameTextBox.cs" />
@@ -878,6 +845,9 @@
     <Compile Remove="obj\x86\ReleaseWindows\TemporaryGeneratedFile_5937a670-0e60-4077-877b-f7221da3dda1.cs" />
     <Compile Remove="obj\x86\ReleaseWindows\TemporaryGeneratedFile_E7A71F73-0F8D-4B9B-B56E-8E70B10BC5D3.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
+  </ItemGroup>
   <Import Project="AutogenerateFiles.targets" />
   <Target Name="GenerateCode" BeforeTargets="BeforeBuild" Condition="'$(RoslynCodeTaskFactory)'!=''">
 	<Message Text="------ Autogenerating source files ------" Importance="high" />
@@ -886,8 +856,5 @@
 	<ItemGroup>
 	  <Compile Include="$(ProjectDir)Generated\AutogeneratedStrings.cs" />
 	</ItemGroup>
-  </Target>
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
-    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies&quot; &quot;$(OutDir)dll&quot; /E/I" />
   </Target>
 </Project>
