@@ -1,10 +1,9 @@
-﻿<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <UsingTask TaskName="GenerateFile" TaskFactory="CodeTaskFactory" AssemblyFile="$(RoslynCodeTaskFactory)" Condition="'$(RoslynCodeTaskFactory)'!=''">
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <UsingTask TaskName="GenerateFile" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
 	    <Filename ParameterType="System.String" Required="true" />
     </ParameterGroup>
 	<Task>
-	  <Reference Include="System.Core" />
 	  <Using Namespace="System" />
 	  <Using Namespace="System.IO" />
 	  <Code Type="Fragment" Language="cs">
@@ -25,7 +24,7 @@ sb.AppendLine("    public static partial class Generated");
 sb.AppendLine("    {");
 sb.AppendLine($"       public static readonly string BugsplatDatabase = \"{value}\";");
 sb.AppendLine("    }");
-sb.AppendLine("} // namespace METAbolt");
+sb.AppendLine("} // namespace Radegast");
 string output = sb.ToString();
 
 if (output != context) { File.WriteAllText(Filename, output); }
