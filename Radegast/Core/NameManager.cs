@@ -35,6 +35,8 @@ namespace Radegast
 {
     public class NameManager : IDisposable, IAsyncDisposable
     {
+        private const string UNKNOWN = "(???) (???)";
+
         public event EventHandler<UUIDNameReplyEventArgs> NameUpdated;
 
         public NameMode Mode
@@ -49,7 +51,7 @@ namespace Radegast
         private GridClient Client => instance.Client;
         private bool hasUpdates;
         private DateTime lastUpdate = DateTime.Now;
-        private TimeSpan cacheInterval = TimeSpan.FromSeconds(30);
+        private readonly TimeSpan cacheInterval = TimeSpan.FromSeconds(30);
 
         private readonly RadegastInstance instance;
         private readonly string cacheFileName;
@@ -234,7 +236,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Error cleaing name cache.", Helpers.LogLevel.Error, ex);
+                Logger.Log("Error cleaning name cache.", Helpers.LogLevel.Error, ex);
             }
         }
 
@@ -272,7 +274,7 @@ namespace Radegast
         {
             if (agentID == UUID.Zero)
             {
-                return "(???) (???)";
+                return UNKNOWN;
             }
 
             string name = null;
@@ -391,7 +393,7 @@ namespace Radegast
         {
             if (agentID == UUID.Zero)
             {
-                return "(???) (???)";
+                return UNKNOWN;
             }
 
             if (names.TryGetValue(agentID, out var name))
@@ -412,7 +414,7 @@ namespace Radegast
         {
             if (agentID == UUID.Zero)
             {
-                return "(???) (???)";
+                return UNKNOWN;
             }
 
             if (names.TryGetValue(agentID, out var name))
@@ -433,7 +435,7 @@ namespace Radegast
         {
             if (agentID == UUID.Zero)
             {
-                return "(???) (???)";
+                return UNKNOWN;
             }
 
             if (names.TryGetValue(agentID, out var name))
