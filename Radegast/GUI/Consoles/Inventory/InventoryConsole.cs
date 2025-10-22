@@ -164,7 +164,7 @@ namespace Radegast
 
         private void InventoryConsole_Disposed(object sender, EventArgs e)
         {
-            GestureManager.Instance.StopMonitoring();
+            instance.GestureManager.StopMonitoring();
 
             if (TreeUpdateTimer != null)
             {
@@ -652,7 +652,7 @@ namespace Radegast
             TreeUpdateInProgress = true;
             TreeUpdateTimer.Start();
 
-            GestureManager.Instance.BeginMonitoring();
+            instance.GestureManager.BeginMonitoring();
 
             FetchQueuedFolders().Wait();
 

@@ -36,20 +36,22 @@ namespace Radegast.Core
             public UUID AssetID { get; set; }
         }
 
-        /// <summary>Gesture manager instance</summary>
-        public static GestureManager Instance { get; } = new GestureManager();
-
+        private readonly RadegastInstance Instance;
         private ConcurrentDictionary<UUID, GestureTrigger> Gestures { get; } = new ConcurrentDictionary<UUID, GestureTrigger>();
         private Random Random { get; } = new Random();
+
+        public GestureManager(RadegastInstance instance)
+        {
+            Instance = instance;
+        }
 
         /// <summary>
         /// Begins monitoring for changes in gestures.
         /// </summary>
         public void BeginMonitoring()
         {
-            var client = RadegastInstance.GlobalInstance.Client;
-            client.Inventory.Store.InventoryObjectAdded += Store_InventoryObjectAdded;
-            client.Inventory.Store.InventoryObjectUpdated += Store_InventoryObjectUpdated;
+            Instance.Client.Inventory.Store.InventoryObjectAdded += Store_InventoryObjectAdded;
+            Instance.Client.Inventory.Store.InventoryObjectUpdated += Store_InventoryObjectUpdated;
         }
 
         /// <summary>
@@ -57,9 +59,8 @@ namespace Radegast.Core
         /// </summary>
         public void StopMonitoring()
         {
-            var client = RadegastInstance.GlobalInstance.Client;
-            client.Inventory.Store.InventoryObjectAdded -= Store_InventoryObjectAdded;
-            client.Inventory.Store.InventoryObjectUpdated -= Store_InventoryObjectUpdated;
+            Instance.Client.Inventory.Store.InventoryObjectAdded -= Store_InventoryObjectAdded;
+            Instance.Client.Inventory.Store.InventoryObjectUpdated -= Store_InventoryObjectUpdated;
         }
 
         /// <summary>
@@ -104,10 +105,9 @@ namespace Radegast.Core
         private bool ProcessWord(string word, StringBuilder outString)
         {
             var possibleTriggers = new List<GestureTrigger>();
-            var client = RadegastInstance.GlobalInstance.Client;
             var lowerWord = word.ToLower();
 
-            client.Self.ActiveGestures.ForEach(pair =>
+            Instance.Client.Self.ActiveGestures.ForEach(pair =>
             {
                 var activeGestureID = pair.Key;
                 if (!Gestures.TryGetValue(activeGestureID, out var gesture))
@@ -141,9 +141,9 @@ namespace Radegast.Core
                 gestureToPlay = possibleTriggers[0];
             }
 
-            client.Self.PlayGesture(gestureToPlay.AssetID);
+            Instance.Client.Self.PlayGesture(gestureToPlay.AssetID);
 
-            if (!String.IsNullOrEmpty(gestureToPlay.Replacement))
+            if (!string.IsNullOrEmpty(gestureToPlay.Replacement))
             {
                 outString.Append(gestureToPlay.Replacement);
                 outString.Append(' ');
@@ -158,9 +158,7 @@ namespace Radegast.Core
         /// <param name="gesture">Gesture that was added or updated.</param>
         private void UpdateInventoryGesture(InventoryGesture gesture)
         {
-            var client = RadegastInstance.GlobalInstance.Client;
-
-            client.Assets.RequestAsset(gesture.AssetUUID, AssetType.Gesture, false, (_, asset) =>
+            Instance.Client.Assets.RequestAsset(gesture.AssetUUID, AssetType.Gesture, false, (_, asset) =>
             {
                 if (!(asset is AssetGesture assetGesture))
                 {

@@ -514,7 +514,7 @@ namespace Radegast
                 }
                 #endregion
 
-                var processedMessage = GestureManager.Instance.PreProcessChatMessage(msg).Trim();
+                var processedMessage = instance.GestureManager.PreProcessChatMessage(msg).Trim();
                 if (!string.IsNullOrEmpty(processedMessage))
                 {
                     netcom.ChatOut(processedMessage, type, ch);

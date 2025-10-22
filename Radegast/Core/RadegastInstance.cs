@@ -29,6 +29,7 @@ using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Media;
 using OpenMetaverse;
+using Radegast.Core;
 using Radegast.Core.RLV;
 
 namespace Radegast
@@ -168,6 +169,11 @@ namespace Radegast
         public CurrentOutfitFolder COF;
 
         /// <summary>
+        /// Gesture manager
+        /// </summary>
+        public GestureManager GestureManager;
+
+        /// <summary>
         /// LSL Syntax manager
         /// </summary>
         public LslSyntax LslSyntax;
@@ -273,6 +279,7 @@ namespace Radegast
             GridManger.LoadGrids();
 
             Names = new NameManager(this);
+            GestureManager = new GestureManager(this);
             LslSyntax = new LslSyntax(client0);
 
             MainForm = new frmMain(this);
