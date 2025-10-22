@@ -19,6 +19,7 @@
  */
 
 using System.Drawing;
+using SkiaSharp;
 
 namespace Radegast
 {
@@ -28,12 +29,12 @@ namespace Radegast
         void InsertLink(string text, string hyperlink);
         void PrintText(string text);
         void PrintTextLine(string text);
-        void PrintTextLine(string text, Color color);
+        void PrintTextLine(string text, SKColor color);
         void ClearText();
 
         string Content { get; set; }
-        Color ForeColor { get; set; }
-        Color BackColor { get; set; }
+        SKColor ForeColor { get; set; }
+        SKColor BackColor { get; set; }
         Font Font { get; set; }
     }
 }

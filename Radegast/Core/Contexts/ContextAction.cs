@@ -20,7 +20,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -86,7 +85,7 @@ namespace Radegast
         {
             return new List<ToolStripMenuItem>()
             {
-                new ToolStripMenuItem(LabelFor(target), (Image) null, (sender, e) => TCI(sender, e, target))
+                new ToolStripMenuItem(LabelFor(target), null, (sender, e) => TCI(sender, e, target))
                 {
                     Enabled = IsEnabled(target), ToolTipText = ToolTipText(target)
                 }

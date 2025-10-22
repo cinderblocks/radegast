@@ -24,6 +24,7 @@ using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Threading;
 using OpenMetaverse;
+using SkiaSharp;
 
 namespace Radegast
 {
@@ -224,12 +225,12 @@ namespace Radegast
 
             if (e.Success)
             {
-                TextManager.TextPrinter.PrintTextLine("Join Group Chat Success!", Color.Green);
+                TextManager.TextPrinter.PrintTextLine("Join Group Chat Success!", SKColors.Green);
                 WaitForSessionStart.Set();
             }
             else
             {
-                TextManager.TextPrinter.PrintTextLine("Join Group Chat failed.", Color.Red);
+                TextManager.TextPrinter.PrintTextLine("Join Group Chat failed.", SKColors.Red);
             }
         }
 
@@ -392,7 +393,7 @@ namespace Radegast
             }
             else
             {
-                TextManager.TextPrinter.PrintTextLine("Cannot send group IM.", Color.Red);
+                TextManager.TextPrinter.PrintTextLine("Cannot send group IM.", SKColors.Red);
             }
         }
 

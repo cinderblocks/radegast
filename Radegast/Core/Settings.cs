@@ -25,9 +25,11 @@ using System.IO;
 using System.Xml;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
-using System.Drawing;
 using System.ComponentModel;
+using System.Drawing;
 using System.Runtime.Serialization;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -43,110 +45,110 @@ namespace Radegast
         {
             {"Normal", new FontSetting {
                 Name = "Normal",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"StatusBlue", new FontSetting {
                 Name = "StatusBlue",
-                ForeColor = Color.Blue,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.Blue,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"StatusDarkBlue", new FontSetting {
                 Name = "StatusDarkBlue",
-                ForeColor = Color.DarkBlue,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.DarkBlue,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"LindenChat", new FontSetting {
                 Name = "LindenChat",
-                ForeColor = Color.DarkGreen,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.DarkGreen,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"ObjectChat", new FontSetting {
                 Name = "ObjectChat",
-                ForeColor = Color.DarkCyan,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.DarkCyan,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"StartupTitle", new FontSetting {
                 Name = "StartupTitle",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = new Font(FontSetting.DefaultFont, FontStyle.Bold),
             }},
             {"Alert", new FontSetting {
                 Name = "Alert",
-                ForeColor = Color.DarkRed,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.DarkRed,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Error", new FontSetting {
                 Name = "Error",
-                ForeColor = Color.Red,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.Red,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"OwnerSay", new FontSetting {
                 Name = "OwnerSay",
-                ForeColor = Color.DarkGoldenrod,
-                BackColor = Color.Transparent,
+                ForeColor = SKColors.DarkGoldenrod,
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Timestamp", new FontSetting {
                 Name = "Timestamp",
-                ForeColor = SystemColors.GrayText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.GrayText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Name", new FontSetting {
                 Name = "Name",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Notification", new FontSetting {
                 Name = "Notification",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"IncomingIM", new FontSetting {
                 Name = "IncomingIM",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"OutgoingIM", new FontSetting {
                 Name = "OutgoingIM",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Emote", new FontSetting {
                 Name = "Emote",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"Self", new FontSetting {
                 Name = "Self",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
             {"MentionMe", new FontSetting {
                 Name = "MentionMe",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Yellow,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Yellow,
                 Font = FontSetting.DefaultFont,
             }},
             {"MentionOthers", new FontSetting {
                 Name = "MentionOthers",
-                ForeColor = SystemColors.ControlText,
-                BackColor = Color.Transparent,
+                ForeColor = SystemColors.ControlText.ToSKColor(),
+                BackColor = SKColors.Transparent,
                 Font = FontSetting.DefaultFont,
             }},
         };
@@ -160,24 +162,24 @@ namespace Radegast
             public Font Font;
 
             [IgnoreDataMember]
-            public Color ForeColor;
+            public SKColor ForeColor;
 
             [IgnoreDataMember]
-            public Color BackColor;
+            public SKColor BackColor;
 
 
             public string Name;
 
             public string ForeColorString
             {
-                get => ColorTranslator.ToHtml(ForeColor);
-                set => ForeColor = ColorTranslator.FromHtml(value);
+                get => ColorTranslator.ToHtml(ForeColor.ToDrawingColor());
+                set => ForeColor = ColorTranslator.FromHtml(value).ToSKColor();
             }
 
             public string BackColorString
             {
-                get => ColorTranslator.ToHtml(BackColor);
-                set => BackColor = ColorTranslator.FromHtml(value);
+                get => ColorTranslator.ToHtml(BackColor.ToDrawingColor());
+                set => BackColor = ColorTranslator.FromHtml(value).ToSKColor();
             }
 
             public string FontString

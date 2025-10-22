@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,6 +25,8 @@ using System.Text;
 using System.IO;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -202,8 +204,8 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.GrayText;
-                    TextPrinter.BackColor = Color.Transparent;
+                    TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
                     TextPrinter.Font = Settings.FontSetting.DefaultFont;
                     TextPrinter.PrintText(DateTime.Now.ToString("[HH:mm] "));
                 }
@@ -218,8 +220,8 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = Color.DarkCyan;
-                TextPrinter.BackColor = Color.Transparent;
+                TextPrinter.ForeColor = SKColors.DarkCyan;
+                TextPrinter.BackColor = SKColors.Transparent;
                 TextPrinter.Font = Settings.FontSetting.DefaultFont;
             }
 
@@ -241,8 +243,8 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.GrayText;
-                    TextPrinter.BackColor = Color.Transparent;
+                    TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
                     TextPrinter.Font = Settings.FontSetting.DefaultFont;
                     TextPrinter.PrintText(DateTime.Now.ToString("[HH:mm] "));
                 }
@@ -257,8 +259,8 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = SystemColors.WindowText;
-                TextPrinter.BackColor = Color.Transparent;
+                TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
                 TextPrinter.Font = Settings.FontSetting.DefaultFont;
             }
 
@@ -284,8 +286,8 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.WindowText;
-                    TextPrinter.BackColor = Color.Transparent;
+                    TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
                     TextPrinter.Font = Settings.FontSetting.DefaultFont;
                 }
 
@@ -304,8 +306,8 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.WindowText;
-                        TextPrinter.BackColor = Color.Transparent;
+                        TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
                         TextPrinter.Font = Settings.FontSetting.DefaultFont;
                     }
                 }
@@ -320,8 +322,8 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.WindowText;
-                        TextPrinter.BackColor = Color.Transparent;
+                        TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
                         TextPrinter.Font = Settings.FontSetting.DefaultFont;
                     }
                 }
@@ -404,8 +406,8 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.GrayText;
-                        TextPrinter.BackColor = Color.Transparent;
+                        TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
                         TextPrinter.Font = Settings.FontSetting.DefaultFont;
                     }
 
@@ -422,8 +424,8 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = SystemColors.GrayText;
-                TextPrinter.BackColor = Color.Transparent;
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
                 TextPrinter.Font = Settings.FontSetting.DefaultFont;
             }
             TextPrinter.PrintTextLine("====");

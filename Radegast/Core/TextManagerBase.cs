@@ -3,7 +3,7 @@ using OpenMetaverse.StructuredData;
 using OpenMetaverse;
 using System;
 using System.Collections.Generic;
-using System.Drawing;
+using SkiaSharp;
 
 namespace Radegast
 {
@@ -114,11 +114,11 @@ namespace Radegast
                 {
                     var fontSetting = FontSettings[linkTextInfo.RequestedFontSettingName];
 
-                    if (fontSetting.ForeColor != Color.Transparent)
+                    if (fontSetting.ForeColor != SKColors.Transparent)
                     {
                         TextPrinter.ForeColor = fontSetting.ForeColor;
                     }
-                    if (fontSetting.BackColor != Color.Transparent)
+                    if (fontSetting.BackColor != SKColors.Transparent)
                     {
                         TextPrinter.BackColor = fontSetting.BackColor;
                     }

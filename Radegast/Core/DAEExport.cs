@@ -23,14 +23,12 @@ using System.Collections.Generic;
 using System.Text;
 using System.Xml;
 using System.IO;
-using System.Drawing;
 using System.Linq;
 using System.Threading;
 using CoreJ2K;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -226,7 +224,7 @@ namespace Radegast
 
                 OnProgress("Fetching texture" + id);
 
-                Image wImage = null;
+                SKBitmap bitmap = null;
                 byte[] jpegData = null;
 
                 try
@@ -237,7 +235,7 @@ namespace Radegast
                         if (state == TextureRequestState.Finished && asset != null)
                         {
                             jpegData = asset.AssetData;
-                            wImage = J2kImage.FromBytes(jpegData).As<SKBitmap>().ToBitmap();
+                            bitmap = J2kImage.FromBytes(jpegData).As<SKBitmap>();
                             gotImage.Set();
                         }
                         else if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
@@ -247,25 +245,35 @@ namespace Radegast
                     });
                     gotImage.WaitOne(120 * 1000, false);
 
-                    if (wImage != null)
+                    if (bitmap != null)
                     {
                         string fullFileName = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(FileName), filename);
                         switch (ImageFormat)
                         {
                             case "PNG":
-                                wImage.Save(fullFileName, System.Drawing.Imaging.ImageFormat.Png);
+                            {
+                                using (var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100)) 
+                                    File.WriteAllBytes(fullFileName, encoded.ToArray());
                                 break;
+                            }
                             case "JPG":
-                                wImage.Save(fullFileName, System.Drawing.Imaging.ImageFormat.Jpeg);
+                            {
+                                using (var encoded = bitmap.Encode(SKEncodedImageFormat.Jpeg, 100))
+                                    File.WriteAllBytes(fullFileName, encoded.ToArray());
                                 break;
+                            }
                             case "BMP":
-                                wImage.Save(fullFileName, System.Drawing.Imaging.ImageFormat.Bmp);
+                            {
+                                using (var encoded = bitmap.Encode(SKEncodedImageFormat.Bmp, 100))
+                                    File.WriteAllBytes(fullFileName, encoded.ToArray());
                                 break;
+                            }
                             case "J2C":
                                 File.WriteAllBytes(fullFileName, jpegData);
                                 break;
                             case "TGA":
-                                //File.WriteAllBytes(fullFileName, mImage.ExportTGA());
+                                var tga = Pfim.Targa.Create(bitmap.Bytes, new Pfim.PfimConfig());
+                                File.WriteAllBytes(fullFileName, tga.Data);
                                 break;
                             default:
                                 throw new Exception("Unsupported image format");

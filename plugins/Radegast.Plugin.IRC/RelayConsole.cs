@@ -28,6 +28,7 @@ using System.Windows.Forms;
 using Meebey.SmartIrc4net;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
+using SkiaSharp;
 
 namespace Radegast.Plugin.IRC
 {
@@ -291,11 +292,11 @@ namespace Radegast.Plugin.IRC
 
             if (true)
             {
-                textPrinter.ForeColor = Color.Gray;
+                textPrinter.ForeColor = SKColors.Gray;
                 textPrinter.PrintText(timestamp.ToString("[HH:mm] "));
             }
 
-            textPrinter.ForeColor = Color.Black;
+            textPrinter.ForeColor = SKColors.Black;
 
             StringBuilder sb = new StringBuilder();
 

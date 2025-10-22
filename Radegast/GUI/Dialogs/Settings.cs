@@ -27,6 +27,8 @@ using Newtonsoft.Json;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using Radegast.Automation;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -901,8 +903,8 @@ namespace Radegast
         {
             float fontSize = SystemFonts.DefaultFont.Size;
             string fontName = SystemFonts.DefaultFont.Name;
-            Color backColor = SystemColors.Window;
-            Color foreColor = SystemColors.ControlText;
+            SKColor backColor = SystemColors.Window.ToSKColor();
+            SKColor foreColor = SystemColors.ControlText.ToSKColor();
             FontStyle style = FontStyle.Regular;
 
             if (cbxFontSize.SelectedItem is float item)
@@ -915,11 +917,11 @@ namespace Radegast
             }
             if (cbxForeground.SelectedItem is Color color)
             {
-                foreColor = color;
+                foreColor = color.ToSKColor();
             }
             if (cbxBackground.SelectedItem is Color backgroundSelectedItem)
             {
-                backColor = backgroundSelectedItem;
+                backColor = backgroundSelectedItem.ToSKColor();
             }
 
             if (cbxBold.Checked)
@@ -947,8 +949,8 @@ namespace Radegast
             var previewFontSettings = GetPreviewFontSettings();
 
             lblPreview.Font = previewFontSettings.Font;
-            lblPreview.ForeColor = previewFontSettings.ForeColor;
-            lblPreview.BackColor = previewFontSettings.BackColor;
+            lblPreview.ForeColor = previewFontSettings.ForeColor.ToDrawingColor();
+            lblPreview.BackColor = previewFontSettings.BackColor.ToDrawingColor();
         }
 
         private void UpdateSelection(Settings.FontSetting selected)
