@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,9 +27,9 @@ namespace RadegastSpeech.Conversation
     /// <summary>
     /// Represents a conversation about notifications and dialogs
     /// </summary>
-    class BlueMenu : Mode
+    internal class BlueMenu : Mode
     {
-        private NotificationEventArgs note;
+        private readonly NotificationEventArgs note;
 
         internal BlueMenu(PluginControl pc, NotificationEventArgs arg) : base(pc)
         {
@@ -80,7 +80,7 @@ namespace RadegastSpeech.Conversation
             ReadOptions();
         }
 
-        void note_OnNotificationClosed(object sender, NotificationEventArgs e)
+        private void note_OnNotificationClosed(object sender, NotificationEventArgs e)
         {
             note.OnNotificationClosed -=
                 note_OnNotificationClosed;
@@ -89,12 +89,12 @@ namespace RadegastSpeech.Conversation
             FinishInterruption();
         }
 
-        void note_OnNotificationClicked(object sender, EventArgs e, NotificationEventArgs notice)
+        private void note_OnNotificationClicked(object sender, EventArgs e, NotificationEventArgs notice)
         {
             if (sender is Button b) { Talker.SayMore(b.Text, Talk.BeepType.Good); }
         }
 
-        void ReadOptions()
+        private void ReadOptions()
         {
             string options = "";
             if (note.Buttons.Count == 1)

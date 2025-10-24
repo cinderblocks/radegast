@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,11 +25,11 @@ namespace Radegast
 {
     public partial class ntfSendLureOffer : Notification
     {
-        private RadegastInstance instance;
-        private UUID agentID;
-        private string agentName;
+        private readonly RadegastInstanceForms instance;
+        private readonly UUID agentID;
+        private readonly string agentName;
 
-        public ntfSendLureOffer(RadegastInstance instance, UUID agentID)
+        public ntfSendLureOffer(RadegastInstanceForms instance, UUID agentID)
             : base(NotificationType.SendLureOffer)
         {
             InitializeComponent();
@@ -39,8 +39,8 @@ namespace Radegast
             txtHead.BackColor = instance.MainForm.NotificationBackground;
 
             agentName = instance.Names.GetAsync(agentID).GetAwaiter().GetResult();
-            txtHead.Text = String.Format("Offer a teleport to {0} with the following message: ", agentName);
-            txtMessage.Text = String.Format("Join me in {0}!", instance.Client.Network.CurrentSim.Name);
+            txtHead.Text = $"Offer a teleport to {agentName} with the following message: ";
+            txtMessage.Text = $"Join me in {instance.Client.Network.CurrentSim.Name}!";
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnOffer.Focus();
 
@@ -62,12 +62,12 @@ namespace Radegast
 
             instance.Client.Self.SendTeleportLure(agentID, txtMessage.Text);
 
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
         {
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
     }
 }

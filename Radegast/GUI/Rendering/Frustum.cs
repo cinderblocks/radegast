@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -34,11 +34,11 @@ namespace Radegast.Rendering
     public class Frustum
     {
         //static Matrix4 ProjMatrix, ModelMatrix;
-        static float[] ClipMatrix = new float[16];
-        static float[,] frustum = new float[6, 4];
-        const int RIGHT = 0, LEFT = 1, BOTTOM = 2, TOP = 3, BACK = 4, FRONT = 5;
+        private static readonly float[] ClipMatrix = new float[16];
+        private static readonly float[,] frustum = new float[6, 4];
+        private const int RIGHT = 0, LEFT = 1, BOTTOM = 2, TOP = 3, BACK = 4, FRONT = 5;
 
-        static void NormalizePlane(float[,] frustum, int side)
+        private static void NormalizePlane(float[,] frustum, int side)
         {
             float magnitude = (float)Math.Sqrt((frustum[side, 0] * frustum[side, 0]) + (frustum[side, 1] * frustum[side, 1])
                                                 + (frustum[side, 2] * frustum[side, 2]));
@@ -176,8 +176,8 @@ namespace Radegast.Rendering
 
     public class BoundingVolume
     {
-        Vector3 Min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
-        Vector3 Max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
+        private Vector3 Min = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
+        private Vector3 Max = new Vector3(float.MinValue, float.MinValue, float.MinValue);
 
         public Vector3 ScaledMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
         public Vector3 ScaledMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);

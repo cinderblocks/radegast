@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,17 +28,17 @@ namespace Radegast
 {
     public partial class ConferenceIMTabWindow : UserControl
     {
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom;
-        private GridClient client;
+        private readonly RadegastInstanceForms instance;
+        private readonly INetCom _netCom;
+        private readonly GridClient client;
         private List<UUID> participants = new List<UUID>();
-        ManualResetEvent WaitForSessionStart = new ManualResetEvent(false);
-        private List<string> chatHistory = new List<string>();
+        private ManualResetEvent WaitForSessionStart = new ManualResetEvent(false);
+        private readonly List<string> chatHistory = new List<string>();
         private int chatPointer;
 
         public string SessionName { get; set; }
 
-        public ConferenceIMTabWindow(RadegastInstance instance, UUID session, string sessionName)
+        public ConferenceIMTabWindow(RadegastInstanceForms instance, UUID session, string sessionName)
         {
             InitializeComponent();
             Disposed += IMTabWindow_Disposed;
@@ -46,15 +46,15 @@ namespace Radegast
             this.instance = instance;
             client = instance.Client;
             SessionName = sessionName;
-            netcom = this.instance.Netcom;
+            _netCom = this.instance.NetCom;
 
             SessionId = session;
 
             TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Conference, SessionId, sessionName);
 
             // Callbacks
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientDisconnected += netcom_ClientDisconnected;
+            _netCom.ClientLoginStatus += NetComClientLoginStatus;
+            _netCom.ClientDisconnected += NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
 
             if (!client.Self.GroupChatSessions.ContainsKey(session))
@@ -67,31 +67,31 @@ namespace Radegast
 
         private void IMTabWindow_Disposed(object sender, EventArgs e)
         {
-            netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-            netcom.ClientDisconnected -= netcom_ClientDisconnected;
+            _netCom.ClientLoginStatus -= NetComClientLoginStatus;
+            _netCom.ClientDisconnected -= NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged -= GlobalSettings_OnSettingChanged;
             CleanUp();
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status != LoginStatus.Success) return;
 
             RefreshControls();
         }
 
-        void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
         {
         }
 
-        private void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             RefreshControls();
         }
 
         public void CleanUp()
         {
-            if (instance.Netcom.IsLoggedIn)
+            if (instance.NetCom.IsLoggedIn)
             {
                 instance.Client.Self.RequestLeaveGroupChat(this.SessionId);
             }
@@ -115,7 +115,7 @@ namespace Radegast
 
         private void RefreshControls()
         {
-            if (!netcom.IsLoggedIn)
+            if (!_netCom.IsLoggedIn)
             {
                 cbxInput.Enabled = false;
                 btnSend.Enabled = false;
@@ -127,7 +127,7 @@ namespace Radegast
             btnSend.Enabled = cbxInput.Text.Length > 0;
         }
 
-        void ChatHistoryPrev()
+        private void ChatHistoryPrev()
         {
             if (chatPointer == 0) return;
             chatPointer--;
@@ -139,7 +139,7 @@ namespace Radegast
             }
         }
 
-        void ChatHistoryNext()
+        private void ChatHistoryNext()
         {
             if (chatPointer == chatHistory.Count) return;
             chatPointer++;

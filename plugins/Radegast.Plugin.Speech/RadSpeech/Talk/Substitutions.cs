@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,7 +26,7 @@ namespace RadegastSpeech.Talk
 {
     internal class Substitutions
     {
-        private List<Tuple> patterns;
+        private readonly List<Tuple> patterns;
 
         public Substitutions( PluginControl pc)
         {
@@ -99,10 +99,10 @@ namespace RadegastSpeech.Talk
 
         }
 
-        class Tuple
+        private class Tuple
         {
-            public Regex pattern;
-            public string replace;
+            public readonly Regex pattern;
+            public readonly string replace;
             /// <summary>
             /// Tuple to replace a pattern
             /// </summary>

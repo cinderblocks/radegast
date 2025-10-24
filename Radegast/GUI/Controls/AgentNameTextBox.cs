@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,8 +28,7 @@ namespace Radegast
     public class AgentNameTextBox : TextBox
     {
         private UUID agentID;
-        private GridClient client => RadegastInstance.GlobalInstance.Client;
-        private RadegastInstance instance => RadegastInstance.GlobalInstance;
+        private static RadegastInstance Instance => RadegastInstanceForms.Instance;
 
         [Browsable(false)]
         public UUID AgentID
@@ -49,7 +48,7 @@ namespace Radegast
                 else
                 {
                     SetupHandlers();
-                    string name = instance.Names.Get(agentID);
+                    string name = Instance.Names.Get(agentID);
                     SetName(name);
                 }
             }
@@ -61,21 +60,21 @@ namespace Radegast
             Disposed += CleanupHandlers;
         }
 
-        void SetupHandlers()
+        private void SetupHandlers()
         {
-            if (instance?.Names == null) return;
-            instance.Names.NameUpdated += Names_NameUpdated;
+            if (Instance?.Names == null) return;
+            Instance.Names.NameUpdated += Names_NameUpdated;
         }
 
-        void CleanupHandlers(object sender, EventArgs e)
+        private void CleanupHandlers(object sender, EventArgs e)
         {
-            if (instance?.Names != null)
+            if (Instance?.Names != null)
             {
-                instance.Names.NameUpdated -= Names_NameUpdated;
+                Instance.Names.NameUpdated -= Names_NameUpdated;
             }
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             if (e.Names.ContainsKey(agentID))
             {
@@ -83,7 +82,7 @@ namespace Radegast
             }
         }
 
-        void SetName(string name)
+        private void SetName(string name)
         {
             if (InvokeRequired)
             {

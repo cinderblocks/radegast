@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -23,9 +23,9 @@ using OpenMetaverse;
 
 namespace RadegastSpeech.Conversation
 {
-    class InvNotecard : Mode
+    internal class InvNotecard : Mode
     {
-        private InventoryNotecard asset;
+        private readonly InventoryNotecard asset;
         private string text;
         private int StartPosition;
         private int StopPosition;
@@ -110,7 +110,7 @@ namespace RadegastSpeech.Conversation
             return false;
         }
 
-        void MainForm_KeyPress(object sender, System.Windows.Forms.KeyEventArgs e)
+        private void MainForm_KeyPress(object sender, System.Windows.Forms.KeyEventArgs e)
         {
             if (e.KeyCode == System.Windows.Forms.Keys.Space ||
                 e.KeyCode == System.Windows.Forms.Keys.Down)
@@ -134,7 +134,7 @@ namespace RadegastSpeech.Conversation
             }
         }
 
-        void ReadSection()
+        private void ReadSection()
         {
             Talker.SayMore( text.Substring( StartPosition, StopPosition-StartPosition ));
             if (!isMore)
@@ -144,7 +144,7 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Delineate the previous section and read it.
         /// </summary>
-        void PrevSection()
+        private void PrevSection()
         {
             if (StartPosition == 0)
             {
@@ -165,7 +165,7 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Delineate the next section and read it.
         /// </summary>
-        void NextSection()
+        private void NextSection()
         {
             StartPosition = StopPosition;
             int section = text.IndexOfAny(

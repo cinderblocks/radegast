@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -18,16 +18,18 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using SkiaSharp;
 using System;
 using System.Drawing;
 using System.Windows.Forms;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
     public class RichTextBoxPrinter : ITextPrinter
     {
-        private RRichTextBox rtb;
-        private bool mono;
+        private readonly RRichTextBox rtb;
+        private readonly bool mono;
 
         public RichTextBoxPrinter(RRichTextBox textBox)
         {
@@ -71,7 +73,7 @@ namespace Radegast
             PrintText(text + Environment.NewLine);
         }
 
-        public void PrintTextLine(string text, Color color)
+        public void PrintTextLine(string text, SKColor color)
         {
             if (rtb.InvokeRequired)
             {
@@ -79,7 +81,7 @@ namespace Radegast
                 return;
             }
 
-            Color c = ForeColor;
+            var c = ForeColor;
             ForeColor = color;
             PrintTextLine(text);
             ForeColor = c;
@@ -96,16 +98,16 @@ namespace Radegast
             set => rtb.Text = value;
         }
 
-        public Color ForeColor
+        public SKColor ForeColor
         {
-            get => rtb.SelectionColor;
-            set => rtb.SelectionColor = value;
+            get => rtb.SelectionColor.ToSKColor();
+            set => rtb.SelectionColor = value.ToDrawingColor();
         }
 
-        public Color BackColor
+        public SKColor BackColor
         {
-            get => rtb.SelectionBackColor;
-            set => rtb.SelectionBackColor = value;
+            get => rtb.SelectionBackColor.ToSKColor();
+            set => rtb.SelectionBackColor = value.ToDrawingColor();
         }
 
         public Font Font

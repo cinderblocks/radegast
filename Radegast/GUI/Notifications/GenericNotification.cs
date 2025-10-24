@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,14 +25,14 @@ namespace Radegast
 {
     public partial class ntfGeneric : Notification
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms Instance;
 
-        public ntfGeneric(RadegastInstance instance, string msg)
+        public ntfGeneric(RadegastInstanceForms instance, string msg)
             : base(NotificationType.Generic)
         {
             InitializeComponent();
 
-            this.instance = instance;
+            Instance = instance;
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             txtMessage.Text = msg.Replace("\n", "\r\n");
             if (msg.Length < 100)
@@ -51,7 +51,7 @@ namespace Radegast
 
         private void btnOk_Click(object sender, EventArgs e)
         {
-            instance.MainForm.RemoveNotification(this);
+            Instance.MainForm.RemoveNotification(this);
         }
     }
 }

@@ -93,9 +93,9 @@ namespace Radegast
         /// </summary>
         public event TabCallback OnTabRemoved;
 
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private Radegast.Netcom netcom => instance.Netcom;
+        private INetCom NetCom => instance.NetCom;
         public ChatTextManager MainChatManger { get; private set; }
 
         public Dictionary<string, RadegastTab> Tabs { get; } = new Dictionary<string, RadegastTab>();
@@ -109,7 +109,7 @@ namespace Radegast
 
         private Form owner;
 
-        public TabsConsole(RadegastInstance instance)
+        public TabsConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += TabsConsole_Disposed;
@@ -150,13 +150,13 @@ namespace Radegast
             client.Network.UnregisterCallback(OpenMetaverse.Packets.PacketType.ScriptTeleportRequest, ScriptTeleportRequestHandler);
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(client);
         }
 
-        void TabsConsole_Disposed(object sender, EventArgs e)
+        private void TabsConsole_Disposed(object sender, EventArgs e)
         {
             RemoveNetcomEvents();
             UnregisterClientEvents(client);
@@ -164,25 +164,25 @@ namespace Radegast
 
         private void AddNetcomEvents()
         {
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientLoggedOut += netcom_ClientLoggedOut;
-            netcom.ClientDisconnected += netcom_ClientDisconnected;
-            netcom.ChatSent += netcom_ChatSent;
-            netcom.AlertMessageReceived += netcom_AlertMessageReceived;
-            netcom.InstantMessageReceived += netcom_InstantMessageReceived;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            NetCom.ClientLoggedOut += NetComClientLoggedOut;
+            NetCom.ClientDisconnected += NetComClientDisconnected;
+            NetCom.ChatSent += NetComChatSent;
+            NetCom.AlertMessageReceived += NetComAlertMessageReceived;
+            NetCom.InstantMessageReceived += NetComInstantMessageReceived;
         }
 
         private void RemoveNetcomEvents()
         {
-            netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-            netcom.ClientLoggedOut -= netcom_ClientLoggedOut;
-            netcom.ClientDisconnected -= netcom_ClientDisconnected;
-            netcom.ChatSent -= netcom_ChatSent;
-            netcom.AlertMessageReceived -= netcom_AlertMessageReceived;
-            netcom.InstantMessageReceived -= netcom_InstantMessageReceived;
+            NetCom.ClientLoginStatus -= NetComClientLoginStatus;
+            NetCom.ClientLoggedOut -= NetComClientLoggedOut;
+            NetCom.ClientDisconnected -= NetComClientDisconnected;
+            NetCom.ChatSent -= NetComChatSent;
+            NetCom.AlertMessageReceived -= NetComAlertMessageReceived;
+            NetCom.InstantMessageReceived -= NetComInstantMessageReceived;
         }
 
-        void ScriptTeleportRequestHandler(object sender, PacketReceivedEventArgs e)
+        private void ScriptTeleportRequestHandler(object sender, PacketReceivedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -203,7 +203,7 @@ namespace Radegast
             }
         }
 
-        void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
+        private void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -219,7 +219,7 @@ namespace Radegast
             }
         }
 
-        void Self_ScriptDialog(object sender, ScriptDialogEventArgs e)
+        private void Self_ScriptDialog(object sender, ScriptDialogEventArgs e)
         {
             if (instance.MainForm.InvokeRequired)
             {
@@ -235,7 +235,7 @@ namespace Radegast
             instance.MainForm.AddNotification(new ntfScriptDialog(instance, e.Message, e.ObjectName, e.ImageID, e.ObjectID, e.FirstName, e.LastName, e.Channel, e.ButtonLabels));
         }
 
-        void Self_ScriptQuestion(object sender, ScriptQuestionEventArgs e)
+        private void Self_ScriptQuestion(object sender, ScriptQuestionEventArgs e)
         {
             // Is this object muted
             if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.TaskID) // muted object by id
@@ -258,7 +258,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status == LoginStatus.Failed)
             {
@@ -266,7 +266,7 @@ namespace Radegast
             }
             else if (e.Status == LoginStatus.Success)
             {
-                DisplayNotificationInChat($"Logged in as {netcom.LoginOptions.FullName}.", ChatBufferTextStyle.StatusDarkBlue);
+                DisplayNotificationInChat($"Logged in as {NetCom.LoginOptions.FullName}.", ChatBufferTextStyle.StatusDarkBlue);
                 DisplayNotificationInChat("Login reply: " + e.Message, ChatBufferTextStyle.StatusDarkBlue);
 
                 if (Tabs.ContainsKey("login"))
@@ -280,7 +280,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_ClientLoggedOut(object sender, EventArgs e)
+        private void NetComClientLoggedOut(object sender, EventArgs e)
         {
             DisposeOnlineTabs();
 
@@ -289,7 +289,7 @@ namespace Radegast
 
         }
 
-        private void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) return;
 
@@ -298,12 +298,12 @@ namespace Radegast
             DisplayNotificationInChat($"Disconnected: {e.Message}", ChatBufferTextStyle.Error);
         }
 
-        void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
+        private void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
         {
             DisplayNotificationInChat($"({e.DisplayName.UserName}) is now known as {e.DisplayName.DisplayName}");
         }
 
-        void Self_SetDisplayNameReply(object sender, SetDisplayNameReplyEventArgs e)
+        private void Self_SetDisplayNameReply(object sender, SetDisplayNameReplyEventArgs e)
         {
             if (e.Status == 200)
             {
@@ -315,7 +315,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_AlertMessageReceived(object sender, AlertMessageEventArgs e)
+        private void NetComAlertMessageReceived(object sender, AlertMessageEventArgs e)
         {
             if (e.NotificationId == "AutopilotCanceled") { return; }
 
@@ -333,12 +333,12 @@ namespace Radegast
             Tabs["chat"].Highlight();
         }
 
-        private void netcom_ChatSent(object sender, ChatSentEventArgs e)
+        private void NetComChatSent(object sender, ChatSentEventArgs e)
         {
             Tabs["chat"].Highlight();
         }
 
-        void Self_LoadURL(object sender, LoadUrlEventArgs e)
+        private void Self_LoadURL(object sender, LoadUrlEventArgs e)
         {
             // Is the object or the owner muted?
             if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.ObjectID) // muted object by id 
@@ -349,7 +349,7 @@ namespace Radegast
             instance.MainForm.AddNotification(new ntfLoadURL(instance, e));
         }
 
-        private void netcom_InstantMessageReceived(object sender, InstantMessageEventArgs e)
+        private void NetComInstantMessageReceived(object sender, InstantMessageEventArgs e)
         {
             // Messaage from someone we muted?
             if (null != client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID)) return;
@@ -398,7 +398,7 @@ namespace Radegast
                     }
                     else if (e.IM.IMSessionID == UUID.Zero)
                     {
-                        String msg = string.Format("Message from {0}: {1}", instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName), e.IM.Message);
+                        var msg = $"Message from {instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName)}: {e.IM.Message}";
                         instance.MainForm.AddNotification(new ntfGeneric(instance, msg));
                         DisplayNotificationInChat(msg);
                     }
@@ -544,7 +544,7 @@ namespace Radegast
         /// </summary>
         /// <param name="msg">Message to be printed in the chat tab</param>
         /// <param name="style">Style of the message to be printed, normal, object, etc.</param>
-        /// <param name="highlightChatTab">Highligt (and flash in taskbar) chat tab if not selected</param>
+        /// <param name="highlightChatTab">Highlight (and flash in taskbar) chat tab if not selected</param>
         public void DisplayNotificationInChat(string msg, ChatBufferTextStyle style, bool highlightChatTab)
         {
             if (InvokeRequired)
@@ -834,7 +834,7 @@ namespace Radegast
         }
 
 
-        public void RegisterContextAction(Type libomvType, String label, EventHandler handler)
+        public void RegisterContextAction(Type libomvType, string label, EventHandler handler)
         {
             instance.ContextActionManager.RegisterContextAction(libomvType, label, handler);
         }
@@ -958,7 +958,7 @@ namespace Radegast
             }
         }
 
-        void tab_TabHidden(object sender, EventArgs e)
+        private void tab_TabHidden(object sender, EventArgs e)
         {
             RadegastTab tab = (RadegastTab)sender;
 

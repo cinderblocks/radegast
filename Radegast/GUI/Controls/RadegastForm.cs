@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -75,7 +75,7 @@ namespace Radegast
         /// <summary>
         /// Instance of Radegast
         /// </summary>
-        protected RadegastInstance Instance { get; } = null;
+        protected RadegastInstanceForms Instance { get; }
 
         /// <summary>
         /// Instance of OpenMetaverse's GridClient
@@ -83,9 +83,9 @@ namespace Radegast
         protected GridClient Client => Instance.Client;
 
         /// <summary>
-        /// Instance of RadegastNetcom
+        /// Instance of Netcom
         /// </summary>
-        protected Radegast.Netcom Netcom => Instance.Netcom;
+        protected NetComForms NetCom => (NetComForms)Instance.NetCom;
 
         private System.Threading.Timer SettingsTimer;
         private const int SettingsTimerTimeout = 500;
@@ -94,7 +94,7 @@ namespace Radegast
         {
         }
 
-        public RadegastForm(RadegastInstance instance)
+        public RadegastForm(RadegastInstanceForms instance)
         {
             Instance = instance;
             instance.OnRadegastFormCreated(this);

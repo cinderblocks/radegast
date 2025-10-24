@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,16 +26,12 @@ namespace Radegast.Commands
 {
     public sealed class SimInfoCommand : RadegastCommand
     {
-        private RadegastInstance instance;
-
-        public SimInfoCommand(RadegastInstance instance)
+        public SimInfoCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "siminfo";
             Description = "Prints out available information about the current region";
             Usage = Name;
-
-            this.instance = instance;
         }
 
         public override void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)

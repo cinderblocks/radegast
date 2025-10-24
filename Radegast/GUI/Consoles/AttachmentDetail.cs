@@ -29,12 +29,12 @@ namespace Radegast
 {
     public partial class AttachmentDetail : UserControl
     {
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private Avatar av;
         private readonly Primitive attachment;
 
-        public AttachmentDetail(RadegastInstance instance, Avatar av, Primitive attachment)
+        public AttachmentDetail(RadegastInstanceForms instance, Avatar av, Primitive attachment)
         {
             InitializeComponent();
             Disposed += AttachmentDetail_Disposed;
@@ -43,12 +43,9 @@ namespace Radegast
             this.av = av;
             this.attachment = attachment;
 
-            if (!instance.advancedDebugging)
-            {
-                btnSave.Visible = false;
-                boxID.Visible = false;
-                lblAttachment.Visible = false;
-            }
+            btnSave.Visible = false;
+            boxID.Visible = false;
+            lblAttachment.Visible = false;
 
             // Callbacks
             client.Objects.ObjectProperties += Objects_ObjectProperties;
@@ -56,7 +53,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void AttachmentDetail_Disposed(object sender, EventArgs e)
+        private void AttachmentDetail_Disposed(object sender, EventArgs e)
         {
             client.Objects.ObjectProperties -= Objects_ObjectProperties;
         }
@@ -105,7 +102,7 @@ namespace Radegast
             lblPrimCount.Text = $"Prims: {parts.Count}";
         }
 
-        void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
             if (e.Properties.ObjectID != attachment.ID) { return; }
 

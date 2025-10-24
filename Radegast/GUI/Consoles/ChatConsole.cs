@@ -26,14 +26,13 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using OpenMetaverse;
-using Radegast.Core;
 
 namespace Radegast
 {
     public partial class ChatConsole : UserControl
     {
-        private readonly RadegastInstance instance;
-        private Radegast.Netcom netcom => instance.Netcom;
+        private readonly RadegastInstanceForms instance;
+        private INetCom NetCom => instance.NetCom;
         private GridClient client => instance.Client;
         private TabsConsole tabConsole;
         private Avatar currentAvatar;
@@ -45,16 +44,13 @@ namespace Radegast
         public readonly Dictionary<UUID, ulong> agentSimHandle = new Dictionary<UUID, ulong>();
         public ChatInputBox ChatInputText => cbxInput;
 
-        public ChatConsole(RadegastInstance instance)
+        public ChatConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += ChatConsole_Disposed;
 
-            if (!instance.advancedDebugging)
-            {
-                ctxAnim.Visible = false;
-                ctxTextures.Visible = false;
-            }
+            ctxAnim.Visible = false;
+            ctxTextures.Visible = false;
 
             this.instance = instance;
             this.instance.ClientChanged += instance_ClientChanged;
@@ -62,8 +58,8 @@ namespace Radegast
             instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
 
             // Callbacks
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientLoggedOut += netcom_ClientLoggedOut;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            NetCom.ClientLoggedOut += NetComClientLoggedOut;
             RegisterClientEvents(client);
 
             ChatManager = new ChatTextManager(instance, new RichTextBoxPrinter(rtbChat));
@@ -71,7 +67,7 @@ namespace Radegast
 
             this.instance.MainForm.Load += MainForm_Load;
 
-            lvwObjects.ListViewItemSorter = new SorterClass(instance);
+            lvwObjects.ListViewItemSorter = new SorterClass(instance.Client.Self.AgentID);
             cbChatType.SelectedIndex = 1;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
@@ -100,8 +96,8 @@ namespace Radegast
         private void ChatConsole_Disposed(object sender, EventArgs e)
         {
             instance.ClientChanged -= instance_ClientChanged;
-            netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-            netcom.ClientLoggedOut -= netcom_ClientLoggedOut;
+            NetCom.ClientLoginStatus -= NetComClientLoginStatus;
+            NetCom.ClientLoggedOut -= NetComClientLoggedOut;
             UnregisterClientEvents(client);
             ChatManager.Dispose();
             ChatManager = null;
@@ -316,7 +312,7 @@ namespace Radegast
 
                         // CoarseLocationUpdate gives us height of 0 when actual height is
                         // between 1024-4096m on OpenSim grids. 1020 on SL
-                        var unknownAltitude = instance.Netcom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
+                        var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
                         if (unknownAltitude) 
                         {
                             if (foundAvi != null)
@@ -382,7 +378,7 @@ namespace Radegast
             tabConsole = instance.TabConsole;
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status != LoginStatus.Success) return;
 
@@ -391,7 +387,7 @@ namespace Radegast
             cbxInput.Focus();
         }
 
-        private void netcom_ClientLoggedOut(object sender, EventArgs e)
+        private void NetComClientLoggedOut(object sender, EventArgs e)
         {
             cbxInput.Enabled = false;
             btnSay.Enabled = false;
@@ -514,10 +510,10 @@ namespace Radegast
                 }
                 #endregion
 
-                var processedMessage = GestureManager.Instance.PreProcessChatMessage(msg).Trim();
+                var processedMessage = instance.GestureManager.PreProcessChatMessage(msg).Trim();
                 if (!string.IsNullOrEmpty(processedMessage))
                 {
-                    netcom.ChatOut(processedMessage, type, ch);
+                    NetCom.ChatOut(processedMessage, type, ch);
                 }
             }
         }
@@ -773,12 +769,12 @@ namespace Radegast
             if (node.Tag is InventoryItem item)
             {
                 client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, (UUID)litem.Tag, true);
-                instance.TabConsole.DisplayNotificationInChat($"Offered item {item.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
+                instance.ShowNotificationInChat($"Offered item {item.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
             }
             else if (node.Tag is InventoryFolder folder)
             {
                 client.Inventory.GiveFolder(folder.UUID, folder.Name, (UUID)litem.Tag, true);
-                instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
+                instance.ShowNotificationInChat($"Offered folder {folder.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
             }
         }
 
@@ -862,7 +858,7 @@ namespace Radegast
         {
             if (lvwObjects.SelectedItems.Count != 1) return;
             UUID av = (UUID)lvwObjects.SelectedItems[0].Tag;
-            instance.MainForm.AddNotification(new ntfSendLureOffer(instance, av));
+            instance.AddNotification(new ntfSendLureOffer(instance, av));
         }
 
         private void ctxTeleportTo_Click(object sender, EventArgs e)
@@ -929,7 +925,7 @@ namespace Radegast
             if (instance.State.TryFindAvatar(person, out var targetPos))
             {
                 client.Self.Movement.TurnToward(targetPos);
-                instance.TabConsole.DisplayNotificationInChat("Facing " + pname);
+                instance.ShowNotificationInChat($"Facing {pname}");
             }
         }
 
@@ -957,11 +953,11 @@ namespace Radegast
     {
         private static readonly Regex distanceRegex = new Regex(@"\((?<dist>\d+)\s*m\)", RegexOptions.Compiled);
         private Match match;
-        private readonly RadegastInstance instance;
+        private readonly UUID AgentId;
 
-        public SorterClass(RadegastInstance instance)
+        public SorterClass(UUID agentId)
         {
-            this.instance = instance;
+            AgentId = agentId;
         }
 
         //this routine should return -1 if xy and 0 if x==y.
@@ -972,10 +968,10 @@ namespace Radegast
             ListViewItem item1 = (ListViewItem)x;
             ListViewItem item2 = (ListViewItem)y;
 
-            if ((item1.Tag is UUID tag) && (tag == instance.Client.Self.AgentID))
+            if ((item1.Tag is UUID tag) && (tag == AgentId))
                 return -1;
 
-            if ((item2.Tag is UUID uuid) && (uuid == instance.Client.Self.AgentID))
+            if ((item2.Tag is UUID uuid) && (uuid == AgentId))
                 return 1;
 
             int distance1 = int.MaxValue, distance2 = int.MaxValue;

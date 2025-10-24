@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,11 +28,11 @@ using OpenMetaverse.StructuredData;
 
 namespace RadegastSpeech
 {
-    [Plugin(Name = "Speech", Description = "Adds TTS and STT accesibility capabilities to Radegast", Version = "0.3")]
+    [Plugin(Name = "Speech", Description = "Adds TTS and STT accessibility capabilities to Radegast", Version = "0.3")]
     public class PluginControl : IRadegastPlugin
     {
         private const string VERSION = "0.3";
-        public RadegastInstance instance;
+        public RadegastInstanceForms instance;
         internal Talk.Control talker;
         internal Listen.Control listener;
         internal Conversation.Control converse;
@@ -48,7 +48,7 @@ namespace RadegastSpeech
         /// </summary>
         /// <param name="inst"></param>
         /// <remarks>Called by Radegast at start-up</remarks>
-        public void StartPlugin(RadegastInstance inst)
+        public void StartPlugin(RadegastInstanceForms inst)
         {
             instance = inst;
 
@@ -245,14 +245,14 @@ namespace RadegastSpeech
         /// <param name="inst"></param>
         /// <remarks>Called by Radegast at shut-down, or when Speech is switched off.
         /// We use this to release system resources.</remarks>
-        public void StopPlugin(RadegastInstance inst)
+        public void StopPlugin(RadegastInstanceForms inst)
         {
             instance.MainForm.KeyDown -= MainForm_KeyDown;
             SpeechButton.Dispose();
             Shutdown();
         }
 
-        void MainForm_KeyDown(object sender, KeyEventArgs e)
+        private void MainForm_KeyDown(object sender, KeyEventArgs e)
         {
             // Ctrl-Shift-R toggle speech rate
             if (e.Modifiers == (Keys.Control | Keys.Shift) && e.KeyCode == Keys.R)
@@ -281,7 +281,7 @@ namespace RadegastSpeech
                     ((ToolStripMenuItem)SpeechButton.DropDownItems.Find("fast", false)[0]).Checked = false;
                 }
 
-                instance.TabConsole.DisplayNotificationInChat("Voice rate set to " + props["voice_speed"]);
+                instance.ShowNotificationInChat("Voice rate set to " + props["voice_speed"]);
             }
         }
 
@@ -303,7 +303,7 @@ namespace RadegastSpeech
                 converse = new Conversation.Control(this);
                 sound = new Sound.FmodSound(this);
                 StartControls();
-                if (!instance.Netcom.IsLoggedIn)
+                if (!instance.NetCom.IsLoggedIn)
                 {
                     talker.SayMore("Press enter to connect.");
                 }
@@ -389,7 +389,7 @@ namespace RadegastSpeech
             talker.Say("Rahdegast is ready.");
         }
 
-        void MarkDisabled()
+        private void MarkDisabled()
         {
             SpeechButton.Checked = false;
             osLayer = null;
@@ -400,7 +400,7 @@ namespace RadegastSpeech
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void OnSpeechMenuButtonClicked(object sender, EventArgs e)
+        private void OnSpeechMenuButtonClicked(object sender, EventArgs e)
         {
             SpeechButton.Checked = !SpeechButton.Checked;
 

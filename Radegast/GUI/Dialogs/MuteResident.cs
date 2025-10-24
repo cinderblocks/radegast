@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,11 +26,11 @@ namespace Radegast
 {
     public partial class MuteResidentForm : RadegastForm
     {
-        AvatarPicker picker;
-        RadegastInstance instance;
-        Radegast.Netcom netcom;
+        private readonly AvatarPicker picker;
+        private RadegastInstanceForms instance;
+        private NetCom _netCom;
 
-        public MuteResidentForm(RadegastInstance instance)
+        public MuteResidentForm(RadegastInstanceForms instance)
             :base(instance)
         {
             InitializeComponent();
@@ -38,35 +38,35 @@ namespace Radegast
             AutoSavePosition = true;
 
             this.instance = instance;
-            netcom = instance.Netcom;
+            _netCom = (NetCom)instance.NetCom;
 
             picker = new AvatarPicker(instance) { Dock = DockStyle.Fill };
             Controls.Add(picker);
-            picker.SelectionChaged += picker_SelectionChaged;
+            picker.SelectionChanged += picker_SelectionChanged;
             picker.BringToFront();
             
-            netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            _netCom.ClientDisconnected += NetComClientDisconnected;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void picker_SelectionChaged(object sender, EventArgs e)
+        private void picker_SelectionChanged(object sender, EventArgs e)
         {
             btnMute.Enabled = picker.SelectedAvatars.Count > 0;
         }
 
-        void MuteResidentForm_Disposed(object sender, EventArgs e)
+        private void MuteResidentForm_Disposed(object sender, EventArgs e)
         {
-            netcom.ClientDisconnected -= Netcom_ClientDisconnected;
-            netcom = null;
+            _netCom.ClientDisconnected -= NetComClientDisconnected;
+            _netCom = null;
             instance = null;
             picker.Dispose();
             Logger.DebugLog("Group picker disposed");
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            ((Radegast.Netcom)sender).ClientDisconnected -= Netcom_ClientDisconnected;
+            ((NetCom)sender).ClientDisconnected -= NetComClientDisconnected;
 
             if (!instance.MonoRuntime || IsHandleCreated)
                 BeginInvoke(new MethodInvoker(Close));

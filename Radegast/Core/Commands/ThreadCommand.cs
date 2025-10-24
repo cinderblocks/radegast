@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,16 +27,16 @@ namespace Radegast.Commands
     public class ThreadCommand : IRadegastCommand
     {
         private List<Thread> _listed = null;
-        List<Thread> _commandThreads = new List<Thread>();
-        Queue<KeyValuePair<string, ThreadStart>> _commandQueue => instance.CommandsManager.CommandQueue;
-        private RadegastInstance instance;
+        private readonly List<Thread> _commandThreads = new List<Thread>();
+        private Queue<KeyValuePair<string, ThreadStart>> _commandQueue => instance.CommandsManager.CommandQueue;
+        private IRadegastInstance instance;
         public string Name => "thread";
 
         public string Description => "Runs a command in a thread";
 
         public string Usage => "thread <long running command>";
 
-        public void StartCommand(RadegastInstance inst)
+        public void StartCommand(IRadegastInstance inst)
         {
             instance = inst;
             instance.CommandsManager.CommandsByName.Add("kill", this);
@@ -60,7 +60,7 @@ namespace Radegast.Commands
 
         public void Execute(string threadCmd, string[] cmdArgs, ConsoleWriteLine WriteLine)
         {
-            string args = String.Join(" ", cmdArgs);
+            string args = string.Join(" ", cmdArgs);
             if (threadCmd == "kill")
             {
                 if (_listed == null)
@@ -173,7 +173,7 @@ namespace Radegast.Commands
 
     public sealed class PauseCommand : RadegastCommand
     {
-        public PauseCommand(RadegastInstance inst)
+        public PauseCommand(IRadegastInstance inst)
             : base(inst)
         {
             Name = "pause";
@@ -191,6 +191,11 @@ namespace Radegast.Commands
                 Thread.Sleep((int)(time * 1000));
                 WriteLine("paused for " + time);
             }
+        }
+
+        public override void Dispose()
+        {
+            
         }
     }
 }

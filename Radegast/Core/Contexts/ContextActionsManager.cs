@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,9 +28,9 @@ namespace Radegast
 {
     public class ContextActionsManager : IDisposable
     {
-        List<IContextAction> contextEventHandlers = new List<IContextAction>();
-        private readonly RadegastInstance instance;
-        public ContextActionsManager(RadegastInstance instance)
+        private readonly List<IContextAction> contextEventHandlers = new List<IContextAction>();
+        private readonly RadegastInstanceForms instance;
+        public ContextActionsManager(RadegastInstanceForms instance)
         {
             this.instance = instance;
         }
@@ -45,7 +45,7 @@ namespace Radegast
         /// <param name="libomvType"></param>
         /// <param name="label"></param>
         /// <param name="handler">Action&lt;object,EventArgs&gt;</param>
-        public void RegisterContextAction(Type libomvType, String label, EventHandler handler)
+        public void RegisterContextAction(Type libomvType, string label, EventHandler handler)
         {
             RegisterContextAction(new ContextAction(instance)
                                {
@@ -62,7 +62,7 @@ namespace Radegast
         /// </summary>
         /// <param name="libomvType"></param>
         /// <param name="label"></param>
-        public void DeregisterContextAction(Type libomvType, String label)
+        public void DeregisterContextAction(Type libomvType, string label)
         {
             lock (contextEventHandlers)
             {
@@ -98,7 +98,7 @@ namespace Radegast
         /// </summary>
         /// <param name="strip">The form's menu</param>
         /// <param name="o">The target object</param>
-        public void AddContributions(ToolStripDropDown strip, Object o)
+        public void AddContributions(ToolStripDropDown strip, object o)
         {
             SetCurrentItem(strip, o);
             AddContributions(strip, o?.GetType(), o);
@@ -140,7 +140,7 @@ namespace Radegast
         /// <param name="type">The type it will target</param>
         /// <param name="obj">the Target ofbject</param>
         /// <param name="controls">Control to search for extra contributions (like buttons)</param>
-        public void AddContributions(ToolStripDropDown strip, Type type, Object obj, params Control[] controls)
+        public void AddContributions(ToolStripDropDown strip, Type type, object obj, params Control[] controls)
         {
             SetCurrentItem(strip, obj);
             List<ToolStripMenuItem> items = new List<ToolStripMenuItem>();
@@ -167,7 +167,7 @@ namespace Radegast
                                      : string.Format("{0} -> {1}", obj.GetType().Name, type.Name);
             item1.Add(new ToolStripMenuItem(newVariable, null,
                                             (sender, e) =>
-                                            instance.TabConsole.DisplayNotificationInChat(
+                                            instance.DisplayNotificationInChat(
                                                 string.Format(" sender={0}\ntarget={1}", ToString(sender), ToString(obj)))
 
                           )
@@ -181,7 +181,7 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Used by UI forms to set the Context target (saved in the toplevel strip if it's a RadegastContextMenuStrip)
+        /// Used by UI forms to set the Context target (saved in the top-level strip if it's a RadegastContextMenuStrip)
         /// </summary>
         /// <param name="strip"></param>
         /// <param name="o"></param>
@@ -213,7 +213,7 @@ namespace Radegast
         /// <param name="type">The type it will target</param>
         /// <param name="obj">the Target object</param>
         /// <param name="controls">Control to search for extra contributions (like buttons)</param>
-        public void GleanContributions(ToolStripDropDown strip, Type type, Object obj, params Control[] controls)
+        public void GleanContributions(ToolStripDropDown strip, Type type, object obj, params Control[] controls)
         {
             SetCurrentItem(strip, obj);
             List<ToolStripMenuItem> items = new List<ToolStripMenuItem>();
@@ -235,7 +235,7 @@ namespace Radegast
         /// <param name="type">The type it will target</param>
         /// <param name="control">Parent control that has buttons on it</param>
         /// <param name="obj">Will becvome the button's target when </param>
-        public static void GleanContributions_Helper(ICollection<ToolStripMenuItem> items, Type type, Control control, Object obj)
+        public static void GleanContributions_Helper(ICollection<ToolStripMenuItem> items, Type type, Control control, object obj)
         {
             if (control == null) return;
             if (control is Button)
@@ -261,12 +261,12 @@ namespace Radegast
                 GleanContributions_Helper(items, type, (Control)v, obj);
         }
 
-        static int CompareItems(ToolStripItem i1, ToolStripItem i2)
+        private static int CompareItems(ToolStripItem i1, ToolStripItem i2)
         {
             if (i1 == i2) return 0;
             if (i1 is ToolStripSeparator)
                 return (i2 is ToolStripSeparator) ? 0 : -1;
-            int i = String.CompareOrdinal(i1.Text, i2.Text);
+            int i = string.CompareOrdinal(i1.Text, i2.Text);
             return i == 0 ? i1.GetHashCode().CompareTo(i2.GetHashCode()) : i;
         }
 

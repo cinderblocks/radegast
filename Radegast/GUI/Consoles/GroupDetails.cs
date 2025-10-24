@@ -30,7 +30,7 @@ namespace Radegast
 {
     public partial class GroupDetails : UserControl
     {
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private Group group;
         private Dictionary<UUID, GroupTitle> titles;
@@ -43,7 +43,7 @@ namespace Radegast
 
         private UUID groupTitlesRequest, groupMembersRequest, groupRolesRequest, groupRolesMembersRequest;
 
-        public GroupDetails(RadegastInstance instance, Group group)
+        public GroupDetails(RadegastInstanceForms instance, Group group)
         {
             InitializeComponent();
             Disposed += GroupDetails_Disposed;
@@ -108,7 +108,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void GroupDetails_Disposed(object sender, EventArgs e)
+        private void GroupDetails_Disposed(object sender, EventArgs e)
         {
             client.Groups.GroupTitlesReply -= Groups_GroupTitlesReply;
             client.Groups.GroupMembersReply -= Groups_GroupMembersReply;
@@ -134,22 +134,22 @@ namespace Radegast
 
         #region Network callbacks
 
-        void Groups_GroupMemberEjected(object sender, GroupOperationEventArgs e)
+        private void Groups_GroupMemberEjected(object sender, GroupOperationEventArgs e)
         {
             if (e.GroupID != group.ID) return;
 
             if (e.Success)
             {
                 BeginInvoke(new MethodInvoker(RefreshGroupInfo));
-                instance.TabConsole.DisplayNotificationInChat("Group member ejected.");
+                instance.ShowNotificationInChat("Group member ejected.");
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat("Failed to eject group member.");
+                instance.ShowNotificationInChat("Failed to eject group member.");
             }
         }
 
-        void Groups_GroupRoleMembersReply(object sender, GroupRolesMembersReplyEventArgs e)
+        private void Groups_GroupRoleMembersReply(object sender, GroupRolesMembersReplyEventArgs e)
         {
             if (e.GroupID == group.ID && e.RequestID == groupRolesMembersRequest)
             {
@@ -164,7 +164,7 @@ namespace Radegast
             }
         }
 
-        void Groups_GroupRoleDataReply(object sender, GroupRolesDataReplyEventArgs e)
+        private void Groups_GroupRoleDataReply(object sender, GroupRolesDataReplyEventArgs e)
         {
             if (e.GroupID == group.ID && e.RequestID == groupRolesRequest)
             {
@@ -175,7 +175,7 @@ namespace Radegast
             }
         }
 
-        void Groups_GroupLeaveReply(object sender, GroupOperationEventArgs e)
+        private void Groups_GroupLeaveReply(object sender, GroupOperationEventArgs e)
         {
             if (e.GroupID == group.ID && e.Success)
             {
@@ -183,7 +183,7 @@ namespace Radegast
             }
         }
 
-        void Groups_GroupJoinedReply(object sender, GroupOperationEventArgs e)
+        private void Groups_GroupJoinedReply(object sender, GroupOperationEventArgs e)
         {
             if (e.GroupID == group.ID && e.Success)
             {
@@ -191,9 +191,9 @@ namespace Radegast
             }
         }
 
-        UUID destinationFolderID;
+        private UUID destinationFolderID;
 
-        void Self_IM(object sender, InstantMessageEventArgs e)
+        private void Self_IM(object sender, InstantMessageEventArgs e)
         {
             if (e.IM.Dialog != InstantMessageDialog.GroupNoticeRequested) return;
 
@@ -233,7 +233,7 @@ namespace Radegast
             txtNotice.Text = text;
         }
 
-        void Groups_GroupNoticesListReply(object sender, GroupNoticesListReplyEventArgs e)
+        private void Groups_GroupNoticesListReply(object sender, GroupNoticesListReplyEventArgs e)
         {
             if (e.GroupID != group.ID) return;
 
@@ -269,12 +269,12 @@ namespace Radegast
             lvwNoticeArchive.EndUpdate();
         }
 
-        void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
+        private void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
         {
             BeginInvoke(new MethodInvoker(RefreshControlsAvailability));
         }
 
-        void Groups_GroupProfile(object sender, GroupProfileEventArgs e)
+        private void Groups_GroupProfile(object sender, GroupProfileEventArgs e)
         {
             if (group.ID != e.Group.ID) return;
 
@@ -331,14 +331,14 @@ namespace Radegast
             RefreshControlsAvailability();
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             ProcessNameUpdate(e.Names);
         }
 
-        int lastTick = 0;
+        private int lastTick = 0;
 
-        void ProcessNameUpdate(Dictionary<UUID, string> Names)
+        private void ProcessNameUpdate(Dictionary<UUID, string> Names)
         {
             if (Names.ContainsKey(group.FounderID))
             {
@@ -386,7 +386,7 @@ namespace Radegast
             });
         }
 
-        void Groups_GroupTitlesReply(object sender, GroupTitlesReplyEventArgs e)
+        private void Groups_GroupTitlesReply(object sender, GroupTitlesReplyEventArgs e)
         {
             if (groupTitlesRequest != e.RequestID) return;
 
@@ -410,9 +410,9 @@ namespace Radegast
             cbxActiveTitle.SelectedIndexChanged += cbxActiveTitle_SelectedIndexChanged;
         }
 
-        List<EnhancedGroupMember> GroupMembers = new List<EnhancedGroupMember>();
+        private List<EnhancedGroupMember> GroupMembers = new List<EnhancedGroupMember>();
 
-        void Groups_GroupMembersReply(object sender, GroupMembersReplyEventArgs e)
+        private void Groups_GroupMembersReply(object sender, GroupMembersReplyEventArgs e)
         {
             if (group.ID != e.GroupID) return;
             if (InvokeRequired)
@@ -436,7 +436,7 @@ namespace Radegast
             lvwMemberDetails.VirtualListSize = GroupMembers.Count;
         }
 
-        void lvwMemberDetails_RetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
+        private void lvwMemberDetails_RetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
         {
             EnhancedGroupMember member = null;
             try
@@ -459,7 +459,7 @@ namespace Radegast
             e.Item = item;
         }
 
-        void lvwGeneralMembers_RetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
+        private void lvwGeneralMembers_RetrieveVirtualItem(object sender, RetrieveVirtualItemEventArgs e)
         {
             EnhancedGroupMember member = null;
             try
@@ -596,7 +596,8 @@ namespace Radegast
         #endregion
 
         #region Controls change handlers
-        void cbxListInProfile_CheckedChanged(object sender, EventArgs e)
+
+        private void cbxListInProfile_CheckedChanged(object sender, EventArgs e)
         {
             if (myGroups.ContainsKey(group.ID))
             {
@@ -637,7 +638,7 @@ namespace Radegast
         }
         #endregion
 
-        void lvwGeneralMembers_ColumnClick(object sender, ColumnClickEventArgs e)
+        private void lvwGeneralMembers_ColumnClick(object sender, ColumnClickEventArgs e)
         {
             ListView lb = (ListView)sender;
             switch (e.Column)
@@ -761,7 +762,7 @@ namespace Radegast
                 try
                 {
                     UUID agentID = new UUID(item.Name);
-                    instance.MainForm.ShowAgentProfile(item.Text, agentID);
+                    instance.ShowAgentProfile(item.Text, agentID);
                 }
                 catch (Exception) { }
             }
@@ -775,7 +776,7 @@ namespace Radegast
                 try
                 {
                     UUID agentID = new UUID(item.Name);
-                    instance.MainForm.ShowAgentProfile(item.Text, agentID);
+                    instance.ShowAgentProfile(item.Text, agentID);
                 }
                 catch (Exception) { }
             }
@@ -1094,7 +1095,7 @@ namespace Radegast
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat("Don't have permission to send notices in this group", ChatBufferTextStyle.Error);
+                instance.ShowNotificationInChat("Don't have permission to send notices in this group", ChatBufferTextStyle.Error);
             }
         }
 
@@ -1140,7 +1141,7 @@ namespace Radegast
             txtNewNoticeTitle.Text = txtNewNoticeBody.Text = string.Empty;
             pnlNewNotice.Visible = false;
             btnRefresh.PerformClick();
-            instance.TabConsole.DisplayNotificationInChat("Notice sent", ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat("Notice sent", ChatBufferTextStyle.Invisible);
         }
         #endregion
 
@@ -1181,12 +1182,12 @@ namespace Radegast
                             break;
                     }
 
-                    instance.TabConsole.DisplayNotificationInChat(
+                    instance.ShowNotificationInChat(
                         $"Saved {GroupMembers.Count} members to {saveMembers.FileName}");
                 }
                 catch (Exception ex)
                 {
-                    instance.TabConsole.DisplayNotificationInChat("Failed to save member list: " + ex.Message, ChatBufferTextStyle.Error);
+                    instance.ShowNotificationInChat("Failed to save member list: " + ex.Message, ChatBufferTextStyle.Error);
                 }
             }
         }
@@ -1224,7 +1225,7 @@ namespace Radegast
             });
         }
 
-        void UpdateBannedAgents(BannedAgentsEventArgs e)
+        private void UpdateBannedAgents(BannedAgentsEventArgs e)
         {
             if (!e.Success || e.GroupID != group.ID) return;
             if (InvokeRequired)
@@ -1424,12 +1425,12 @@ namespace Radegast
             {
                 case SortByColumn.Subject:
                     return CurrentOrder == SortOrder.Ascending
-                        ? String.CompareOrdinal(member1.Subject, member2.Subject) 
-                        : String.CompareOrdinal(member2.Subject, member1.Subject);
+                        ? string.CompareOrdinal(member1.Subject, member2.Subject) 
+                        : string.CompareOrdinal(member2.Subject, member1.Subject);
                 case SortByColumn.Sender:
                     return CurrentOrder == SortOrder.Ascending 
-                        ? String.CompareOrdinal(member1.FromName, member2.FromName) 
-                        : String.CompareOrdinal(member2.FromName, member1.FromName);
+                        ? string.CompareOrdinal(member1.FromName, member2.FromName) 
+                        : string.CompareOrdinal(member2.FromName, member1.FromName);
                 case SortByColumn.Date:
                     return CurrentOrder == SortOrder.Ascending 
                         ? IntCompare(member1.Timestamp, member2.Timestamp) 

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -80,7 +80,7 @@ namespace Radegast
             CheckBoxControl.MouseHover += chk_MouseHover;
         }
 
-        void chk_MouseHover(object sender, EventArgs e)
+        private void chk_MouseHover(object sender, EventArgs e)
         {
             OnMouseHover(e);
         }
@@ -99,12 +99,12 @@ namespace Radegast
             ((CheckBox)c).CheckStateChanged -= ToolStripCheckBox_CheckStateChanged;
         }
 
-        void ToolStripCheckBox_CheckedChanged(object sender, EventArgs e)
+        private void ToolStripCheckBox_CheckedChanged(object sender, EventArgs e)
         {
             CheckedChanged?.Invoke(this, e);
         }
 
-        void ToolStripCheckBox_CheckStateChanged(object sender, EventArgs e)
+        private void ToolStripCheckBox_CheckStateChanged(object sender, EventArgs e)
         {
             CheckStateChanged?.Invoke(this, e);
         }

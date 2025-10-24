@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -32,19 +32,19 @@ namespace RadegastSpeech
     /// <summary>
     /// Linux Speech Synthesis based on Festival
     /// </summary>
-    class LinSynth
+    internal class LinSynth
     {
         private string[] BeepNames;
-		private string serverhost = "localhost";
-		private string serverport = "1314";
+		private readonly string serverhost = "localhost";
+		private readonly string serverport = "1314";
         private const string SynthCommand = "/usr/bin/festival_client"; //"text2wave";
         private const string SynthArgs = " --server %S --port %P --output %F"; 
-        private string ActualArgs;
+        private readonly string ActualArgs;
         private const string LIBRARYPATH =
             "/usr/share/festival/voices/";
-        private System.Text.ASCIIEncoding ToASCII;
-        private int rateBias = 0;
-        private OSDMap voiceProperties;
+        private readonly System.Text.ASCIIEncoding ToASCII;
+        private readonly int rateBias = 0;
+        private readonly OSDMap voiceProperties;
 
         internal LinSynth( PluginControl pc, string[] beeps)
         {
@@ -261,7 +261,7 @@ namespace RadegastSpeech
 		/// <summary>
 		/// The Linux representation of an installed voice. 
 		/// </summary>
-        class LinAvailableVoice : AvailableVoice
+        private class LinAvailableVoice : AvailableVoice
         {
             internal LinAvailableVoice(string name, bool m)
             {

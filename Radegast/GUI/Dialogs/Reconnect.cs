@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,6 @@ namespace Radegast
 {
     public partial class frmReconnect : RadegastForm
     {
-        private RadegastInstance instance;
         private int reconnectTime;
         
         public int ReconnectTime
@@ -38,40 +37,39 @@ namespace Radegast
             }
         }
 
-        public frmReconnect(RadegastInstance instance, int time)
+        public frmReconnect(RadegastInstanceForms instance, int time) : base(instance)
         {
             InitializeComponent();
             Disposed += frmReconnect_Disposed;
-            this.instance = instance;
             ReconnectTime = time;
-            lblAutoReconnect.Text = string.Format("Auto reconnect in {0} seconds.", reconnectTime);
+            lblAutoReconnect.Text = $"Auto reconnect in {reconnectTime} seconds.";
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void frmReconnect_Disposed(object sender, EventArgs e)
+        private void frmReconnect_Disposed(object sender, EventArgs e)
         {
         }
 
         private void tmrReconnect_Tick(object sender, EventArgs e)
         {
-            lblAutoReconnect.Text = string.Format("Auto reconnect in {0} seconds.", --reconnectTime);
+            lblAutoReconnect.Text = $"Auto reconnect in {--reconnectTime} seconds.";
             if (reconnectTime <= 0)
             {
-                instance.Reconnect();
+                Instance.Reconnect();
                 Close();
             }
         }
 
         private void btnReconnectNow_Click(object sender, EventArgs e)
         {
-            instance.Reconnect();
+            Instance.Reconnect();
             Close();
         }
 
         private void btnDisable_Click(object sender, EventArgs e)
         {
-            instance.GlobalSettings["auto_reconnect"] = OSD.FromBoolean(false);
+            Instance.GlobalSettings["auto_reconnect"] = OSD.FromBoolean(false);
             Close();
         }
 

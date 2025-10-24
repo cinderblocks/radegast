@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,12 +29,12 @@ namespace Radegast
         public Control Control, TrackedControl;
         public bool DockedToMain;
 
-        int mainTop;
-        int mainLeft;
-        Size mainSize;
-        Form parentForm;
+        private int mainTop;
+        private int mainLeft;
+        private Size mainSize;
+        private Form parentForm;
 
-        public Floater(RadegastInstance instance, Control control, Control trackedControl)
+        public Floater(RadegastInstanceForms instance, Control control, Control trackedControl)
             : base(instance)
         {
             Control = control;
@@ -55,7 +55,7 @@ namespace Radegast
 
         }
 
-        void Floater_Load(object sender, EventArgs e)
+        private void Floater_Load(object sender, EventArgs e)
         {
             Control.Dock = DockStyle.Fill;
             ClientSize = Control.Size;
@@ -64,22 +64,22 @@ namespace Radegast
             parentForm.Move += parentForm_Move;
         }
 
-        void Floater_Shown(object sender, EventArgs e)
+        private void Floater_Shown(object sender, EventArgs e)
         {
             UpdatePos();
         }
 
-        void Floater_ResizeEnd(object sender, EventArgs e)
+        private void Floater_ResizeEnd(object sender, EventArgs e)
         {
             UpdatePos();
         }
 
-        void Floater_Activated(object sender, EventArgs e)
+        private void Floater_Activated(object sender, EventArgs e)
         {
             Opacity = 1;
         }
 
-        void Floater_Deactivate(object sender, EventArgs e)
+        private void Floater_Deactivate(object sender, EventArgs e)
         {
             if (DockedToMain)
             {
@@ -87,12 +87,12 @@ namespace Radegast
             }
         }
 
-        void Control_TextChanged(object sender, EventArgs e)
+        private void Control_TextChanged(object sender, EventArgs e)
         {
             Text = Control.Text;
         }
 
-        void parentForm_Move(object sender, EventArgs e)
+        private void parentForm_Move(object sender, EventArgs e)
         {
             if (DockedToMain)
             {
@@ -103,7 +103,7 @@ namespace Radegast
             UpdatePos();
         }
 
-        void Control_ParentChanged(object sender, EventArgs e)
+        private void Control_ParentChanged(object sender, EventArgs e)
         {
             if (parentForm != null)
             {
@@ -119,7 +119,7 @@ namespace Radegast
             }
         }
 
-        void SaveMainFormPos()
+        private void SaveMainFormPos()
         {
             parentForm = TrackedControl.FindForm();
             if (parentForm != null)

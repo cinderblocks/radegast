@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@ namespace Radegast
 {
     public partial class PluginsTab : RadegastTabControl
     {
-        public PluginsTab(RadegastInstance instance)
+        public PluginsTab(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
@@ -37,7 +37,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void ListPlugins()
+        private void ListPlugins()
         {
             List<PluginInfo> plugins = instance.PluginManager.Plugins;
             lvwPlugins.Items.Clear();
@@ -82,7 +82,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    instance.TabConsole.DisplayNotificationInChat($"ERROR unable to unload plugin: {plugin} because {ex}", ChatBufferTextStyle.Error);
+                    instance.ShowNotificationInChat($"ERROR unable to unload plugin: {plugin} because {ex}", ChatBufferTextStyle.Error);
                 }
             }
             ListPlugins();
@@ -107,7 +107,7 @@ namespace Radegast
                         }
                         catch (Exception ex)
                         {
-                            instance.TabConsole.DisplayNotificationInChat($"ERROR unable to load plugin: {name} because {ex}", ChatBufferTextStyle.Error);
+                            instance.ShowNotificationInChat($"ERROR unable to load plugin: {name} because {ex}", ChatBufferTextStyle.Error);
                         }
                     }
 
@@ -134,7 +134,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    instance.TabConsole.DisplayNotificationInChat($"ERROR unable to reload plugin: {item} because {ex}", ChatBufferTextStyle.Error);
+                    instance.ShowNotificationInChat($"ERROR unable to reload plugin: {item} because {ex}", ChatBufferTextStyle.Error);
                 }
                 ListPlugins();
             }

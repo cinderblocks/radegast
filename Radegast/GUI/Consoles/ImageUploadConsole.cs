@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -40,8 +40,8 @@ namespace Radegast
         public string FileName, TextureName, TextureDescription;
         public byte[] UploadData;
         public UUID InventoryID, AssetID, TransactionID;
-        bool ImageLoaded;
-        int OriginalCapsTimeout;
+        private bool ImageLoaded;
+        private readonly int OriginalCapsTimeout;
 
         public ImageUploadConsole()
         {
@@ -50,14 +50,14 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public ImageUploadConsole(RadegastInstance instance)
+        public ImageUploadConsole(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
 
             Disposed += ImageUploadConsole_Disposed;
-            instance.Netcom.ClientConnected += Netcom_ClientConnected;
-            instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            instance.NetCom.ClientConnected += Netcom_ClientConnected;
+            instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
             client.Assets.AssetUploaded += Assets_AssetUploaded;
             UpdateButtons();
             OriginalCapsTimeout = client.Settings.CAPS_TIMEOUT;
@@ -65,12 +65,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void ImageUploadConsole_Disposed(object sender, EventArgs e)
+        private void ImageUploadConsole_Disposed(object sender, EventArgs e)
         {
             client.Assets.AssetUploaded -= Assets_AssetUploaded;
         }
 
-        void Assets_AssetUploaded(object sender, AssetUploadEventArgs e)
+        private void Assets_AssetUploaded(object sender, AssetUploadEventArgs e)
         {
             if (e.Upload.ID == TransactionID)
             {
@@ -87,7 +87,7 @@ namespace Radegast
             }
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -101,7 +101,7 @@ namespace Radegast
             UpdateButtons();
         }
 
-        void Netcom_ClientConnected(object sender, EventArgs e)
+        private void Netcom_ClientConnected(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -235,7 +235,7 @@ namespace Radegast
             }
         }
 
-        void UpdateButtons()
+        private void UpdateButtons()
         {
             btnLoad.Enabled = true;
             btnSave.Enabled = ImageLoaded;

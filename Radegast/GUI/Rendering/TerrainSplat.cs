@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -72,7 +72,7 @@ namespace Radegast.Rendering
         /// <returns>A composited 256x256 RGB texture ready for rendering</returns>
         /// <remarks>Based on the algorithm described at http://opensimulator.org/wiki/Terrain_Splatting
         /// </remarks>
-        public static Bitmap Splat(RadegastInstance instance, float[,] heightmap, UUID[] textureIDs, float[] startHeights, float[] heightRanges)
+        public static Bitmap Splat(IRadegastInstance instance, float[,] heightmap, UUID[] textureIDs, float[] startHeights, float[] heightRanges)
         {
             Debug.Assert(textureIDs.Length == 4);
             Debug.Assert(startHeights.Length == 4);
@@ -169,7 +169,7 @@ namespace Radegast.Rendering
 
                     // Combine the current height, generated noise, start height, and height range parameters, then scale all of it
                     float layer = ((height + noise - startHeight) / heightRange) * 4f;
-                    if (Single.IsNaN(layer))
+                    if (float.IsNaN(layer))
                         layer = 0f;
                     layermap[newY * RegionSize + newX] = Utils.Clamp(layer, 0f, 3f);
                 }

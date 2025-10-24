@@ -64,7 +64,7 @@ after_build:
   - cmd: '7z a -ttar -so Radegast-%TAG_VERSION%.tar %APPVEYOR_BUILD_FOLDER%\bin\Release\ | 7z a -si Radegast_%PLATFORM%-%TAG_VERSION%.tbz'
   - ps: Copy-Item bin\Packages\en-US\RadegastSetup_$env:PLATFORM.msi RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.msi
   - ps: Copy-Item bin\Packages\RadegastBundle_$env:PLATFORM.exe RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.exe
-  - ps: netsparkle-generate-appcast -n Radegast -e "exe,msi" -a . --output-type json -o windows-$env:PLATFORM --file-version $env:APPVEYOR_REPO_TAG -u https://github.com/cinderblocks/radegast/releases/download/tag/$env:APPVEYOR_REPO_TAG
+  - ps: netsparkle-generate-appcast -n Radegast -e msi -a . --output-type json -o windows-$env:PLATFORM --file-version $env:TAG_VERSION -u https://github.com/cinderblocks/radegast/releases/download/tag/$env:APPVEYOR_REPO_TAG_NAME
 
 artifacts:
   - path: 'RadegastSetup*.exe'

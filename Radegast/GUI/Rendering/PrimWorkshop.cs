@@ -76,7 +76,7 @@ namespace Radegast.Rendering
         /// <summary>
         /// List of prims in the scene
         /// </summary>
-        Dictionary<uint, FacetedMesh> Prims = new Dictionary<uint, FacetedMesh>();
+        private readonly Dictionary<uint, FacetedMesh> Prims = new Dictionary<uint, FacetedMesh>();
 
         /// <summary>
         /// Local ID of the root prim
@@ -91,21 +91,21 @@ namespace Radegast.Rendering
 
         #region Private fields
 
-        Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
-        RadegastInstance instance;
-        MeshmerizerR renderer;
-        OpenTK.Graphics.GraphicsMode GLMode = null;
-        ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
-        float[] lightPos = new float[] { 0f, 0f, 1f, 0f };
-        TextRendering textRendering;
-        OpenTK.Matrix4 ModelMatrix;
-        OpenTK.Matrix4 ProjectionMatrix;
-        int[] Viewport = new int[4];
+        private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
+        private readonly RadegastInstance instance;
+        private readonly MeshmerizerR renderer;
+        private OpenTK.Graphics.GraphicsMode GLMode = null;
+        private readonly ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
+        private readonly float[] lightPos = new float[] { 0f, 0f, 1f, 0f };
+        private TextRendering textRendering;
+        private OpenTK.Matrix4 ModelMatrix;
+        private OpenTK.Matrix4 ProjectionMatrix;
+        private readonly int[] Viewport = new int[4];
 
         #endregion Private fields
 
         #region Construction and disposal
-        public frmPrimWorkshop(RadegastInstance instance, uint rootLocalID)
+        public frmPrimWorkshop(RadegastInstanceForms instance, uint rootLocalID)
             : base(instance)
         {
             RootPrimLocalID = rootLocalID;
@@ -128,7 +128,7 @@ namespace Radegast.Rendering
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void FrmPrimWorkshop_Disposed(object sender, EventArgs e)
+        private void FrmPrimWorkshop_Disposed(object sender, EventArgs e)
         {
             if (textRendering != null)
             {
@@ -145,7 +145,8 @@ namespace Radegast.Rendering
         #endregion Construction and disposal
 
         #region Network messaage handlers
-        void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+
+        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
             if (Prims.ContainsKey(e.Prim.LocalID))
             {
@@ -153,7 +154,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void Objects_ObjectUpdate(object sender, PrimEventArgs e)
+        private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
         {
             if (Prims.ContainsKey(e.Prim.LocalID) || Prims.ContainsKey(e.Prim.ParentID))
             {
@@ -161,7 +162,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void Objects_ObjectDataBlockUpdate(object sender, ObjectDataBlockUpdateEventArgs e)
+        private void Objects_ObjectDataBlockUpdate(object sender, ObjectDataBlockUpdateEventArgs e)
         {
             if (Prims.ContainsKey(e.Prim.LocalID))
             {
@@ -236,7 +237,7 @@ namespace Radegast.Rendering
             glControl.BringToFront();
         }
 
-        void glControl_Disposed(object sender, EventArgs e)
+        private void glControl_Disposed(object sender, EventArgs e)
         {
             TextureThreadRunning = false;
             while (!PendingTextures.IsEmpty)
@@ -245,7 +246,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void glControl_Load(object sender, EventArgs e)
+        private void glControl_Load(object sender, EventArgs e)
         {
             try
             {
@@ -391,8 +392,9 @@ namespace Radegast.Rendering
         #endregion glControl paint and resize events
 
         #region Mouse handling
-        bool dragging = false;
-        int dragX, dragY, downX, downY;
+
+        private bool dragging = false;
+        private int dragX, dragY, downX, downY;
 
         private void glControl_MouseWheel(object sender, MouseEventArgs e)
         {
@@ -406,8 +408,8 @@ namespace Radegast.Rendering
             }
         }
 
-        FacetedMesh RightclickedPrim;
-        int RightclickedFaceID;
+        private FacetedMesh RightclickedPrim;
+        private int RightclickedFaceID;
 
         private void glControl_MouseDown(object sender, MouseEventArgs e)
         {
@@ -507,9 +509,10 @@ namespace Radegast.Rendering
         #endregion Mouse handling
 
         #region Texture thread
-        bool TextureThreadRunning = true;
 
-        void TextureThread()
+        private bool TextureThreadRunning = true;
+
+        private void TextureThread()
         {
             Logger.DebugLog("Started Texture Thread");
 
@@ -617,7 +620,7 @@ namespace Radegast.Rendering
                     }
 
                     primPos.Z += prim.Scale.Z * 0.8f;
-                    if (!Math3D.GluProject(primPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
+                    if (!GLU.Project(primPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
                     screenPos.Y = glControl.Height - screenPos.Y;
 
                     textRendering.Begin();

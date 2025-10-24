@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -67,6 +67,7 @@ namespace Radegast
             "Pfim.dll",
             "PrimMesher.dll",
             "protobuf-net.dll",
+            "Radegast.Core.dll",
             "RadSpeechLin.dll",
             "RadSpeechMac.dll",
             "RadSpeechWin.dll",
@@ -112,7 +113,7 @@ namespace Radegast
             ".exe"
         });
 
-        private RadegastInstance Instance { get; }
+        private RadegastInstanceForms Instance { get; }
 
         /// <summary>Collection of all loaded plugins</summary>
         public List<PluginInfo> Plugins { get; } = new List<PluginInfo>();
@@ -121,7 +122,7 @@ namespace Radegast
         /// Creates new PluginManager
         /// </summary>
         /// <param name="instance">Radegast instance PluginManager is associated with</param>
-        public PluginManager(RadegastInstance instance)
+        public PluginManager(RadegastInstanceForms instance)
         {
             Instance = instance;
         }
@@ -251,7 +252,7 @@ namespace Radegast
 
             if (IsPluginLoaded(path))
             {
-                Instance.TabConsole.DisplayNotificationInChat($"Plugin already loaded, skipping: {path}");
+                Instance.ShowNotificationInChat($"Plugin already loaded, skipping: {path}");
                 return new List<PluginInfo>();
             }
 
@@ -326,7 +327,7 @@ namespace Radegast
             var source = File.ReadAllText(scriptPath);
             var compilerResults = compiler.CompileAssemblyFromSource(compilerParameters, source);
 
-            // *** Check for compilation erros
+            // *** Check for compilation errors
             if (compilerResults.Errors.HasErrors)
             {
                 var errorMessage = new StringBuilder();
@@ -337,11 +338,11 @@ namespace Radegast
                     errorMessage.AppendLine($"Line: {compilerResults.Errors[i].Line} - {compilerResults.Errors[i].ErrorText}");
                 }
 
-                Instance.TabConsole.DisplayNotificationInChat(errorMessage.ToString(), ChatBufferTextStyle.Alert);
+                Instance.ShowNotificationInChat(errorMessage.ToString(), ChatBufferTextStyle.Alert);
                 return new List<PluginInfo>();
             }
 
-            Instance.TabConsole.DisplayNotificationInChat("Compilation successful.");
+            Instance.ShowNotificationInChat("Compilation successful.");
             return LoadPluginsFromAssembly(scriptPath, compilerResults.CompiledAssembly);
         }
 

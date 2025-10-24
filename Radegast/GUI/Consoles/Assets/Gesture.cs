@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,22 +25,19 @@ using OpenMetaverse.Assets;
 
 namespace Radegast
 {
-    public partial class Gesture : DettachableControl
+    public partial class Gesture : DetachableControl
     {
-        private RadegastInstance instance;
+        private readonly IRadegastInstance instance;
         private GridClient client => instance.Client;
-        private InventoryGesture gesture;
+        private readonly InventoryGesture gesture;
         private AssetGesture gestureAsset;
 
-        public Gesture(RadegastInstance instance, InventoryGesture gesture)
+        public Gesture(IRadegastInstance instance, InventoryGesture gesture)
         {
             InitializeComponent();
-            Disposed += Guesture_Disposed;
+            Disposed += Gesture_Disposed;
 
-            if (!instance.advancedDebugging)
-            {
-                tbtnReupload.Visible = false;
-            }
+            tbtnReupload.Visible = false;
 
             this.instance = instance;
             this.gesture = gesture;
@@ -52,11 +49,11 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void Guesture_Disposed(object sender, EventArgs e)
+        private void Gesture_Disposed(object sender, EventArgs e)
         {
         }
 
-        void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
         {
             if (InvokeRequired)
             {

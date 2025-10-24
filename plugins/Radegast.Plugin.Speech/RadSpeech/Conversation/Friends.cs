@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,11 +25,11 @@ using OpenMetaverse;
 
 namespace RadegastSpeech.Conversation
 {
-    class Friends : Mode
+    internal class Friends : Mode
     {
-        private FriendsConsole frTab;
+        private readonly FriendsConsole frTab;
         public bool Announce { get; set; }
-        private System.Windows.Forms.ListBox friends;
+        private readonly System.Windows.Forms.ListBox friends;
 
         #region statechange
         internal Friends(PluginControl pc)
@@ -103,13 +103,13 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Was previous selection multiple
         /// </summary>
-        bool prevMultiple = false;
+        private bool prevMultiple = false;
         /// <summary>
         /// Announce which friend has been selected in the list.
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void friends_ItemSelectionChanged(object sender, EventArgs e)
+        private void friends_ItemSelectionChanged(object sender, EventArgs e)
         {
             FriendInfo f = (FriendInfo)friends.SelectedItem;
             bool multiple = friends.SelectedItems.Count > 1;

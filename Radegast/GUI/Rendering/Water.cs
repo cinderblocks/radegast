@@ -41,24 +41,24 @@ namespace Radegast.Rendering
 
     public partial class SceneWindow
     {
-        double[] AboveWaterPlane;
-        double[] BelowWaterPlane;
+        private double[] AboveWaterPlane;
+        private double[] BelowWaterPlane;
 
-        ShaderProgram waterProgram = new ShaderProgram();
+        private readonly ShaderProgram waterProgram = new ShaderProgram();
 
-        int reflectionTexture;
-        int refractionTexture;
-        int dudvmap;
-        int normalmap;
-        int depthTexture;
+        private int reflectionTexture;
+        private int refractionTexture;
+        private int dudvmap;
+        private int normalmap;
+        private int depthTexture;
 
-        void SetWaterPlanes()
+        private void SetWaterPlanes()
         {
             AboveWaterPlane = Math3D.AbovePlane(Client.Network.CurrentSim.WaterHeight);
             BelowWaterPlane = Math3D.BelowPlane(Client.Network.CurrentSim.WaterHeight);
         }
 
-        void InitWater()
+        private void InitWater()
         {
             Bitmap normal = (Bitmap)Image.FromFile(System.IO.Path.Combine("shader_data", "normalmap.png"));
             reflectionTexture = RHelp.GLLoadImage(normal, false);
@@ -69,14 +69,14 @@ namespace Radegast.Rendering
             waterProgram.Load("water.vert", "water.frag");
         }
 
-        float waterUV = 35f;
-        float waterFlow = 0.0025f;
-        float normalMove = 0f;
-        float move = 0f;
-        const float kNormalMapScale = 0.25f;
-        float normalUV;
+        private readonly float waterUV = 35f;
+        private readonly float waterFlow = 0.0025f;
+        private float normalMove = 0f;
+        private float move = 0f;
+        private const float kNormalMapScale = 0.25f;
+        private float normalUV;
 
-        void DrawWaterQuad(float x, float y, float z)
+        private void DrawWaterQuad(float x, float y, float z)
         {
             normalUV = waterUV * kNormalMapScale;
             normalMove += waterFlow * kNormalMapScale * lastFrameTime;

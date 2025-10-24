@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -24,9 +24,9 @@ using LibreMetaverse.Voice.Vivox;
 
 namespace RadegastSpeech.Conversation
 {
-    class Voice : Mode
+    internal class Voice : Mode
     {
-        private VoiceConsole vTab;
+        private readonly VoiceConsole vTab;
         private System.Windows.Forms.ListView participants;
         private VoiceSession session;
  
@@ -60,21 +60,22 @@ namespace RadegastSpeech.Conversation
 #endregion
 
 #region Sessions
-        void OnSessionCreate(object sender, EventArgs e)
+
+private void OnSessionCreate(object sender, EventArgs e)
         {
             session = sender as VoiceSession;
             if (session != null) { control.talker.Say("Voice started in " + session.RegionName); }
             //            session.OnParticipantAdded += new EventHandler(session_OnParticipantAdded);
         }
 
-        void gateway_OnSessionRemove(object sender, EventArgs e)
+        private void gateway_OnSessionRemove(object sender, EventArgs e)
         {
             VoiceSession session = sender as VoiceSession;
             control.talker.Say("Voice session closed.");
 //            session.OnParticipantAdded -= new EventHandler(session_OnParticipantAdded);
         }
 
-        void session_OnParticipantAdded(object sender, EventArgs e)
+        private void session_OnParticipantAdded(object sender, EventArgs e)
         {
             if (sender is VoiceParticipant p)
             {
@@ -85,12 +86,12 @@ namespace RadegastSpeech.Conversation
 
         #endregion
 
-        void chkVoiceEnable_CheckStateChanged(object sender, EventArgs e)
+        private void chkVoiceEnable_CheckStateChanged(object sender, EventArgs e)
         {
             SayEnabled();
         }
 
-        void SayEnabled()
+        private void SayEnabled()
         {
             string msg = "Voice is ";
             if (vTab.chkVoiceEnable.Checked)

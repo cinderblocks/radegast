@@ -23,10 +23,10 @@ namespace Radegast.GUI
 {
     public partial class MfaPrompt : Form
     {
-        private readonly RadegastInstance Instance;
-        private Netcom Netcom => Instance.Netcom;
+        private readonly RadegastInstanceForms Instance;
+        private INetCom NetCom => Instance.NetCom;
 
-        public MfaPrompt(RadegastInstance instance)
+        public MfaPrompt(RadegastInstanceForms instance)
         {
             Instance = instance;
             InitializeComponent();
@@ -37,8 +37,8 @@ namespace Radegast.GUI
 
         private void btnSubmit_Click(object sender, System.EventArgs e)
         {
-            Netcom.LoginOptions.MfaToken = tokenBox.Text;
-            Netcom.Login();
+            NetCom.LoginOptions.MfaToken = tokenBox.Text;
+            NetCom.Login();
             DialogResult = DialogResult.OK;
             Close();
         }

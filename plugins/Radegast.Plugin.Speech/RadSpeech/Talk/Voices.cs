@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,12 +28,12 @@ namespace RadegastSpeech.Talk
 {
     internal class Voices
     {
-        private PluginControl control;
+        private readonly PluginControl control;
         /// <summary>
         /// Library of installed voices, keyed by voice name.
         /// </summary>
-        private Dictionary<string, AvailableVoice> maleVoiceLibrary;
-        private Dictionary<string, AvailableVoice> femaleVoiceLibrary;
+        private readonly Dictionary<string, AvailableVoice> maleVoiceLibrary;
+        private readonly Dictionary<string, AvailableVoice> femaleVoiceLibrary;
         internal Dictionary<string, AvailableVoice> voiceLibrary;
         /// <summary>
         /// Library of assigned voices, keyed by avatar name.
@@ -44,7 +44,7 @@ namespace RadegastSpeech.Talk
         private string[] maleIndex;
         private string[] femaleIndex;
         private Random rgen;
-        private OSDMap configVoices;
+        private readonly OSDMap configVoices;
         private Regex voicePattern;
 
         internal Voices( PluginControl pc)
@@ -275,7 +275,7 @@ namespace RadegastSpeech.Talk
         /// Choose a random voice from those available.
         /// </summary>
         /// <returns></returns>
-        AssignedVoice PickRandomVoice()
+        private AssignedVoice PickRandomVoice()
         {
             if (voiceIndex.Length > 0)
                 return AddVariation( voiceLibrary[voiceIndex[GetRandom(voiceIndex.Length)]]);
@@ -288,7 +288,7 @@ namespace RadegastSpeech.Talk
         /// </summary>
         /// <param name="id"></param>
         /// <returns></returns>
-        AssignedVoice PickRandomVoice( UUID id )
+        private AssignedVoice PickRandomVoice( UUID id )
         {
             AvailableVoice chosen = null;
 
@@ -331,7 +331,7 @@ namespace RadegastSpeech.Talk
             assignedVoices[id] = v;
         }
 
-        bool GenderAvailable(bool male)
+        private bool GenderAvailable(bool male)
         {
             if (male)
                 return (maleIndex.Length > 0);
@@ -344,7 +344,7 @@ namespace RadegastSpeech.Talk
         /// </summary>
         /// <param name="v1"></param>
         /// <returns></returns>
-        AssignedVoice AddVariation(AvailableVoice v1)
+        private AssignedVoice AddVariation(AvailableVoice v1)
         {
             int rate = GetRandom(2) - 1;
             int pitch = GetRandom(2) - 1;

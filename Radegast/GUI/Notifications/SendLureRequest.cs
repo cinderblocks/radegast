@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,11 +25,11 @@ namespace Radegast
 {
     public partial class ntfSendLureRequest : Notification
     {
-        private RadegastInstance instance;
-        private UUID agentID;
-        private string agentName;
+        private readonly RadegastInstanceForms instance;
+        private readonly UUID agentID;
+        private readonly string agentName;
 
-        public ntfSendLureRequest(RadegastInstance instance, UUID agentID)
+        public ntfSendLureRequest(RadegastInstanceForms instance, UUID agentID)
             : base(NotificationType.SendLureRequest)
         {
             InitializeComponent();
@@ -39,7 +39,7 @@ namespace Radegast
             txtHead.BackColor = instance.MainForm.NotificationBackground;
 
             agentName = instance.Names.GetAsync(agentID).GetAwaiter().GetResult();
-            txtHead.Text = String.Format("Request a teleport to {0}'s location with the following message:", agentName);
+            txtHead.Text = $"Request a teleport to {agentName}'s location with the following message:";
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnRequest.Focus();
 
@@ -62,12 +62,12 @@ namespace Radegast
             instance.Client.Self.InstantMessage(instance.Client.Self.Name, agentID, txtMessage.Text,
                 instance.Client.Self.AgentID ^ agentID, InstantMessageDialog.RequestLure, InstantMessageOnline.Offline,
                 instance.Client.Self.SimPosition, instance.Client.Network.CurrentSim.ID, null);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
         {
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
     }
 }

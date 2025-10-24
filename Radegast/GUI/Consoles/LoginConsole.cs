@@ -31,11 +31,11 @@ namespace Radegast
 {
     public partial class LoginConsole : UserControl, IRadegastTabControl
     {
-        private readonly RadegastInstance instance;
-        private Netcom netcom => instance.Netcom;
+        private readonly RadegastInstanceForms instance;
+        private INetCom NetCom => instance.NetCom;
         private GridClient client => instance.Client;
 
-        public LoginConsole(RadegastInstance instance)
+        public LoginConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += MainConsole_Disposed;
@@ -67,7 +67,7 @@ namespace Radegast
             RemoveNetcomEvents();
         }
 
-        void LoginConsole_Load(object sender, EventArgs e)
+        private void LoginConsole_Load(object sender, EventArgs e)
         {
             if (!instance.GlobalSettings["theme_compatibility_mode"] && instance.PlainColors)
             {
@@ -81,23 +81,23 @@ namespace Radegast
 
         private void AddNetcomEvents()
         {
-            netcom.ClientLoggingIn += netcom_ClientLoggingIn;
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientLoggingOut += netcom_ClientLoggingOut;
-            netcom.ClientLoggedOut += netcom_ClientLoggedOut;
+            NetCom.ClientLoggingIn += NetComClientLoggingIn;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            NetCom.ClientLoggingOut += NetComClientLoggingOut;
+            NetCom.ClientLoggedOut += NetComClientLoggedOut;
             client.Network.RegisterLoginResponseCallback(network_OnLoginResponseCallback);
         }
 
         private void RemoveNetcomEvents()
         {
-            netcom.ClientLoggingIn -= netcom_ClientLoggingIn;
-            netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-            netcom.ClientLoggingOut -= netcom_ClientLoggingOut;
-            netcom.ClientLoggedOut -= netcom_ClientLoggedOut;
+            NetCom.ClientLoggingIn -= NetComClientLoggingIn;
+            NetCom.ClientLoginStatus -= NetComClientLoginStatus;
+            NetCom.ClientLoggingOut -= NetComClientLoggingOut;
+            NetCom.ClientLoggedOut -= NetComClientLoggedOut;
             client.Network.UnregisterLoginResponseCallback(network_OnLoginResponseCallback);
         }
 
-        void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
         {
             if (e.Key == "hide_login_graphics")
             {
@@ -319,7 +319,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             switch (e.Status)
             {
@@ -344,7 +344,7 @@ namespace Radegast
                     break;
 
                 case LoginStatus.Success:
-                    lblLoginStatus.Text = $"Logged in as {netcom.LoginOptions.FullName}";
+                    lblLoginStatus.Text = $"Logged in as {NetCom.LoginOptions.FullName}";
                     lblLoginStatus.ForeColor = Color.FromArgb(0, 128, 128, 255);
                     proLogin.Visible = false;
 
@@ -374,7 +374,7 @@ namespace Radegast
                     else
                     {
                         lblLoginStatus.Text = e.Message;
-                        netcom.loginOptions.MfaToken = string.Empty;
+                        NetCom.LoginOptions.MfaToken = string.Empty;
                         btnLogin.Enabled = true;
                     }
                     proLogin.Visible = false;
@@ -387,7 +387,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_ClientLoggedOut(object sender, EventArgs e)
+        private void NetComClientLoggedOut(object sender, EventArgs e)
         {
             pnlLoginPrompt.Visible = true;
             pnlLoggingIn.Visible = false;
@@ -396,7 +396,7 @@ namespace Radegast
             btnLogin.Enabled = true;
         }
 
-        private void netcom_ClientLoggingOut(object sender, OverrideEventArgs e)
+        private void NetComClientLoggingOut(object sender, OverrideEventArgs e)
         {
             btnLogin.Enabled = false;
 
@@ -406,7 +406,7 @@ namespace Radegast
             proLogin.Visible = true;
         }
 
-        private void netcom_ClientLoggingIn(object sender, OverrideEventArgs e)
+        private void NetComClientLoggingIn(object sender, OverrideEventArgs e)
         {
             lblLoginStatus.Text = "Logging in...";
             lblLoginStatus.ForeColor = Color.FromKnownColor(KnownColor.ControlText);
@@ -449,40 +449,40 @@ namespace Radegast
             if (cbxUsername.SelectedIndex > 0 && cbxUsername.SelectedItem is SavedLogin login)
             {
                 username = login.Username;
-                netcom.loginOptions.MfaHash = login.MfaHash;
+                NetCom.LoginOptions.MfaHash = login.MfaHash;
             }
 
             string[] parts = System.Text.RegularExpressions.Regex.Split(username.Trim(), @"[. ]+");
 
             if (parts.Length == 2)
             {
-                netcom.LoginOptions.FirstName = parts[0];
-                netcom.LoginOptions.LastName = parts[1];
+                NetCom.LoginOptions.FirstName = parts[0];
+                NetCom.LoginOptions.LastName = parts[1];
             }
             else
             {
-                netcom.LoginOptions.FirstName = username.Trim();
-                netcom.LoginOptions.LastName = "Resident";
+                NetCom.LoginOptions.FirstName = username.Trim();
+                NetCom.LoginOptions.LastName = "Resident";
             }
 
-            netcom.LoginOptions.Password = txtPassword.Text;
-            netcom.LoginOptions.Channel = Properties.Resources.ProgramName; // Channel
-            netcom.LoginOptions.Version = Properties.Resources.RadegastTitle; // Version
-            netcom.AgreeToTos = cbTOS.Checked;
+            NetCom.LoginOptions.Password = txtPassword.Text;
+            NetCom.LoginOptions.Channel = Properties.Resources.ProgramName; // Channel
+            NetCom.LoginOptions.Version = Properties.Resources.RadegastTitle; // Version
+            NetCom.AgreeToTos = cbTOS.Checked;
 
             switch (cbxLocation.SelectedIndex)
             {
                 case -1: //Custom
-                    netcom.LoginOptions.StartLocation = StartLocationType.Custom;
-                    netcom.LoginOptions.StartLocationCustom = cbxLocation.Text;
+                    NetCom.LoginOptions.StartLocation = StartLocationType.Custom;
+                    NetCom.LoginOptions.StartLocationCustom = cbxLocation.Text;
                     break;
 
                 case 0: //Home
-                    netcom.LoginOptions.StartLocation = StartLocationType.Home;
+                    NetCom.LoginOptions.StartLocation = StartLocationType.Home;
                     break;
 
                 case 1: //Last
-                    netcom.LoginOptions.StartLocation = StartLocationType.Last;
+                    NetCom.LoginOptions.StartLocation = StartLocationType.Last;
                     break;
             }
 
@@ -495,12 +495,12 @@ namespace Radegast
                     return;
                 }
 
-                netcom.LoginOptions.Grid = new Grid("custom", "Custom", txtCustomLoginUri.Text);
-                netcom.LoginOptions.GridCustomLoginUri = txtCustomLoginUri.Text;
+                NetCom.LoginOptions.Grid = new Grid("custom", "Custom", txtCustomLoginUri.Text);
+                NetCom.LoginOptions.GridCustomLoginUri = txtCustomLoginUri.Text;
             }
             else
             {
-                netcom.LoginOptions.Grid = cbxGrid.SelectedItem as Grid;
+                NetCom.LoginOptions.Grid = cbxGrid.SelectedItem as Grid;
             }
 
             if (instance.GlobalSettings.TryGetValue("saved_logins", out var savedLogins))
@@ -512,11 +512,11 @@ namespace Radegast
                 if (logins.TryGetValue(savedLoginsKey, out var loginKey))
                 {
                     var sl = SavedLogin.FromOSD(loginKey);
-                    netcom.LoginOptions.MfaHash = sl.MfaHash;
+                    NetCom.LoginOptions.MfaHash = sl.MfaHash;
                 }
             }
 
-            netcom.Login();
+            NetCom.Login();
             SaveConfig();
         }
 
@@ -662,15 +662,14 @@ namespace Radegast
 
         public override string ToString()
         {
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
             string gridName;
             if (GridID == "custom_login_uri")
             {
                 gridName = "Custom Login URI";
             }
-            else if (instance.GridManger.KeyExists(GridID))
+            else if (RadegastInstanceForms.Instance.GridManger.KeyExists(GridID))
             {
-                gridName = instance.GridManger[GridID].Name;
+                gridName = RadegastInstanceForms.Instance.GridManger[GridID].Name;
             }
             else
             {

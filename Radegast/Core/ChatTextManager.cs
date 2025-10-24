@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2023, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,17 +27,19 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
-    public class ChatTextManager : TextManagerBase, IDisposable
+    public class ChatTextManager : TextManagerBase
     {
         public event EventHandler<ChatLineAddedArgs> ChatLineAdded;
 
         private bool showTimestamps;
-        private List<ChatBufferItem> textBuffer;
+        private readonly List<ChatBufferItem> textBuffer;
 
-        public ChatTextManager(RadegastInstance instance, ITextPrinter textPrinter)
+        public ChatTextManager(RadegastInstanceForms instance, ITextPrinter textPrinter)
             : base(instance, textPrinter)
         {
             textBuffer = new List<ChatBufferItem>();
@@ -45,16 +47,16 @@ namespace Radegast
             InitializeConfig();
 
             // Callbacks
-            instance.Netcom.ChatReceived += netcom_ChatReceived;
-            instance.Netcom.ChatSent += netcom_ChatSent;
-            instance.Netcom.AlertMessageReceived += netcom_AlertMessageReceived;
+            instance.NetCom.ChatReceived += netcom_ChatReceived;
+            instance.NetCom.ChatSent += netcom_ChatSent;
+            instance.NetCom.AlertMessageReceived += netcom_AlertMessageReceived;
         }
 
         public override void Dispose()
         {
-            instance.Netcom.ChatReceived -= netcom_ChatReceived;
-            instance.Netcom.ChatSent -= netcom_ChatSent;
-            instance.Netcom.AlertMessageReceived -= netcom_AlertMessageReceived;
+            instance.NetCom.ChatReceived -= netcom_ChatReceived;
+            instance.NetCom.ChatSent -= netcom_ChatSent;
+            instance.NetCom.AlertMessageReceived -= netcom_AlertMessageReceived;
 
             base.Dispose();
         }
@@ -117,7 +119,7 @@ namespace Radegast
             ProcessBufferItem(ready, true);
         }
 
-        private Object SyncChat = new Object();
+        private readonly object SyncChat = new object();
 
         public void ProcessBufferItem(ChatBufferItem item, bool isNewMessage)
         {
@@ -140,9 +142,9 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.GrayText;
-                        TextPrinter.BackColor = Color.Transparent;
-                        TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                        TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
+                        TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                         TextPrinter.PrintText(item.Timestamp.ToString("[HH:mm] "));
                     }
                 }
@@ -156,9 +158,9 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.WindowText;
-                    TextPrinter.BackColor = Color.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                 }
 
                 if (item.Style == ChatBufferTextStyle.Normal && item.ID != UUID.Zero && instance.GlobalSettings["av_name_link"])
@@ -179,9 +181,9 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.WindowText;
-                    TextPrinter.BackColor = Color.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                 }
 
                 ProcessAndPrintText(item.Text, isNewMessage, true);

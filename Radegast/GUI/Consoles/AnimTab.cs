@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,13 +28,13 @@ namespace Radegast
 {
     public partial class AnimTab : UserControl
     {
-        private GridClient client;
-        private RadegastInstance instance;
-        private Avatar av;
-        private List<UUID> seenAnim = new List<UUID>();
+        private readonly GridClient client;
+        private readonly IRadegastInstance instance;
+        private readonly Avatar av;
+        private readonly List<UUID> seenAnim = new List<UUID>();
         private int n = 0;
 
-        public AnimTab(RadegastInstance instance, Avatar av)
+        public AnimTab(IRadegastInstance instance, Avatar av)
         {
             InitializeComponent();
             Disposed += AnimTab_Disposed;
@@ -48,12 +48,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void AnimTab_Disposed(object sender, EventArgs e)
+        private void AnimTab_Disposed(object sender, EventArgs e)
         {
             client.Avatars.AvatarAnimation -= Avatars_AvatarAnimation;
         }
 
-        void Avatars_AvatarAnimation(object sender, AvatarAnimationEventArgs e)
+        private void Avatars_AvatarAnimation(object sender, AvatarAnimationEventArgs e)
         {
             if (InvokeRequired) {
                 Invoke(new MethodInvoker(() => Avatars_AvatarAnimation(sender, e)));

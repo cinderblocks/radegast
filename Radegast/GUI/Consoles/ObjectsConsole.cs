@@ -35,7 +35,7 @@ namespace Radegast
     {
         public List<Primitive> Prims = new List<Primitive>();
 
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
 
         private float searchRadius = 40.0f;
@@ -46,7 +46,7 @@ namespace Radegast
 
         public Primitive CurrentPrim { get; private set; } = new Primitive();
 
-        public ObjectsConsole(RadegastInstance instance)
+        public ObjectsConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += frmObjects_Disposed;
@@ -84,7 +84,7 @@ namespace Radegast
             contentsDownloadCancelToken = new CancellationTokenSource();
 
             // Callbacks
-            instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
             instance.State.SitStateChanged += State_SitStateChanged;
             client.Objects.ObjectUpdate += Objects_ObjectUpdate;
             client.Objects.KillObjects += Objects_KillObjects;
@@ -107,7 +107,7 @@ namespace Radegast
             } catch (ObjectDisposedException) { }
 
             propRequester.Dispose();
-            instance.Netcom.ClientDisconnected -= Netcom_ClientDisconnected;
+            instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
             instance.State.SitStateChanged -= State_SitStateChanged;
             client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
             client.Objects.KillObjects -= Objects_KillObjects;
@@ -513,7 +513,7 @@ namespace Radegast
                 client.Inventory.MoveTaskInventory(prim.LocalID, item.UUID, folderID, client.Network.CurrentSim);
             }
 
-            instance.TabConsole.DisplayNotificationInChat(
+            instance.ShowNotificationInChat(
                 $"Items from object contents copied to new inventory folder {prim.Properties.Name}");
 
         }
@@ -995,7 +995,7 @@ namespace Radegast
         {
             if (CurrentPrim.PrimData.PCode != PCode.Prim)
             {
-                instance.TabConsole.DisplayNotificationInChat("Cannot display objects of that type", ChatBufferTextStyle.Error);
+                instance.ShowNotificationInChat("Cannot display objects of that type", ChatBufferTextStyle.Error);
                 return;
             }
 
@@ -1443,14 +1443,14 @@ namespace Radegast
     public class PropertiesQueue : IDisposable
     {
         private readonly object sync = new object();
-        private RadegastInstance instance;
+        private IRadegastInstance instance;
         private System.Timers.Timer qTimer;
         private Queue<Primitive> props = new Queue<Primitive>();
 
         public delegate void TickCallback(int remaining);
         public event TickCallback OnTick;
 
-        public PropertiesQueue(RadegastInstance instance)
+        public PropertiesQueue(IRadegastInstance instance)
         {
             this.instance = instance;
             qTimer = new System.Timers.Timer(2500) {Enabled = true};

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -34,7 +34,7 @@ namespace Radegast
     public class LineNumberPanel : Control
     {
         private RRichTextBox rtb;
-        private SolidBrush brush;
+        private readonly SolidBrush brush;
 
         /// <summary>
         /// Associated ritch text box control
@@ -69,7 +69,7 @@ namespace Radegast
             }
         }
 
-        void rtb_InvalidateNumbers(object sender, EventArgs e)
+        private void rtb_InvalidateNumbers(object sender, EventArgs e)
         {
             Invalidate();
         }
@@ -112,8 +112,8 @@ namespace Radegast
             var first_line_y = 1 + rtb.GetPositionFromCharIndex(first_index).Y;
 
             int i = first_line;
-            Single y = 0;
-            int total_lines = rtb.GetLineFromCharIndex(Int32.MaxValue) + 1;
+            float y = 0;
+            int total_lines = rtb.GetLineFromCharIndex(int.MaxValue) + 1;
             StringFormat align = new StringFormat(StringFormatFlags.NoWrap)
             {
                 Alignment = StringAlignment.Far,

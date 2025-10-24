@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2023, Sjofn, LLC
+ * Copyright(c) 2016-20253, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,6 +27,8 @@ using Newtonsoft.Json;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using Radegast.Automation;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -39,10 +41,9 @@ namespace Radegast
 
     public partial class frmSettings : RadegastForm
     {
-        private Settings s;
-        private static bool settingInitialized = false;
-        private Settings.FontSetting currentlySelectedFontSetting = null;
-        Dictionary<string, Settings.FontSetting> chatFontSettings;
+        private readonly SettingsForms settings;
+        private SettingsForms.FontSetting currentlySelectedFontSetting = null;
+        private Dictionary<string, SettingsForms.FontSetting> chatFontSettings;
 
         public static void InitSettings(Settings s)
         {
@@ -185,10 +186,10 @@ namespace Radegast
             var chatFontsJson = Instance.GlobalSettings["chat_fonts"];
             if (chatFontsJson.Type != OSDType.Unknown)
             {
-                Dictionary<string, Settings.FontSetting> unpacked = new Dictionary<string, Settings.FontSetting>();
-                chatFontSettings = JsonConvert.DeserializeObject<Dictionary<string, Settings.FontSetting>>(chatFontsJson);
+                Dictionary<string, SettingsForms.FontSetting> unpacked = new Dictionary<string, SettingsForms.FontSetting>();
+                chatFontSettings = JsonConvert.DeserializeObject<Dictionary<string, SettingsForms.FontSetting>>(chatFontsJson);
 
-                foreach (var fontSetting in Settings.DefaultFontSettings)
+                foreach (var fontSetting in SettingsForms.DefaultFontSettings)
                 {
                     if (!chatFontSettings.ContainsKey(fontSetting.Key))
                     {
@@ -198,7 +199,7 @@ namespace Radegast
             }
             else
             {
-                chatFontSettings = Settings.DefaultFontSettings;
+                chatFontSettings = SettingsForms.DefaultFontSettings;
             }
 
             foreach (var item in chatFontSettings)
@@ -212,90 +213,87 @@ namespace Radegast
             }
         }
 
-        public frmSettings(RadegastInstance instance)
+        public frmSettings(RadegastInstanceForms instance)
             : base(instance)
         {
-            if (settingInitialized)
-            {
-                InitSettings(instance.GlobalSettings);
-            }
+            InitSettings(instance.GlobalSettings);
 
             InitializeComponent();
             AutoSavePosition = true;
             InitColorSettings();
 
-            s = instance.GlobalSettings;
+            settings = (SettingsForms)instance.GlobalSettings;
             tbpGraphics.Controls.Add(new Rendering.GraphicsPreferences(instance));
-            cbChatTimestamps.Checked = s["chat_timestamps"].AsBoolean();
+            cbChatTimestamps.Checked = settings["chat_timestamps"].AsBoolean();
 
-            cbIMTimeStamps.Checked = s["im_timestamps"].AsBoolean();
+            cbIMTimeStamps.Checked = settings["im_timestamps"].AsBoolean();
 
             cbChatTimestamps.CheckedChanged += cbChatTimestamps_CheckedChanged;
             cbIMTimeStamps.CheckedChanged += cbIMTimeStamps_CheckedChanged;
 
-            cbTrasactDialog.Checked = s["transaction_notification_dialog"].AsBoolean();
-            cbTransactChat.Checked = s["transaction_notification_chat"].AsBoolean();
+            cbTrasactDialog.Checked = settings["transaction_notification_dialog"].AsBoolean();
+            cbTransactChat.Checked = settings["transaction_notification_chat"].AsBoolean();
 
-            cbFriendsNotifications.Checked = s["show_friends_online_notifications"].AsBoolean();
+            cbFriendsNotifications.Checked = settings["show_friends_online_notifications"].AsBoolean();
             cbFriendsNotifications.CheckedChanged += cbFriendsNotifications_CheckedChanged;
 
-            cbAutoReconnect.Checked = s["auto_reconnect"].AsBoolean();
+            cbAutoReconnect.Checked = settings["auto_reconnect"].AsBoolean();
             cbAutoReconnect.CheckedChanged += cbAutoReconnect_CheckedChanged;
 
-            cbResolveURIs.Checked = s["resolve_uris"].AsBoolean();
+            cbResolveURIs.Checked = settings["resolve_uris"].AsBoolean();
             cbResolveURIs.CheckedChanged += cbResolveURIs_CheckedChanged;
 
-            cbHideLoginGraphics.Checked = s["hide_login_graphics"].AsBoolean();
+            cbHideLoginGraphics.Checked = settings["hide_login_graphics"].AsBoolean();
             cbHideLoginGraphics.CheckedChanged += cbHideLoginGraphics_CheckedChanged;
 
-            cbIgnoreConferenceChats.Checked = s["ignore_conference_chats"].AsBoolean();
+            cbIgnoreConferenceChats.Checked = settings["ignore_conference_chats"].AsBoolean();
             cbIgnoreConferenceChats.CheckedChanged += cbIgnoreConferenceChats_CheckedChanged;
 
             cbAllowConferenceChatsFromFriends.Enabled = cbIgnoreConferenceChats.Checked;
-            cbAllowConferenceChatsFromFriends.Checked = s["allow_conference_chats_from_friends"].AsBoolean();
+            cbAllowConferenceChatsFromFriends.Checked = settings["allow_conference_chats_from_friends"].AsBoolean();
             cbAllowConferenceChatsFromFriends.CheckedChanged += cbAllowConferenceChatsFromFriends_CheckedChanged;
 
             cbLogIgnoredConferencesToChat.Enabled = cbIgnoreConferenceChats.Checked;
-            cbLogIgnoredConferencesToChat.Checked = s["log_ignored_conferences_to_chat"].AsBoolean();
+            cbLogIgnoredConferencesToChat.Checked = settings["log_ignored_conferences_to_chat"].AsBoolean();
             cbLogIgnoredConferencesToChat.CheckedChanged += cbLogIgnoredConferencesToChat_CheckedChanged;
 
-            cbRLV.Checked = s["rlv_enabled"].AsBoolean();
+            cbRLV.Checked = settings["rlv_enabled"].AsBoolean();
             cbRLV.CheckedChanged += (sender, e) =>
             {
-                s["rlv_enabled"] = new OSDBoolean(cbRLV.Checked);
+                settings["rlv_enabled"] = new OSDBoolean(cbRLV.Checked);
             };
 
-            cbRLVDebug.Checked = s["rlv_debugcommands"].AsBoolean();
+            cbRLVDebug.Checked = settings["rlv_debugcommands"].AsBoolean();
             cbRLVDebug.CheckedChanged += (sender, e) =>
             {
-                s["rlv_debugcommands"] = new OSDBoolean(cbRLVDebug.Checked);
+                settings["rlv_debugcommands"] = new OSDBoolean(cbRLVDebug.Checked);
             };
 
-            cbMUEmotes.Checked = s["mu_emotes"].AsBoolean();
+            cbMUEmotes.Checked = settings["mu_emotes"].AsBoolean();
             cbMUEmotes.CheckedChanged += (sender, e) =>
             {
-                s["mu_emotes"] = new OSDBoolean(cbMUEmotes.Checked);
+                settings["mu_emotes"] = new OSDBoolean(cbMUEmotes.Checked);
             };
 
-            if (!s.ContainsKey("minimize_to_tray")) s["minimize_to_tray"] = OSD.FromBoolean(false);
-            cbMinToTrey.Checked = s["minimize_to_tray"].AsBoolean();
+            if (!settings.ContainsKey("minimize_to_tray")) settings["minimize_to_tray"] = OSD.FromBoolean(false);
+            cbMinToTrey.Checked = settings["minimize_to_tray"].AsBoolean();
             cbMinToTrey.CheckedChanged += (sender, e) =>
             {
-                s["minimize_to_tray"] = OSD.FromBoolean(cbMinToTrey.Checked);
+                settings["minimize_to_tray"] = OSD.FromBoolean(cbMinToTrey.Checked);
             };
 
-            cbNoTyping.Checked = s["no_typing_anim"].AsBoolean();
+            cbNoTyping.Checked = settings["no_typing_anim"].AsBoolean();
             cbNoTyping.CheckedChanged += (sender, e) =>
             {
-                s["no_typing_anim"] = OSD.FromBoolean(cbNoTyping.Checked);
+                settings["no_typing_anim"] = OSD.FromBoolean(cbNoTyping.Checked);
             };
 
-            txtAutoResponse.Text = s["auto_response_text"];
+            txtAutoResponse.Text = settings["auto_response_text"];
             txtAutoResponse.TextChanged += (sender, e) =>
             {
-                s["auto_response_text"] = txtAutoResponse.Text;
+                settings["auto_response_text"] = txtAutoResponse.Text;
             };
-            AutoResponseType art = (AutoResponseType)s["auto_response_type"].AsInteger();
+            AutoResponseType art = (AutoResponseType)settings["auto_response_type"].AsInteger();
             switch (art)
             {
                 case AutoResponseType.WhenBusy: rbAutobusy.Checked = true; break;
@@ -303,13 +301,13 @@ namespace Radegast
                 case AutoResponseType.Always: rbAutoAlways.Checked = true; break;
             }
 
-            cbSyntaxHighlight.Checked = s["script_syntax_highlight"].AsBoolean();
+            cbSyntaxHighlight.Checked = settings["script_syntax_highlight"].AsBoolean();
             cbSyntaxHighlight.CheckedChanged += (sender, e) =>
             {
-                s["script_syntax_highlight"] = OSD.FromBoolean(cbSyntaxHighlight.Checked);
+                settings["script_syntax_highlight"] = OSD.FromBoolean(cbSyntaxHighlight.Checked);
             };
 
-            switch ((NameMode)s["display_name_mode"].AsInteger())
+            switch ((NameMode)settings["display_name_mode"].AsInteger())
             {
                 case NameMode.Standard: rbDNOff.Checked = true; break;
                 case NameMode.Smart: rbDNSmart.Checked = true; break;
@@ -317,71 +315,71 @@ namespace Radegast
                 case NameMode.OnlyDisplayName: rbDNOnlyDN.Checked = true; break;
             }
 
-            txtReconnectTime.Text = s["reconnect_time"].AsInteger().ToString();
+            txtReconnectTime.Text = settings["reconnect_time"].AsInteger().ToString();
 
-            txtResolveURITime.Text = s["resolve_uri_time"].AsInteger().ToString();
+            txtResolveURITime.Text = settings["resolve_uri_time"].AsInteger().ToString();
 
-            cbOnInvOffer.SelectedIndex = s["inv_auto_accept_mode"].AsInteger();
+            cbOnInvOffer.SelectedIndex = settings["inv_auto_accept_mode"].AsInteger();
             cbOnInvOffer.SelectedIndexChanged += (sender, e) =>
             {
-                s["inv_auto_accept_mode"] = cbOnInvOffer.SelectedIndex;
+                settings["inv_auto_accept_mode"] = cbOnInvOffer.SelectedIndex;
             };
 
-            cbRadegastLogToFile.Checked = s["log_to_file"];
+            cbRadegastLogToFile.Checked = settings["log_to_file"];
 
-            cbDisableChatIMLog.Checked = s["disable_chat_im_log"];
+            cbDisableChatIMLog.Checked = settings["disable_chat_im_log"];
             cbDisableChatIMLog.CheckedChanged += (sender, e) =>
             {
-                s["disable_chat_im_log"] = cbDisableChatIMLog.Checked;
+                settings["disable_chat_im_log"] = cbDisableChatIMLog.Checked;
             };
 
-            cbDisableLookAt.Checked = s["disable_look_at"];
+            cbDisableLookAt.Checked = settings["disable_look_at"];
             cbDisableLookAt.CheckedChanged += (sender, e) =>
             {
-                s["disable_look_at"] = cbDisableLookAt.Checked;
+                settings["disable_look_at"] = cbDisableLookAt.Checked;
             };
 
-            cbConfirmExit.Checked = s["confirm_exit"];
+            cbConfirmExit.Checked = settings["confirm_exit"];
             cbConfirmExit.CheckedChanged += (sender, e) =>
             {
-                s["confirm_exit"] = cbConfirmExit.Checked;
+                settings["confirm_exit"] = cbConfirmExit.Checked;
             };
 
-            cbThemeCompatibilityMode.Checked = s["theme_compatibility_mode"];
+            cbThemeCompatibilityMode.Checked = settings["theme_compatibility_mode"];
             cbThemeCompatibilityMode.CheckedChanged += (sender, e) =>
             {
-                s["theme_compatibility_mode"] = cbThemeCompatibilityMode.Checked;
+                settings["theme_compatibility_mode"] = cbThemeCompatibilityMode.Checked;
             };
 
-            cbTaskBarHighLight.Checked = s["taskbar_highlight"];
+            cbTaskBarHighLight.Checked = settings["taskbar_highlight"];
             cbTaskBarHighLight.CheckedChanged += (sender, e) =>
             {
-                s["taskbar_highlight"] = cbTaskBarHighLight.Checked;
+                settings["taskbar_highlight"] = cbTaskBarHighLight.Checked;
                 UpdateEnabled();
             };
 
-            cbFriendsHighlight.Checked = s["friends_notification_highlight"].AsBoolean();
+            cbFriendsHighlight.Checked = settings["friends_notification_highlight"].AsBoolean();
             cbFriendsHighlight.CheckedChanged += (sender, e) =>
             {
-                s["friends_notification_highlight"] = new OSDBoolean(cbFriendsHighlight.Checked);
+                settings["friends_notification_highlight"] = new OSDBoolean(cbFriendsHighlight.Checked);
             };
 
-            cbHighlightChat.Checked = s["highlight_on_chat"];
+            cbHighlightChat.Checked = settings["highlight_on_chat"];
             cbHighlightChat.CheckedChanged += (sender, e) =>
             {
-                s["highlight_on_chat"] = cbHighlightChat.Checked;
+                settings["highlight_on_chat"] = cbHighlightChat.Checked;
             };
 
-            cbHighlightIM.Checked = s["highlight_on_im"];
+            cbHighlightIM.Checked = settings["highlight_on_im"];
             cbHighlightIM.CheckedChanged += (sender, e) =>
             {
-                s["highlight_on_im"] = cbHighlightIM.Checked;
+                settings["highlight_on_im"] = cbHighlightIM.Checked;
             };
 
-            cbHighlightGroupIM.Checked = s["highlight_on_group_im"];
+            cbHighlightGroupIM.Checked = settings["highlight_on_group_im"];
             cbHighlightGroupIM.CheckedChanged += (sender, e) =>
             {
-                s["highlight_on_group_im"] = cbHighlightGroupIM.Checked;
+                settings["highlight_on_group_im"] = cbHighlightGroupIM.Checked;
             };
 
             // disable_av_name_link
@@ -391,62 +389,62 @@ namespace Radegast
             }
             else
             {
-                cbNameLinks.Checked = s["av_name_link"];
+                cbNameLinks.Checked = settings["av_name_link"];
                 cbNameLinks.CheckedChanged += (sender, e) =>
                 {
-                    s["av_name_link"] = cbNameLinks.Checked;
+                    settings["av_name_link"] = cbNameLinks.Checked;
                 };
             }
 
-            cbGroupIMSound.Checked = s["group_im_sound"];
+            cbGroupIMSound.Checked = settings["group_im_sound"];
             cbGroupIMSound.CheckedChanged += (sender, e) =>
             {
-                s["group_im_sound"] = cbGroupIMSound.Checked;
+                settings["group_im_sound"] = cbGroupIMSound.Checked;
             };
 
-            cbMentionMeSound.Checked = s["mention_me_sound"];
+            cbMentionMeSound.Checked = settings["mention_me_sound"];
             cbMentionMeSound.CheckedChanged += (sender, e) =>
             {
-                s["mention_me_sound"] = cbMentionMeSound.Checked;
+                settings["mention_me_sound"] = cbMentionMeSound.Checked;
                 txtMentionMeSoundUUID.Enabled = cbMentionMeSound.Checked;
             };
 
-            txtMentionMeSoundUUID.Text = s["mention_me_sound_uuid"];
+            txtMentionMeSoundUUID.Text = settings["mention_me_sound_uuid"];
             txtMentionMeSoundUUID.Enabled = cbMentionMeSound.Checked;
             txtMentionMeSoundUUID.TextChanged += (sender, e) =>
             {
                 if (UUID.TryParse(txtMentionMeSoundUUID.Text, out UUID newMentionMeSoundUUID))
                 {
                     txtMentionMeSoundUUID.ForeColor = DefaultForeColor;
-                    s["mention_me_sound_uuid"] = newMentionMeSoundUUID;
+                    settings["mention_me_sound_uuid"] = newMentionMeSoundUUID;
                 }
                 else
                 {
                     txtMentionMeSoundUUID.ForeColor = Color.Red;
-                    s["mention_me_sound_uuid"] = UISounds.ChatMention;
+                    settings["mention_me_sound_uuid"] = UISounds.ChatMention;
                 }
             };
 
-            cbShowScriptErrors.Checked = s["show_script_errors"];
+            cbShowScriptErrors.Checked = settings["show_script_errors"];
             cbShowScriptErrors.CheckedChanged += (sender, e) =>
             {
-                s["show_script_errors"] = cbShowScriptErrors.Checked;
+                settings["show_script_errors"] = cbShowScriptErrors.Checked;
             };
 
-            txtChatLogDir.Text = s["chat_log_dir"];
+            txtChatLogDir.Text = settings["chat_log_dir"];
 
             autoSitPrefsUpdate();
             pseudoHomePrefsUpdated();
             LSLHelperPrefsUpdate();
 
-            cbAutoScriptPermission.Text = s["on_script_question"];
+            cbAutoScriptPermission.Text = settings["on_script_question"];
 
             UpdateEnabled();
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void UpdateEnabled()
+        private void UpdateEnabled()
         {
             if (cbTaskBarHighLight.Checked)
             {
@@ -458,59 +456,59 @@ namespace Radegast
             }
         }
 
-        void cbHideLoginGraphics_CheckedChanged(object sender, EventArgs e)
+        private void cbHideLoginGraphics_CheckedChanged(object sender, EventArgs e)
         {
-            s["hide_login_graphics"] = OSD.FromBoolean(cbHideLoginGraphics.Checked);
+            settings["hide_login_graphics"] = OSD.FromBoolean(cbHideLoginGraphics.Checked);
         }
 
-        void cbAutoReconnect_CheckedChanged(object sender, EventArgs e)
+        private void cbAutoReconnect_CheckedChanged(object sender, EventArgs e)
         {
-            s["auto_reconnect"] = OSD.FromBoolean(cbAutoReconnect.Checked);
+            settings["auto_reconnect"] = OSD.FromBoolean(cbAutoReconnect.Checked);
         }
 
         private void cbResolveURIs_CheckedChanged(object sender, EventArgs e)
         {
-            s["resolve_uris"] = OSD.FromBoolean(cbResolveURIs.Checked);
+            settings["resolve_uris"] = OSD.FromBoolean(cbResolveURIs.Checked);
         }
 
-        void cbFriendsNotifications_CheckedChanged(object sender, EventArgs e)
+        private void cbFriendsNotifications_CheckedChanged(object sender, EventArgs e)
         {
-            s["show_friends_online_notifications"] = OSD.FromBoolean(cbFriendsNotifications.Checked);
+            settings["show_friends_online_notifications"] = OSD.FromBoolean(cbFriendsNotifications.Checked);
         }
 
-        void cbChatTimestamps_CheckedChanged(object sender, EventArgs e)
+        private void cbChatTimestamps_CheckedChanged(object sender, EventArgs e)
         {
-            s["chat_timestamps"] = OSD.FromBoolean(cbChatTimestamps.Checked);
+            settings["chat_timestamps"] = OSD.FromBoolean(cbChatTimestamps.Checked);
         }
 
-        void cbIMTimeStamps_CheckedChanged(object sender, EventArgs e)
+        private void cbIMTimeStamps_CheckedChanged(object sender, EventArgs e)
         {
-            s["im_timestamps"] = OSD.FromBoolean(cbIMTimeStamps.Checked);
+            settings["im_timestamps"] = OSD.FromBoolean(cbIMTimeStamps.Checked);
         }
 
         private void cbTrasactDialog_CheckedChanged(object sender, EventArgs e)
         {
-            s["transaction_notification_dialog"] = OSD.FromBoolean(cbTrasactDialog.Checked);
+            settings["transaction_notification_dialog"] = OSD.FromBoolean(cbTrasactDialog.Checked);
         }
 
         private void cbTrasactChat_CheckedChanged(object sender, EventArgs e)
         {
-            s["transaction_notification_chat"] = OSD.FromBoolean(cbTransactChat.Checked);
+            settings["transaction_notification_chat"] = OSD.FromBoolean(cbTransactChat.Checked);
         }
 
         private void rbAutobusy_CheckedChanged(object sender, EventArgs e)
         {
-            s["auto_response_type"] = (int)AutoResponseType.WhenBusy;
+            settings["auto_response_type"] = (int)AutoResponseType.WhenBusy;
         }
 
         private void rbAutoNonFriend_CheckedChanged(object sender, EventArgs e)
         {
-            s["auto_response_type"] = (int)AutoResponseType.WhenFromNonFriend;
+            settings["auto_response_type"] = (int)AutoResponseType.WhenFromNonFriend;
         }
 
         private void rbAutoAlways_CheckedChanged(object sender, EventArgs e)
         {
-            s["auto_response_type"] = (int)AutoResponseType.Always;
+            settings["auto_response_type"] = (int)AutoResponseType.Always;
         }
 
         private void rbDNOff_CheckedChanged(object sender, EventArgs e)
@@ -518,7 +516,7 @@ namespace Radegast
             if (rbDNOff.Checked)
             {
                 Instance.Names.CleanCache();
-                s["display_name_mode"] = (int)NameMode.Standard;
+                settings["display_name_mode"] = (int)NameMode.Standard;
             }
         }
 
@@ -527,7 +525,7 @@ namespace Radegast
             if (rbDNSmart.Checked)
             {
                 Instance.Names.CleanCache();
-                s["display_name_mode"] = (int)NameMode.Smart;
+                settings["display_name_mode"] = (int)NameMode.Smart;
             }
         }
 
@@ -536,7 +534,7 @@ namespace Radegast
             if (rbDNDandUsernme.Checked)
             {
                 Instance.Names.CleanCache();
-                s["display_name_mode"] = (int)NameMode.DisplayNameAndUserName;
+                settings["display_name_mode"] = (int)NameMode.DisplayNameAndUserName;
             }
         }
 
@@ -545,7 +543,7 @@ namespace Radegast
             if (rbDNOnlyDN.Checked)
             {
                 Instance.Names.CleanCache();
-                s["display_name_mode"] = (int)NameMode.OnlyDisplayName;
+                settings["display_name_mode"] = (int)NameMode.OnlyDisplayName;
             }
         }
 
@@ -554,17 +552,17 @@ namespace Radegast
             cbAllowConferenceChatsFromFriends.Enabled = cbIgnoreConferenceChats.Checked;
             cbLogIgnoredConferencesToChat.Enabled = cbIgnoreConferenceChats.Checked;
 
-            s["ignore_conference_chats"] = OSD.FromBoolean(cbIgnoreConferenceChats.Checked);
+            settings["ignore_conference_chats"] = OSD.FromBoolean(cbIgnoreConferenceChats.Checked);
         }
 
         private void cbAllowConferenceChatsFromFriends_CheckedChanged(object sender, EventArgs e)
         {
-            s["allow_conference_chats_from_friends"] = OSD.FromBoolean(cbAllowConferenceChatsFromFriends.Checked);
+            settings["allow_conference_chats_from_friends"] = OSD.FromBoolean(cbAllowConferenceChatsFromFriends.Checked);
         }
 
         private void cbLogIgnoredConferencesToChat_CheckedChanged(object sender, EventArgs e)
         {
-            s["log_ignored_conferences_to_chat"] = OSD.FromBoolean(cbLogIgnoredConferencesToChat.Checked);
+            settings["log_ignored_conferences_to_chat"] = OSD.FromBoolean(cbLogIgnoredConferencesToChat.Checked);
         }
 
         private void txtReconnectTime_TextChanged(object sender, EventArgs e)
@@ -579,7 +577,7 @@ namespace Radegast
                 txtReconnectTime.Select(txtReconnectTime.Text.Length, 0);
             }
 
-            s["reconnect_time"] = t;
+            settings["reconnect_time"] = t;
         }
 
         private void txtResolveURITime_TextChanged(object sender, EventArgs e)
@@ -594,22 +592,22 @@ namespace Radegast
                 txtResolveURITime.Select(txtResolveURITime.Text.Length, 0);
             }
 
-            s["resolve_uri_time"] = t;
+            settings["resolve_uri_time"] = t;
         }
 
         private void cbRadegastLogToFile_CheckedChanged(object sender, EventArgs e)
         {
-            s["log_to_file"] = OSD.FromBoolean(cbRadegastLogToFile.Checked);
+            settings["log_to_file"] = OSD.FromBoolean(cbRadegastLogToFile.Checked);
         }
 
         private void cbConfirmExit_CheckedChanged(object sender, EventArgs e)
         {
-            s["confirm_exit"] = OSD.FromBoolean(cbConfirmExit.Checked);
+            settings["confirm_exit"] = OSD.FromBoolean(cbConfirmExit.Checked);
         }
 
         private void cbThemeCompatibilityMode_CheckedChanged(object sender, EventArgs e)
         {
-            s["theme_compatibility_mode"] = OSD.FromBoolean(cbThemeCompatibilityMode.Checked);
+            settings["theme_compatibility_mode"] = OSD.FromBoolean(cbThemeCompatibilityMode.Checked);
         }
 
         #region Auto-Sit
@@ -832,7 +830,7 @@ namespace Radegast
 
         private void cbAutoScriptPermission_SelectedIndexChanged(object sender, EventArgs e)
         {
-            s["on_script_question"] = cbAutoScriptPermission.Text;
+            settings["on_script_question"] = cbAutoScriptPermission.Text;
         }
 
         private void cbxForeground_DrawItem(object sender, DrawItemEventArgs e)
@@ -897,12 +895,12 @@ namespace Radegast
             }
         }
 
-        private Settings.FontSetting GetPreviewFontSettings()
+        private SettingsForms.FontSetting GetPreviewFontSettings()
         {
             float fontSize = SystemFonts.DefaultFont.Size;
             string fontName = SystemFonts.DefaultFont.Name;
-            Color backColor = SystemColors.Window;
-            Color foreColor = SystemColors.ControlText;
+            SKColor backColor = SystemColors.Window.ToSKColor();
+            SKColor foreColor = SystemColors.ControlText.ToSKColor();
             FontStyle style = FontStyle.Regular;
 
             if (cbxFontSize.SelectedItem is float item)
@@ -915,11 +913,11 @@ namespace Radegast
             }
             if (cbxForeground.SelectedItem is Color color)
             {
-                foreColor = color;
+                foreColor = color.ToSKColor();
             }
             if (cbxBackground.SelectedItem is Color backgroundSelectedItem)
             {
-                backColor = backgroundSelectedItem;
+                backColor = backgroundSelectedItem.ToSKColor();
             }
 
             if (cbxBold.Checked)
@@ -931,7 +929,7 @@ namespace Radegast
                 style |= FontStyle.Italic;
             }
 
-            var previewFontSettings = new Settings.FontSetting()
+            var previewFontSettings = new SettingsForms.FontSetting()
             {
                 Name = string.Empty,
                 Font = new Font(fontName, fontSize, style),
@@ -947,11 +945,11 @@ namespace Radegast
             var previewFontSettings = GetPreviewFontSettings();
 
             lblPreview.Font = previewFontSettings.Font;
-            lblPreview.ForeColor = previewFontSettings.ForeColor;
-            lblPreview.BackColor = previewFontSettings.BackColor;
+            lblPreview.ForeColor = previewFontSettings.ForeColor.ToDrawingColor();
+            lblPreview.BackColor = previewFontSettings.BackColor.ToDrawingColor();
         }
 
-        private void UpdateSelection(Settings.FontSetting selected)
+        private void UpdateSelection(SettingsForms.FontSetting selected)
         {
             currentlySelectedFontSetting = selected;
             cbxFontSize.SelectedItem = selected.Font.Size;
@@ -992,7 +990,7 @@ namespace Radegast
         {
             try
             {
-                var json = JsonConvert.SerializeObject(Settings.DefaultFontSettings);
+                var json = JsonConvert.SerializeObject(SettingsForms.DefaultFontSettings);
                 Instance.GlobalSettings["chat_fonts"] = json;
                 Instance.GlobalSettings.Save();
                 ReloadFontSettings();
@@ -1021,7 +1019,7 @@ namespace Radegast
         private void lbxColorItems_SelectedIndexChanged(object sender, EventArgs e)
         {
             var sourceListbox = sender as ListBox;
-            if (sourceListbox?.SelectedItem is Settings.FontSetting fontSettings)
+            if (sourceListbox?.SelectedItem is SettingsForms.FontSetting fontSettings)
             {
                 UpdateSelection(fontSettings);
             }
@@ -1036,7 +1034,7 @@ namespace Radegast
                     int itemIndex = sourceListbox.IndexFromPoint(new Point(e.X, e.Y));
                     if (itemIndex != -1)
                     {
-                        if (sourceListbox.Items[itemIndex] is Settings.FontSetting selectedItem
+                        if (sourceListbox.Items[itemIndex] is SettingsForms.FontSetting selectedItem
                            && selectedItem != currentlySelectedFontSetting)
                         {
                             UpdateSelection(selectedItem);
@@ -1066,7 +1064,7 @@ namespace Radegast
             }
         }
 
-        private void FrmSettings_FormClosing(object sender, System.Windows.Forms.FormClosingEventArgs e)
+        private void FrmSettings_FormClosing(object sender, FormClosingEventArgs e)
         {
             LSLHelperPrefsSave();
         }
@@ -1082,7 +1080,7 @@ namespace Radegast
             if (result == DialogResult.OK)
             {
                 txtChatLogDir.Text = folderDlg.SelectedPath;
-                s["chat_log_dir"] = folderDlg.SelectedPath;
+                settings["chat_log_dir"] = folderDlg.SelectedPath;
             }
         }
     }

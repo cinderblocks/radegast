@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,6 +25,8 @@ using System.Text;
 using System.IO;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
+using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
@@ -32,14 +34,14 @@ namespace Radegast
     {
         public bool DingOnAllIncoming = false;
 
-        IMTextManagerType Type;
-        string sessionName;
-        bool AutoResponseSent = false;
-        ArrayList textBuffer;
+        private readonly IMTextManagerType Type;
+        private readonly string sessionName;
+        private bool AutoResponseSent = false;
+        private ArrayList textBuffer;
 
         private bool showTimestamps;
 
-        public IMTextManager(RadegastInstance instance, ITextPrinter textPrinter, IMTextManagerType type, UUID sessionID, string sessionName)
+        public IMTextManager(RadegastInstanceForms instance, ITextPrinter textPrinter, IMTextManagerType type, UUID sessionID, string sessionName)
             : base(instance, textPrinter)
         {
             SessionID = sessionID;
@@ -77,14 +79,14 @@ namespace Radegast
 
         private void AddNetcomEvents()
         {
-            instance.Netcom.InstantMessageReceived += netcom_InstantMessageReceived;
-            instance.Netcom.InstantMessageSent += netcom_InstantMessageSent;
+            instance.NetCom.InstantMessageReceived += netcom_InstantMessageReceived;
+            instance.NetCom.InstantMessageSent += netcom_InstantMessageSent;
         }
 
         private void RemoveNetcomEvents()
         {
-            instance.Netcom.InstantMessageReceived -= netcom_InstantMessageReceived;
-            instance.Netcom.InstantMessageSent -= netcom_InstantMessageSent;
+            instance.NetCom.InstantMessageReceived -= netcom_InstantMessageReceived;
+            instance.NetCom.InstantMessageSent -= netcom_InstantMessageSent;
         }
 
         private void netcom_InstantMessageSent(object sender, InstantMessageSentEventArgs e)
@@ -121,7 +123,7 @@ namespace Radegast
 
         private void ProcessOutgoingIM(InstantMessageSentEventArgs e, bool isNewMessage)
         {
-            PrintIM(e.Timestamp, instance.Netcom.LoginOptions.FullName, instance.Client.Self.AgentID, e.Message, isNewMessage);
+            PrintIM(e.Timestamp, instance.NetCom.LoginOptions.FullName, instance.Client.Self.AgentID, e.Message, isNewMessage);
         }
 
         private void ProcessIncomingIM(InstantMessageEventArgs e, bool isNewMessage)
@@ -202,9 +204,9 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.GrayText;
-                    TextPrinter.BackColor = Color.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                     TextPrinter.PrintText(DateTime.Now.ToString("[HH:mm] "));
                 }
             }
@@ -218,9 +220,9 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = Color.DarkCyan;
-                TextPrinter.BackColor = Color.Transparent;
-                TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                TextPrinter.ForeColor = SKColors.DarkCyan;
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
             }
 
             instance.LogClientMessage(sessionName + ".txt", message);
@@ -241,9 +243,9 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.GrayText;
-                    TextPrinter.BackColor = Color.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                     TextPrinter.PrintText(DateTime.Now.ToString("[HH:mm] "));
                 }
             }
@@ -257,9 +259,9 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = SystemColors.WindowText;
-                TextPrinter.BackColor = Color.Transparent;
-                TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
             }
 
             if (instance.GlobalSettings["av_name_link"])
@@ -284,9 +286,9 @@ namespace Radegast
                 }
                 else
                 {
-                    TextPrinter.ForeColor = SystemColors.WindowText;
-                    TextPrinter.BackColor = Color.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                    TextPrinter.BackColor = SKColors.Transparent;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                 }
 
                 sb.Append(message.Substring(3));
@@ -304,9 +306,9 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.WindowText;
-                        TextPrinter.BackColor = Color.Transparent;
-                        TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                        TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
+                        TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                     }
                 }
                 else
@@ -320,9 +322,9 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.WindowText;
-                        TextPrinter.BackColor = Color.Transparent;
-                        TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                        TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
+                        TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                     }
                 }
 
@@ -338,7 +340,7 @@ namespace Radegast
             ProcessAndPrintText(sb.ToString(), isNewMessage, true);
         }
 
-        public static string ReadEndTokens(string path, Int64 numberOfTokens, Encoding encoding, string tokenSeparator)
+        public static string ReadEndTokens(string path, long numberOfTokens, Encoding encoding, string tokenSeparator)
         {
 
             int sizeOfChar = encoding.GetByteCount("\n");
@@ -347,10 +349,10 @@ namespace Radegast
 
             using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read))
             {
-                Int64 tokenCount = 0;
-                Int64 endPosition = fs.Length / sizeOfChar;
+                long tokenCount = 0;
+                long endPosition = fs.Length / sizeOfChar;
 
-                for (Int64 position = sizeOfChar; position < endPosition; position += sizeOfChar)
+                for (long position = sizeOfChar; position < endPosition; position += sizeOfChar)
                 {
                     fs.Seek(-position, SeekOrigin.End);
                     fs.Read(buffer, 0, buffer.Length);
@@ -404,9 +406,9 @@ namespace Radegast
                     }
                     else
                     {
-                        TextPrinter.ForeColor = SystemColors.GrayText;
-                        TextPrinter.BackColor = Color.Transparent;
-                        TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                        TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                        TextPrinter.BackColor = SKColors.Transparent;
+                        TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                     }
 
                     ProcessAndPrintText(msg, false, true);
@@ -422,9 +424,9 @@ namespace Radegast
             }
             else
             {
-                TextPrinter.ForeColor = SystemColors.GrayText;
-                TextPrinter.BackColor = Color.Transparent;
-                TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
             }
             TextPrinter.PrintTextLine("====");
         }

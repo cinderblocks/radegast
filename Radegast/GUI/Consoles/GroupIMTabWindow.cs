@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -24,21 +24,22 @@ using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Threading;
 using OpenMetaverse;
+using SkiaSharp;
 
 namespace Radegast
 {
     public partial class GroupIMTabWindow : UserControl
     {
-        private RadegastInstance instance;
+        private RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private Radegast.Netcom netcom => instance.Netcom;
-        private object AvatarListSyncRoot = new object();
-        private List<string> chatHistory = new List<string>();
+        private INetCom NetCom => instance.NetCom;
+        private readonly object AvatarListSyncRoot = new object();
+        private readonly List<string> chatHistory = new List<string>();
         private int chatPointer;
 
-        ManualResetEvent WaitForSessionStart = new ManualResetEvent(false);
+        private readonly ManualResetEvent WaitForSessionStart = new ManualResetEvent(false);
 
-        public GroupIMTabWindow(RadegastInstance instance, UUID session, string sessionName)
+        public GroupIMTabWindow(RadegastInstanceForms instance, UUID session, string sessionName)
         {
             InitializeComponent();
             Disposed += IMTabWindow_Disposed;
@@ -68,8 +69,8 @@ namespace Radegast
             client.Self.ChatSessionMemberAdded += Self_ChatSessionMemberAdded;
             client.Self.ChatSessionMemberLeft += Self_ChatSessionMemberLeft;
             instance.Names.NameUpdated += Names_NameUpdated;
-            instance.Netcom.ClientConnected += Netcom_Connected;
-            instance.Netcom.ClientDisconnected += Netcom_Disconnected;
+            instance.NetCom.ClientConnected += Netcom_Connected;
+            instance.NetCom.ClientDisconnected += Netcom_Disconnected;
             instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
             instance.ClientChanged += instance_ClientChanged;
         }
@@ -80,26 +81,26 @@ namespace Radegast
             client.Self.ChatSessionMemberAdded -= Self_ChatSessionMemberAdded;
             client.Self.ChatSessionMemberLeft -= Self_ChatSessionMemberLeft;
             instance.Names.NameUpdated -= Names_NameUpdated;
-            instance.Netcom.ClientConnected -= Netcom_Connected;
-            instance.Netcom.ClientDisconnected -= Netcom_Disconnected;
+            instance.NetCom.ClientConnected -= Netcom_Connected;
+            instance.NetCom.ClientDisconnected -= Netcom_Disconnected;
             instance.GlobalSettings.OnSettingChanged -= GlobalSettings_OnSettingChanged;
             instance.ClientChanged -= instance_ClientChanged;
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(client);
         }
 
-        void GroupIMTabWindow_Load(object sender, EventArgs e)
+        private void GroupIMTabWindow_Load(object sender, EventArgs e)
         {
             UpdateParticipantList();
         }
 
         private void IMTabWindow_Disposed(object sender, EventArgs e)
         {
-            if (instance.Netcom.IsLoggedIn)
+            if (instance.NetCom.IsLoggedIn)
             {
                 client.Self.RequestLeaveGroupChat(SessionId);
             }
@@ -108,24 +109,24 @@ namespace Radegast
             CleanUp();
         }
 
-        void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
         {
             if (e.Key == "display_name_mode")
                 UpdateParticipantList();
         }
 
-        void Netcom_Disconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_Disconnected(object sender, DisconnectedEventArgs e)
         {
             RefreshControls();
         }
 
-        void Netcom_Connected(object sender, EventArgs e)
+        private void Netcom_Connected(object sender, EventArgs e)
         {
             client.Self.RequestJoinGroupChat(SessionId);
             RefreshControls();
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -150,19 +151,19 @@ namespace Radegast
             }
         }
 
-        void Self_ChatSessionMemberLeft(object sender, ChatSessionMemberLeftEventArgs e)
+        private void Self_ChatSessionMemberLeft(object sender, ChatSessionMemberLeftEventArgs e)
         {
             if (e.SessionID == SessionId)
                 UpdateParticipantList();
         }
 
-        void Self_ChatSessionMemberAdded(object sender, ChatSessionMemberAddedEventArgs e)
+        private void Self_ChatSessionMemberAdded(object sender, ChatSessionMemberAddedEventArgs e)
         {
             if (e.SessionID == SessionId)
                 UpdateParticipantList();
         }
 
-        void UpdateParticipantList()
+        private void UpdateParticipantList()
         {
             if (InvokeRequired)
             {
@@ -208,7 +209,7 @@ namespace Radegast
             }
         }
 
-        void Self_GroupChatJoined(object sender, GroupChatJoinedEventArgs e)
+        private void Self_GroupChatJoined(object sender, GroupChatJoinedEventArgs e)
         {
             if (e.SessionID != SessionId && e.TmpSessionID != SessionId)
             {
@@ -224,12 +225,12 @@ namespace Radegast
 
             if (e.Success)
             {
-                TextManager.TextPrinter.PrintTextLine("Join Group Chat Success!", Color.Green);
+                TextManager.TextPrinter.PrintTextLine("Join Group Chat Success!", SKColors.Green);
                 WaitForSessionStart.Set();
             }
             else
             {
-                TextManager.TextPrinter.PrintTextLine("Join Group Chat failed.", Color.Red);
+                TextManager.TextPrinter.PrintTextLine("Join Group Chat failed.", SKColors.Red);
             }
         }
 
@@ -274,7 +275,7 @@ namespace Radegast
                 return;
             }
 
-            if (!netcom.IsLoggedIn)
+            if (!NetCom.IsLoggedIn)
             {
                 cbxInput.Enabled = false;
                 btnSend.Enabled = false;
@@ -297,7 +298,7 @@ namespace Radegast
             }
         }
 
-        void ChatHistoryPrev()
+        private void ChatHistoryPrev()
         {
             if (chatPointer == 0) return;
             chatPointer--;
@@ -309,7 +310,7 @@ namespace Radegast
             }
         }
 
-        void ChatHistoryNext()
+        private void ChatHistoryNext()
         {
             if (chatPointer == chatHistory.Count) return;
             chatPointer++;
@@ -392,7 +393,7 @@ namespace Radegast
             }
             else
             {
-                TextManager.TextPrinter.PrintTextLine("Cannot send group IM.", Color.Red);
+                TextManager.TextPrinter.PrintTextLine("Cannot send group IM.", SKColors.Red);
             }
         }
 
@@ -422,7 +423,7 @@ namespace Radegast
             {
                 try
                 {
-                    instance.MainForm.ShowAgentProfile(item.Text, new UUID(item.Name));
+                    instance.ShowAgentProfile(item.Text, new UUID(item.Name));
                 }
                 catch (Exception) { }
             }
@@ -467,7 +468,7 @@ namespace Radegast
             UUID av = (UUID)Participants.SelectedItems[0].Tag;
             string name = instance.Names.Get(av);
 
-            instance.MainForm.ShowAgentProfile(name, av);
+            instance.ShowAgentProfile(name, av);
         }
 
         private void ctxPay_Click(object sender, EventArgs e)
@@ -492,14 +493,14 @@ namespace Radegast
         {
             if (Participants.SelectedItems.Count != 1) return;
             UUID av = (UUID)Participants.SelectedItems[0].Tag;
-            instance.MainForm.AddNotification(new ntfSendLureOffer(instance, av));
+            instance.AddNotification(new ntfSendLureOffer(instance, av));
         }
 
         private void ctxReqestLure_Click(object sender, EventArgs e)
         {
             if (Participants.SelectedItems.Count != 1) return;
             UUID av = (UUID)Participants.SelectedItems[0].Tag;
-            instance.MainForm.AddNotification(new ntfSendLureRequest(instance, av));
+            instance.AddNotification(new ntfSendLureRequest(instance, av));
         }
 
         private void ctxEject_Click(object sender, EventArgs e)

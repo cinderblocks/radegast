@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,15 +25,15 @@ namespace Radegast
 {
     public partial class ntfGroupNotice : Notification
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private InstantMessage msg;
-        private AssetType type = AssetType.Unknown;
+        private readonly InstantMessage msg;
+        private readonly AssetType type = AssetType.Unknown;
         private UUID destinationFolderID;
-        private UUID groupID;
+        private readonly UUID groupID;
         private Group group;
 
-        public ntfGroupNotice(RadegastInstance instance, InstantMessage msg)
+        public ntfGroupNotice(RadegastInstanceForms instance, InstantMessage msg)
             : base(NotificationType.GroupNotice)
         {
             InitializeComponent();
@@ -108,12 +108,12 @@ namespace Radegast
             FireNotificationCallback(args);
         }
 
-        void ntfGroupNotice_Disposed(object sender, System.EventArgs e)
+        private void ntfGroupNotice_Disposed(object sender, System.EventArgs e)
         {
             client.Groups.GroupProfile -= Groups_GroupProfile;
         }
 
-        void Groups_GroupProfile(object sender, GroupProfileEventArgs e)
+        private void Groups_GroupProfile(object sender, GroupProfileEventArgs e)
         {
             if (groupID != e.Group.ID) return;
 

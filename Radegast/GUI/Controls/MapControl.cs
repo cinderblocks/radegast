@@ -33,7 +33,7 @@ namespace Radegast
 {
     public partial class MapControl : UserControl
     {
-        private readonly RadegastInstance Instance;
+        private readonly RadegastInstanceForms Instance;
         private GridClient Client => Instance.Client;
         private readonly Color background;
         private float zoom;
@@ -60,7 +60,7 @@ namespace Radegast
         public float MaxZoom => 6f;
         public float MinZoom => 0.5f;
 
-        public MapControl(RadegastInstance instance)
+        public MapControl(RadegastInstanceForms instance)
         {
             Zoom = 1.0f;
             InitializeComponent();
@@ -247,7 +247,7 @@ namespace Radegast
             }
 
             // opensim grids need extra push
-            if (Instance.Netcom.Grid.Platform == "OpenSim")
+            if (Instance.NetCom.Grid.Platform == "OpenSim")
             {
                 Client.Grid.RequestMapLayer(GridLayerType.Objects);
             }

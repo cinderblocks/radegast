@@ -26,12 +26,12 @@ namespace Radegast.Commands
 {
     public sealed class SitCommand : RadegastCommand
     {
-        TabsConsole TC => Instance.TabConsole;
-        ObjectsConsole Objects;
-        ChatConsole Chat;
-        ConsoleWriteLine wl;
+        private TabsConsole TC => ((RadegastInstanceForms)Instance).TabConsole;
+        private ObjectsConsole Objects;
+        private ChatConsole Chat;
+        private ConsoleWriteLine wl;
 
-        public SitCommand(RadegastInstance instance)
+        public SitCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "sit";
@@ -48,7 +48,7 @@ namespace Radegast.Commands
             base.Dispose();
         }
 
-        void PrintUsage()
+        private void PrintUsage()
         {
             wl("Wrong arguments for \"sit\" command. Use {0}{1}", CommandsManager.CmdPrefix, Usage);
         }
@@ -77,7 +77,7 @@ namespace Radegast.Commands
 
             if (!TC.TabExists("objects"))
             {
-                RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
+                RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(((RadegastInstanceForms)Instance)));
                 tab.AllowClose = true;
                 tab.AllowDetach = true;
                 tab.Visible = true;

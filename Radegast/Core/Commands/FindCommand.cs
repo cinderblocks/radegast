@@ -31,12 +31,12 @@ namespace Radegast.Commands
 {
     public sealed class FindCommand : RadegastCommand
     {
-        TabsConsole TC => Instance.TabConsole;
-        ObjectsConsole Objects;
-        ChatConsole Chat;
-        ConsoleWriteLine wl;
+        private TabsConsole TC => ((RadegastInstanceForms)Instance).TabConsole;
+        private ObjectsConsole Objects;
+        private ChatConsole Chat;
+        private ConsoleWriteLine wl;
 
-        public FindCommand(RadegastInstance instance)
+        public FindCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "find";
@@ -53,7 +53,7 @@ namespace Radegast.Commands
             base.Dispose();
         }
 
-        void PrintUsage()
+        private void PrintUsage()
         {
             wl("Wrong arguments for \"find\" command. Use {0}{1}", CommandsManager.CmdPrefix, Usage);
         }
@@ -91,7 +91,7 @@ namespace Radegast.Commands
             {
                 if (!TC.TabExists("objects"))
                 {
-                    RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
+                    RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole((RadegastInstanceForms)Instance));
                     tab.AllowClose = true;
                     tab.AllowDetach = true;
                     tab.Visible = true;

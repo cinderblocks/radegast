@@ -27,11 +27,11 @@ namespace Radegast
 {
     public partial class GroupsConsole : UserControl
     {
-        GridClient client;
-        RadegastInstance instance;
-        UUID newGrpID;
+        private readonly GridClient client;
+        private readonly RadegastInstanceForms instance;
+        private UUID newGrpID;
 
-        public GroupsConsole(RadegastInstance instance)
+        public GroupsConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += GroupsDialog_Disposed;
@@ -47,7 +47,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void GroupsDialog_Disposed(object sender, EventArgs e)
+        private void GroupsDialog_Disposed(object sender, EventArgs e)
         {
             client.Groups.CurrentGroups -= Groups_CurrentGroups;
             client.Groups.GroupCreatedReply -= Groups_GroupCreatedReply;
@@ -55,7 +55,7 @@ namespace Radegast
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
         }
 
-        void Groups_GroupRoleDataReply(object sender, GroupRolesDataReplyEventArgs e)
+        private void Groups_GroupRoleDataReply(object sender, GroupRolesDataReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -75,7 +75,7 @@ namespace Radegast
             }
         }
 
-        void Groups_GroupCreatedReply(object sender, GroupCreatedReplyEventArgs e)
+        private void Groups_GroupCreatedReply(object sender, GroupCreatedReplyEventArgs e)
         {
             if (e.Success)
             {
@@ -93,7 +93,7 @@ namespace Radegast
             }
         }
 
-        void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
+        private void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
         {
             if (IsHandleCreated)
             {
@@ -101,7 +101,7 @@ namespace Radegast
             }
         }
 
-        private object DisplaySyncRoot = new object();
+        private readonly object DisplaySyncRoot = new object();
 
         public void UpdateDisplay()
         {
@@ -247,7 +247,7 @@ namespace Radegast
 
         private void lblCreateStatus_TextChanged(object sender, EventArgs e)
         {
-            instance.TabConsole.DisplayNotificationInChat(lblCreateStatus.Text, ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat(lblCreateStatus.Text, ChatBufferTextStyle.Invisible);
         }
 
         private void UpdateMuteButton()
@@ -264,7 +264,7 @@ namespace Radegast
             }
         }
 
-        void Self_MuteListUpdated(object sender, EventArgs e)
+        private void Self_MuteListUpdated(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {

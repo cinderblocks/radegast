@@ -30,15 +30,15 @@ namespace Radegast
 {
     public partial class AnimDetail : UserControl
     {
-        private RadegastInstance instance;
-        private Avatar av;
-        private UUID anim;
-        private int n;
+        private readonly IRadegastInstance instance;
+        private readonly Avatar av;
+        private readonly UUID anim;
+        private readonly int n;
         private List<FriendInfo> friends;
         private FriendInfo friend;
         private byte[] animData;
 
-        public AnimDetail(RadegastInstance instance, Avatar av, UUID anim, int n)
+        public AnimDetail(IRadegastInstance instance, Avatar av, UUID anim, int n)
         {
             InitializeComponent();
             Disposed += AnimDetail_Disposed;
@@ -50,7 +50,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void AnimDetail_Disposed(object sender, EventArgs e)
+        private void AnimDetail_Disposed(object sender, EventArgs e)
         {
         }
 
@@ -107,7 +107,7 @@ namespace Radegast
             }
         }
 
-        void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
         {
             if (InvokeRequired)
             {
@@ -150,7 +150,7 @@ namespace Radegast
             cbFriends.Enabled = false;
         }
 
-        void On_ItemCreated(bool success, string status, UUID itemID, UUID assetID)
+        private void On_ItemCreated(bool success, string status, UUID itemID, UUID assetID)
         {
             if (InvokeRequired)
             {

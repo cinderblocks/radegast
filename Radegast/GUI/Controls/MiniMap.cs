@@ -102,7 +102,7 @@ namespace Radegast.WinForms
             _Client.Network.SimChanged += Network_OnCurrentSimChanged;
         }
 
-        void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
+        private void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
         {
             UpdateMiniMap(e.Simulator);
         }
@@ -188,7 +188,7 @@ namespace Radegast.WinForms
             }
         }
 
-        void Network_OnCurrentSimChanged(object sender, SimChangedEventArgs e)
+        private void Network_OnCurrentSimChanged(object sender, SimChangedEventArgs e)
         {
             FetchMapLayer();
         }

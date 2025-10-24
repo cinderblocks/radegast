@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,12 +25,12 @@ namespace Radegast.GUI
 {
     public static class GuiHelpers
     {
-        public static void ApplyGuiFixes(Object root)
+        public static void ApplyGuiFixes(object root)
         {
             try
             {
-                var instance = RadegastInstance.GlobalInstance;
-                if (instance.GlobalSettings["theme_compatibility_mode"])
+                if (RadegastInstanceForms.Initialized
+                    && RadegastInstanceForms.Instance.GlobalSettings["theme_compatibility_mode"])
                 {
                     ApplyThemeCompatibilityModeRecursive(root);
                 }
@@ -42,7 +42,7 @@ namespace Radegast.GUI
 
         }
 
-        private static void ApplyThemeCompatibilityModeRecursive(Object root)
+        private static void ApplyThemeCompatibilityModeRecursive(object root)
         {
             if (root is ToolStrip toolstrip)
             {

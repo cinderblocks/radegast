@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class TurnToAction : ContextAction
     {
-        public TurnToAction(RadegastInstance inst)
+        public TurnToAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Turn To";
@@ -46,12 +46,12 @@ namespace Radegast
 
             if (TryFindPos(target, out var sim, out var pos))
             {
-                instance.TabConsole.DisplayNotificationInChat($"Facing {pname}");
+                instance.ShowNotificationInChat($"Facing {pname}");
                 Client.Self.Movement.TurnToward(instance.State.ToLocalPosition(sim.Handle, pos));
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat($"Could not locate {target}");
+                instance.ShowNotificationInChat($"Could not locate {target}");
             }
         }
     }

@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,16 +25,16 @@ namespace Radegast
 {
     public partial class ntfPermissions : Notification
     {
-        private UUID taskID;
-        private UUID itemID;
-        private string objectName;
+        private readonly UUID taskID;
+        private readonly UUID itemID;
+        private readonly string objectName;
         private string objectOwner;
-        private ScriptPermission questions;
-        private RadegastInstance instance;
-        private Simulator simulator;
+        private readonly ScriptPermission questions;
+        private readonly RadegastInstanceForms instance;
+        private readonly Simulator simulator;
 
 
-        public ntfPermissions(RadegastInstance instance, Simulator simulator, UUID taskID, UUID itemID, string objectName, string objectOwner, ScriptPermission questions)
+        public ntfPermissions(RadegastInstanceForms instance, Simulator simulator, UUID taskID, UUID itemID, string objectName, string objectOwner, ScriptPermission questions)
             : base(NotificationType.PermissionsRequest)
         {
             InitializeComponent();
@@ -48,7 +48,7 @@ namespace Radegast
             this.questions = questions;
 
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
-            txtMessage.Text = "Object " + objectName + " owned by " + objectOwner + " is asking permission to " + questions + ". Do you accept?";
+            txtMessage.Text = $"Object {objectName} owned by {objectOwner} is asking permission to {questions}. Do you accept?";
 
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance) {Text = txtMessage.Text};
@@ -63,19 +63,19 @@ namespace Radegast
         private void btnYes_Click(object sender, EventArgs e)
         {
             instance.Client.Self.ScriptQuestionReply(simulator, itemID, taskID, questions);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void btnNo_Click(object sender, EventArgs e)
         {
             instance.Client.Self.ScriptQuestionReply(simulator, itemID, taskID, 0);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void btnMute_Click(object sender, EventArgs e)
         {
             instance.Client.Self.UpdateMuteListEntry(MuteType.Object, taskID, objectName);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class SitOnGroundAction : ContextAction
     {
-        public SitOnGroundAction(RadegastInstance inst)
+        public SitOnGroundAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Sit on ground";
@@ -47,33 +47,30 @@ namespace Radegast
         {
             if (Client.Self.Movement.SitOnGround)
             {
-                instance.TabConsole.DisplayNotificationInChat("Standing up");
+                instance.ShowNotificationInChat("Standing up");
                 Client.Self.Stand();
                 return;
             }
             string pname = instance.Names.Get(ToUUID(target));
             if (pname == "(???) (???)") pname = "" + target;
 
-            Simulator sim = null;
-            Vector3 pos;
-
-            if (TryFindPos(target, out sim, out pos))
+            if (TryFindPos(target, out var sim, out var pos))
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Walking to {0}", pname));
+                instance.ShowNotificationInChat($"Walking to {pname}");
                 instance.State.MoveTo(sim, pos, false);
                 //TODO wait until we get there
 
                 double close = instance.State.WaitUntilPosition(StateManager.GlobalPosition(sim, pos), TimeSpan.FromSeconds(5), 1);
                 if (close > 2)
                 {
-                    instance.TabConsole.DisplayNotificationInChat(
-                        string.Format("Counldn't quite make it to {0}, now sitting", pname));
+                    instance.ShowNotificationInChat(
+                        $"Couldn't quite make it to {pname}, now sitting");
                 }
                 Client.Self.SitOnGround();
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Could not locate {0}", target));
+                instance.ShowNotificationInChat($"Could not locate {target}");
             }
         }
     }

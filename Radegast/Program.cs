@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2021, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -70,21 +70,19 @@ namespace Radegast
 
     public static class MainProgram
     {
-        /// <summary>
-        /// Parsed command line options
-        /// </summary>
+        /// <summary>Parsed command line options</summary>
         public static CommandLineOptions s_CommandLineOpts;
 
+        /// <summary>BugSplat error reporting instance</summary>
         public static BugSplatDotNetStandard.BugSplat s_BugSplat;
 
-        static void RunRadegast(CommandLineOptions args)
+        private static void RunRadegast(CommandLineOptions args)
         {
             s_CommandLineOpts = args;
             AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
 
             // Increase the number of IOCP threads available. Mono defaults to a tragically low number
-            int workerThreads, iocpThreads;
-            ThreadPool.GetMaxThreads(out workerThreads, out iocpThreads);
+            ThreadPool.GetMaxThreads(out var workerThreads, out var iocpThreads);
 
             if (workerThreads < 500 || iocpThreads < 1000)
             {
@@ -119,7 +117,7 @@ namespace Radegast
             }
 
             // Create main Radegast instance
-            RadegastInstance instance = RadegastInstance.GlobalInstance;
+            var client = new GridClient();
 
             if (!string.IsNullOrEmpty(Generated.BugsplatDatabase))
             {
@@ -127,24 +125,25 @@ namespace Radegast
                 Generated.BugsplatDatabase, "Radegast",
                 Assembly.GetExecutingAssembly().GetName().Version.ToString())
                 {
-                    User = string.IsNullOrWhiteSpace(instance.Client.Self.Name) ? "Unknown" : instance.Client.Self.Name,
+                    User = string.IsNullOrWhiteSpace(RadegastInstanceForms.Instance.Client.Self.Name) ? "Unknown" 
+                        : RadegastInstanceForms.Instance.Client.Self.Name,
                     ExceptionType = BugSplatDotNetStandard.BugSplat.ExceptionTypeId.DotNetStandard,
                 };
                 s_BugSplat.Attributes.Add("platform", Utils.GetRunningPlatform().ToString());
                 s_BugSplat.Attributes.Add("runtime", Utils.GetRunningRuntime().ToString());
-                s_BugSplat.Attributes.Add("run", (DateTime.Now - instance.StartupTimeUTC).ToString("c"));
-                if (instance.GlobalLogFile != null)
+                s_BugSplat.Attributes.Add("run", (DateTime.Now - RadegastInstanceForms.Instance.StartupTimeUTC).ToString("c"));
+                if (RadegastInstanceForms.Instance.GlobalLogFile != null)
                 {
-                    s_BugSplat.Attachments.Add(new FileInfo(instance.GlobalLogFile));
+                    s_BugSplat.Attachments.Add(new FileInfo(RadegastInstanceForms.Instance.GlobalLogFile));
                 }
             }
 
-            Application.Run(instance.MainForm);
+            Application.Run(RadegastInstanceForms.Instance.MainForm);
         }
 
         private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs exEventArgs)
         {
-            RadegastInstance.GlobalInstance.Client.Network.Logout();
+            RadegastInstanceForms.Instance.Client.Network.Logout();
             Exception ex = (Exception)exEventArgs.ExceptionObject;
             s_BugSplat?.Post(ex);
         }
@@ -153,7 +152,7 @@ namespace Radegast
         /// The main entry point for the application.
         /// </summary>
         [STAThread]
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
             Core.NativeMethods.Init();
             try
@@ -182,7 +181,7 @@ namespace Radegast
                                 ex.Message + Environment.NewLine +
                                 ex.StackTrace + Environment.NewLine;
 
-                OpenMetaverse.Logger.Log(errMsg, OpenMetaverse.Helpers.LogLevel.Error);
+                Logger.Log(errMsg, Helpers.LogLevel.Error);
                 
                 s_BugSplat?.Post(ex);
 

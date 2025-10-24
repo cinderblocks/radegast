@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,14 +27,14 @@ namespace Radegast
 {
     public partial class IMTabWindow : UserControl
     {
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom => instance.Netcom;
+        private readonly RadegastInstanceForms instance;
+        private INetCom NetCom => instance.NetCom;
         private UUID target;
         private bool typing = false;
-        private List<string> chatHistory = new List<string>();
+        private readonly List<string> chatHistory = new List<string>();
         private int chatPointer;
 
-        public IMTabWindow(RadegastInstance instance, UUID target, UUID session, string toName)
+        public IMTabWindow(RadegastInstanceForms instance, UUID target, UUID session, string toName)
         {
             InitializeComponent();
             Disposed += IMTabWindow_Disposed;
@@ -59,30 +59,30 @@ namespace Radegast
 
         private void AddNetcomEvents()
         {
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientDisconnected += netcom_ClientDisconnected;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            NetCom.ClientDisconnected += NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
         }
 
         private void RemoveNetcomEvents()
         {
-            netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-            netcom.ClientDisconnected -= netcom_ClientDisconnected;
+            NetCom.ClientLoginStatus -= NetComClientLoginStatus;
+            NetCom.ClientDisconnected -= NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged -= GlobalSettings_OnSettingChanged;
         }
 
-        void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
         {
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status != LoginStatus.Success) return;
 
             RefreshControls();
         }
 
-        private void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             RefreshControls();
         }
@@ -107,7 +107,7 @@ namespace Radegast
 
         private void RefreshControls()
         {
-            if (!netcom.IsLoggedIn)
+            if (!NetCom.IsLoggedIn)
             {
                 cbxInput.Enabled = false;
                 btnSend.Enabled = false;
@@ -122,14 +122,14 @@ namespace Radegast
 
                 if (!typing)
                 {
-                    netcom.SendIMStartTyping(target, SessionId);
+                    NetCom.SendIMStartTyping(target, SessionId);
                     typing = true;
                 }
             }
             else
             {
                 btnSend.Enabled = false;
-                netcom.SendIMStopTyping(target, SessionId);
+                NetCom.SendIMStopTyping(target, SessionId);
                 typing = false;
             }
         }
@@ -153,11 +153,11 @@ namespace Radegast
                 msg = "*** IM blocked by sender's viewer";
             }
 
-            netcom.SendInstantMessage(msg, target, SessionId);
+            NetCom.SendInstantMessage(msg, target, SessionId);
             ClearIMInput();
         }
 
-        void ChatHistoryPrev()
+        private void ChatHistoryPrev()
         {
             if (chatPointer == 0) return;
             chatPointer--;
@@ -169,7 +169,7 @@ namespace Radegast
             }
         }
 
-        void ChatHistoryNext()
+        private void ChatHistoryNext()
         {
             if (chatPointer == chatHistory.Count) return;
             chatPointer++;
@@ -221,12 +221,12 @@ namespace Radegast
 
         private void tbtnProfile_Click(object sender, EventArgs e)
         {
-            instance.MainForm.ShowAgentProfile(TargetName, target);
+            instance.ShowAgentProfile(TargetName, target);
         }
 
         private void btnOfferTeleport_Click(object sender, EventArgs e)
         {
-            instance.MainForm.AddNotification(new ntfSendLureOffer(instance, target));
+            instance.AddNotification(new ntfSendLureOffer(instance, target));
         }
 
         private void btnPay_Click(object sender, EventArgs e)

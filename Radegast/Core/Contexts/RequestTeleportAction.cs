@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class RequestTeleportAction : ContextAction
     {
-        public RequestTeleportAction(RadegastInstance inst)
+        public RequestTeleportAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Request Teleport";
@@ -40,8 +40,8 @@ namespace Radegast
         public override void OnInvoke(object sender, EventArgs e, object target)
         {
             UUID id = ToUUID(target);
-            instance.MainForm.AddNotification(new ntfSendLureRequest(instance, id));
-            instance.TabConsole.DisplayNotificationInChat($"Sent Teleport Request to {id}");
+            instance.AddNotification(new ntfSendLureRequest(instance, id));
+            instance.ShowNotificationInChat($"Sent Teleport Request to {id}");
         }
     }
 }

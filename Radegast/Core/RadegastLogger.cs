@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -36,9 +36,9 @@ namespace Radegast
         protected static void OnLog(object sender, LogEventArgs e)
         {
             EventHandler<LogEventArgs> handler = m_Log;
-            if (handler != null)
-                try { handler(sender, e); }
-                catch { }
+            if (handler == null) { return; }
+            try { handler(sender, e); }
+            catch { }
         }
 
         private static readonly object m_LogLock = new object();
@@ -76,8 +76,11 @@ namespace Radegast
                 }
                 Console.WriteLine();
 
-                if (RadegastInstance.GlobalInstance.GlobalLogFile != null && (!RadegastInstance.GlobalInstance.GlobalSettings.ContainsKey("log_to_file") || RadegastInstance.GlobalInstance.GlobalSettings["log_to_file"]))
-                    File.AppendAllText(RadegastInstance.GlobalInstance.GlobalLogFile, RenderLoggingEvent(le) + Environment.NewLine);
+                if (RadegastInstanceForms.Initialized
+                    && RadegastInstanceForms.Instance.GlobalLogFile != null
+                    && (!RadegastInstanceForms.Instance.GlobalSettings.ContainsKey("log_to_file") 
+                        || RadegastInstanceForms.Instance.GlobalSettings["log_to_file"]))
+                    File.AppendAllText(RadegastInstanceForms.Instance.GlobalLogFile, RenderLoggingEvent(le) + Environment.NewLine);
             }
             catch (Exception) { }
         }

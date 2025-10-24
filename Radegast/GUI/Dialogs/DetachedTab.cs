@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,16 +28,16 @@ namespace Radegast
     {
         public bool DockedToMain;
 
-        private RadegastInstance instance;
-        private RadegastTab tab;
+        private readonly RadegastInstanceForms instance;
+        private readonly RadegastTab tab;
 
         //For reattachment
 
-        int mainTop;
-        int mainLeft;
-        Size mainSize;
+        private int mainTop;
+        private int mainLeft;
+        private Size mainSize;
 
-        public frmDetachedTab(RadegastInstance instance, RadegastTab tab)
+        public frmDetachedTab(RadegastInstanceForms instance, RadegastTab tab)
             :base(instance)
         {
             InitializeComponent();
@@ -62,24 +62,24 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void Control_TextChanged(object sender, EventArgs e)
+        private void Control_TextChanged(object sender, EventArgs e)
         {
             Text = tab.Control.Text;
         }
 
-        void frmDetachedTab_Disposed(object sender, EventArgs e)
+        private void frmDetachedTab_Disposed(object sender, EventArgs e)
         {
             instance.MainForm.Move -= MainForm_ResizeEnd;
         }
 
-        void SaveMainFormPos()
+        private void SaveMainFormPos()
         {
             mainTop = instance.MainForm.Top;
             mainLeft = instance.MainForm.Left;
             mainSize = instance.MainForm.Size;
         }
 
-        void MainForm_ResizeEnd(object sender, EventArgs e)
+        private void MainForm_ResizeEnd(object sender, EventArgs e)
         {
             if (DockedToMain)
             {

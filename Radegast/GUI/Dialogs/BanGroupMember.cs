@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,54 +27,48 @@ namespace Radegast
 {
     public partial class BanGroupMember : RadegastForm
     {
-        AvatarPicker picker;
-        RadegastInstance instance;
-        Radegast.Netcom netcom;
-        GroupDetails parent;
+        private readonly AvatarPicker picker;
+        private readonly GroupDetails parent;
 
-        Group group;
+        private readonly Group group;
 
-        public BanGroupMember(RadegastInstance instance, Group group, GroupDetails parent)
+        public BanGroupMember(RadegastInstanceForms instance, Group group, GroupDetails parent)
             :base(instance)
         {
             InitializeComponent();
             Disposed += GroupInvite_Disposed;
             AutoSavePosition = true;
 
-            this.instance = instance;
             this.group = group;
-            netcom = instance.Netcom;
             this.parent = parent;
 
             picker = new AvatarPicker(instance) { Dock = DockStyle.Fill };
             Controls.Add(picker);
-            picker.SelectionChaged += picker_SelectionChaged;
+            picker.SelectionChanged += PickerSelectionChanged;
             picker.BringToFront();
             
-            netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            NetCom.ClientDisconnected += NetComClientDisconnected;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void picker_SelectionChaged(object sender, EventArgs e)
+        private void PickerSelectionChanged(object sender, EventArgs e)
         {
             btnBan.Enabled = picker.SelectedAvatars.Count > 0;
         }
 
-        void GroupInvite_Disposed(object sender, EventArgs e)
+        private void GroupInvite_Disposed(object sender, EventArgs e)
         {
-            netcom.ClientDisconnected -= Netcom_ClientDisconnected;
-            netcom = null;
-            instance = null;
+            NetCom.ClientDisconnected -= NetComClientDisconnected;
             picker.Dispose();
             Logger.DebugLog("Group picker disposed");
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            ((Radegast.Netcom)sender).ClientDisconnected -= Netcom_ClientDisconnected;
+            ((NetCom)sender).ClientDisconnected -= NetComClientDisconnected;
 
-            if (!instance.MonoRuntime || IsHandleCreated)
+            if (!Instance.MonoRuntime || IsHandleCreated)
                 BeginInvoke(new MethodInvoker(Close));
         }
 

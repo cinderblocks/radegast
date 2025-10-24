@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,19 +26,16 @@ namespace Radegast
 {
     public partial class frmGroupInfo : RadegastForm
     {
-        private RadegastInstance instance;
-
         public Group Group { get; set; }
         public GroupDetails GroupDetails { get; set; }
 
-        public frmGroupInfo(RadegastInstance instance, Group group)
+        public frmGroupInfo(RadegastInstanceForms instance, Group group)
             : base(instance)
         {
             InitializeComponent();
             Disposed += frmGroupInfo_Disposed;
             AutoSavePosition = true;
 
-            this.instance = instance;
             Group = group;
 
             GroupDetails = new GroupDetails(instance, group) {Dock = DockStyle.Fill};
@@ -46,18 +43,18 @@ namespace Radegast
             MinimumSize = Size;
             Controls.Add(GroupDetails);
             Text = group.Name + " - Group information";
-            instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void frmGroupInfo_Disposed(object sender, System.EventArgs e)
+        private void frmGroupInfo_Disposed(object sender, System.EventArgs e)
         {
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            ((Radegast.Netcom)sender).ClientDisconnected -= Netcom_ClientDisconnected;
+            ((NetCom)sender).ClientDisconnected -= Netcom_ClientDisconnected;
 
             if (InvokeRequired)
             {

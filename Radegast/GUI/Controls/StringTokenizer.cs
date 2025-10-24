@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -70,17 +70,17 @@ namespace Radegast
 	/// </summary>
 	public class StringTokenizer
 	{
-		const char EOF = (char)0;
+        private const char EOF = (char)0;
 
-		int line;
-		int column;
-		int pos;	// position within data
+        private int line;
+        private int column;
+        private int pos;	// position within data
 
-		string data;
+        private readonly string data;
 
-	    int saveLine;
-		int saveCol;
-		int savePos;
+        private int saveLine;
+        private int saveCol;
+        private int savePos;
 
 		public StringTokenizer(TextReader reader)
 		{
@@ -228,7 +228,7 @@ namespace Radegast
 
 				default:
 				{
-					if (Char.IsLetter(ch) || ch == '_')
+					if (char.IsLetter(ch) || ch == '_')
 						return ReadWord();
 					else if (IsSymbol(ch))
 					{
@@ -295,7 +295,7 @@ namespace Radegast
 			while (true)
 			{
 				char ch = LA(0);
-				if (Char.IsDigit(ch))
+				if (char.IsDigit(ch))
 					Consume();
 				else if (ch == '.' && !hadDot)
 				{
@@ -321,7 +321,7 @@ namespace Radegast
 			while (true)
 			{
 				char ch = LA(0);
-				if (Char.IsLetter(ch) || ch == '_')
+				if (char.IsLetter(ch) || ch == '_')
 					Consume();
 				else
 					break;

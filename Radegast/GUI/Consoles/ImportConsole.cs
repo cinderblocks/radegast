@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -32,11 +32,12 @@ namespace Radegast
 	public partial class ImportConsole : RadegastTabControl
 	{
 		#region Private Varaibles
-		PrimImporter Importer;
-		GridClient Client;
-		List<UUID> FailedUploads = new List<UUID>();
-		DateTime start;
-		string sFileName;
+
+        private readonly PrimImporter Importer;
+        private readonly GridClient Client;
+        private List<UUID> FailedUploads = new List<UUID>();
+        private DateTime start;
+        private string sFileName;
 		#endregion
 		
 		#region Constructors
@@ -55,7 +56,8 @@ namespace Radegast
 		#endregion
 		
 		#region Private Methods
-		void LogMessage(string format, params object[] args)
+
+        private void LogMessage(string format, params object[] args)
 		{
 			if (InvokeRequired)
 			{
@@ -63,12 +65,12 @@ namespace Radegast
 					BeginInvoke(new MethodInvoker(() => LogMessage(format, args)));
 				return;
 			}
-			txtLog.AppendText(String.Format(format + "\r\n",args));
+			txtLog.AppendText(string.Format(format + "\r\n",args));
 			txtLog.SelectionStart = txtLog.TextLength;
 			txtLog.ScrollToCaret();
 		}
-		
-		void ValidateFileName()
+
+        private void ValidateFileName()
 		{
 			string fileName = txtFileName.Text;
 			if (File.Exists(fileName))
@@ -115,8 +117,8 @@ namespace Radegast
 				LogMessage("Reading complete, Ready to import...");
 			}
 		}
-		
-		UUID FindOrMakeInventoryFolder(string name)
+
+        private UUID FindOrMakeInventoryFolder(string name)
 		{
 			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),Client.Self.AgentID,true,false,InventorySortOrder.ByName,TimeSpan.FromSeconds(15));
 			UUID dir = UUID.Zero;
@@ -130,8 +132,8 @@ namespace Radegast
 				dir = Client.Inventory.CreateFolder(Client.Inventory.FindFolderForType(AssetType.Texture),name);
 			return dir;
 		}
-		
-		void UploadImages()
+
+        private void UploadImages()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
@@ -174,8 +176,8 @@ namespace Radegast
 				}
 			}
 		}
-		
-		void UploadImagesRetry()
+
+        private void UploadImagesRetry()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
@@ -208,22 +210,23 @@ namespace Radegast
 				}
 			}
 		}
-		
-		void EnableWindow()
+
+        private void EnableWindow()
 		{
 			Enabled = true;
 		}
 		#endregion
 		
 		#region Event Handlers
-		void ChckRezAtLocCheckedChanged(object sender, EventArgs e)
+
+        private void ChckRezAtLocCheckedChanged(object sender, EventArgs e)
 		{
 			txtX.Enabled = chckRezAtLoc.Checked;
 			txtY.Enabled = chckRezAtLoc.Checked;
 			txtZ.Enabled = chckRezAtLoc.Checked;
 		}
-		
-		void BtnBrowseClick(object sender, EventArgs e)
+
+        private void BtnBrowseClick(object sender, EventArgs e)
 		{
 		    if (Form.ActiveForm != null)
 		    {
@@ -242,8 +245,8 @@ namespace Radegast
 			txtFileName.Text = dlg.FileName;
 			ValidateFileName();
 		}
-		
-		void TxtFileNameLeave(object sender, EventArgs e)
+
+        private void TxtFileNameLeave(object sender, EventArgs e)
 		{
 			if (sFileName != txtFileName.Text)
 			{
@@ -251,8 +254,8 @@ namespace Radegast
 				ValidateFileName();
 			}
 		}
-		
-		void BtnUploadClick(object sender, EventArgs e)
+
+        private void BtnUploadClick(object sender, EventArgs e)
 		{
 			Enabled = false;
 			if (cmbImageOptions.SelectedIndex == -1)
