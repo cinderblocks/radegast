@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,24 +27,24 @@ namespace Radegast.Commands
 {
     public sealed class ParcelInfoCommand : RadegastCommand
     {
-        private ManualResetEvent ParcelsDownloaded = new ManualResetEvent(false);
-        private RadegastInstance instance;
+        private readonly ManualResetEvent ParcelsDownloaded = new ManualResetEvent(false);
+        private readonly RadegastInstanceForms instance;
 
-        public ParcelInfoCommand(RadegastInstance instance)
+        public ParcelInfoCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "parcelinfo";
             Description = "Prints out info about all the parcels in this simulator";
             Usage = Name;
 
-            this.instance = instance;
-            this.instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            this.instance = (RadegastInstanceForms)instance;
+            this.instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
         }
 
         public override void Dispose()
         {
             base.Dispose();
-            instance.Netcom.ClientDisconnected -= Netcom_ClientDisconnected;
+            instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
         }
 
         public override void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)
@@ -90,7 +90,7 @@ namespace Radegast.Commands
             WriteLine("Parcel Infro results:\n{0}", result);
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             ParcelsDownloaded.Set();
         }

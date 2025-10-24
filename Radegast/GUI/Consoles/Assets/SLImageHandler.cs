@@ -32,9 +32,9 @@ using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
-    public partial class SLImageHandler : DettachableControl
+    public partial class SLImageHandler : DetachableControl
     {
-        private RadegastInstance instance;
+        private RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private UUID imageID;
 
@@ -75,12 +75,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public SLImageHandler(RadegastInstance instance, UUID image, string label)
+        public SLImageHandler(RadegastInstanceForms instance, UUID image, string label)
             : this(instance, image, label, false)
         {
         }
 
-        public SLImageHandler(RadegastInstance instance, UUID image, string label, bool allowSave)
+        public SLImageHandler(RadegastInstanceForms instance, UUID image, string label, bool allowSave)
         {
             this.allowSave = allowSave;
             InitializeComponent();
@@ -89,7 +89,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public void Init(RadegastInstance instance, UUID image, string label)
+        public void Init(RadegastInstanceForms instance, UUID image, string label)
         {
             Disposed += SLImageHandler_Disposed;
             pictureBox1.AllowDrop = true;
@@ -380,8 +380,6 @@ namespace Radegast
                 tbtbInvShow.Tag = invItem;
                 save |= InventoryConsole.IsFullPerm(invItem);
             }
-
-            save |= instance.advancedDebugging;
 
             if (save)
             {

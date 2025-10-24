@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,27 +29,27 @@ namespace Radegast.Rendering
 {
     public class RenderTerrain : SceneObject
     {
-        RadegastInstance Instance;
-        GridClient Client => Instance.Client;
+        private readonly RadegastInstanceForms Instance;
+        private GridClient Client => Instance.Client;
 
         public bool Modified = true;
-        float[,] heightTable = new float[256, 256];
-        Face terrainFace;
-        uint[] terrainIndices;
-        ColorVertex[] terrainVertices;
-        int terrainTexture = -1;
-        bool fetchingTerrainTexture = false;
-        Bitmap terrainImage = null;
-        int terrainVBO = -1;
-        int terrainIndexVBO = -1;
-        bool terrainVBOFailed = false;
-        bool terrainInProgress = false;
-        bool terrainTextureNeedsUpdate = false;
-        float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f; // Update terrain om first run
-        MeshmerizerR renderer;
-        Simulator sim => Instance.Client.Network.CurrentSim;
+        private readonly float[,] heightTable = new float[256, 256];
+        private Face terrainFace;
+        private uint[] terrainIndices;
+        private ColorVertex[] terrainVertices;
+        private int terrainTexture = -1;
+        private bool fetchingTerrainTexture = false;
+        private Bitmap terrainImage = null;
+        private int terrainVBO = -1;
+        private int terrainIndexVBO = -1;
+        private bool terrainVBOFailed = false;
+        private bool terrainInProgress = false;
+        private bool terrainTextureNeedsUpdate = false;
+        private float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f; // Update terrain om first run
+        private readonly MeshmerizerR renderer;
+        private Simulator sim => Instance.Client.Network.CurrentSim;
 
-        public RenderTerrain(RadegastInstance instance)
+        public RenderTerrain(RadegastInstanceForms instance)
         {
             Instance = instance;
             renderer = new MeshmerizerR();
@@ -146,7 +146,7 @@ namespace Radegast.Rendering
             });
         }
 
-        void UpdateTerrainTexture()
+        private void UpdateTerrainTexture()
         {
             if (!fetchingTerrainTexture)
             {

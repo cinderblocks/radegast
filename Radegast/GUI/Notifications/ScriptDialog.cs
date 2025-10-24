@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,11 +28,11 @@ namespace Radegast
 {
     public partial class ntfScriptDialog : Notification
     {
-        RadegastInstance instance;
-        UUID objectID;
-        int chatChannel;
+        private readonly RadegastInstanceForms instance;
+        private readonly UUID objectID;
+        private readonly int chatChannel;
 
-        public ntfScriptDialog(RadegastInstance instance, string message, string objectName, UUID imageID, UUID objectID, string firstName, string lastName, int chatChannel, List<string> buttons)
+        public ntfScriptDialog(RadegastInstanceForms instance, string message, string objectName, UUID imageID, UUID objectID, string firstName, string lastName, int chatChannel, List<string> buttons)
             : base(NotificationType.ScriptDialog)
         {
             InitializeComponent();
@@ -84,23 +84,23 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void b_Click(object sender, EventArgs e)
+        private void b_Click(object sender, EventArgs e)
         {
             string label = ((Button)sender).Text;
             int index = int.Parse(((Button)sender).Name);
             instance.Client.Self.ReplyToScriptDialog(chatChannel, index, label, objectID);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void ignoreBtn_Click(object sender, EventArgs e)
         {
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
 
         private void sendBtn_Click(object sender, EventArgs e)
         {
             instance.Client.Self.ReplyToScriptDialog(chatChannel, 0, txtTextBox.Text, objectID);
-            instance.MainForm.RemoveNotification(this);
+            instance.RemoveNotification(this);
         }
     }
 }

@@ -52,7 +52,7 @@ public static class FormFlash
         {
             cbSize = Convert.ToUInt32(Marshal.SizeOf(typeof(FLASHWINFO))),
             hwnd = form.Handle,
-            dwFlags = (Int32)(FLASHWINFOFLAGS.FLASHW_TRAY | FLASHWINFOFLAGS.FLASHW_TIMERNOFG),
+            dwFlags = (int)(FLASHWINFOFLAGS.FLASHW_TRAY | FLASHWINFOFLAGS.FLASHW_TIMERNOFG),
             uCount = 5,
             dwTimeout = 0
         };
@@ -75,7 +75,7 @@ public static class FormFlash
         {
             cbSize = Convert.ToUInt32(Marshal.SizeOf(typeof(FLASHWINFO))),
             hwnd = form.Handle,
-            dwFlags = (Int32)(FLASHWINFOFLAGS.FLASHW_STOP),
+            dwFlags = (int)(FLASHWINFOFLAGS.FLASHW_STOP),
             uCount = 0,
             dwTimeout = 0
         };

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -32,7 +32,7 @@ namespace Radegast
         {
         }
 
-        public DebugConsole(RadegastInstance instance)
+        public DebugConsole(RadegastInstanceForms instance)
             :base(instance)
         {
             InitializeComponent();
@@ -42,12 +42,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void DebugConsole_Disposed(object sender, EventArgs e)
+        private void DebugConsole_Disposed(object sender, EventArgs e)
         {
             RadegastAppender.Log -= RadegastAppender_Log;
         }
 
-        void RadegastAppender_Log(object sender, LogEventArgs e)
+        private void RadegastAppender_Log(object sender, LogEventArgs e)
         {
             if (!IsHandleCreated) return;
 

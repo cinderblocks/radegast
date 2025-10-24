@@ -25,7 +25,7 @@ namespace Radegast
 {
     public partial class frmAbout : RadegastForm
     {
-        public frmAbout(RadegastInstance instance)
+        public frmAbout(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();

@@ -83,12 +83,12 @@ namespace RadegastSpeech.Conversation
             nearby = null;
         }
 
-        void cbxInput_GotFocus(object sender, EventArgs e)
+        private void cbxInput_GotFocus(object sender, EventArgs e)
         {
             Talker.SayMore("chat input");
         }
 
-        void nearby_GotFocus(object sender, EventArgs e)
+        private void nearby_GotFocus(object sender, EventArgs e)
         {
             Talker.SayMore("near bye avatars");
         }
@@ -104,7 +104,7 @@ namespace RadegastSpeech.Conversation
         /// <param name="id"></param>
         /// <param name="ownerid"></param>
         /// <param name="position"></param>
-        void OnChat(
+        private void OnChat(
             object sender,
             ChatEventArgs e)
         {

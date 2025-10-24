@@ -48,15 +48,15 @@ namespace Radegast
         private System.Threading.Timer ttTimer;
         private ToolTip ttKeyWords;
 
-        private static Color StateColor = Color.FromArgb(127, 26, 77);
-        private static Color DataTypeColor = Color.FromArgb(125, 75, 255);
-        private static Color EventColor = Color.FromArgb(0, 77, 128);
-        private static Color ConstantColor = Color.FromArgb(26, 26, 127);
-        private static Color FunctionColor = Color.FromArgb(128, 0, 38);
-        private static Color FlowColor = Color.FromArgb(0, 0, 204);
-        private static Color CommentColor = Color.FromArgb(203, 76, 37);
-        private static Color LiteralColor = Color.FromArgb(0, 51, 0);
-        private static Color[] UsedColors = new Color[] {
+        private static readonly Color StateColor = Color.FromArgb(127, 26, 77);
+        private static readonly Color DataTypeColor = Color.FromArgb(125, 75, 255);
+        private static readonly Color EventColor = Color.FromArgb(0, 77, 128);
+        private static readonly Color ConstantColor = Color.FromArgb(26, 26, 127);
+        private static readonly Color FunctionColor = Color.FromArgb(128, 0, 38);
+        private static readonly Color FlowColor = Color.FromArgb(0, 0, 204);
+        private static readonly Color CommentColor = Color.FromArgb(203, 76, 37);
+        private static readonly Color LiteralColor = Color.FromArgb(0, 51, 0);
+        private static readonly Color[] UsedColors = new Color[] {
             StateColor, DataTypeColor, EventColor, ConstantColor, FunctionColor, FlowColor, CommentColor, LiteralColor
         };
 
@@ -385,7 +385,7 @@ namespace Radegast
                 int Offset = 0;
                 int i = 0;
 
-                foreach (String L in Lines)
+                foreach (string L in Lines)
                 {
                     if (i < value.Line)
                     {
@@ -421,7 +421,7 @@ namespace Radegast
                 c == '_';
         }
 
-        private void ttTimerElapsed(Object sender)
+        private void ttTimerElapsed(object sender)
         {
             if (InvokeRequired)
             {
@@ -579,10 +579,10 @@ namespace Radegast
             return GetSelectionStyle(Win32.CFM_LINK, Win32.CFE_LINK);
         }
 
-        private void SetSelectionStyle(UInt32 mask, UInt32 effect)
+        private void SetSelectionStyle(uint mask, uint effect)
         {
             Win32.CHARFORMAT2_STRUCT cf = new Win32.CHARFORMAT2_STRUCT();
-            cf.cbSize = (UInt32)Marshal.SizeOf(cf);
+            cf.cbSize = (uint)Marshal.SizeOf(cf);
             cf.dwMask = mask;
             cf.dwEffects = effect;
 
@@ -595,10 +595,10 @@ namespace Radegast
             Marshal.FreeCoTaskMem(lpar);
         }
 
-        private int GetSelectionStyle(UInt32 mask, UInt32 effect)
+        private int GetSelectionStyle(uint mask, uint effect)
         {
             Win32.CHARFORMAT2_STRUCT cf = new Win32.CHARFORMAT2_STRUCT();
-            cf.cbSize = (UInt32)Marshal.SizeOf(cf);
+            cf.cbSize = (uint)Marshal.SizeOf(cf);
             cf.szFaceName = new char[32];
 
             IntPtr wpar = new IntPtr(Win32.SCF_SELECTION);
@@ -720,15 +720,15 @@ namespace Radegast
             #endregion
 
             #region CHARFORMAT2 Flags
-            public const UInt32 CFE_BOLD = 0x0001;
-            public const UInt32 CFE_ITALIC = 0x0002;
-            public const UInt32 CFE_UNDERLINE = 0x0004;
-            public const UInt32 CFE_STRIKEOUT = 0x0008;
-            public const UInt32 CFE_PROTECTED = 0x0010;
-            public const UInt32 CFE_LINK = 0x0020;
-            public const UInt32 CFE_AUTOCOLOR = 0x40000000;
-            public const UInt32 CFE_SUBSCRIPT = 0x00010000;		/* Superscript and subscript are */
-            public const UInt32 CFE_SUPERSCRIPT = 0x00020000;		/*  mutually exclusive			 */
+            public const uint CFE_BOLD = 0x0001;
+            public const uint CFE_ITALIC = 0x0002;
+            public const uint CFE_UNDERLINE = 0x0004;
+            public const uint CFE_STRIKEOUT = 0x0008;
+            public const uint CFE_PROTECTED = 0x0010;
+            public const uint CFE_LINK = 0x0020;
+            public const uint CFE_AUTOCOLOR = 0x40000000;
+            public const uint CFE_SUBSCRIPT = 0x00010000;		/* Superscript and subscript are */
+            public const uint CFE_SUPERSCRIPT = 0x00020000;		/*  mutually exclusive			 */
 
             public const int CFM_SMALLCAPS = 0x0040;			/* (*)	*/
             public const int CFM_ALLCAPS = 0x0080;			/* Displayed by 3.0	*/
@@ -751,19 +751,19 @@ namespace Radegast
             public const int CFM_REVAUTHOR = 0x00008000;
 
 
-            public const UInt32 CFM_BOLD = 0x00000001;
-            public const UInt32 CFM_ITALIC = 0x00000002;
-            public const UInt32 CFM_UNDERLINE = 0x00000004;
-            public const UInt32 CFM_STRIKEOUT = 0x00000008;
-            public const UInt32 CFM_PROTECTED = 0x00000010;
-            public const UInt32 CFM_LINK = 0x00000020;
-            public const UInt32 CFM_SIZE = 0x80000000;
-            public const UInt32 CFM_COLOR = 0x40000000;
-            public const UInt32 CFM_FACE = 0x20000000;
-            public const UInt32 CFM_OFFSET = 0x10000000;
-            public const UInt32 CFM_CHARSET = 0x08000000;
-            public const UInt32 CFM_SUBSCRIPT = CFE_SUBSCRIPT | CFE_SUPERSCRIPT;
-            public const UInt32 CFM_SUPERSCRIPT = CFM_SUBSCRIPT;
+            public const uint CFM_BOLD = 0x00000001;
+            public const uint CFM_ITALIC = 0x00000002;
+            public const uint CFM_UNDERLINE = 0x00000004;
+            public const uint CFM_STRIKEOUT = 0x00000008;
+            public const uint CFM_PROTECTED = 0x00000010;
+            public const uint CFM_LINK = 0x00000020;
+            public const uint CFM_SIZE = 0x80000000;
+            public const uint CFM_COLOR = 0x40000000;
+            public const uint CFM_FACE = 0x20000000;
+            public const uint CFM_OFFSET = 0x10000000;
+            public const uint CFM_CHARSET = 0x08000000;
+            public const uint CFM_SUBSCRIPT = CFE_SUBSCRIPT | CFE_SUPERSCRIPT;
+            public const uint CFM_SUPERSCRIPT = CFM_SUBSCRIPT;
 
             public const byte CFU_UNDERLINENONE = 0x00000000;
             public const byte CFU_UNDERLINE = 0x00000001;
@@ -794,7 +794,7 @@ namespace Radegast
         #endregion
     }
 
-    class LSLErrorHandler : ErrorHandler
+    internal class LSLErrorHandler : ErrorHandler
     {
         public LSLErrorHandler()
             : base(false)

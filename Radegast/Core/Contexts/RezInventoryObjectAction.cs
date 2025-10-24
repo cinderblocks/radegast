@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class RezInventoryObjectAction : ContextAction
     {
-        public RezInventoryObjectAction(RadegastInstance inst)
+        public RezInventoryObjectAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Rez..";

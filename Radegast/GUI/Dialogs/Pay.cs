@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,22 +26,20 @@ namespace Radegast
 {
     public partial class frmPay : RadegastForm
     {
-        private RadegastInstance instance;
-        private GridClient client => instance.Client;
-        private UUID target;
-        private string name;
+        private readonly UUID target;
+        private readonly string name;
         private UUID owner;
-        private bool isObject;
-        private Button[] buttons;
-        private int[] defaultAmounts = new int[] { 1, 5, 10, 20 };
+        private readonly bool isObject;
+        private readonly Button[] buttons;
+        private readonly int[] defaultAmounts = new int[] { 1, 5, 10, 20 };
         public static int LastPayed = -1;
 
-        public frmPay(RadegastInstance instance, UUID target, string name, bool isObject)
+        public frmPay(RadegastInstanceForms instance, UUID target, string name, bool isObject)
+            : base(instance)
         {
             InitializeComponent();
             Disposed += frmPay_Disposed;
 
-            this.instance = instance;
             this.target = target;
             this.name = name;
             this.isObject = isObject;
@@ -51,26 +49,26 @@ namespace Radegast
             for (int i = 0; i < buttons.Length; i++)
             {
                 buttons[i].Click += frmPay_Click;
-                buttons[i].Text = string.Format("L${0}", defaultAmounts[i]);
+                buttons[i].Text = $"L${defaultAmounts[i]}";
                 buttons[i].Tag = defaultAmounts[i];
             }
 
             // Callbacks
-            client.Objects.PayPriceReply += Objects_PayPriceReply;
-            client.Objects.ObjectPropertiesFamily += Objects_ObjectPropertiesFamily;
+            Client.Objects.PayPriceReply += Objects_PayPriceReply;
+            Client.Objects.ObjectPropertiesFamily += Objects_ObjectPropertiesFamily;
             instance.Names.NameUpdated += Avatars_UUIDNameReply;
 
             if (isObject)
             {
-                client.Objects.RequestPayPrice(client.Network.CurrentSim, target);
-                client.Objects.RequestObjectPropertiesFamily(client.Network.CurrentSim, target);
+                Client.Objects.RequestPayPrice(Client.Network.CurrentSim, target);
+                Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, target);
                 lblObject.Visible = true;
-                lblObject.Text = string.Format("Via object: {0}: ", name);
+                lblObject.Text = $"Via object: {name}: ";
             }
             else
             {
                 lblObject.Visible = false;
-                lblResident.Text = string.Format("Pay resident: {0}", name);
+                lblResident.Text = $"Pay resident: {name}";
             }
 
             if (LastPayed > 0)
@@ -81,29 +79,29 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void frmPay_Disposed(object sender, EventArgs e)
+        private void frmPay_Disposed(object sender, EventArgs e)
         {
-            client.Objects.PayPriceReply -= Objects_PayPriceReply;
-            client.Objects.ObjectPropertiesFamily -= Objects_ObjectPropertiesFamily;
-            instance.Names.NameUpdated -= Avatars_UUIDNameReply;
+            Client.Objects.PayPriceReply -= Objects_PayPriceReply;
+            Client.Objects.ObjectPropertiesFamily -= Objects_ObjectPropertiesFamily;
+            Instance.Names.NameUpdated -= Avatars_UUIDNameReply;
         }
 
-        void frmPay_Click(object sender, EventArgs e)
+        private void frmPay_Click(object sender, EventArgs e)
         {
             int amount = (int)((Button)sender).Tag;
 
             if (!isObject)
             {
-                client.Self.GiveAvatarMoney(target, amount);
+                Client.Self.GiveAvatarMoney(target, amount);
             }
             else
             {
-                client.Self.GiveObjectMoney(target, amount, name);
+                Client.Self.GiveObjectMoney(target, amount, name);
             }
             Close();
         }
 
-        void UpdateResident()
+        private void UpdateResident()
         {
             if (InvokeRequired)
             {
@@ -111,20 +109,20 @@ namespace Radegast
                 return;
             }
 
-            lblResident.Text = $"Pay resident: {instance.Names.Get(owner)}";
+            lblResident.Text = $"Pay resident: {Instance.Names.Get(owner)}";
         }
 
-        void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
             if (e.Names.ContainsKey(owner))
             {
-                instance.Names.NameUpdated -= Avatars_UUIDNameReply;
+                Instance.Names.NameUpdated -= Avatars_UUIDNameReply;
                 UpdateResident();
             }
         }
 
 
-        void Objects_ObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
+        private void Objects_ObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
         {
             if (e.Properties.ObjectID == target)
             {
@@ -133,7 +131,7 @@ namespace Radegast
             }
         }
 
-        void Objects_PayPriceReply(object sender, PayPriceReplyEventArgs e)
+        private void Objects_PayPriceReply(object sender, PayPriceReplyEventArgs e)
         {
             if (e.ObjectID != target) return;
 
@@ -188,7 +186,7 @@ namespace Radegast
 
             if (int.TryParse(txtAmount.Text, out amount) && amount > 0)
             {
-                if (amount > client.Self.Balance)
+                if (amount > Client.Self.Balance)
                 {
                     lblStatus.Visible = true;
                     return;
@@ -198,11 +196,11 @@ namespace Radegast
 
                 if (!isObject)
                 {
-                    client.Self.GiveAvatarMoney(target, amount);
+                    Client.Self.GiveAvatarMoney(target, amount);
                 }
                 else
                 {
-                    client.Self.GiveObjectMoney(target, amount, name);
+                    Client.Self.GiveObjectMoney(target, amount, name);
                 }
             }
             Close();
@@ -218,10 +216,9 @@ namespace Radegast
 
         private void txtAmount_TextChanged(object sender, EventArgs e)
         {
-            int amount = 0;
-            if (int.TryParse(txtAmount.Text, out amount) && amount > 0)
+            if (int.TryParse(txtAmount.Text, out var amount) && amount > 0)
             {
-                if (amount > client.Self.Balance)
+                if (amount > Client.Self.Balance)
                 {
                     lblStatus.Visible = true;
                     btnPay.Enabled = false;

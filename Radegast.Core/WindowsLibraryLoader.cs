@@ -1,6 +1,6 @@
 ﻿/**
  * Radegast Metaverse Client
- * Copyright(c) 2021-2024, Sjofn, LLC
+ * Copyright(c) 2021-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -124,7 +124,7 @@ namespace Radegast.Core
             var addressWidth = this._ProcessorArchitectureAddressWidthPlatforms[processInfo.Architecture];
             if (addressWidth != IntPtr.Size)
             {
-                if (String.Equals(processInfo.Architecture, "AMD64", StringComparison.OrdinalIgnoreCase) && IntPtr.Size == 4)
+                if (string.Equals(processInfo.Architecture, "AMD64", StringComparison.OrdinalIgnoreCase) && IntPtr.Size == 4)
                 {
                     // fall back to x86 if detected x64 but has an address width of 32 bits.
                     processInfo.Architecture = "x86";
@@ -143,7 +143,7 @@ namespace Radegast.Core
 
         private string GetPlatformName(string processorArchitecture)
         {
-            if (String.IsNullOrEmpty(processorArchitecture))
+            if (string.IsNullOrEmpty(processorArchitecture))
                 return null;
 
             string platformName;
@@ -294,7 +294,7 @@ namespace Radegast.Core
 
             public void AddWarning(string format, params object[] args)
             {
-                Warnings.Add(String.Format(format, args));
+                Warnings.Add(string.Format(format, args));
             }
 
             public bool HasWarnings => Warnings.Count > 0;

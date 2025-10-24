@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,11 +28,12 @@ namespace Radegast
 	public partial class ExportCollada : RadegastTabControl
 	{
 		#region Private Variables
-        DAEExport Exporter;
+
+        private readonly DAEExport Exporter;
 		#endregion
 		
 		#region Constructor
-        public ExportCollada(RadegastInstance instance, Primitive prim)
+        public ExportCollada(RadegastInstanceForms instance, Primitive prim)
             : base(instance)
 		{
 			InitializeComponent();
@@ -46,7 +47,8 @@ namespace Radegast
 		#endregion
 		
 		#region Private Methods
-		void LogMessage(string format, params object[] args)
+
+        private void LogMessage(string format, params object[] args)
 		{
 			if (InvokeRequired)
 			{
@@ -54,12 +56,12 @@ namespace Radegast
 					BeginInvoke(new MethodInvoker(() => LogMessage(format, args)));
 				return;
 			}
-			txtLog.AppendText(String.Format(format + "\r\n",args));
+			txtLog.AppendText(string.Format(format + "\r\n",args));
 			txtLog.SelectionStart = txtLog.TextLength;
 			txtLog.ScrollToCaret();
 		}
 
-        void UpdateInfo()
+        private void UpdateInfo()
         {
             Primitive root = Exporter.Prims[0];
             objectName.Text = root.Properties != null ? root.Properties.Name : "Object";
@@ -78,8 +80,8 @@ namespace Radegast
                 texturesPanel.Controls.Add(img);
             }
         }
-		
-		void ValidatePath(string fname)
+
+        private void ValidatePath(string fname)
         {
             string path = Path.GetDirectoryName(fname);
             btnExport.Enabled = Directory.Exists(path);
@@ -87,12 +89,13 @@ namespace Radegast
 		#endregion
 		
 		#region Event Handlers
-		void TxtFileNameTextChanged(object sender, EventArgs e)
+
+        private void TxtFileNameTextChanged(object sender, EventArgs e)
 		{
 			ValidatePath(txtFileName.Text);
 		}
-		
-		void BtnBrowseClick(object sender, EventArgs e)
+
+        private void BtnBrowseClick(object sender, EventArgs e)
 		{
             SaveFileDialog dlg = new SaveFileDialog
             {
@@ -111,8 +114,8 @@ namespace Radegast
 				ValidatePath(dlg.FileName);
 			}
 		}
-		
-		void BtnExportClick(object sender, EventArgs e)
+
+        private void BtnExportClick(object sender, EventArgs e)
 		{
             Exporter.ImageFormat = cbImageType.Text;
             try
@@ -130,7 +133,7 @@ namespace Radegast
             Exporter.ExportTextures = cbImageType.Enabled = cbExportTextures.Checked;
         }
 
-        void Exporter_Progress(object sender, DAEStatutsEventArgs e)
+        private void Exporter_Progress(object sender, DAEStatutsEventArgs e)
         {
             LogMessage(e.Message);
         }

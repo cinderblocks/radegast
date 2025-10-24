@@ -33,7 +33,7 @@ namespace Radegast
     {
         private bool Running = false;
         private bool UploadImages;
-        private Queue<string> FileNames = new Queue<string>();
+        private readonly Queue<string> FileNames = new Queue<string>();
         private CancellationTokenSource uploadCts;
 
         public MeshUploadConsole()
@@ -43,14 +43,14 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public MeshUploadConsole(RadegastInstance instance)
+        public MeshUploadConsole(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
 
             Disposed += MeshUploadConsole_Disposed;
-            instance.Netcom.ClientConnected += Netcom_ClientConnected;
-            instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            instance.NetCom.ClientConnected += Netcom_ClientConnected;
+            instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
             UpdateButtons();
 
             GUI.GuiHelpers.ApplyGuiFixes(this);

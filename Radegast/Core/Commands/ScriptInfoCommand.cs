@@ -27,7 +27,7 @@ namespace Radegast.Commands
 {
     public sealed class ScriptInfoCommand : RadegastCommand
     {
-        public ScriptInfoCommand(RadegastInstance instance)
+        public ScriptInfoCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "scriptinfo";

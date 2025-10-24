@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -36,7 +36,7 @@ namespace RadegastSpeech.Talk
         /// <summary>
         /// Interface to the platform-specific synthesizer
         /// </summary>
-        private Synthesizer syn;
+        private readonly Synthesizer syn;
         /// <summary>
         /// Queue of utterances waiting to be said
         /// </summary>
@@ -47,7 +47,7 @@ namespace RadegastSpeech.Talk
         /// </summary>
         private Thread speakingThread;
 
-        private Substitutions subs;
+        private readonly Substitutions subs;
 
         /// <summary>
         /// The voice used for all system announcements.
@@ -55,7 +55,7 @@ namespace RadegastSpeech.Talk
         internal AssignedVoice SystemVoice;
         internal AssignedVoice ObjectVoice;
         // System voice comes over the left shoulder.
-        private Vector3 SYSTEMPOSITION = new Vector3(-3.0f, +3.0f, 0);
+        private readonly Vector3 SYSTEMPOSITION = new Vector3(-3.0f, +3.0f, 0);
 
         /// <summary>
         /// The voice library manager

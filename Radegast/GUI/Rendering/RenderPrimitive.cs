@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -108,8 +108,8 @@ namespace Radegast.Rendering
         public float CurrentFrame;
         public float CurrentTime;
         public bool PingPong;
-        float LastTime = 0f;
-        float TotalTime = 0f;
+        private float LastTime = 0f;
+        private float TotalTime = 0f;
 
         /// <summary>
         /// Perform texture manipulation to implement texture animations
@@ -327,9 +327,10 @@ namespace Radegast.Rendering
         #endregion Public fields
 
         #region Private fields
-        int prevTEHash;
-        int prevSculptHash;
-        int prevShapeHash;
+
+        private int prevTEHash;
+        private int prevSculptHash;
+        private int prevShapeHash;
         #endregion Private fields
 
         /// <summary>

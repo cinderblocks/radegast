@@ -37,10 +37,10 @@ namespace Radegast.Rendering
 {
     public partial class GraphicsPreferences : UserControl
     {
-        RadegastInstance Instance;
-        GridClient Client => Instance.Client;
+        private readonly RadegastInstanceForms Instance;
+        private GridClient Client => Instance.Client;
 
-        SceneWindow Window
+        private SceneWindow Window
         {
             get
             {
@@ -59,7 +59,7 @@ namespace Radegast.Rendering
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public GraphicsPreferences(RadegastInstance instance)
+        public GraphicsPreferences(RadegastInstanceForms instance)
         {
             Instance = instance;
             InitializeComponent();
@@ -82,7 +82,7 @@ namespace Radegast.Rendering
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void GraphicsPreferences_Disposed(object sender, EventArgs e)
+        private void GraphicsPreferences_Disposed(object sender, EventArgs e)
         {
         }
 

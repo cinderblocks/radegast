@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,13 +27,12 @@ namespace Radegast
 {
     public partial class FindPeopleConsole : UserControl
     {
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom;
-        private GridClient client;
+        private INetCom NetCom;
+        private readonly GridClient Client;
 
         public event EventHandler SelectedIndexChanged;
 
-        public FindPeopleConsole(RadegastInstance instance, UUID queryID)
+        public FindPeopleConsole(IRadegastInstance instance, UUID queryID)
         {
             InitializeComponent();
             Disposed += FindPeopleConsole_Disposed;
@@ -41,22 +40,21 @@ namespace Radegast
             LLUUIDs = new Dictionary<string, UUID>();
             QueryID = queryID;
 
-            this.instance = instance;
-            netcom = this.instance.Netcom;
-            client = this.instance.Client;
+            NetCom = instance.NetCom;
+            Client = instance.Client;
 
             // Callbacks
-            client.Directory.DirPeopleReply += Directory_DirPeopleReply;
+            Client.Directory.DirPeopleReply += Directory_DirPeopleReply;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void FindPeopleConsole_Disposed(object sender, EventArgs e)
+        private void FindPeopleConsole_Disposed(object sender, EventArgs e)
         {
-            client.Directory.DirPeopleReply -= Directory_DirPeopleReply;
+            Client.Directory.DirPeopleReply -= Directory_DirPeopleReply;
         }
 
-        void Directory_DirPeopleReply(object sender, DirPeopleReplyEventArgs e)
+        private void Directory_DirPeopleReply(object sender, DirPeopleReplyEventArgs e)
         {
             if (e.QueryID != QueryID) return;
 

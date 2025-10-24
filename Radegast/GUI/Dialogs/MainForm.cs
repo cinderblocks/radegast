@@ -74,9 +74,8 @@ namespace Radegast
         #endregion
 
         #region Private members
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private Radegast.Netcom netcom => instance.Netcom;
         private System.Timers.Timer statusTimer;
         private AutoPilot ap;
         private bool AutoPilotActive = false;
@@ -87,7 +86,7 @@ namespace Radegast
         #endregion
 
         #region Constructor and disposal
-        public frmMain(RadegastInstance instance)
+        public frmMain(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
@@ -96,7 +95,7 @@ namespace Radegast
             this.instance = instance;
             this.instance.ClientChanged += instance_ClientChanged;
 
-            netcom.NetcomSync = this;
+            NetCom.NetcomSync = this;
             ShowAgentProfile = ShowAgentProfileInternal;
 
             pnlDialog.Visible = false;
@@ -125,9 +124,9 @@ namespace Radegast
             }
 
             // Callbacks
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
-            netcom.ClientLoggedOut += netcom_ClientLoggedOut;
-            netcom.ClientDisconnected += netcom_ClientDisconnected;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            NetCom.ClientLoggedOut += NetComClientLoggedOut;
+            NetCom.ClientDisconnected += NetComClientDisconnected;
             instance.Names.NameUpdated += Names_NameUpdated;
             client.Network.SimChanged += Network_SimChanged;
 
@@ -169,12 +168,12 @@ namespace Radegast
 
         private void frmMain_Disposed(object sender, EventArgs e)
         {
-            if (netcom != null)
+            if (NetCom != null)
             {
-                netcom.NetcomSync = null;
-                netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
-                netcom.ClientLoggedOut -= netcom_ClientLoggedOut;
-                netcom.ClientDisconnected -= netcom_ClientDisconnected;
+                NetCom.NetcomSync = null;
+                NetCom.ClientLoginStatus -= NetComClientLoginStatus;
+                NetCom.ClientLoggedOut -= NetComClientLoggedOut;
+                NetCom.ClientDisconnected -= NetComClientDisconnected;
             }
 
             if (client != null)
@@ -287,7 +286,7 @@ namespace Radegast
             ).Start();
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status == LoginStatus.Failed)
             {
@@ -317,7 +316,7 @@ namespace Radegast
             }
         }
 
-        private void netcom_ClientLoggedOut(object sender, EventArgs e)
+        private void NetComClientLoggedOut(object sender, EventArgs e)
         {
             tsb3D.Enabled = tbtnVoice.Enabled = disconnectToolStripMenuItem.Enabled =
             tbtnGroups.Enabled = tbnObjects.Enabled = tbtnWorld.Enabled = tbnTools.Enabled = tmnuImport.Enabled =
@@ -333,7 +332,7 @@ namespace Radegast
             RefreshWindowTitle();
         }
 
-        private void netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
             firstMoneyNotification = true;
 
@@ -345,7 +344,7 @@ namespace Radegast
             }
 
             if (e.Reason == NetworkManager.DisconnectType.ClientInitiated) { return; }
-            netcom_ClientLoggedOut(sender, EventArgs.Empty);
+            NetComClientLoggedOut(sender, EventArgs.Empty);
 
             if (instance.GlobalSettings["auto_reconnect"].AsBoolean())
             {
@@ -386,7 +385,7 @@ namespace Radegast
                 MediaConsole = null;
             }
 
-            if (!netcom.IsLoggedIn) return;
+            if (!NetCom.IsLoggedIn) return;
 
             Thread saveInvToDisk = new Thread(delegate()
             {
@@ -397,7 +396,7 @@ namespace Radegast
             };
             saveInvToDisk.Start();
 
-            netcom.Logout();
+            NetCom.Logout();
         }
         #endregion
 
@@ -427,7 +426,7 @@ namespace Radegast
 
         private void RefreshStatusBar()
         {
-            if (netcom.IsLoggedIn)
+            if (NetCom.IsLoggedIn)
             {
                 tlblLoginName.Text = instance.Names.Get(client.Self.AgentID, client.Self.Name);
                 tlblMoneyBalance.Text = client.Self.Balance.ToString();
@@ -463,7 +462,7 @@ namespace Radegast
             StringBuilder sb = new StringBuilder();
             sb.Append("Radegast - ");
 
-            if (netcom.IsLoggedIn)
+            if (NetCom.IsLoggedIn)
             {
                 sb.Append("[" + name + "]");
 
@@ -531,7 +530,7 @@ namespace Radegast
             if (e.Modifiers == (Keys.Control | Keys.Shift | Keys.Alt) && e.KeyCode == Keys.H)
             {
                 e.Handled = e.SuppressKeyPress = true;
-                netcom.ChatOut("Hippos!", ChatType.Normal, 0);
+                NetCom.ChatOut("Hippos!", ChatType.Normal, 0);
                 return;
             }
 
@@ -719,7 +718,7 @@ namespace Radegast
 
         public void ShowGroupProfile(UUID id)
         {
-            ShowGroupProfile(new OpenMetaverse.Group()
+            ShowGroupProfile(new Group()
             {
                 ID = id,
             });
@@ -727,7 +726,7 @@ namespace Radegast
 
         public void ShowGroupProfile(AvatarGroup group)
         {
-            ShowGroupProfile(new OpenMetaverse.Group()
+            ShowGroupProfile(new Group()
             {
                 ID = group.GroupID,
                 InsigniaID = group.GroupInsigniaID,
@@ -736,7 +735,7 @@ namespace Radegast
             );
         }
 
-        public void ShowGroupProfile(OpenMetaverse.Group group)
+        public void ShowGroupProfile(Group group)
         {
             if (InvokeRequired)
             {
@@ -881,27 +880,29 @@ namespace Radegast
             btnDialogNextControl.BringToFront();
         }
 
-        public void AddNotification(Notification control)
+        public void AddNotification(INotification notification)
         {
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(delegate()
                 {
-                    AddNotification(control);
+                    AddNotification(notification);
                 }
                 ));
                 return;
             }
 
+            
             var active = TabsConsole.FindFocusedControl(this);
 
             FormFlash.StartFlash(this);
             pnlDialog.Visible = true;
             pnlDialog.BringToFront();
 
+            var control = (Notification)notification;
             if (control.SingleInstance)
             {
-                var exists = notifications.Find(notification => notification.Type == control.Type);
+                var exists = notifications.Find(n => n.Type == control.Type);
                 if (exists != null)
                 {
                     RemoveNotification(exists);
@@ -927,8 +928,9 @@ namespace Radegast
             active?.Focus();
         }
 
-        public void RemoveNotification(Notification control)
+        public void RemoveNotification(INotification notification)
         {
+            var control = (Notification)notification;
             pnlDialog.Controls.Remove(control);
             notifications.Remove(control);
             control.Dispose();

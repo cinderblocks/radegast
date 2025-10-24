@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,7 +26,7 @@ namespace RadegastSpeech.Conversation
 {
     internal class Closet : Mode
     {
-        private Inventory inv;
+        private readonly Inventory inv;
         private InventoryBase selected;
         private InventoryConsole invTab;
         private TreeView tree;
@@ -78,17 +78,17 @@ namespace RadegastSpeech.Conversation
             tree.AfterCollapse -= tree_AfterCollapse;
         }
 
-        void tree_AfterCollapse(object sender, TreeViewEventArgs e)
+        private void tree_AfterCollapse(object sender, TreeViewEventArgs e)
         {
             Talker.SayMore(DescriptiveName( selected ) + " collapsed.");
         }
 
-        void tree_AfterExpand(object sender, TreeViewEventArgs e)
+        private void tree_AfterExpand(object sender, TreeViewEventArgs e)
         {
             Talker.SayMore(DescriptiveName(selected) + " expanded.");
         }
 
-        void OnItemChange(object sender, TreeViewEventArgs e)
+        private void OnItemChange(object sender, TreeViewEventArgs e)
         {
             selected = (InventoryBase)e.Node.Tag;
             SayWhere();
@@ -132,12 +132,12 @@ namespace RadegastSpeech.Conversation
             return true;
         }
 
-        void SayWhere()
+        private void SayWhere()
         {
             Talker.SayMore("Looking at " + DescriptiveName( selected ));
         }
 
-         void ListNode()
+        private void ListNode()
         {
             SayWhere();
 
@@ -149,8 +149,8 @@ namespace RadegastSpeech.Conversation
                 }
             }
         }
- 
-         string DescriptiveName(InventoryBase item)
+
+        private string DescriptiveName(InventoryBase item)
          {
              string name = NiceName(item.Name);
 
@@ -171,7 +171,7 @@ namespace RadegastSpeech.Conversation
              return name;
          }
 
-        string ItemType(InventoryItem item)
+        private string ItemType(InventoryItem item)
         {
             switch (item.AssetType)
             {
@@ -191,7 +191,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="item"></param>
         /// <returns></returns>
-        string WearableType(InventoryWearable item)
+        private string WearableType(InventoryWearable item)
         {
             switch (item.WearableType)
             {
@@ -213,7 +213,7 @@ namespace RadegastSpeech.Conversation
             }
         }
 
-        void Wearing()
+        private void Wearing()
         {
 
         }

@@ -306,8 +306,8 @@ namespace FMOD
     [StructLayout(LayoutKind.Sequential)]
     public struct PLUGINLIST
     {
-        PLUGINTYPE type;
-        IntPtr description;
+        private PLUGINTYPE type;
+        private IntPtr description;
     }
 
     [Flags]
@@ -1216,7 +1216,7 @@ namespace FMOD
         {
             return FMOD5_System_GetCPUUsageEx(this.handle, out convolutionThread1, out convolutionThread2);
         }
-        public RESULT getFileUsage(out Int64 sampleBytesRead, out Int64 streamBytesRead, out Int64 otherBytesRead)
+        public RESULT getFileUsage(out long sampleBytesRead, out long streamBytesRead, out long otherBytesRead)
         {
             return FMOD5_System_GetFileUsage(this.handle, out sampleBytesRead, out streamBytesRead, out otherBytesRead);
         }
@@ -1565,7 +1565,7 @@ namespace FMOD
         [DllImport(VERSION.dll)]
         private static extern RESULT FMOD5_System_GetCPUUsageEx             (IntPtr system, out float convolutionThread1, out float convolutionThread2);
         [DllImport(VERSION.dll)]
-        private static extern RESULT FMOD5_System_GetFileUsage              (IntPtr system, out Int64 sampleBytesRead, out Int64 streamBytesRead, out Int64 otherBytesRead);
+        private static extern RESULT FMOD5_System_GetFileUsage              (IntPtr system, out long sampleBytesRead, out long streamBytesRead, out long otherBytesRead);
         [DllImport(VERSION.dll)]
         private static extern RESULT FMOD5_System_CreateSound               (IntPtr system, byte[] name_or_data, MODE mode, ref CREATESOUNDEXINFO exinfo, out IntPtr sound);
         [DllImport(VERSION.dll)]
@@ -1976,7 +1976,7 @@ namespace FMOD
     /*
         'ChannelControl' API
     */
-    interface IChannelControl
+    internal interface IChannelControl
     {
         RESULT getSystemObject              (out System system);
 
@@ -3773,7 +3773,7 @@ namespace FMOD
     [StructLayout(LayoutKind.Sequential)]
     public struct StringWrapper
     {
-        IntPtr nativeUtf8Ptr;
+        private IntPtr nativeUtf8Ptr;
 
         public StringWrapper(IntPtr ptr)
         {
@@ -3789,15 +3789,15 @@ namespace FMOD
         }
     }
 
-    static class StringHelper
+    internal static class StringHelper
     {
         public class ThreadSafeEncoding : IDisposable
         {
-            UTF8Encoding encoding = new UTF8Encoding();
-            byte[] encodedBuffer = new byte[128];
-            char[] decodedBuffer = new char[128];
-            bool inUse;
-            GCHandle gcHandle;
+            private readonly UTF8Encoding encoding = new UTF8Encoding();
+            private byte[] encodedBuffer = new byte[128];
+            private char[] decodedBuffer = new char[128];
+            private bool inUse;
+            private GCHandle gcHandle;
 
             public bool InUse()    { return inUse; }
             public void SetInUse() { inUse = true; }
@@ -3884,7 +3884,7 @@ namespace FMOD
 
                 int charCount = encoding.GetChars(encodedBuffer, 0, nativeLen, decodedBuffer, 0);
 
-                return new String(decodedBuffer, 0, charCount);
+                return new string(decodedBuffer, 0, charCount);
             }
 
             public void Dispose()
@@ -3900,7 +3900,7 @@ namespace FMOD
             }
         }
 
-        static readonly List<ThreadSafeEncoding> encoders = new List<ThreadSafeEncoding>(1);
+        private static readonly List<ThreadSafeEncoding> encoders = new List<ThreadSafeEncoding>(1);
 
         public static ThreadSafeEncoding GetFreeHelper()
         {

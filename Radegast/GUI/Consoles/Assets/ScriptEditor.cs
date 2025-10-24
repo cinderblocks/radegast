@@ -32,25 +32,25 @@ namespace Radegast
 
     public partial class ScriptEditor : UserControl
     {
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private readonly InventoryLSL script;
         private string scriptName;
         private string fileName;
         private readonly Primitive prim;
 
-        public ScriptEditor(RadegastInstance instance)
+        public ScriptEditor(RadegastInstanceForms instance)
             : this(instance, null, null)
         {
             scriptName = "New Script";
         }
 
-        public ScriptEditor(RadegastInstance instance, InventoryLSL script)
+        public ScriptEditor(RadegastInstanceForms instance, InventoryLSL script)
             : this(instance, script, null)
         {
         }
 
-        public ScriptEditor(RadegastInstance instance, InventoryLSL script, Primitive prim)
+        public ScriptEditor(RadegastInstanceForms instance, InventoryLSL script, Primitive prim)
         {
             InitializeComponent();
             Disposed += ScriptEditor_Disposed;
@@ -62,7 +62,7 @@ namespace Radegast
             rtb.SyntaxHighlightEnabled = instance.GlobalSettings["script_syntax_highlight"].AsBoolean();
             lblScripStatus.Text = string.Empty;
             lblScripStatus.TextChanged += (sender, e) =>
-                instance.TabConsole.DisplayNotificationInChat(lblScripStatus.Text, ChatBufferTextStyle.Invisible);
+                instance.ShowNotificationInChat(lblScripStatus.Text, ChatBufferTextStyle.Invisible);
             Dock = DockStyle.Fill;
             TabStop = false;
 
@@ -666,7 +666,7 @@ namespace Radegast
 
         private void ReadCursorPosition()
         {
-            instance.TabConsole.DisplayNotificationInChat(
+            instance.ShowNotificationInChat(
                 $"Cursor at line {rtb.CursorPosition.Line + 1}, column {rtb.CursorPosition.Column + 1}",
                 ChatBufferTextStyle.Invisible);
         }
@@ -702,7 +702,7 @@ namespace Radegast
                                         int column = 1 + int.Parse(m.Groups["column"].Value, Utils.EnUsCulture);
                                         string kind = m.Groups["kind"].Value;
                                         string msg = m.Groups["msg"].Value;
-                                        instance.TabConsole.DisplayNotificationInChat(
+                                        instance.ShowNotificationInChat(
                                             $"{kind} on line {line}, column {column}: {msg}",
                                             ChatBufferTextStyle.Invisible);
                                         txtStatus.Text += $"{kind} (Ln {line}, Col {column}): {msg}";
@@ -717,7 +717,7 @@ namespace Radegast
                                     else
                                     {
                                         txtStatus.Text += compileMessages[i] + Environment.NewLine;
-                                        instance.TabConsole.DisplayNotificationInChat(compileMessages[i]);
+                                        instance.ShowNotificationInChat(compileMessages[i]);
                                     }
                                 }
                             }

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,14 +27,14 @@ namespace Radegast
 {
     public partial class ntfInventoryOffer : Notification
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private InstantMessage msg;
-        private AssetType type = AssetType.Unknown;
-        private UUID objectID = UUID.Zero;
-        UUID destinationFolderID;
+        private readonly InstantMessage msg;
+        private readonly AssetType type = AssetType.Unknown;
+        private readonly UUID objectID = UUID.Zero;
+        private UUID destinationFolderID;
 
-        public ntfInventoryOffer(RadegastInstance instance, InstantMessage msg)
+        public ntfInventoryOffer(RadegastInstanceForms instance, InstantMessage msg)
             : base (NotificationType.InventoryOffer)
         {
             InitializeComponent();
@@ -57,7 +57,7 @@ namespace Radegast
 
                 if (msg.Dialog == InstantMessageDialog.InventoryOffered)
                 {
-                    txtInfo.Text = string.Format("{0} has offered you {1} \"{2}\".", msg.FromAgentName, type, msg.Message);
+                    txtInfo.Text = $"{msg.FromAgentName} has offered you {type} \"{msg.Message}\".";
                 }
                 else if (msg.Dialog == InstantMessageDialog.TaskInventoryOffered)
                 {
@@ -79,12 +79,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void ntfInventoryOffer_Disposed(object sender, EventArgs e)
+        private void ntfInventoryOffer_Disposed(object sender, EventArgs e)
         {
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;
         }
 
-        void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
             if (e.Names.Keys.Contains(msg.FromAgentID))
             {
@@ -95,12 +95,13 @@ namespace Radegast
 
         private string objectOfferText()
         {
-            return string.Format("Object \"{0}\" owned by {1} has offered you {2}", msg.FromAgentName, instance.Names.Get(msg.FromAgentID), msg.Message); 
+            return $"Object \"{msg.FromAgentName}\" owned by {instance.Names.Get(msg.FromAgentID)} has offered you {msg.Message}"; 
         }
 
         private void SendReply(InstantMessageDialog dialog, byte[] bucket)
         {
-            client.Self.InstantMessage(client.Self.Name, msg.FromAgentID, string.Empty, msg.IMSessionID, dialog, InstantMessageOnline.Offline, client.Self.SimPosition, client.Network.CurrentSim.RegionID, bucket);
+            client.Self.InstantMessage(client.Self.Name, msg.FromAgentID, string.Empty, 
+                msg.IMSessionID, dialog, InstantMessageOnline.Offline, client.Self.SimPosition, client.Network.CurrentSim.RegionID, bucket);
             
             if (dialog == InstantMessageDialog.InventoryAccepted)
             {

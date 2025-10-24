@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -38,26 +38,26 @@ namespace Radegast
             Muted
         };
 
-        private RadegastInstance instance;
-        private Radegast.Netcom netcom => instance.Netcom;
-        private GridClient client => instance.Client;
+        private readonly RadegastInstanceForms Instance;
+        private INetCom NetCom => Instance.NetCom;
+        private GridClient Client => Instance.Client;
         private TabsConsole tabConsole;
-        private OSDMap config;
+        private readonly OSDMap config;
         public VoiceGateway gateway = null;
         public VoiceSession session;
         private VoiceParticipant selected;
 
-        public VoiceConsole(RadegastInstance instance)
+        public VoiceConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += VoiceConsole_Disposed;
 
-            this.instance = instance;
+            this.Instance = instance;
 
             // Callbacks
-            netcom.ClientLoginStatus += netcom_ClientLoginStatus;
+            NetCom.ClientLoginStatus += NetComClientLoginStatus;
 
-            this.instance.MainForm.Load += MainForm_Load;
+            this.Instance.MainForm.Load += MainForm_Load;
 
             config = instance.GlobalSettings["voice"] as OSDMap;
             if (config == null)
@@ -78,7 +78,7 @@ namespace Radegast
         {
             if (gateway == null)
             {
-                gateway = new VoiceGateway(instance.Client);
+                gateway = new VoiceGateway(Instance.Client);
             }
 
             // Initialize progress bar
@@ -105,7 +105,7 @@ namespace Radegast
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void RadegastContextMenuStrip_OnContentMenuOpened(object sender, RadegastContextMenuStrip.ContextMenuEventArgs e)
+        private void RadegastContextMenuStrip_OnContentMenuOpened(object sender, RadegastContextMenuStrip.ContextMenuEventArgs e)
         {
             lock (e.Menu)
             {
@@ -123,19 +123,19 @@ namespace Radegast
             }
         }
 
-        void OnMuteClick(object sender, EventArgs e)
+        private void OnMuteClick(object sender, EventArgs e)
         {
             selected.IsMuted = true;
         }
 
-        void OnUnMuteClick(object sender, EventArgs e)
+        private void OnUnMuteClick(object sender, EventArgs e)
         {
             selected.IsMuted = false;
         }
 
         private void RegisterClientEvents()
         {
-            instance.Names.NameUpdated += Names_NameUpdated;
+            Instance.Names.NameUpdated += Names_NameUpdated;
 
             // Voice hooks
             gateway.OnSessionCreate +=
@@ -152,7 +152,7 @@ namespace Radegast
 
         private void UnregisterClientEvents()
         {
-            instance.Names.NameUpdated -= Names_NameUpdated;
+            Instance.Names.NameUpdated -= Names_NameUpdated;
 
             gateway.OnSessionCreate -=
                gateway_OnSessionCreate;
@@ -166,11 +166,11 @@ namespace Radegast
                 gateway_OnAuxGetRenderDevicesResponse;
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             if (InvokeRequired)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
+                if (IsHandleCreated || !Instance.MonoRuntime)
                     BeginInvoke((MethodInvoker)(() => Names_NameUpdated(sender, e)));
                 return;
             }
@@ -189,22 +189,23 @@ namespace Radegast
         }
 
         #region Connection Status
-        void gateway_OnAuxGetRenderDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
+
+        private void gateway_OnAuxGetRenderDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
         {
             BeginInvoke(new MethodInvoker(() => LoadSpkrDevices(e.Devices, e.CurrentDevice)));
         }
 
-        void gateway_OnAuxGetCaptureDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
+        private void gateway_OnAuxGetCaptureDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
         {
             BeginInvoke(new MethodInvoker(() => LoadMicDevices(e.Devices, e.CurrentDevice)));
         }
 
-        void gateway_OnVoiceConnectionChange(VoiceGateway.ConnectionState state)
+        private void gateway_OnVoiceConnectionChange(VoiceGateway.ConnectionState state)
         {
             BeginInvoke(new MethodInvoker(() => SetProgress(state)));
         }
 
-        void SetProgress(VoiceGateway.ConnectionState s)
+        private void SetProgress(VoiceGateway.ConnectionState s)
         {
             int value = (int)s;
             if (value == progressBar1.Maximum)
@@ -222,9 +223,10 @@ namespace Radegast
         #endregion
 
         #region Sessions
-        bool queriedDevices = false;
 
-        void gateway_OnSessionCreate(object sender, EventArgs e)
+        private bool queriedDevices = false;
+
+        private void gateway_OnSessionCreate(object sender, EventArgs e)
         {
             if (!queriedDevices)
             {
@@ -256,7 +258,7 @@ namespace Radegast
              }));
         }
 
-        void gateway_OnSessionRemove(object sender, EventArgs e)
+        private void gateway_OnSessionRemove(object sender, EventArgs e)
         {
             VoiceSession s = sender as VoiceSession;
             if (s == null) return;
@@ -284,14 +286,15 @@ namespace Radegast
 
         #endregion
         #region Participants
-        void session_OnParticipantAdded(object sender, EventArgs e)
+
+        private void session_OnParticipantAdded(object sender, EventArgs e)
         {
             VoiceParticipant p = sender as VoiceParticipant;
             BeginInvoke(new MethodInvoker(delegate()
             {
                 // Supply the name based on the UUID.
                 if (p == null) return;
-                p.Name = instance.Names.Get(p.ID);
+                p.Name = Instance.Names.Get(p.ID);
 
                 if (participants.Items.ContainsKey(p.ID.ToString()))
                     return;
@@ -306,7 +309,7 @@ namespace Radegast
             }));
         }
 
-        void session_OnParticipantRemoved(object sender, EventArgs e)
+        private void session_OnParticipantRemoved(object sender, EventArgs e)
         {
             VoiceParticipant p = sender as VoiceParticipant;
             if (p?.Name == null) return;
@@ -321,7 +324,7 @@ namespace Radegast
             }));
         }
 
-        void session_OnParticipantUpdate(object sender, EventArgs e)
+        private void session_OnParticipantUpdate(object sender, EventArgs e)
         {
             VoiceParticipant p = sender as VoiceParticipant;
             if (p?.Name == null) return;
@@ -353,7 +356,7 @@ namespace Radegast
             if (e.Button != MouseButtons.Right) return;
 
             RadegastContextMenuStrip cms = new RadegastContextMenuStrip();
-            instance.ContextActionManager.AddContributions(cms, instance.Client);
+            Instance.ContextActionManager.AddContributions(cms, Instance.Client);
             cms.Show((Control)sender, new Point(e.X, e.Y));
         }
 
@@ -366,7 +369,7 @@ namespace Radegast
         {
             foreach (ListViewItem i in participants.Items)
             {
-                if (i.Tag is VoiceParticipant p && p.ID != instance.Client.Self.AgentID)
+                if (i.Tag is VoiceParticipant p && p.ID != Instance.Client.Self.AgentID)
                 {
                     p.IsMuted = false;
                     i.StateImageIndex = (int)TalkState.Idle;
@@ -383,7 +386,7 @@ namespace Radegast
         {
             foreach (ListViewItem i in participants.Items)
             {
-                if (i.Tag is VoiceParticipant p && p.ID != instance.Client.Self.AgentID)
+                if (i.Tag is VoiceParticipant p && p.ID != Instance.Client.Self.AgentID)
                 {
                     p.IsMuted = true;
                     i.StateImageIndex = (int)TalkState.Muted;
@@ -391,7 +394,7 @@ namespace Radegast
             }
         }
 
-        ListViewItem FindParticipantItem(VoiceParticipant p)
+        private ListViewItem FindParticipantItem(VoiceParticipant p)
         {
             foreach (ListViewItem item in participants.Items)
             {
@@ -403,11 +406,12 @@ namespace Radegast
 
         #endregion
         #region Console control
-        void VoiceConsole_Disposed(object sender, EventArgs e)
+
+        private void VoiceConsole_Disposed(object sender, EventArgs e)
         {
             try
             {
-                netcom.ClientLoginStatus -= netcom_ClientLoginStatus;
+                NetCom.ClientLoginStatus -= NetComClientLoginStatus;
                 if (gateway != null)
                 {
                     UnregisterClientEvents();
@@ -419,10 +423,10 @@ namespace Radegast
 
         private void MainForm_Load(object sender, EventArgs e)
         {
-            tabConsole = instance.TabConsole;
+            tabConsole = Instance.TabConsole;
         }
 
-        private void netcom_ClientLoginStatus(object sender, LoginProgressEventArgs e)
+        private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
         {
             if (e.Status != LoginStatus.Success) return;
 
@@ -436,7 +440,8 @@ namespace Radegast
         #endregion
 
         #region Talk control
-        void OnMouseUp(object sender, MouseEventArgs e)
+
+        private void OnMouseUp(object sender, MouseEventArgs e)
         {
             BeginInvoke(new MethodInvoker(delegate()
             {
@@ -448,7 +453,7 @@ namespace Radegast
             }));
         }
 
-        void OnMouseDown(object sender, MouseEventArgs e)
+        private void OnMouseDown(object sender, MouseEventArgs e)
         {
             BeginInvoke(new MethodInvoker(delegate()
             {
@@ -464,7 +469,7 @@ namespace Radegast
 
         #region Audio Settings
 
-        void LoadMicDevices(List<string> available, string current)
+        private void LoadMicDevices(List<string> available, string current)
         {
             if (available == null) return;
 
@@ -474,7 +479,7 @@ namespace Radegast
             micDevice.SelectedItem = current;
         }
 
-        void LoadSpkrDevices(List<string> available, string current)
+        private void LoadSpkrDevices(List<string> available, string current)
         {
             if (available == null) return;
 
@@ -488,14 +493,14 @@ namespace Radegast
         {
             gateway.PlaybackDevice = (string)spkrDevice.SelectedItem;
             config["playback.device"] = new OSDString((string)spkrDevice.SelectedItem);
-            instance.GlobalSettings.Save();
+            Instance.GlobalSettings.Save();
         }
 
         private void micDevice_SelectedIndexChanged(object sender, EventArgs e)
         {
             gateway.CurrentCaptureDevice = (string)micDevice.SelectedItem;
             config["capture.device"] = new OSDString((string)micDevice.SelectedItem);
-            instance.GlobalSettings.Save();
+            Instance.GlobalSettings.Save();
         }
 
         private void micLevel_ValueChanged(object sender, EventArgs e)
@@ -504,7 +509,7 @@ namespace Radegast
             {
                 gateway.MicLevel = micLevel.Value;
             }
-            instance.GlobalSettings["voice_mic_level"] = micLevel.Value;
+            Instance.GlobalSettings["voice_mic_level"] = micLevel.Value;
         }
 
         private void spkrLevel_ValueChanged(object sender, EventArgs e)
@@ -513,7 +518,7 @@ namespace Radegast
             {
                 gateway.SpkrLevel = spkrLevel.Value;
             }
-            instance.GlobalSettings["voice_speaker_level"] = spkrLevel.Value;
+            Instance.GlobalSettings["voice_speaker_level"] = spkrLevel.Value;
         }
         #endregion
 
@@ -525,7 +530,7 @@ namespace Radegast
             BeginInvoke(new MethodInvoker(delegate()
             {
                 config["enabled"] = new OSDBoolean(chkVoiceEnable.Checked);
-                instance.GlobalSettings.Save();
+                Instance.GlobalSettings.Save();
 
                 if (chkVoiceEnable.Checked)
                 {
@@ -546,16 +551,16 @@ namespace Radegast
             }
         }
 
-        void LoadConfigVolume()
+        private void LoadConfigVolume()
         {
-            if (instance.GlobalSettings.ContainsKey("voice_mic_level"))
+            if (Instance.GlobalSettings.ContainsKey("voice_mic_level"))
             {
-                micLevel.Value = instance.GlobalSettings["voice_mic_level"];
+                micLevel.Value = Instance.GlobalSettings["voice_mic_level"];
             }
 
-            if (instance.GlobalSettings.ContainsKey("voice_speaker_level"))
+            if (Instance.GlobalSettings.ContainsKey("voice_speaker_level"))
             {
-                spkrLevel.Value = instance.GlobalSettings["voice_speaker_level"];
+                spkrLevel.Value = Instance.GlobalSettings["voice_speaker_level"];
             }
         }
 

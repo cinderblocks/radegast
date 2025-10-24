@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -36,11 +36,11 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Conversations correspond to tabbed panels on the main window.
         /// </summary>
-        private Dictionary<string, Mode> conversations;
+        private readonly Dictionary<string, Mode> conversations;
         /// <summary>
         /// Interruptions are short-lived conversations about dialog boxes, etc
         /// </summary>
-        private LinkedList<Mode> interruptions;
+        private readonly LinkedList<Mode> interruptions;
 
         // The permanent conversations.
         private Chat chat;
@@ -85,19 +85,19 @@ namespace RadegastSpeech.Conversation
             //                new Notification.NotificationCallback(OnNotificationClosed);
 
             // Announce connect and disconnect.
-            control.instance.Netcom.ClientConnected +=
+            control.instance.NetCom.ClientConnected +=
                 Network_ClientConnected;
-            control.instance.Netcom.ClientDisconnected +=
+            control.instance.NetCom.ClientDisconnected +=
                 Network_Disconnected;
 
-            control.instance.Netcom.ClientLoginStatus +=
+            control.instance.NetCom.ClientLoginStatus +=
                 netcom_ClientLoginStatus;
 
             // Notice arrival in a new sim
             control.instance.Client.Network.SimChanged +=
                 Network_SimChanged;
 
-            control.instance.Netcom.ClientLoggingIn +=
+            control.instance.NetCom.ClientLoggingIn +=
                 Netcom_ClientLoggingIn;
             // Watch the coming and going of main window tabs.
             control.instance.TabConsole.OnTabAdded +=
@@ -114,7 +114,7 @@ namespace RadegastSpeech.Conversation
                 OnInstantMessage;
 
             // Outgoing IMs
-            control.instance.Netcom.InstantMessageSent += Netcom_InstantMessageSent;
+            control.instance.NetCom.InstantMessageSent += Netcom_InstantMessageSent;
 
             // Watch for global keys
             control.instance.MainForm.KeyUp += MainForm_KeyUp;
@@ -131,7 +131,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender">Message sender</param>
         /// <param name="e">Event args</param>
-        void TabConsole_OnChatNotification(object sender, ChatNotificationEventArgs e)
+        private void TabConsole_OnChatNotification(object sender, ChatNotificationEventArgs e)
         {
             Talker.Say(e.Message);
         }
@@ -141,7 +141,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void MainForm_KeyUp(object sender, KeyEventArgs e)
+        private void MainForm_KeyUp(object sender, KeyEventArgs e)
         {
             // Escape clears the speak-ahead queue.
             if (e.KeyCode == Keys.Escape)
@@ -153,7 +153,7 @@ namespace RadegastSpeech.Conversation
         }
 
 
-        void Netcom_ClientLoggingIn(object sender, Radegast.OverrideEventArgs e)
+        private void Netcom_ClientLoggingIn(object sender, Radegast.OverrideEventArgs e)
         {
             Talker.SayMore("Logging in.  Please wait.");
         }
@@ -174,7 +174,7 @@ namespace RadegastSpeech.Conversation
                     return;
 
                 case LoginStatus.Success:
-                    LoginName = control.instance.Netcom.LoginOptions.FullName;
+                    LoginName = control.instance.NetCom.LoginOptions.FullName;
                     //Talker.SayMore("Logged in as " + LoginName);
                     //if (friends != null)
                     //    friends.Announce = true;
@@ -195,7 +195,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void OnTabChange(object sender, TabEventArgs e)
+        private void OnTabChange(object sender, TabEventArgs e)
         {
             ActivateConversationFromTab(e.Tab);
         }
@@ -254,7 +254,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void TabConsole_OnTabAdded(object sender, TabEventArgs e)
+        private void TabConsole_OnTabAdded(object sender, TabEventArgs e)
         {
             CreateConversationFromTab(e.Tab, true);
         }
@@ -322,7 +322,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void TabConsole_OnTabRemoved(object sender, TabEventArgs e)
+        private void TabConsole_OnTabRemoved(object sender, TabEventArgs e)
         {
             System.Windows.Forms.Control sTabControl = e.Tab.Control;
             if (sTabControl is InventoryConsole)
@@ -354,19 +354,19 @@ namespace RadegastSpeech.Conversation
                 OnNotificationDisplayed;
 
             // Announce connect and disconnect.
-            control.instance.Netcom.ClientConnected -=
+            control.instance.NetCom.ClientConnected -=
                 Network_ClientConnected;
-            control.instance.Netcom.ClientDisconnected -=
+            control.instance.NetCom.ClientDisconnected -=
                 Network_Disconnected;
 
-            control.instance.Netcom.ClientLoginStatus -=
+            control.instance.NetCom.ClientLoginStatus -=
                 netcom_ClientLoginStatus;
 
             // Notice arrival in a new sim
             control.instance.Client.Network.SimChanged -=
                 Network_SimChanged;
 
-            control.instance.Netcom.ClientLoggingIn -=
+            control.instance.NetCom.ClientLoggingIn -=
                 Netcom_ClientLoggingIn;
             // Watch the coming and going of main window tabs.
             control.instance.TabConsole.OnTabAdded -=
@@ -383,7 +383,7 @@ namespace RadegastSpeech.Conversation
                 OnInstantMessage;
 
             // Outgoing IMs
-            control.instance.Netcom.InstantMessageSent -= Netcom_InstantMessageSent;
+            control.instance.NetCom.InstantMessageSent -= Netcom_InstantMessageSent;
 
             // System notifications in chat
             control.instance.TabConsole.OnChatNotification -= TabConsole_OnChatNotification;
@@ -402,7 +402,7 @@ namespace RadegastSpeech.Conversation
             interruptions.Clear();
         }
 
-        void WatchKeys()
+        private void WatchKeys()
         {
         }
 
@@ -414,7 +414,7 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Start an interrupting conversation.
         /// </summary>
-        void StartInterruption()
+        private void StartInterruption()
         {
             // Remember what we were talking about.
             if (interrupted == null)
@@ -463,7 +463,7 @@ namespace RadegastSpeech.Conversation
             }
         }
 
-        void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             Talker.Say("You are now in " +
                 control.instance.Client.Network.CurrentSim.Name,
@@ -672,7 +672,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void OnNotificationDisplayed(object sender, NotificationEventArgs e)
+        private void OnNotificationDisplayed(object sender, NotificationEventArgs e)
         {
             AddInterruption(new BlueMenu(control, e));
         }
@@ -682,7 +682,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void Netcom_InstantMessageSent(object sender, Radegast.InstantMessageSentEventArgs e)
+        private void Netcom_InstantMessageSent(object sender, Radegast.InstantMessageSentEventArgs e)
         {
             // Message to an individual
             IMSession sess = (IMSession)control.converse.GetConversation(control.instance.Names.GetAsync(e.TargetID).GetAwaiter().GetResult());
@@ -695,7 +695,7 @@ namespace RadegastSpeech.Conversation
         /// </summary>
         /// <param name="im"></param>
         /// <param name="simulator"></param>
-        void OnInstantMessage(object sender, InstantMessageEventArgs e)
+        private void OnInstantMessage(object sender, InstantMessageEventArgs e)
         {
             ThreadPool.QueueUserWorkItem(sync =>
                 {

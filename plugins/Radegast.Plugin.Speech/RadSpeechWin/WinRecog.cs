@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,8 +28,8 @@ namespace RadegastSpeech
     internal class WinRecog
     {
         private SpeechRecognizer rec;
-        private DictationGrammar dGrammar;
-        private Dictionary<string, Grammar> cGrammars;
+        private readonly DictationGrammar dGrammar;
+        private readonly Dictionary<string, Grammar> cGrammars;
         internal event SpeechEventHandler OnWinRecognition;
 
         internal WinRecog( )
@@ -95,7 +95,7 @@ namespace RadegastSpeech
             rec.UnloadGrammar(v);
         }
 
-        void onSpeech(object sender, SpeechRecognizedEventArgs e)
+        private void onSpeech(object sender, SpeechRecognizedEventArgs e)
         {
             if (rec == null) return;
 

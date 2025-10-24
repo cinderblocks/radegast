@@ -34,7 +34,7 @@ namespace Radegast
         {
         }
 
-        public RegionInfo(RadegastInstance instance)
+        public RegionInfo(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();

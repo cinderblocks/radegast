@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,20 +26,20 @@ using OpenMetaverse.Assets;
 
 namespace Radegast
 {
-    public partial class Notecard : DettachableControl
+    public partial class Notecard : DetachableControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private InventoryNotecard notecard;
+        private readonly InventoryNotecard notecard;
         private AssetNotecard receivedNotecard;
-        private Primitive prim;
+        private readonly Primitive prim;
 
-        public Notecard(RadegastInstance instance, InventoryNotecard notecard)
+        public Notecard(RadegastInstanceForms instance, InventoryNotecard notecard)
             : this(instance, notecard, null)
         {
         }
 
-        public Notecard(RadegastInstance instance, InventoryNotecard notecard, Primitive prim)
+        public Notecard(RadegastInstanceForms instance, InventoryNotecard notecard, Primitive prim)
         {
             InitializeComponent();
             Disposed += Notecard_Disposed;
@@ -77,11 +77,11 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void Notecard_Disposed(object sender, EventArgs e)
+        private void Notecard_Disposed(object sender, EventArgs e)
         {
         }
 
-        void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
         {
             if (InvokeRequired)
             {
@@ -108,7 +108,7 @@ namespace Radegast
                         int index = (int)n.BodyText[++i] - 0xdc00;
                         InventoryItem e = n.EmbeddedItems[index];
                         rtbContent.AppendText(noteText);
-                        rtbContent.InsertLink(e.Name, string.Format("radegast://embeddedasset/{0}", index));
+                        rtbContent.InsertLink(e.Name, $"radegast://embeddedasset/{index}");
                         noteText = string.Empty;
                     }
                     else
@@ -177,20 +177,19 @@ namespace Radegast
 
             if (null == item) return;
 
-            instance.TabConsole.DisplayNotificationInChat(
-                string.Format("{0} saved to inventory", item.Name),
+            instance.ShowNotificationInChat($"{item.Name} saved to inventory",
                 ChatBufferTextStyle.Invisible);
 
             tlblStatus.Text = "Saved";
             
-            if (item is InventoryNotecard)
+            if (item is InventoryNotecard inventoryNotecard)
             {
-                Notecard nc = new Notecard(instance, (InventoryNotecard) item) {pnlKeepDiscard = {Visible = true}};
+                Notecard nc = new Notecard(instance, inventoryNotecard) {pnlKeepDiscard = {Visible = true}};
                 nc.ShowDetached();
             }
         }
 
-        void attachmentMenuItem_Click(object sender, EventArgs e)
+        private void attachmentMenuItem_Click(object sender, EventArgs e)
         {
             if (sender is ToolStripMenuItem titem)
             {
@@ -330,7 +329,7 @@ namespace Radegast
             }
         }
 
-        void UpdateStatus(string status)
+        private void UpdateStatus(string status)
         {
             if (InvokeRequired)
             {
@@ -338,7 +337,7 @@ namespace Radegast
                     BeginInvoke(new MethodInvoker(() => UpdateStatus(status)));
                 return;
             }
-            instance.TabConsole.DisplayNotificationInChat("Notecard status: " + status, ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat($"Notecard status: {status}", ChatBufferTextStyle.Invisible);
             tlblStatus.Text = status;
         }
 
@@ -360,7 +359,7 @@ namespace Radegast
 
         private void rtbContent_Enter(object sender, EventArgs e)
         {
-            instance.TabConsole.DisplayNotificationInChat("Editing notecard", ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat("Editing notecard", ChatBufferTextStyle.Invisible);
         }
 
         private void btnKeep_Click(object sender, EventArgs e)

@@ -9,13 +9,13 @@ namespace Radegast
 {
     public abstract class TextManagerBase : IDisposable
     {
-        protected readonly RadegastInstance instance;
+        protected readonly RadegastInstanceForms instance;
         private readonly SlUriParser uriParser;
 
         public ITextPrinter TextPrinter { get; }
-        protected Dictionary<string, Settings.FontSetting> FontSettings { get; set; }
+        protected Dictionary<string, SettingsForms.FontSetting> FontSettings { get; set; }
 
-        public TextManagerBase(RadegastInstance instance, ITextPrinter textPrinter)
+        protected TextManagerBase(RadegastInstanceForms instance, ITextPrinter textPrinter)
         {
             TextPrinter = textPrinter;
 
@@ -45,7 +45,7 @@ namespace Radegast
             {
                 try
                 {
-                    instance.GlobalSettings["chat_fonts"] = JsonConvert.SerializeObject(Settings.DefaultFontSettings);
+                    instance.GlobalSettings["chat_fonts"] = JsonConvert.SerializeObject(SettingsForms.DefaultFontSettings);
                 }
                 catch (Exception ex)
                 {
@@ -55,9 +55,9 @@ namespace Radegast
 
             try
             {
-                FontSettings = JsonConvert.DeserializeObject<Dictionary<string, Settings.FontSetting>>(instance.GlobalSettings["chat_fonts"]);
+                FontSettings = JsonConvert.DeserializeObject<Dictionary<string, SettingsForms.FontSetting>>(instance.GlobalSettings["chat_fonts"]);
 
-                foreach (var fontSetting in Settings.DefaultFontSettings)
+                foreach (var fontSetting in SettingsForms.DefaultFontSettings)
                 {
                     if (!FontSettings.ContainsKey(fontSetting.Key))
                     {

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,11 +26,11 @@ using Radegast.Media;
 
 namespace Radegast
 {
-    public partial class MediaConsole : DettachableControl
+    public partial class MediaConsole : DetachableControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private Settings s;
+        private readonly Settings s;
         private float m_audioVolume;
 
         private float audioVolume
@@ -53,7 +53,7 @@ namespace Radegast
         private readonly object parcelMusicLock = new object();
 
 
-        public MediaConsole(RadegastInstance instance)
+        public MediaConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             DisposeOnDetachedClose = false;
@@ -135,7 +135,7 @@ namespace Radegast
             }
         }
 
-        void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
+        private void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
         {
             if (cbKeep.Checked || e.Result != ParcelResult.Single) return;
 
@@ -187,7 +187,7 @@ namespace Radegast
             }
         }
 
-        void ParcelMusic_OnStreamInfo(object sender, StreamInfoArgs e)
+        private void ParcelMusic_OnStreamInfo(object sender, StreamInfoArgs e)
         {
             if (InvokeRequired)
             {
@@ -233,7 +233,8 @@ namespace Radegast
         }
 
         #region GUI event handlers
-        void lblStation_Click(object sender, EventArgs e)
+
+        private void lblStation_Click(object sender, EventArgs e)
         {
             if (lblStation.ToString() != string.Empty)
             {
@@ -255,7 +256,7 @@ namespace Radegast
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
         }
 
-        void cbObjEnableChanged(object sender, EventArgs e)
+        private void cbObjEnableChanged(object sender, EventArgs e)
         {
             instance.MediaManager.ObjectEnable = cbObjSoundEnable.Checked;
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
@@ -266,12 +267,12 @@ namespace Radegast
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
         }
 
-        void cbPlayAudioStream_CheckedChanged(object sender, EventArgs e)
+        private void cbPlayAudioStream_CheckedChanged(object sender, EventArgs e)
         {
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
         }
 
-        void cbKeep_CheckedChanged(object sender, EventArgs e)
+        private void cbKeep_CheckedChanged(object sender, EventArgs e)
         {
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
         }

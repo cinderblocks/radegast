@@ -26,12 +26,12 @@ namespace Radegast
 {
     public partial class WearableTextures : UserControl
     {
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private readonly InventoryWearable item;
         private AssetWearable wearable;
         private GridClient Client => instance.Client;
 
-        public WearableTextures(RadegastInstance instance, InventoryWearable item)
+        public WearableTextures(RadegastInstanceForms instance, InventoryWearable item)
         {
             InitializeComponent();
 

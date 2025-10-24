@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -273,7 +273,7 @@ namespace Radegast
          * */
         private const string RTF_DOCUMENT_PRE = @"\viewkind4\uc1\pard\cf1\f0\fs20";
         private const string RTF_DOCUMENT_POST = @"\cf0\fs17}";
-        private string RTF_IMAGE_POST = @"}";
+        private readonly string RTF_IMAGE_POST = @"}";
 
         // Represents an unknown font family
         private const string FF_UNKNOWN = "UNKNOWN";
@@ -773,22 +773,22 @@ namespace Radegast
         private const int TWIPS_PER_INCH = 1440;
 
         // The default text color
-        private RtfColor textColor;
+        private readonly RtfColor textColor;
 
         // The default text background color
-        private RtfColor highlightColor;
+        private readonly RtfColor highlightColor;
 
         // Dictionary that maps color enums to RTF color codes
-        private Dictionary<RtfColor, string> rtfColor;
+        private readonly Dictionary<RtfColor, string> rtfColor;
 
         // Dictionary that mapas Framework font families to RTF font families
-        private Dictionary<string, string> rtfFontFamily;
+        private readonly Dictionary<string, string> rtfFontFamily;
 
         // The horizontal resolution at which the control is being displayed
-        private float xDpi;
+        private readonly float xDpi;
 
         // The vertical resolution at which the control is being displayed
-        private float yDpi;
+        private readonly float yDpi;
 
         #endregion
         #region Append RTF or Text to RichTextBox Contents
@@ -1270,7 +1270,7 @@ namespace Radegast
                 // Append the bits to the RTF string
                 foreach (var t in _buffer)
                 {
-                    _rtf.Append(String.Format("{0:X2}", t));
+                    _rtf.Append(string.Format("{0:X2}", t));
                 }
 
                 return _rtf.ToString();

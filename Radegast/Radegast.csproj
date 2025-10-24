@@ -65,7 +65,7 @@
   <ItemGroup>
     <Compile Update="GUI\Controls\AgentNameTextBox.cs" />
     <Compile Update="GUI\Controls\ChatInputBox.cs" />
-    <Compile Update="GUI\Controls\DettachableControl.cs" />
+    <Compile Update="GUI\Controls\DetachableControl.cs" />
     <Compile Update="GUI\Controls\ExtendedRichTextBox.cs" />
     <Compile Update="GUI\Controls\LineNumberPanel.cs" />
     <Compile Update="GUI\Controls\ListBoxCustomSort.cs" />

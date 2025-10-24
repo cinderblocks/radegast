@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -127,7 +127,7 @@ namespace Radegast.Rendering
 
         #endregion Public fields
 
-        uint previousParent = uint.MaxValue;
+        private uint previousParent = uint.MaxValue;
 
         /// <summary>
         /// Cleanup resources used
@@ -168,7 +168,7 @@ namespace Radegast.Rendering
             if (BasePrim.Velocity != Vector3.Zero)
             {
                 BasePrim.Position = InterpolatedPosition = BasePrim.Position + BasePrim.Velocity * time
-                    * 0.98f * RadegastInstance.GlobalInstance.Client.Network.CurrentSim.Stats.Dilation;
+                    * 0.98f * RadegastInstanceForms.Instance.Client.Network.CurrentSim.Stats.Dilation;
                 BasePrim.Velocity += BasePrim.Acceleration * time;
             }
             else if (InterpolatedPosition != BasePrim.Position)
@@ -338,11 +338,92 @@ namespace Radegast.Rendering
         #endregion Occlusion queries
     }
 
+    public static class GLU
+    {
+        public static bool Project(OpenTK.Vector3 objPos, OpenTK.Matrix4 modelMatrix, 
+            OpenTK.Matrix4 projMatrix, int[] viewport, out OpenTK.Vector3 screenPos)
+        {
+            OpenTK.Vector4 _in;
+
+            _in.X = objPos.X;
+            _in.Y = objPos.Y;
+            _in.Z = objPos.Z;
+            _in.W = 1.0f;
+
+            var _out = OpenTK.Vector4.Transform(_in, modelMatrix);
+            _in = OpenTK.Vector4.Transform(_out, projMatrix);
+
+            if (_in.W <= 0.0)
+            {
+                screenPos = OpenTK.Vector3.Zero;
+                return false;
+            }
+
+            _in.X /= _in.W;
+            _in.Y /= _in.W;
+            _in.Z /= _in.W;
+            /* Map x, y and z to range 0-1 */
+            _in.X = _in.X * 0.5f + 0.5f;
+            _in.Y = _in.Y * 0.5f + 0.5f;
+            _in.Z = _in.Z * 0.5f + 0.5f;
+
+            /* Map x,y to viewport */
+            _in.X = _in.X * viewport[2] + viewport[0];
+            _in.Y = _in.Y * viewport[3] + viewport[1];
+
+            screenPos.X = _in.X;
+            screenPos.Y = _in.Y;
+            screenPos.Z = _in.Z;
+
+            return true;
+        }
+
+        public static bool UnProject(float winx, float winy, float winz, OpenTK.Matrix4 modelMatrix, 
+            OpenTK.Matrix4 projMatrix, int[] viewport, out OpenTK.Vector3 pos)
+        {
+            OpenTK.Vector4 _in;
+
+            var finalMatrix = OpenTK.Matrix4.Mult(modelMatrix, projMatrix);
+
+            finalMatrix.Invert();
+
+            _in.X = winx;
+            _in.Y = winy;
+            _in.Z = winz;
+            _in.W = 1.0f;
+
+            /* Map x and y from window coordinates */
+            _in.X = (_in.X - viewport[0]) / viewport[2];
+            _in.Y = (_in.Y - viewport[1]) / viewport[3];
+
+            pos = OpenTK.Vector3.Zero;
+
+            /* Map to range -1 to 1 */
+            _in.X = _in.X * 2 - 1;
+            _in.Y = _in.Y * 2 - 1;
+            _in.Z = _in.Z * 2 - 1;
+
+            //__gluMultMatrixVecd(finalMatrix, _in, _out);
+            // check if this works:
+            var _out = OpenTK.Vector4.Transform(_in, finalMatrix);
+
+            if (_out.W == 0.0f)
+                return false;
+            _out.X /= _out.W;
+            _out.Y /= _out.W;
+            _out.Z /= _out.W;
+            pos.X = _out.X;
+            pos.Y = _out.Y;
+            pos.Z = _out.Z;
+            return true;
+        }
+    }
+
     public static class RHelp
     {
         public static readonly Vector3 InvalidPosition = new Vector3(99999f, 99999f, 99999f);
-        static readonly float t1 = 0.075f;
-        static readonly float t2 = t1 / 5.7f;
+        private static readonly float t1 = 0.075f;
+        private static readonly float t2 = t1 / 5.7f;
 
         public static Vector3 Smoothed1stOrder(Vector3 curPos, Vector3 targetPos, float lastFrameTime)
         {
@@ -444,7 +525,7 @@ namespace Radegast.Rendering
 
             try
             {
-                var fname = RadegastInstance.GlobalInstance.ComputeCacheName(RadegastInstance.GlobalInstance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
+                var fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
 
                 using (var f = File.Open(fname, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
@@ -494,7 +575,7 @@ namespace Radegast.Rendering
         {
             try
             {
-                string fname = RadegastInstance.GlobalInstance.ComputeCacheName(RadegastInstance.GlobalInstance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
+                string fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
 
                 using (var f = File.Open(fname, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
@@ -659,8 +740,9 @@ namespace Radegast.Rendering
         /// Indicates that there was manual camera movement, stop tracking objects
         /// </summary>
         public bool Manual;
-        Vector3 mPosition;
-        Vector3 mFocalPoint;
+
+        private Vector3 mPosition;
+        private Vector3 mFocalPoint;
 
         /// <summary>Camera position</summary>
         public Vector3 Position
@@ -704,7 +786,7 @@ namespace Radegast.Rendering
         public Vector3 RenderPosition;
         public Vector3 RenderFocalPoint;
 
-        void Modify()
+        private void Modify()
         {
             Modified = true;
         }
@@ -903,9 +985,9 @@ namespace Radegast.Rendering
                             #region Vertex Normal
 
                             // HACK: Sometimes normals are getting set to <NaN,NaN,NaN>
-                            if (!Single.IsNaN(vertex.Normal.X) && 
-                                !Single.IsNaN(vertex.Normal.Y) &&
-                                !Single.IsNaN(vertex.Normal.Z))
+                            if (!float.IsNaN(vertex.Normal.X) && 
+                                !float.IsNaN(vertex.Normal.Y) &&
+                                !float.IsNaN(vertex.Normal.Z))
                             {
                                 obj.AppendFormat("vn {0} {1} {2}{3}", vertex.Normal.X, vertex.Normal.Y, vertex.Normal.Z,
                                     Environment.NewLine);
@@ -957,236 +1039,6 @@ namespace Radegast.Rendering
         }
     }
 
-    public static class Math3D
-    {
-        // Column-major:
-        // |  0  4  8 12 |
-        // |  1  5  9 13 |
-        // |  2  6 10 14 |
-        // |  3  7 11 15 |
-
-        public static float[] CreateTranslationMatrix(Vector3 v)
-        {
-            float[] mat = new float[16];
-
-            mat[12] = v.X;
-            mat[13] = v.Y;
-            mat[14] = v.Z;
-            mat[0] = mat[5] = mat[10] = mat[15] = 1;
-
-            return mat;
-        }
-
-        public static float[] CreateRotationMatrix(Quaternion q)
-        {
-            float[] mat = new float[16];
-
-            // Transpose the quaternion (don't ask me why)
-            q.X *= -1f;
-            q.Y *= -1f;
-            q.Z *= -1f;
-
-            float x2 = q.X + q.X;
-            float y2 = q.Y + q.Y;
-            float z2 = q.Z + q.Z;
-            float xx = q.X * x2;
-            float xy = q.X * y2;
-            float xz = q.X * z2;
-            float yy = q.Y * y2;
-            float yz = q.Y * z2;
-            float zz = q.Z * z2;
-            float wx = q.W * x2;
-            float wy = q.W * y2;
-            float wz = q.W * z2;
-
-            mat[0] = 1.0f - (yy + zz);
-            mat[1] = xy - wz;
-            mat[2] = xz + wy;
-            mat[3] = 0.0f;
-
-            mat[4] = xy + wz;
-            mat[5] = 1.0f - (xx + zz);
-            mat[6] = yz - wx;
-            mat[7] = 0.0f;
-
-            mat[8] = xz - wy;
-            mat[9] = yz + wx;
-            mat[10] = 1.0f - (xx + yy);
-            mat[11] = 0.0f;
-
-            mat[12] = 0.0f;
-            mat[13] = 0.0f;
-            mat[14] = 0.0f;
-            mat[15] = 1.0f;
-
-            return mat;
-        }
-
-        public static float[] CreateSRTMatrix(Vector3 scale, Quaternion q, Vector3 pos)
-        {
-            float[] mat = new float[16];
-
-            // Transpose the quaternion (don't ask me why)
-            q.X *= -1f;
-            q.Y *= -1f;
-            q.Z *= -1f;
-
-            float x2 = q.X + q.X;
-            float y2 = q.Y + q.Y;
-            float z2 = q.Z + q.Z;
-            float xx = q.X * x2;
-            float xy = q.X * y2;
-            float xz = q.X * z2;
-            float yy = q.Y * y2;
-            float yz = q.Y * z2;
-            float zz = q.Z * z2;
-            float wx = q.W * x2;
-            float wy = q.W * y2;
-            float wz = q.W * z2;
-
-            mat[0] = (1.0f - (yy + zz)) * scale.X;
-            mat[1] = (xy - wz) * scale.X;
-            mat[2] = (xz + wy) * scale.X;
-            mat[3] = 0.0f;
-
-            mat[4] = (xy + wz) * scale.Y;
-            mat[5] = (1.0f - (xx + zz)) * scale.Y;
-            mat[6] = (yz - wx) * scale.Y;
-            mat[7] = 0.0f;
-
-            mat[8] = (xz - wy) * scale.Z;
-            mat[9] = (yz + wx) * scale.Z;
-            mat[10] = (1.0f - (xx + yy)) * scale.Z;
-            mat[11] = 0.0f;
-
-            //Positional parts
-            mat[12] = pos.X;
-            mat[13] = pos.Y;
-            mat[14] = pos.Z;
-            mat[15] = 1.0f;
-
-            return mat;
-        }
-
-
-        public static float[] CreateScaleMatrix(Vector3 v)
-        {
-            float[] mat = new float[16];
-
-            mat[0] = v.X;
-            mat[5] = v.Y;
-            mat[10] = v.Z;
-            mat[15] = 1;
-
-            return mat;
-        }
-
-        public static float[] Lerp(float[] matrix1, float[] matrix2, float amount)
-        {
-
-            float[] lerp = new float[16];
-            //Probably not doing this as a loop is cheaper(unrolling)
-            //also for performance we probably should not create new objects
-            // but meh.
-            for (int x = 0; x < 16; x++)
-            {
-                lerp[x] = matrix1[x] + ((matrix2[x] - matrix1[x]) * amount);
-            }
-
-            return lerp;
-        }
-
-
-        public static bool GluProject(OpenTK.Vector3 objPos, OpenTK.Matrix4 modelMatrix, OpenTK.Matrix4 projMatrix, int[] viewport, out OpenTK.Vector3 screenPos)
-        {
-            OpenTK.Vector4 _in;
-            OpenTK.Vector4 _out;
-
-            _in.X = objPos.X;
-            _in.Y = objPos.Y;
-            _in.Z = objPos.Z;
-            _in.W = 1.0f;
-
-            _out = OpenTK.Vector4.Transform(_in, modelMatrix);
-            _in = OpenTK.Vector4.Transform(_out, projMatrix);
-
-            if (_in.W <= 0.0)
-            {
-                screenPos = OpenTK.Vector3.Zero;
-                return false;
-            }
-
-            _in.X /= _in.W;
-            _in.Y /= _in.W;
-            _in.Z /= _in.W;
-            /* Map x, y and z to range 0-1 */
-            _in.X = _in.X * 0.5f + 0.5f;
-            _in.Y = _in.Y * 0.5f + 0.5f;
-            _in.Z = _in.Z * 0.5f + 0.5f;
-
-            /* Map x,y to viewport */
-            _in.X = _in.X * viewport[2] + viewport[0];
-            _in.Y = _in.Y * viewport[3] + viewport[1];
-
-            screenPos.X = _in.X;
-            screenPos.Y = _in.Y;
-            screenPos.Z = _in.Z;
-
-            return true;
-        }
-
-        public static bool GluUnProject(float winx, float winy, float winz, OpenTK.Matrix4 modelMatrix, OpenTK.Matrix4 projMatrix, int[] viewport, out OpenTK.Vector3 pos)
-        {
-            OpenTK.Matrix4 finalMatrix;
-            OpenTK.Vector4 _in;
-            OpenTK.Vector4 _out;
-
-            finalMatrix = OpenTK.Matrix4.Mult(modelMatrix, projMatrix);
-
-            finalMatrix.Invert();
-
-            _in.X = winx;
-            _in.Y = winy;
-            _in.Z = winz;
-            _in.W = 1.0f;
-
-            /* Map x and y from window coordinates */
-            _in.X = (_in.X - viewport[0]) / viewport[2];
-            _in.Y = (_in.Y - viewport[1]) / viewport[3];
-
-            pos = OpenTK.Vector3.Zero;
-
-            /* Map to range -1 to 1 */
-            _in.X = _in.X * 2 - 1;
-            _in.Y = _in.Y * 2 - 1;
-            _in.Z = _in.Z * 2 - 1;
-
-            //__gluMultMatrixVecd(finalMatrix, _in, _out);
-            // check if this works:
-            _out = OpenTK.Vector4.Transform(_in, finalMatrix);
-
-            if (_out.W == 0.0f)
-                return false;
-            _out.X /= _out.W;
-            _out.Y /= _out.W;
-            _out.Z /= _out.W;
-            pos.X = _out.X;
-            pos.Y = _out.Y;
-            pos.Z = _out.Z;
-            return true;
-        }
-
-        public static double[] AbovePlane(double height)
-        {
-            return new double[] { 0, 0, 1, -height };
-        }
-
-        public static double[] BelowPlane(double height)
-        {
-            return new double[] { 0, 0, -1, height };
-        }
-    }
-
     /*
      *  Helper classs for reading the static VFS file, call 
      *  staticVFS.readVFSheaders() with the path to the static_data.db2 and static_index.db2 files
@@ -1194,7 +1046,7 @@ namespace Radegast.Rendering
      *  This should only be needed to be used if LL update the static VFS in order to refresh our data
      */
 
-    class VFSblock
+    internal class VFSblock
     {
         public int mLocation;
         public int mLength;
@@ -1216,7 +1068,7 @@ namespace Radegast.Rendering
             mSize = input.UnpackInt();
             offset += 34;
 
-            Logger.Log(String.Format("Found header for {0} type {1} length {2} at {3}", mFileID, mAssetType, mSize, mLocation), Helpers.LogLevel.Info);
+            Logger.Log(string.Format("Found header for {0} type {1} length {2} at {3}", mFileID, mAssetType, mSize, mLocation), Helpers.LogLevel.Info);
 
             return offset;
         }

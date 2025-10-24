@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,12 +29,11 @@ namespace Radegast.Commands
 {
     public sealed class TPCommand : RadegastCommand
     {
-        TabsConsole TC => Instance.TabConsole;
         public static string FolderName = "Radegast Landmarks";
-        Inventory Inv => Client.Inventory.Store;
-        ConsoleWriteLine wl;
+        private Inventory Inv => Client.Inventory.Store;
+        private ConsoleWriteLine wl;
 
-        public TPCommand(RadegastInstance instance)
+        public TPCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "tp";
@@ -43,12 +42,12 @@ namespace Radegast.Commands
             
         }
 
-        void PrintUsage()
+        private void PrintUsage()
         {
             wl("Wrong arguments for \"tp\" command. For detailed description type: " + CommandsManager.CmdPrefix + "tp help");
         }
 
-        void PrintFullUsage()
+        private void PrintFullUsage()
         {
             wl(@"Usage:
 {0}tp (list|landmark name|landmark number|help)
@@ -109,7 +108,7 @@ Example:
                 sb.AppendLine("Landmarks:");
                 for (int i = 0; i < landmarks.Count; i++)
                 {
-                    sb.AppendLine(string.Format("{0}. {1}", i + 1, landmarks[i].Name));
+                    sb.AppendLine($"{i + 1}. {landmarks[i].Name}");
                 }
                 WriteLine(sb.ToString());
                 return;
@@ -142,7 +141,12 @@ Example:
             }
         }
 
-        class LMSorter : IComparer<InventoryLandmark>
+        public override void Dispose()
+        {
+            
+        }
+
+        private class LMSorter : IComparer<InventoryLandmark>
         {
             public int Compare(InventoryLandmark lm1, InventoryLandmark lm2)
             {

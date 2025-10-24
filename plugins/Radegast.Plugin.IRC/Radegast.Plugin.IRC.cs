@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,13 +28,13 @@ namespace Radegast.Plugin.IRC
     [Plugin(Name = "IRC Relay", Description = "Relays SL group chat to a IRC network", Version = "0.1")]
     public class IRCPlugin : IRadegastPlugin
     {
-        RadegastInstance instance;
-        GridClient Client => instance.Client;
+        private RadegastInstanceForms instance;
+        private GridClient Client => instance.Client;
 
-        ToolStripMenuItem IRCButton;
-        int relayNr = 0;
+        private ToolStripMenuItem IRCButton;
+        private int relayNr = 0;
 
-        public void StartPlugin(RadegastInstance inst)
+        public void StartPlugin(RadegastInstanceForms inst)
         {
             instance = inst;
 
@@ -43,7 +43,7 @@ namespace Radegast.Plugin.IRC
             instance.MainForm.PluginsMenu.DropDownItems.Add(IRCButton);
         }
 
-        public void StopPlugin(RadegastInstance instance)
+        public void StopPlugin(RadegastInstanceForms instance)
         {
             List<RadegastTab> toRemove = new List<RadegastTab>();
             foreach (RadegastTab tab in this.instance.TabConsole.Tabs.Values)
@@ -62,7 +62,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void IRCButton_Click(object sender, EventArgs e)
+        private void IRCButton_Click(object sender, EventArgs e)
         {
             relayNr++;
             string tabName = "irc_relay_" + relayNr;

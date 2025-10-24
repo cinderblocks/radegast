@@ -31,7 +31,7 @@ namespace Radegast
 {
     public partial class MapConsole : UserControl
     {
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private bool Active => client.Network.Connected;
         private WebBrowser map;
@@ -40,7 +40,7 @@ namespace Radegast
         private bool mapCreated = false;
         private readonly Dictionary<string, ulong> regionHandles = new Dictionary<string, ulong>();
 
-        public MapConsole(RadegastInstance inst)
+        public MapConsole(RadegastInstanceForms inst)
         {
             InitializeComponent();
             Disposed += frmMap_Disposed;
@@ -94,7 +94,7 @@ namespace Radegast
 
                 mapCtrl.ZoomChanged += MapCtrlZoomChanged;
 
-                if (instance.Netcom.Grid.ID == "agni")
+                if (instance.NetCom.Grid.ID == "agni")
                 {
                     mapCtrl.UseExternalTiles = true;
                 }
@@ -279,14 +279,14 @@ namespace Radegast
                     InTeleport = false;
                     lblStatus.Text = "Failed: " + e.Message;
                     if (Environment.TickCount - lastTick > 500)
-                        instance.TabConsole.DisplayNotificationInChat("Teleport failed");
+                        instance.ShowNotificationInChat("Teleport failed");
                     lastTick = Environment.TickCount;
                     break;
 
                 case TeleportStatus.Finished:
                     lblStatus.Text = "Teleport complete";
                     if (Environment.TickCount - lastTick > 500)
-                        instance.TabConsole.DisplayNotificationInChat("Teleport complete");
+                        instance.ShowNotificationInChat("Teleport complete");
                     lastTick = Environment.TickCount;
                     InTeleport = false;
                     Network_SimChanged(null, null);

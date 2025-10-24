@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -22,7 +22,7 @@ using OpenMetaverse;
 
 namespace RadegastSpeech.Conversation
 {
-    class Max : Mode
+    internal class Max : Mode
     {
         internal Max(PluginControl pc) : base(pc)
         {

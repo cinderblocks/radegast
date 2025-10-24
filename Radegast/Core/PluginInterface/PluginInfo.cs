@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -76,7 +76,7 @@ namespace Radegast
         /// </summary>
         /// <param name="instance">Radegast instance</param>
         /// <exception cref="Exception">On failure</exception>
-        public void Start(RadegastInstance instance)
+        public void Start(RadegastInstanceForms instance)
         {
             if (!IsStarted)
             {
@@ -94,7 +94,7 @@ namespace Radegast
         /// </summary>
         /// <param name="instance">Radegast instance</param>
         /// <exception cref="Exception">On failure</exception>
-        public void Stop(RadegastInstance instance)
+        public void Stop(RadegastInstanceForms instance)
         {
             if (IsStarted)
             {

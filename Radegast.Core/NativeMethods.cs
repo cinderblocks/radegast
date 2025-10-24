@@ -1,6 +1,6 @@
 ﻿/**
  * Radegast Metaverse Client
- * Copyright(c) 2021, Sjofn, LLC
+ * Copyright(c) 2021-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify

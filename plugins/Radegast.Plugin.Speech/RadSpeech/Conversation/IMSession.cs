@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,7 +27,7 @@ namespace RadegastSpeech.Conversation
     /// Represents a single IM conversation
     /// </summary>
     /// <remarks>This can be with an individual or a group</remarks>
-    abstract class IMSession : Mode
+    internal abstract class IMSession : Mode
     {
         protected UUID SessionID;
         protected UUID AgentID;
@@ -59,7 +59,7 @@ namespace RadegastSpeech.Conversation
         /// <summary>
         /// Assign IM conversations to different spatial locations.
         /// </summary>
-        void AssignSlot()
+        private void AssignSlot()
         {
             // We pick locations in a circle.
             int slot = positionSlot++;

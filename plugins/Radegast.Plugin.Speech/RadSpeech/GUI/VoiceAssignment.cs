@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,15 +28,15 @@ namespace RadegastSpeech.GUI
 {
     public partial class VoiceAssignment : Form
     {
-        private PluginControl control;
-        private Dictionary<string, AvailableVoice> library;
+        private readonly PluginControl control;
+        private readonly Dictionary<string, AvailableVoice> library;
         private string voiceName;
         private AvailableVoice voice;
-        private string avatarName;
-        private UUID avatarId;
+        private readonly string avatarName;
+        private readonly UUID avatarId;
         private int rateModification;
         private int pitchModification;
-        private bool doDemo = false;
+        private readonly bool doDemo = false;
 
         public VoiceAssignment( PluginControl pc, string name, UUID id )
         {

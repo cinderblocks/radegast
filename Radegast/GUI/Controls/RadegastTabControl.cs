@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,12 +27,12 @@ namespace Radegast
     {
         public RadegastTab RadegastTab { get; set; }
 
-        protected RadegastInstance instance;
+        protected RadegastInstanceForms instance;
         protected GridClient client => instance.Client;
 
         public RadegastTabControl() { }
 
-        public RadegastTabControl(RadegastInstance instance)
+        public RadegastTabControl(RadegastInstanceForms instance)
         {
             this.instance = instance;
         }

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,12 +27,12 @@ namespace RadegastSpeech.Environment
     /// <summary>
     /// Keep track of other avatars
     /// </summary>
-    class People
+    internal class People
     {
-        private PluginControl control;
+        private readonly PluginControl control;
         private Talk.Control Talker => control.talker;
         private GridClient Client => control.instance.Client;
-        private Dictionary<UUID, AvatarInfo> information;
+        private readonly Dictionary<UUID, AvatarInfo> information;
         private readonly string[] genders;
         private Random random;
         private readonly string[] directions;
@@ -74,7 +74,7 @@ namespace RadegastSpeech.Environment
         /// <param name="defaultTexture"></param>
         /// <param name="faceTextures"></param>
         /// <param name="visualParams"></param>
-        void Avatars_OnAvatarAppearance(
+        private void Avatars_OnAvatarAppearance(
             object sender,
             AvatarAppearanceEventArgs e)
         {

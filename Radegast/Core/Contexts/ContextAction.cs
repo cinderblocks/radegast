@@ -34,7 +34,7 @@ namespace Radegast
         public bool ExactContextType = false;
         public virtual string Label { get; set; }
         public EventHandler Handler;
-        protected RadegastInstance instance;
+        protected RadegastInstanceForms instance;
         public bool ExecAsync = true;
         public bool Enabled { get; set; }
         public virtual object DeRef(object o)
@@ -57,7 +57,7 @@ namespace Radegast
         }
         protected ContextActionsManager ContextActionManager => Instance.ContextActionManager;
 
-        public virtual RadegastInstance Instance
+        public virtual RadegastInstanceForms Instance
         {
             get => instance;
             set => instance = value;
@@ -65,7 +65,7 @@ namespace Radegast
 
         protected virtual GridClient Client => Instance.Client;
 
-        public ContextAction(RadegastInstance inst)
+        public ContextAction(RadegastInstanceForms inst)
         {
             Enabled = true;
             instance = inst;
@@ -143,7 +143,7 @@ namespace Radegast
             return ContextType.IsAssignableFrom(o);
         }
 
-        public virtual bool Contributes(Object o, Type type)
+        public virtual bool Contributes(object o, Type type)
         {
             if (o==null) return false;
             if(TypeContributes(type)) return true;
@@ -163,7 +163,7 @@ namespace Radegast
             Handler?.Invoke(oneOf, e);
         }
 
-        public virtual void IContextAction(RadegastInstance instance)
+        public virtual void IContextAction(RadegastInstanceForms instance)
         {
             Instance = instance;
         }
@@ -282,7 +282,7 @@ namespace Radegast
 
         public void DebugLog(string s)
         {
-           // instance.TabConsole.DisplayNotificationInChat(string.Format("ContextAction {0}: {1}", Label, s));
+           // instance.DisplayNotificationInChat(string.Format("ContextAction {0}: {1}", Label, s));
         }
 
         protected bool TryFindPos(object initial, out Simulator simulator, out Vector3 vector3)

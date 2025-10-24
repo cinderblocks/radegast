@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -34,7 +34,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public MuteList(RadegastInstance instance)
+        public MuteList(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
@@ -46,30 +46,30 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(e.Client);
         }
 
-        void MuteList_Disposed(object sender, EventArgs e)
+        private void MuteList_Disposed(object sender, EventArgs e)
         {
             UnregisterClientEvents(client);
         }
 
-        void RegisterClientEvents(GridClient client)
+        private void RegisterClientEvents(GridClient client)
         {
             if (null == client) return;
             client.Self.MuteListUpdated += Self_MuteListUpdated;
         }
 
-        void UnregisterClientEvents(GridClient client)
+        private void UnregisterClientEvents(GridClient client)
         {
             if (null == client) return;
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
         }
 
-        void Self_MuteListUpdated(object sender, EventArgs e)
+        private void Self_MuteListUpdated(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {

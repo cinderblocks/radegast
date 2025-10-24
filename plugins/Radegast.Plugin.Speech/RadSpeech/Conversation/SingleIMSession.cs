@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace RadegastSpeech.Conversation
     /// <summary>
     /// Instant Message session with an individual
     /// </summary>
-    class SingleIMSession : IMSession
+    internal class SingleIMSession : IMSession
     {
         internal SingleIMSession(PluginControl pc, string label, UUID agent, UUID session) : 
             base(pc, session)
@@ -69,7 +69,7 @@ namespace RadegastSpeech.Conversation
             }
 
             Talker.Say(control.converse.LoginName, message);
-            control.instance.Netcom.SendInstantMessage(
+            control.instance.NetCom.SendInstantMessage(
                         message,
                         AgentID,
                         SessionID);

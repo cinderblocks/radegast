@@ -20,7 +20,6 @@
 
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
-using Radegast.Core;
 using Radegast.WinForms;
 using System;
 using System.Collections.Concurrent;
@@ -39,7 +38,7 @@ namespace Radegast
     {
         private const int UPDATE_INTERVAL = 1000;
 
-        private readonly RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient Client => instance.Client;
 
         private readonly Inventory Inventory;
@@ -61,7 +60,7 @@ namespace Radegast
         private CancellationTokenSource inventoryUpdateCancelToken;
 
         #region Construction and disposal
-        public InventoryConsole(RadegastInstance instance)
+        public InventoryConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += InventoryConsole_Disposed;
@@ -663,7 +662,7 @@ namespace Radegast
             }
             TreeUpdateInProgress = false;
             UpdateStatus("OK");
-            instance.TabConsole.DisplayNotificationInChat("Inventory update completed.");
+            instance.ShowNotificationInChat("Inventory update completed.");
 
             if ((Client.Network.LoginResponseData.FirstLogin) && !string.IsNullOrEmpty(Client.Network.LoginResponseData.InitialOutfit))
             {
@@ -771,7 +770,7 @@ namespace Radegast
 
         private void btnProfile_Click(object sender, EventArgs e)
         {
-            instance.MainForm.ShowAgentProfile(txtCreator.Text, txtCreator.AgentID);
+            instance.ShowAgentProfile(txtCreator.Text, txtCreator.AgentID);
         }
 
         private void UpdateItemInfo(InventoryItem item)
@@ -925,7 +924,7 @@ namespace Radegast
             switch (item.AssetType)
             {
                 case AssetType.Landmark:
-                    instance.TabConsole.DisplayNotificationInChat($"Teleporting to {item.Name}");
+                    instance.ShowNotificationInChat($"Teleporting to {item.Name}");
                     Client.Self.RequestTeleport(item.AssetUUID);
                     break;
 
@@ -1796,7 +1795,7 @@ namespace Radegast
                         break;
 
                     case "lm_teleport":
-                        instance.TabConsole.DisplayNotificationInChat($"Teleporting to {item.Name}");
+                        instance.ShowNotificationInChat($"Teleporting to {item.Name}");
                         Client.Self.RequestTeleport(item.AssetUUID);
                         break;
 
@@ -1874,11 +1873,11 @@ namespace Radegast
 
             if (!success)
             {
-                instance.TabConsole.DisplayNotificationInChat("Creation of notecard failed");
+                instance.ShowNotificationInChat("Creation of notecard failed");
                 return;
             }
 
-            instance.TabConsole.DisplayNotificationInChat("New notecard created, enter notecard name and press enter", ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat("New notecard created, enter notecard name and press enter", ChatBufferTextStyle.Invisible);
             var node = FindNodeForItem(item.ParentUUID);
             node?.Expand();
             node = FindNodeForItem(item.UUID);
@@ -1899,11 +1898,11 @@ namespace Radegast
 
             if (!success)
             {
-                instance.TabConsole.DisplayNotificationInChat("Creation of script failed");
+                instance.ShowNotificationInChat("Creation of script failed");
                 return;
             }
 
-            instance.TabConsole.DisplayNotificationInChat("New script created, enter script name and press enter", ChatBufferTextStyle.Invisible);
+            instance.ShowNotificationInChat("New script created, enter script name and press enter", ChatBufferTextStyle.Invisible);
             var node = FindNodeForItem(item.ParentUUID);
             node?.Expand();
             node = FindNodeForItem(item.UUID);

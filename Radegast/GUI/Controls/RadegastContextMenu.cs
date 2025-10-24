@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -186,7 +186,7 @@ namespace Radegast
         /// <summary>
         /// Locking arround changing the MenuItem
         /// </summary>
-        readonly object _selectionLock = new object();
+        private readonly object _selectionLock = new object();
 
         /// <summary>
         /// Children we have added our hooks into
@@ -302,7 +302,7 @@ namespace Radegast
         {
             WriteDebug("Menu_Opening: {0} {1}", sender, e.Cancel);
 
-            if (RadegastInstance.GlobalInstance.GlobalSettings["theme_compatibility_mode"])
+            if (RadegastInstanceForms.Instance.GlobalSettings["theme_compatibility_mode"])
             {
                 RenderMode = ToolStripRenderMode.System;
             }
@@ -473,7 +473,7 @@ namespace Radegast
 
         private void Rad_Item_Opening(object sender, EventArgs e)
         {
-            if (RadegastInstance.GlobalInstance.GlobalSettings["theme_compatibility_mode"])
+            if (RadegastInstanceForms.Instance.GlobalSettings["theme_compatibility_mode"])
             {
                 RenderMode = ToolStripRenderMode.System;
             }

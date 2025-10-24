@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -30,10 +30,10 @@ namespace Radegast
     public partial class SearchConsole : UserControl
     {
         #region Private members
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
 
-        private FindPeopleConsole console;
+        private readonly FindPeopleConsole console;
 
         private string lastQuery = string.Empty;
         private int startResult = 0;
@@ -42,7 +42,7 @@ namespace Radegast
         #endregion Private members
 
         #region Construction and disposal
-        public SearchConsole(RadegastInstance instance)
+        public SearchConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += SearchConsole_Disposed;
@@ -69,7 +69,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void SearchConsole_Disposed(object sender, EventArgs e)
+        private void SearchConsole_Disposed(object sender, EventArgs e)
         {
             client.Directory.DirPeopleReply -= Directory_DirPeopleReply;
             client.Directory.DirPlacesReply -= Directory_DirPlacesReply;
@@ -88,7 +88,7 @@ namespace Radegast
         }
 
 
-        void Directory_DirPeopleReply(object sender, DirPeopleReplyEventArgs e)
+        private void Directory_DirPeopleReply(object sender, DirPeopleReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -170,7 +170,7 @@ namespace Radegast
 
         private void btnProfile_Click(object sender, EventArgs e)
         {
-            instance.MainForm.ShowAgentProfile(console.SelectedName, console.SelectedAgentUUID);
+            instance.ShowAgentProfile(console.SelectedName, console.SelectedAgentUUID);
         }
 
         private void txtPersonName_KeyDown(object sender, KeyEventArgs e)
@@ -190,7 +190,7 @@ namespace Radegast
         private int placeMatches = 0;
         private int placeStart = 0;
 
-        void Directory_DirPlacesReply(object sender, DirPlacesReplyEventArgs e)
+        private void Directory_DirPlacesReply(object sender, DirPlacesReplyEventArgs e)
         {
             if (e.QueryID != placeSearch) return;
 
@@ -310,7 +310,7 @@ namespace Radegast
                 switch (SortBy)
                 {
                     case SortByColumn.Name:
-                        return CurrentOrder == SortOrder.Ascending ? String.CompareOrdinal(item1.Text, item2.Text) : String.CompareOrdinal(item2.Text, item1.Text);
+                        return CurrentOrder == SortOrder.Ascending ? string.CompareOrdinal(item1.Text, item2.Text) : string.CompareOrdinal(item2.Text, item1.Text);
 
                     case SortByColumn.Traffic:
                         if (CurrentOrder == SortOrder.Ascending)
@@ -377,7 +377,7 @@ namespace Radegast
         private int groupMatches = 0;
         private int groupStart = 0;
 
-        void Directory_DirGroupsReply(object sender, DirGroupsReplyEventArgs e)
+        private void Directory_DirGroupsReply(object sender, DirGroupsReplyEventArgs e)
         {
             if (e.QueryID != groupSearch) return;
 
@@ -530,8 +530,8 @@ namespace Radegast
                 {
                     case SortByColumn.Name:
                         return CurrentOrder == SortOrder.Ascending 
-                            ? String.CompareOrdinal(item1.Text, item2.Text) 
-                            : String.CompareOrdinal(item2.Text, item1.Text);
+                            ? string.CompareOrdinal(item1.Text, item2.Text) 
+                            : string.CompareOrdinal(item2.Text, item1.Text);
 
                     case SortByColumn.Members:
                         if (CurrentOrder == SortOrder.Ascending)
@@ -558,18 +558,18 @@ namespace Radegast
 
         #region Events Search
 
-        uint eventsPerPage = 200;
-        int eventMatches;
-        uint eventStart;
-        UUID eventSearch;
+        private readonly uint eventsPerPage = 200;
+        private int eventMatches;
+        private uint eventStart;
+        private UUID eventSearch;
 
-        DirectoryManager.EventCategories eventType;
-        DirectoryManager.DirFindFlags eventFlags;
-        string eventTime = "u";
+        private DirectoryManager.EventCategories eventType;
+        private DirectoryManager.DirFindFlags eventFlags;
+        private readonly string eventTime = "u";
 
-        static Dictionary<int, DirectoryManager.EventCategories> eventTypeMap = new Dictionary<int, DirectoryManager.EventCategories>(12);
+        private static readonly Dictionary<int, DirectoryManager.EventCategories> eventTypeMap = new Dictionary<int, DirectoryManager.EventCategories>(12);
 
-        void Directory_DirEventsReply(object sender, DirEventsReplyEventArgs e)
+        private void Directory_DirEventsReply(object sender, DirEventsReplyEventArgs e)
         {
             if (e.QueryID != eventSearch) return;
 
@@ -642,7 +642,7 @@ namespace Radegast
             PerformEventSearch();
         }
 
-        void PerformEventSearch()
+        private void PerformEventSearch()
         {
             lvwEvents_SizeChanged(this, EventArgs.Empty);
             lvwEvents.Items.Clear();
@@ -672,12 +672,12 @@ namespace Radegast
             PerformEventSearch();
         }
 
-        void lvwEvents_SizeChanged(object sender, EventArgs e)
+        private void lvwEvents_SizeChanged(object sender, EventArgs e)
         {
             lvwEvents.Columns[0].Width = lvwEvents.Width - 130;
         }
 
-        class EventSorter : System.Collections.IComparer
+        private class EventSorter : System.Collections.IComparer
         {
             public int Compare(object a, object b)
             {
@@ -688,7 +688,7 @@ namespace Radegast
 
                     if (e1.Time < e2.Time) return -1;
                     if (e1.Time > e2.Time) return 1;
-                    return String.CompareOrdinal(e1.Name, e2.Name);
+                    return string.CompareOrdinal(e1.Name, e2.Name);
                 }
                 catch { }
                 return 0;
@@ -706,7 +706,7 @@ namespace Radegast
             }
         }
 
-        void Directory_EventInfoReply(object sender, EventInfoReplyEventArgs e)
+        private void Directory_EventInfoReply(object sender, EventInfoReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -730,7 +730,7 @@ namespace Radegast
             txtEventDescription.Text = evt.Desc.Replace("\n", Environment.NewLine);
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -758,8 +758,7 @@ namespace Radegast
         private void btnTeleport_Click(object sender, EventArgs e)
         {
             var evt = (DirectoryManager.EventInfo)pnlEventDetail.Tag;
-            float localX, localY;
-            ulong handle = Helpers.GlobalPosToRegionHandle((float)evt.GlobalPos.X, (float)evt.GlobalPos.Y, out localX, out localY);
+            ulong handle = Helpers.GlobalPosToRegionHandle((float)evt.GlobalPos.X, (float)evt.GlobalPos.Y, out var localX, out var localY);
             client.Self.Teleport(handle, new Vector3(localX, localY, (float)evt.GlobalPos.Z));
         }
 

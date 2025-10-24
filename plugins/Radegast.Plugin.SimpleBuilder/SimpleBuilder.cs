@@ -50,21 +50,21 @@ namespace SimpleBuilderNamespace
     [Plugin(Name = "SimpleBuilder Plugin", Description = "Allows you to build some basic prims, like boxes, cylinder, tubes, ... (requires permission!)", Version = "1.0")]
     public partial class SimpleBuilder : RadegastTabControl, IRadegastPlugin
     {
-        System.Threading.AutoResetEvent primDone = new System.Threading.AutoResetEvent(false);
+        private readonly System.Threading.AutoResetEvent primDone = new System.Threading.AutoResetEvent(false);
 
-        private string pluginName = "SimpleBuilder";
+        private readonly string pluginName = "SimpleBuilder";
         // Methods needed for proper registration of a GUI tab
         #region Template for GUI radegast tab
         /// <summary>String for internal identification of the tab (change this!)</summary>
-        static string tabID = "simplebuilder_tab";
+        private static readonly string tabID = "simplebuilder_tab";
         /// <summary>Text displayed in the plugins menu and the tab label (change this!)</summary>
-        static string tabLabel = "Build Prims";
+        private static readonly string tabLabel = "Build Prims";
 
         /// <summary>Menu item that gets added to the Plugins menu</summary>
-        ToolStripMenuItem ActivateTabButton;
+        private ToolStripMenuItem ActivateTabButton;
 
         public List<Primitive> Prims = new List<Primitive>();
-        PropertiesQueue propRequester;
+        private PropertiesQueue propRequester;
 
         private Primitive m_selectedPrim;
         public Primitive selectedPrim {
@@ -99,7 +99,7 @@ namespace SimpleBuilderNamespace
         /// </summary>
         /// <param name="instance">RadegastInstance</param>
         /// <param name="unused">This param is not used, but needs to be there to keep the constructor signature</param>
-        public SimpleBuilder(RadegastInstance instance, bool unused)
+        public SimpleBuilder(RadegastInstanceForms instance, bool unused)
             : base(instance)
         {
             InitializeComponent();
@@ -118,7 +118,7 @@ namespace SimpleBuilderNamespace
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void DemoTab_Disposed(object sender, EventArgs e)
+        private void DemoTab_Disposed(object sender, EventArgs e)
         {
             UnregisterClientEvents(client);
             instance.ClientChanged -= instance_ClientChanged;
@@ -130,7 +130,7 @@ namespace SimpleBuilderNamespace
         /// for this tab
         /// </summary>
         /// <param name="inst">Main RadegastInstance</param>
-        public void StartPlugin(RadegastInstance inst)
+        public void StartPlugin(RadegastInstanceForms inst)
         {
             instance = inst;
 
@@ -147,7 +147,7 @@ namespace SimpleBuilderNamespace
         /// Close the tab if it's active and remove the menu button
         /// </summary>
         /// <param name="inst"></param>
-        public void StopPlugin(RadegastInstance inst)
+        public void StopPlugin(RadegastInstanceForms inst)
         {
             ActivateTabButton.Dispose();
             if (instance.TabConsole.Tabs.ContainsKey(tabID))
@@ -158,7 +158,7 @@ namespace SimpleBuilderNamespace
             propRequester.OnTick -= propRequester_OnTick;
         }
 
-        void propRequester_OnTick(int remaining)
+        private void propRequester_OnTick(int remaining)
         {
             if (InvokeRequired)
             {
@@ -239,11 +239,11 @@ namespace SimpleBuilderNamespace
             }
             else if (ownerName != "Loading...")
             {
-                return String.Format("{0} ({1}m) owned by {2}", name, distance, ownerName);
+                return string.Format("{0} ({1}m) owned by {2}", name, distance, ownerName);
             }
             else
             {
-                return String.Format("{0} ({1}m)", name, distance);
+                return string.Format("{0} ({1}m)", name, distance);
             }
 
         }
@@ -287,7 +287,7 @@ namespace SimpleBuilderNamespace
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(e.Client);
@@ -297,7 +297,7 @@ namespace SimpleBuilderNamespace
         /// Registration of all GridClient (libomv) events go here
         /// </summary>
         /// <param name="client"></param>
-        void RegisterClientEvents(GridClient client)
+        private void RegisterClientEvents(GridClient client)
         {
             client.Self.ChatFromSimulator += Self_ChatFromSimulator;
         }
@@ -307,7 +307,7 @@ namespace SimpleBuilderNamespace
         /// Important that this be symetric to RegisterClientEvents() calls
         /// </summary>
         /// <param name="client"></param>
-        void UnregisterClientEvents(GridClient client)
+        private void UnregisterClientEvents(GridClient client)
         {
             if (client == null) return;
             client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
@@ -320,7 +320,7 @@ namespace SimpleBuilderNamespace
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        void MenuButtonClicked(object sender, EventArgs e)
+        private void MenuButtonClicked(object sender, EventArgs e)
         {
             if (instance.TabConsole.TabExists(tabID))
             {
@@ -335,7 +335,8 @@ namespace SimpleBuilderNamespace
         #endregion Template for GUI radegast tab
 
         #region Implementation of the custom tab functionality
-        void Self_ChatFromSimulator(object sender, ChatEventArgs e)
+
+        private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
         {
             // Boilerplate, make sure to be on the GUI thread
             if (InvokeRequired)
@@ -378,14 +379,14 @@ namespace SimpleBuilderNamespace
             txt_ObjectName.Text = ObjectName;
         }
 
-        void Objects_OnNewPrim(object sender, PrimEventArgs e)
+        private void Objects_OnNewPrim(object sender, PrimEventArgs e)
         {
             Primitive prim = e.Prim;
 
             if ((prim.Flags & PrimFlags.CreateSelected) == 0)
                 return; // We received an update for an object we didn't create
 
-            if (String.IsNullOrEmpty(ObjectName))
+            if (string.IsNullOrEmpty(ObjectName))
                 ObjectName = "SimpleBuilder " + DateTime.Now.ToString("hmmss");
 
             client.Objects.SetName(client.Network.CurrentSim, prim.LocalID, ObjectName);
@@ -419,27 +420,27 @@ namespace SimpleBuilderNamespace
         private void getScaleFromSelection(){
             if (selectedPrim == null) return;
 
-            scaleX.Value = (Decimal)selectedPrim.Scale.X;
-            scaleY.Value = (Decimal)selectedPrim.Scale.Y;
-            scaleZ.Value = (Decimal)selectedPrim.Scale.Z;
+            scaleX.Value = (decimal)selectedPrim.Scale.X;
+            scaleY.Value = (decimal)selectedPrim.Scale.Y;
+            scaleZ.Value = (decimal)selectedPrim.Scale.Z;
         }
 
         private void getRotFromSelection()
         {
             if (selectedPrim == null) return;
 
-            rotX.Value = (Decimal)selectedPrim.Rotation.X;
-            rotY.Value = (Decimal)selectedPrim.Rotation.Y;
-            rotZ.Value = (Decimal)selectedPrim.Rotation.Z;
+            rotX.Value = (decimal)selectedPrim.Rotation.X;
+            rotY.Value = (decimal)selectedPrim.Rotation.Y;
+            rotZ.Value = (decimal)selectedPrim.Rotation.Z;
         }
 
         private void getPosFromSelection()
         {
             if (selectedPrim == null) return;
 
-            posX.Value = (Decimal)selectedPrim.Position.X;
-            posY.Value = (Decimal)selectedPrim.Position.Y;
-            posZ.Value = (Decimal)selectedPrim.Position.Z;
+            posX.Value = (decimal)selectedPrim.Position.X;
+            posY.Value = (decimal)selectedPrim.Position.Y;
+            posZ.Value = (decimal)selectedPrim.Position.Z;
         }
 
         private void setRotToSelection()

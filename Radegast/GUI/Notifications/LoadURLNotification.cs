@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,10 +26,10 @@ namespace Radegast
 {
     public partial class ntfLoadURL : Notification
     {
-        LoadUrlEventArgs ev;
-        RadegastInstance instance;
+        private readonly LoadUrlEventArgs ev;
+        private readonly RadegastInstanceForms instance;
 
-        public ntfLoadURL(RadegastInstance instance, LoadUrlEventArgs e)
+        public ntfLoadURL(RadegastInstanceForms instance, LoadUrlEventArgs e)
         {
             InitializeComponent();
             Disposed += ntfLoadURL_Disposed;
@@ -50,12 +50,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void ntfLoadURL_Disposed(object sender, EventArgs e)
+        private void ntfLoadURL_Disposed(object sender, EventArgs e)
         {
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;
         }
 
-        void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
         {
             if (!e.Names.ContainsKey(ev.OwnerID)) return;
 

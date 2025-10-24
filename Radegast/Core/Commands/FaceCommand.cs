@@ -30,14 +30,14 @@ namespace Radegast.Commands
 {
     public sealed class FaceCommand : RadegastCommand
     {
-        private TabsConsole TC => Instance.TabConsole;
+        private TabsConsole TC => ((RadegastInstanceForms)Instance).TabConsole;
         private ObjectsConsole Objects;
         private ChatConsole Chat;
         private Vector3 targetPos = Vector3.Zero;
         private const RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;
         private ConsoleWriteLine wl;
 
-        public FaceCommand(RadegastInstance instance)
+        public FaceCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "face";
@@ -161,7 +161,7 @@ Examples:
 
                     if (!TC.TabExists("objects"))
                     {
-                        var tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
+                        var tab = TC.AddTab("objects", "Objects", new ObjectsConsole((RadegastInstanceForms)Instance));
                         tab.AllowClose = true;
                         tab.AllowDetach = true;
                         tab.Visible = true;

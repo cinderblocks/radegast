@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -27,77 +28,70 @@ namespace Radegast
 {
     public partial class GroupInvite : RadegastForm
     {
-        AvatarPicker picker;
-        RadegastInstance instance;
-        Radegast.Netcom netcom;
+        private readonly AvatarPicker Picker;
 
-        Group group;
-        Dictionary<UUID, GroupRole> roles;
+        private readonly Group group;
+        private Dictionary<UUID, GroupRole> roles;
 
-        public GroupInvite(RadegastInstance instance, Group group, Dictionary<UUID, GroupRole> roles)
+        public GroupInvite(RadegastInstanceForms instance, Group group, Dictionary<UUID, GroupRole> roles)
             :base(instance)
         {
             InitializeComponent();
             Disposed += GroupInvite_Disposed;
             AutoSavePosition = true;
 
-            this.instance = instance;
             this.roles = roles;
             this.group = group;
-            netcom = instance.Netcom;
 
-            picker = new AvatarPicker(instance) { Dock = DockStyle.Fill };
-            Controls.Add(picker);
-            picker.SelectionChaged += picker_SelectionChaged;
-            picker.BringToFront();
+            Picker = new AvatarPicker(instance) { Dock = DockStyle.Fill };
+            Controls.Add(Picker);
+            Picker.SelectionChanged += PickerSelectionChanged;
+            Picker.BringToFront();
             
-            netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            NetCom.ClientDisconnected += NetComClientDisconnected;
 
             cmbRoles.Items.Add(roles[UUID.Zero]);
             cmbRoles.SelectedIndex = 0;
 
-            foreach (KeyValuePair<UUID, GroupRole> role in roles)
-                if (role.Key != UUID.Zero)
-                    cmbRoles.Items.Add(role.Value);
+            foreach (var role in roles.Where(role => role.Key != UUID.Zero))
+                cmbRoles.Items.Add(role.Value);
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void picker_SelectionChaged(object sender, EventArgs e)
+        private void PickerSelectionChanged(object sender, EventArgs e)
         {
-            btnIvite.Enabled = picker.SelectedAvatars.Count > 0;
+            btnIvite.Enabled = Picker.SelectedAvatars.Count > 0;
         }
 
-        void GroupInvite_Disposed(object sender, EventArgs e)
+        private void GroupInvite_Disposed(object sender, EventArgs e)
         {
-            netcom.ClientDisconnected -= Netcom_ClientDisconnected;
-            netcom = null;
-            instance = null;
-            picker.Dispose();
+            NetCom.ClientDisconnected -= NetComClientDisconnected;
+            Picker.Dispose();
             Logger.DebugLog("Group picker disposed");
         }
 
-        void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            ((Radegast.Netcom)sender).ClientDisconnected -= Netcom_ClientDisconnected;
+            ((NetCom)sender).ClientDisconnected -= NetComClientDisconnected;
 
-            if (!instance.MonoRuntime || IsHandleCreated)
+            if (!Instance.MonoRuntime || IsHandleCreated)
                 BeginInvoke(new MethodInvoker(Close));
         }
 
 
         private void GroupInvite_Load(object sender, EventArgs e)
         {
-            picker.txtSearch.Focus();
+            Picker.txtSearch.Focus();
         }
 
-        private void btnIvite_Click(object sender, EventArgs e)
+        private void btnInvite_Click(object sender, EventArgs e)
         {
             List<UUID> roleID = new List<UUID> {((GroupRole) cmbRoles.SelectedItem).ID};
 
-            foreach (UUID key in picker.SelectedAvatars.Keys)
+            foreach (UUID key in Picker.SelectedAvatars.Keys)
             {
-                instance.Client.Groups.Invite(group.ID, roleID, key);
+                Instance.Client.Groups.Invite(group.ID, roleID, key);
             }
             Close();
         }

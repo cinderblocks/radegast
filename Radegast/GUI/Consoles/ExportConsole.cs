@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -31,10 +31,11 @@ namespace Radegast
 	public partial class ExportConsole : RadegastTabControl
 	{
 		#region Private Variables
-		uint uLocalID;
-		List<UUID> Textures = new List<UUID>();
-		GridClient Client;
-		PrimExporter Exporter;
+
+        private readonly uint uLocalID;
+        private readonly List<UUID> Textures = new List<UUID>();
+        private readonly GridClient Client;
+        private readonly PrimExporter Exporter;
 		#endregion
 		
 		#region Constructor
@@ -51,7 +52,8 @@ namespace Radegast
 		#endregion
 		
 		#region Private Methods
-		void LogMessage(string format, params object[] args)
+
+        private void LogMessage(string format, params object[] args)
 		{
 			if (InvokeRequired)
 			{
@@ -63,8 +65,8 @@ namespace Radegast
 			txtLog.SelectionStart = txtLog.TextLength;
 			txtLog.ScrollToCaret();
 		}
-		
-		void GatherInfo()
+
+        private void GatherInfo()
 		{
             var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                 prim => prim.Value.LocalID == uLocalID);
@@ -111,8 +113,8 @@ namespace Radegast
             primCount.Text = prims.Count.ToString();
             textureCount.Text = Textures.Count.ToString();
         }
-		
-		void ValidatePath(string fname)
+
+        private void ValidatePath(string fname)
 		{
 		    string path = Path.GetDirectoryName(fname);
 		    btnExport.Enabled = Directory.Exists(path);
@@ -120,12 +122,13 @@ namespace Radegast
 		#endregion
 		
 		#region Event Handlers
-		void TxtFileNameTextChanged(object sender, EventArgs e)
+
+        private void TxtFileNameTextChanged(object sender, EventArgs e)
 		{
 			ValidatePath(txtFileName.Text);
 		}
-		
-		void BtnBrowseClick(object sender, EventArgs e)
+
+        private void BtnBrowseClick(object sender, EventArgs e)
 		{
             SaveFileDialog dlg = new SaveFileDialog {Title = "Export object file", Filter = "XML File (*.xml)|*.xml"};
             DialogResult res = dlg.ShowDialog();
@@ -136,8 +139,8 @@ namespace Radegast
 				ValidatePath(dlg.FileName);
 			}
 		}
-		
-		void BtnExportClick(object sender, EventArgs e)
+
+        private void BtnExportClick(object sender, EventArgs e)
 		{
 			Enabled = false;
 			Exporter.LogMessage = LogMessage;

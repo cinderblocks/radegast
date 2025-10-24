@@ -36,7 +36,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        public DisplayNameChange(RadegastInstance inst)
+        public DisplayNameChange(RadegastInstanceForms inst)
             : base(inst)
         {
             InitializeComponent();
@@ -48,12 +48,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void DisplayNameChange_Disposed(object sender, EventArgs e)
+        private void DisplayNameChange_Disposed(object sender, EventArgs e)
         {
             Client.Self.SetDisplayNameReply += Self_SetDisplayNameReply;
         }
 
-        void Self_SetDisplayNameReply(object sender, SetDisplayNameReplyEventArgs e)
+        private void Self_SetDisplayNameReply(object sender, SetDisplayNameReplyEventArgs e)
         {
             UpdateStatus(e.Status == 200
                 ? $"Name successfully changed to: {e.DisplayName.DisplayName}"

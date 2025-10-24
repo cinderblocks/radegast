@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -33,11 +33,11 @@ namespace RadegastSpeech
     /// <summary>
     /// Low level interface to Mac OSX speech synthesis functions.
     /// </summary>
-    class MacSynth
+    internal class MacSynth
     {
         private string[] BeepNames;
         private NSSpeechSynthesizer syn;
-        private OSDMap voiceProperties;
+        private readonly OSDMap voiceProperties;
         internal MacSynth(PluginControl pc, string[] beeps )
         {
 			BeepNames = beeps;
@@ -153,7 +153,7 @@ namespace RadegastSpeech
         }
 
 
-        class MacAvailableVoice : AvailableVoice
+        private class MacAvailableVoice : AvailableVoice
         {
             internal MacAvailableVoice(string name)
             {

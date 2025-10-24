@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,14 +29,14 @@ namespace Radegast
         public bool Floater = false;
         public bool CloseOnDetachedClose = false;
 
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms Instance;
 
         private string label;
         private string originalLabel;
 
-        public RadegastTab(RadegastInstance instance, ToolStripButton button, Control control, string name, string label)
+        public RadegastTab(IRadegastInstance instance, ToolStripButton button, Control control, string name, string label)
         {
-            this.instance = instance;
+            Instance = (RadegastInstanceForms)instance;
             Button = button;
             Control = control;
             Name = name;
@@ -54,9 +54,9 @@ namespace Radegast
                     Control.Parent.Dispose();
                 }
 
-                if (instance.TabConsole.toolStripContainer1.ContentPanel.Contains(Control))
+                if (Instance.TabConsole.toolStripContainer1.ContentPanel.Contains(Control))
                 {
-                    instance.TabConsole.toolStripContainer1.ContentPanel.Controls.Remove(Control);
+                    Instance.TabConsole.toolStripContainer1.ContentPanel.Controls.Remove(Control);
                 }
                 Control.Dispose();
                 Control = null;
@@ -64,9 +64,9 @@ namespace Radegast
 
             if (Button != null)
             {
-                if (instance.TabConsole.tstTabs.Items.Contains(Button))
+                if (Instance.TabConsole.tstTabs.Items.Contains(Button))
                 {
-                    instance.TabConsole.tstTabs.Items.Remove(Button);
+                    Instance.TabConsole.tstTabs.Items.Remove(Button);
                 }
                 Button.Dispose();
                 Button = null;
@@ -150,12 +150,12 @@ namespace Radegast
 
         public void Highlight()
         {
-            if (instance.GlobalSettings["taskbar_highlight"])
+            if (Instance.GlobalSettings["taskbar_highlight"])
             {
-                if ((Control is ChatConsole && instance.GlobalSettings["highlight_on_chat"]) ||
-                    (Control is IMTabWindow && instance.GlobalSettings["highlight_on_im"]) ||
-                    (Control is GroupIMTabWindow && instance.GlobalSettings["highlight_on_group_chat"]) ||
-                    (Control is ConferenceIMTabWindow && instance.GlobalSettings["highlight_on_group_chat"]))
+                if ((Control is ChatConsole && Instance.GlobalSettings["highlight_on_chat"]) ||
+                    (Control is IMTabWindow && Instance.GlobalSettings["highlight_on_im"]) ||
+                    (Control is GroupIMTabWindow && Instance.GlobalSettings["highlight_on_group_chat"]) ||
+                    (Control is ConferenceIMTabWindow && Instance.GlobalSettings["highlight_on_group_chat"]))
                 {
                     FormFlash.StartFlash(Control.FindForm());
                 }
@@ -175,7 +175,7 @@ namespace Radegast
 
         public void Unhighlight()
         {
-            FormFlash.StopFlash(instance.MainForm);
+            FormFlash.StopFlash(Instance.MainForm);
 
             if (!Detached)
             {
@@ -202,7 +202,7 @@ namespace Radegast
             OnTabAttached(EventArgs.Empty);
         }
 
-        public void Detach(RadegastInstance instance)
+        public void Detach(RadegastInstanceForms instance)
         {
             if (!AllowDetach) return;
             if (Detached) return;

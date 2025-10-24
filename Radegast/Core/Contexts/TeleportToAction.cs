@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class TeleportToAction : ContextAction
     {
-        public TeleportToAction(RadegastInstance inst)
+        public TeleportToAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Teleport To";
@@ -44,17 +44,14 @@ namespace Radegast
             string pname = instance.Names.Get(ToUUID(target));
             if (pname == "(???) (???)") pname = "" + target;
 
-            Simulator sim = null;
-            Vector3 pos;
-
-            if (TryFindPos(target, out sim, out pos))
+            if (TryFindPos(target, out var sim, out var pos))
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Teleport to {0}", pname));
+                instance.ShowNotificationInChat($"Teleport to {pname}");
                 instance.State.MoveTo(sim, pos, true);
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Could not locate {0}", target));
+                instance.ShowNotificationInChat($"Could not locate {target}");
             }
         }
     }

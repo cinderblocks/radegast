@@ -31,7 +31,7 @@ namespace Radegast
     /// <summary>
     /// Base class for all notifications (blue dialogs)
     /// </summary>
-    public class Notification : UserControl
+    public class Notification : UserControl, INotification
     {
         /// <summary>
         /// Notification type
@@ -139,7 +139,7 @@ namespace Radegast
         /// <summary>
         /// Instance of Radegast where the event occured
         /// </summary>
-        public RadegastInstance Instance;
+        public RadegastInstanceForms Instance;
 
         /// <summary>
         /// Notification text
@@ -165,7 +165,7 @@ namespace Radegast
         /// Create new event args object
         /// </summary>
         /// <param name="instance">Instance of Radegast notification is coming from</param>
-        public NotificationEventArgs(RadegastInstance instance)
+        public NotificationEventArgs(RadegastInstanceForms instance)
         {
             Instance = instance;
         }

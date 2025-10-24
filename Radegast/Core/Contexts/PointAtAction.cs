@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class PointAtAction : ContextAction
     {
-        public PointAtAction(RadegastInstance inst)
+        public PointAtAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Point at";
@@ -48,7 +48,7 @@ namespace Radegast
         {
             if (instance.State.IsPointing)
             {
-                instance.TabConsole.DisplayNotificationInChat("stopping pointing");
+                instance.ShowNotificationInChat("stopping pointing");
                 instance.State.UnSetPointing();
                 return;
             }
@@ -58,12 +58,12 @@ namespace Radegast
 
             if (prim != null)
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Pointing at {0}", pname));
+                instance.ShowNotificationInChat($"Pointing at {pname}");
                 instance.State.SetPointing(prim, 5);
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Could not locate {0}", target));
+                instance.ShowNotificationInChat($"Could not locate {target}");
             }
         }
     }

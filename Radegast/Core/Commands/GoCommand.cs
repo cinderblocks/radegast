@@ -30,15 +30,15 @@ namespace Radegast.Commands
 {
     public sealed class GoCommand : RadegastCommand
     {
-        Regex subCommand;
-        RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;
-        TabsConsole TC => Instance.TabConsole;
-        ObjectsConsole Objects;
-        ChatConsole Chat;
-        Vector3 targetPos = Vector3.Zero;
-        ConsoleWriteLine wl;
+        private Regex subCommand;
+        private readonly RegexOptions regexOptions = RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase;
+        private TabsConsole TC => ((RadegastInstanceForms)Instance).TabConsole;
+        private ObjectsConsole Objects;
+        private ChatConsole Chat;
+        private Vector3 targetPos = Vector3.Zero;
+        private ConsoleWriteLine wl;
 
-        public GoCommand(RadegastInstance instance)
+        public GoCommand(IRadegastInstance instance)
             : base(instance)
         {
             Name = "go";
@@ -56,12 +56,12 @@ namespace Radegast.Commands
             base.Dispose();
         }
 
-        void PrintUsage()
+        private void PrintUsage()
         {
             wl("Wrong arguments for \"go\" command. For detailed description type: " + CommandsManager.CmdPrefix + "go help");
         }
 
-        void PrintFullUsage()
+        private void PrintFullUsage()
         {
             wl(@"Usage:
 
@@ -196,7 +196,7 @@ Examples:
 
                     if (!TC.TabExists("objects"))
                     {
-                        RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(Instance));
+                        RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(((RadegastInstanceForms)Instance)));
                         tab.AllowClose = true;
                         tab.AllowDetach = true;
                         tab.Visible = true;

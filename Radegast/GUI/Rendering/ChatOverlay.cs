@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -33,14 +33,14 @@ namespace Radegast.Rendering
         public static float ChatLineFade = 1.5f; // number of seconds before expiry to start fading chat off
         public static OpenTK.Graphics.Color4 ChatBackground = new OpenTK.Graphics.Color4(0f, 0f, 0f, 0.75f);
 
-        RadegastInstance Instance;
-        SceneWindow Window;
-        float runningTime;
-        
-        Queue<ChatLine> chatLines;
-        int screenWidth, screenHeight;
+        private readonly RadegastInstanceForms Instance;
+        private readonly SceneWindow Window;
+        private float runningTime;
 
-        public ChatOverlay(RadegastInstance instance, SceneWindow window)
+        private Queue<ChatLine> chatLines;
+        private int screenWidth, screenHeight;
+
+        public ChatOverlay(RadegastInstanceForms instance, SceneWindow window)
         {
             Instance = instance;
             Window = window;
@@ -65,7 +65,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void MainChatManger_ChatLineAdded(object sender, ChatLineAddedArgs e)
+        private void MainChatManger_ChatLineAdded(object sender, ChatLineAddedArgs e)
         {
             lock (chatLines)
             {
@@ -184,9 +184,9 @@ namespace Radegast.Rendering
 
         public ChatBufferTextStyle Style => item.Style;
 
-        int textureID = -1;
-        int widthForTextureGenerated = -1;
-        ChatBufferItem item;
+        private int textureID = -1;
+        private int widthForTextureGenerated = -1;
+        private readonly ChatBufferItem item;
        
         public ChatLine(ChatBufferItem item, float timeAdded)
         {

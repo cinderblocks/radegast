@@ -31,28 +31,27 @@ namespace Radegast
 {
     public partial class InventoryBackup : Form
     {
-        private RadegastInstance instance;
-        GridClient client => instance.Client;
-        private Inventory inv;
+        private readonly IRadegastInstance instance;
+        private GridClient client => instance.Client;
         private string folderName;
         private int fetched = 0;
         private TextWriter csvFile = null;
         private int traversed = 0;
-        private InventoryNode rootNode;
-        private CancellationTokenSource backupTaskCancelToken;
+        private readonly InventoryNode rootNode;
+        private readonly CancellationTokenSource backupTaskCancelToken;
 
-        public InventoryBackup(RadegastInstance instance, UUID rootFolder)
+        public InventoryBackup(IRadegastInstance instance, UUID rootFolder)
         {
             InitializeComponent();
             Disposed += InventoryBackup_Disposed;
 
             this.instance = instance;
 
-            inv = client.Inventory.Store;
-            rootNode = inv.RootNode;
-            if (inv.Contains(rootFolder) && inv.GetNodeFor(rootFolder).Data is InventoryFolder)
+            var inv1 = client.Inventory.Store;
+            rootNode = inv1.RootNode;
+            if (inv1.Contains(rootFolder) && inv1.GetNodeFor(rootFolder).Data is InventoryFolder)
             {
-                rootNode = inv.GetNodeFor(rootFolder);
+                rootNode = inv1.GetNodeFor(rootFolder);
             }
 
             backupTaskCancelToken = new CancellationTokenSource();
@@ -60,7 +59,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void InventoryBackup_Disposed(object sender, EventArgs e)
+        private void InventoryBackup_Disposed(object sender, EventArgs e)
         {
             try
             {

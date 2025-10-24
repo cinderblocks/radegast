@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,44 +26,44 @@ namespace Radegast
 {
     public interface IContextAction : IDisposable
     {
-        void IContextAction(RadegastInstance instance);
+        void IContextAction(RadegastInstanceForms instance);
 
         /// <summary>
-        /// Generate a list of ToolStripMenuItems that might be be embeded into a ContextMenuStrip host
+        /// Generate a list of ToolStripMenuItems that might be embedded into a ContextMenuStrip host
         /// </summary>
-        /// <param name="target">the context sensitive item</param>
+        /// <param name="target">the context-sensitive item</param>
         /// <param name="type">the dereferenced type</param>
-        /// <returns>List of ToolStripMenuItem that will be appeneded to the current menu</returns>
+        /// <returns>List of ToolStripMenuItem that will be appended to the current menu</returns>
         IEnumerable<ToolStripMenuItem> GetToolItems(object target, Type type);
 
         /// <summary>
         /// If the menu item is Enabled
         /// </summary>
-        /// <param name="target">the context sensiive item</param>
+        /// <param name="target">the context-sensitive item</param>
         /// <returns>false when the menu Item should be greyed</returns>
         bool IsEnabled(object target);
 
         /// <summary>
         /// The menu Item's text based on target 
         /// </summary>
-        /// <param name="target">the context sensiive item</param>
-        /// <returns>true if the Action is availble - for instance some Avatar might not even be logged in so "follow" would not even show up</returns>
+        /// <param name="target">the context-sensitive item</param>
+        /// <returns>true if the Action is available - for instance some Avatar might not even be logged in so "follow" would not even show up</returns>
         string LabelFor(object target);
 
         /// <summary>
         /// If the context menu is usable to the target
         /// </summary>
-        /// <param name="target">the context sensitive item</param>
+        /// <param name="target">the context-sensitive item</param>
         /// <param name="type">the dereferenced type</param>
         /// <returns>The name that is displayed in a menu of options</returns>
-        bool Contributes(Object target, Type type);
+        bool Contributes(object target, Type type);
 
         /// <summary>
         /// The Action code goes here
         /// </summary>
         /// <param name="sender">the Control that originates the event</param>
-        /// <param name="e">The EventArgs proprietary to the Controls event.. like MouseEventArgs or KeyEventArgs etc</param>
-        /// <param name="target">The Context Item that is realy targeted</param>
+        /// <param name="e">The EventArgs proprietary to the Controls event like MouseEventArgs or KeyEventArgs etc</param>
+        /// <param name="target">The Context Item that is really targeted</param>
         void OnInvoke(object sender, EventArgs e, object target);
     }
 }

@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -97,23 +97,23 @@ namespace Radegast.Plugin.IRC
                 }
             }
 
-            public string Name;
-            public RelaySourceType SourceType;
+            public readonly string Name;
+            public readonly RelaySourceType SourceType;
             public UUID SessionId;
         }
 
         public IrcClient irc;
 
-        TabsConsole TC => instance.TabConsole;
-        RichTextBoxPrinter textPrinter;
-        private List<string> chatHistory = new List<string>();
+        private TabsConsole TC => instance.TabConsole;
+        private readonly RichTextBoxPrinter textPrinter;
+        private readonly List<string> chatHistory = new List<string>();
         private int chatPointer;
-        volatile bool connecting;
+        private volatile bool connecting;
         public OSDMap config;
 
-        RelaySource currentSource;
+        private RelaySource currentSource;
 
-        public RelayConsole(RadegastInstance instance)
+        public RelayConsole(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
@@ -183,7 +183,7 @@ namespace Radegast.Plugin.IRC
             RefreshGroups();
         }
 
-        void RelayConsole_Disposed(object sender, EventArgs e)
+        private void RelayConsole_Disposed(object sender, EventArgs e)
         {
             client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
             client.Self.IM -= Self_IM;
@@ -206,12 +206,12 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void TC_OnTabRemoved(object sender, TabEventArgs e)
+        private void TC_OnTabRemoved(object sender, TabEventArgs e)
         {
             RefreshGroups();
         }
 
-        void TC_OnTabAdded(object sender, TabEventArgs e)
+        private void TC_OnTabAdded(object sender, TabEventArgs e)
         {
             if (e.Tab.Control is GroupIMTabWindow ||
                 e.Tab.Control is ConferenceIMTabWindow ||
@@ -222,7 +222,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void RefreshGroups()
+        private void RefreshGroups()
         {
             if (InvokeRequired)
             {
@@ -434,7 +434,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void irc_OnRawMessage(object sender, IrcEventArgs e)
+        private void irc_OnRawMessage(object sender, IrcEventArgs e)
         {
             if (e.Data.Type == ReceiveType.Unknown || e.Data.Type == ReceiveType.ChannelMessage) 
                 return;
@@ -442,12 +442,12 @@ namespace Radegast.Plugin.IRC
             PrintMsg(e.Data.Nick, e.Data.Type + ": " + e.Data.Message);
         }
 
-        void irc_OnError(object sender, ErrorEventArgs e)
+        private void irc_OnError(object sender, ErrorEventArgs e)
         {
             PrintMsg("Error", e.ErrorMessage);
         }
 
-        void irc_OnDisconnected(object sender, EventArgs e)
+        private void irc_OnDisconnected(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -459,7 +459,7 @@ namespace Radegast.Plugin.IRC
             UpdateGui();
         }
 
-        void irc_OnConnected(object sender, EventArgs e)
+        private void irc_OnConnected(object sender, EventArgs e)
         {
             if (InvokeRequired)
             {
@@ -471,7 +471,7 @@ namespace Radegast.Plugin.IRC
             UpdateGui();
         }
 
-        void irc_OnChannelMessage(object sender, IrcEventArgs e)
+        private void irc_OnChannelMessage(object sender, IrcEventArgs e)
         {
             ThreadPool.QueueUserWorkItem(sync =>
                 {
@@ -522,7 +522,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void Self_ChatFromSimulator(object sender, ChatEventArgs e)
+        private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
         {
             if (currentSource == null || currentSource.SourceType != RelaySourceType.Chat)
                 return;
@@ -537,7 +537,7 @@ namespace Radegast.Plugin.IRC
                 ProcessMessage(e.Message, e.FromName);
         }
 
-        void Self_IM(object sender, InstantMessageEventArgs e)
+        private void Self_IM(object sender, InstantMessageEventArgs e)
         {
             if (currentSource == null)
                 return;
@@ -566,7 +566,7 @@ namespace Radegast.Plugin.IRC
             ProcessMessage(e.IM.Message, e.IM.FromAgentName);
         }
 
-        void SendMsg()
+        private void SendMsg()
         {
             string msg = cbxInput.Text;
             if (msg == string.Empty)
@@ -583,7 +583,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void ChatHistoryPrev()
+        private void ChatHistoryPrev()
         {
             if (chatPointer == 0)
                 return;
@@ -597,7 +597,7 @@ namespace Radegast.Plugin.IRC
             }
         }
 
-        void ChatHistoryNext()
+        private void ChatHistoryNext()
         {
             if (chatPointer == chatHistory.Count) 
                 return;

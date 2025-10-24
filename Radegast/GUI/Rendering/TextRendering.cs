@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -28,7 +28,7 @@ namespace Radegast.Rendering
 {
     public class TextRendering : IDisposable
     {
-        class CachedInfo
+        private class CachedInfo
         {
             public int TextureID;
             public int LastUsed;
@@ -36,13 +36,13 @@ namespace Radegast.Rendering
             public int Height;
         }
 
-        class TextItem
+        private class TextItem
         {
-            public String Text;
-            public Font Font;
-            public Color Color;
+            public readonly string Text;
+            public readonly Font Font;
+            public readonly Color Color;
             public Rectangle Box;
-            public TextFormatFlags Flags;
+            public readonly TextFormatFlags Flags;
 
             public int ImgWidth;
             public int ImgHeight;
@@ -61,14 +61,14 @@ namespace Radegast.Rendering
 
         public static Size MaxSize = new Size(8192, 8192);
 
-        RadegastInstance Instance;
-        List<TextItem> textItems;
-        int[] Viewport = new int[4];
-        int ScreenWidth { get; set; }
-        int ScreenHeight { get; set; }
-        Dictionary<int, CachedInfo> Cache = new Dictionary<int, CachedInfo>();
+        private IRadegastInstance Instance;
+        private readonly List<TextItem> textItems;
+        private readonly int[] Viewport = new int[4];
+        private int ScreenWidth { get; set; }
+        private int ScreenHeight { get; set; }
+        private readonly Dictionary<int, CachedInfo> Cache = new Dictionary<int, CachedInfo>();
 
-        public TextRendering(RadegastInstance instance)
+        public TextRendering(IRadegastInstance instance)
         {
             Instance = instance;
             textItems = new List<TextItem>();
@@ -106,9 +106,9 @@ namespace Radegast.Rendering
                 {
                     int hash = GetItemHash(item);
                     CachedInfo tex = new CachedInfo() { TextureID = -1 };
-                    if (Cache.ContainsKey(hash))
+                    if (Cache.TryGetValue(hash, out var value))
                     {
-                        tex = Cache[hash];
+                        tex = value;
                         tex.LastUsed = stamp;
                     }
                     else
@@ -140,7 +140,7 @@ namespace Radegast.Rendering
             textItems.Clear();
         }
 
-        int GetItemHash(TextItem item)
+        private int GetItemHash(TextItem item)
         {
             int ret = 17;
             ret = ret * 31 + item.Text.GetHashCode();
@@ -150,7 +150,7 @@ namespace Radegast.Rendering
         }
 
 
-        void PrepareText(TextItem item)
+        private void PrepareText(TextItem item)
         {
 
             // If we're modified and have texture already delete it from graphics card
@@ -207,11 +207,11 @@ namespace Radegast.Rendering
         }
 
 
-        bool depthTestEnabled;
-        bool lightningEnabled;
+        private bool depthTestEnabled;
+        private bool lightningEnabled;
 
         // Switch to ortho display mode for drawing hud
-        void GLHUDBegin()
+        private void GLHUDBegin()
         {
             depthTestEnabled = GL.IsEnabled(EnableCap.DepthTest);
             lightningEnabled = GL.IsEnabled(EnableCap.Lighting);
@@ -227,7 +227,7 @@ namespace Radegast.Rendering
         }
 
         // Switch back to frustrum display mode
-        void GLHUDEnd()
+        private void GLHUDEnd()
         {
             if (depthTestEnabled)
             {

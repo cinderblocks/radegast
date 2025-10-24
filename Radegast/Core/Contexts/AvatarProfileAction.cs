@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class AvatarProfileAction : ContextAction
     {
-        public AvatarProfileAction(RadegastInstance inst)
+        public AvatarProfileAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Profile";
@@ -44,7 +44,7 @@ namespace Radegast
                 DebugLog("cannot find avatar" + target);
                 return;
             }
-            instance.MainForm.ShowAgentProfile(instance.Names.Get(id), id);
+            instance.ShowAgentProfile(instance.Names.Get(id), id);
         }
     }
 }

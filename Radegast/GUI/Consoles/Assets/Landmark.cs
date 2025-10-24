@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -26,25 +26,25 @@ using OpenMetaverse.Assets;
 
 namespace Radegast
 {
-    public partial class Landmark : DettachableControl
+    public partial class Landmark : DetachableControl
     {
-        private RadegastInstance instance;
+        private RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private InventoryLandmark landmark;
         private AssetLandmark decodedLandmark;
         private UUID parcelID;
         private ParcelInfo parcel;
         private Vector3 localPosition;
-        private bool parcelLocation = false;
+        private readonly bool parcelLocation = false;
 
-        public Landmark(RadegastInstance instance, InventoryLandmark landmark)
+        public Landmark(RadegastInstanceForms instance, InventoryLandmark landmark)
         {
             this.landmark = landmark;
             Init(instance);
             client.Assets.RequestAsset(landmark.AssetUUID, landmark.AssetType, true, Assets_OnAssetReceived);
         }
 
-        public Landmark(RadegastInstance instance, UUID parcelID)
+        public Landmark(RadegastInstanceForms instance, UUID parcelID)
         {
             this.parcelID = parcelID;
             Init(instance);
@@ -52,7 +52,7 @@ namespace Radegast
             client.Parcels.RequestParcelInfo(parcelID);
         }
 
-        void Init(RadegastInstance instance)
+        private void Init(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += Landmark_Disposed;
@@ -66,13 +66,13 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void Landmark_Disposed(object sender, EventArgs e)
+        private void Landmark_Disposed(object sender, EventArgs e)
         {
             client.Grid.RegionHandleReply -= Grid_RegionHandleReply;
             client.Parcels.ParcelInfoReply -= Parcels_ParcelInfoReply;
         }
 
-        void Parcels_ParcelInfoReply(object sender, ParcelInfoReplyEventArgs e)
+        private void Parcels_ParcelInfoReply(object sender, ParcelInfoReplyEventArgs e)
         {
             if (e.Parcel.ID != parcelID) return;
 
@@ -117,7 +117,7 @@ namespace Radegast
             txtParcelDescription.Text = parcel.Description;
         }
 
-        async void Grid_RegionHandleReply(object sender, RegionHandleReplyEventArgs e)
+        private async void Grid_RegionHandleReply(object sender, RegionHandleReplyEventArgs e)
         {
             if (decodedLandmark == null || decodedLandmark.RegionID != e.RegionID) return;
 
@@ -128,7 +128,7 @@ namespace Radegast
             }
         }
 
-        void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
         {
             if (transfer.Success && asset.AssetType == AssetType.Landmark)
             {
@@ -150,11 +150,7 @@ namespace Radegast
 
         private void btnShowOnMap_Click(object sender, EventArgs e)
         {
-            instance.MainForm.WorldMap.Show();
-            instance.MainForm.WorldMap.DisplayLocation(parcel.SimName, 
-                (int)localPosition.X,
-                (int)localPosition.Y,
-                (int)localPosition.Z);
+            instance.ShowLocation(parcel.SimName, (int)localPosition.X, (int)localPosition.Y, (int)localPosition.Z);
         }
     }
 }

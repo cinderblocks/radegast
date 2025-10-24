@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -30,7 +30,7 @@ using OpenMetaverse.StructuredData;
 
 namespace RadegastSpeech
 {
-    class WinSynth
+    internal class WinSynth
     {
         private SpeechSynthesizer syn;
 
@@ -38,9 +38,10 @@ namespace RadegastSpeech
         private PromptBuilder pb;
         private PromptStyle mainStyle;
         private FileStream mstream;
-        private string[] BeepNames;
-        private OSDMap voiceProperties;
-        PromptRate voiceRate
+        private readonly string[] BeepNames;
+        private readonly OSDMap voiceProperties;
+
+        private PromptRate voiceRate
         {
             get
             {
@@ -292,9 +293,9 @@ namespace RadegastSpeech
                 d.Remove(key);
         }
 
-        class WinAvailableVoice : AvailableVoice
+        private class WinAvailableVoice : AvailableVoice
         {
-            internal InstalledVoice winVoice;
+            internal readonly InstalledVoice winVoice;
             internal WinAvailableVoice(InstalledVoice i)
             {
                 winVoice = i;

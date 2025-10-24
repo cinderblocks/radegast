@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -32,13 +32,13 @@ namespace Radegast.Plugin.Alice
     [Plugin(Name = "ALICE Chatbot", Description = "A.L.I.C.E. based AI chat bot", Version = "1.1")]
     public class AliceAI : IRadegastPlugin
     {
-        private RadegastInstance Instance;
+        private RadegastInstanceForms Instance;
         private GridClient Client => Instance.Client;
 
         private bool Enabled = false;
         private Avatar.AvatarProperties MyProfile;
         private Bot Alice;
-        private Hashtable AliceUsers = new Hashtable();
+        private readonly Hashtable AliceUsers = new Hashtable();
         private ToolStripMenuItem MenuButton, EnabledButton;
         private TalkToAvatar talkToAvatar;
         private bool respondWithoutName = false;
@@ -51,7 +51,7 @@ namespace Radegast.Plugin.Alice
         private bool EnableRandomDelay = false;
         private bool AimlLoaded = false;
 
-        public void StartPlugin(RadegastInstance inst)
+        public void StartPlugin(RadegastInstanceForms inst)
         {
             Instance = inst;
             Instance.ClientChanged += Instance_ClientChanged;
@@ -319,7 +319,7 @@ namespace Radegast.Plugin.Alice
         }
 
 
-        public void StopPlugin(RadegastInstance Instance)
+        public void StopPlugin(RadegastInstanceForms Instance)
         {
             // Remove the menu buttons
             EnabledButton.Dispose();
@@ -338,7 +338,7 @@ namespace Radegast.Plugin.Alice
             Client.Self.ChatFromSimulator += Self_ChatFromSimulator;
             Client.Self.IM += Self_IM;
             Client.Avatars.AvatarPropertiesReply += Avatars_AvatarPropertiesReply;
-            Instance.Netcom.ClientConnected += Netcom_ClientConnected;
+            Instance.NetCom.ClientConnected += Netcom_ClientConnected;
         }
 
         private void UnregisterClientEvents(GridClient client)
@@ -346,16 +346,16 @@ namespace Radegast.Plugin.Alice
             Client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
             Client.Self.IM -= Self_IM;
             Client.Avatars.AvatarPropertiesReply -= Avatars_AvatarPropertiesReply;
-            Instance.Netcom.ClientConnected -= Netcom_ClientConnected;
+            Instance.NetCom.ClientConnected -= Netcom_ClientConnected;
         }
 
-        void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             RegisterClientEvents(Client);
         }
 
-        void Netcom_ClientConnected(object sender, EventArgs e)
+        private void Netcom_ClientConnected(object sender, EventArgs e)
         {
             if (AimlLoaded)
             {
@@ -363,7 +363,7 @@ namespace Radegast.Plugin.Alice
             }
         }
 
-        void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
+        private void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
         {
             if (e.AvatarID == Client.Self.AgentID && AimlLoaded)
             {
@@ -385,10 +385,10 @@ namespace Radegast.Plugin.Alice
             }
         }
 
-        private object syncChat = new object();
-        private Random rand = new Random();
+        private readonly object syncChat = new object();
+        private readonly Random rand = new Random();
 
-        void Self_ChatFromSimulator(object sender, ChatEventArgs e)
+        private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
         {
             // We ignore everything except normal chat from other avatars
             if (!Enabled 
@@ -481,7 +481,7 @@ namespace Radegast.Plugin.Alice
             }
         }
 
-        void Self_IM(object sender, InstantMessageEventArgs e)
+        private void Self_IM(object sender, InstantMessageEventArgs e)
         {
             if (!Enabled) return;
             // Every event coming from a different thread (almost all of them, most certainly those
@@ -545,7 +545,7 @@ namespace Radegast.Plugin.Alice
                         msg = msg.Substring(0, 1000);
                     }
                     if (EnableRandomDelay) Thread.Sleep(2000 + 1000 * rand.Next(3));
-                    Instance.Netcom.SendIMStartTyping(e.IM.FromAgentID, e.IM.IMSessionID);
+                    Instance.NetCom.SendIMStartTyping(e.IM.FromAgentID, e.IM.IMSessionID);
                     if (EnableRandomDelay)
                     {
                         Thread.Sleep(2000 + 1000 * rand.Next(5));
@@ -554,14 +554,14 @@ namespace Radegast.Plugin.Alice
                     {
                         Thread.Sleep(1000);
                     }
-                    Instance.Netcom.SendIMStopTyping(e.IM.FromAgentID, e.IM.IMSessionID);
+                    Instance.NetCom.SendIMStopTyping(e.IM.FromAgentID, e.IM.IMSessionID);
                     if (Instance.MainForm.InvokeRequired)
                     {
-                        Instance.MainForm.BeginInvoke(new MethodInvoker(() => Instance.Netcom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID)));
+                        Instance.MainForm.BeginInvoke(new MethodInvoker(() => Instance.NetCom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID)));
                     }
                     else
                     {
-                        Instance.Netcom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID);
+                        Instance.NetCom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID);
                     }
                 }
             });

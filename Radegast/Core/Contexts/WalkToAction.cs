@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -25,7 +25,7 @@ namespace Radegast
 {
     public sealed class WalkToAction : ContextAction
     {
-        public WalkToAction(RadegastInstance inst)
+        public WalkToAction(RadegastInstanceForms inst)
             : base(inst)
         {
             Label = "Walk To";
@@ -49,12 +49,12 @@ namespace Radegast
 
             if (TryFindPos(target, out sim, out pos))
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Walking to {0}", pname));
+                instance.ShowNotificationInChat($"Walking to {pname}");
                 instance.State.MoveTo(sim, pos, false);
             }
             else
             {
-                instance.TabConsole.DisplayNotificationInChat(string.Format("Could not locate {0}", target));
+                instance.ShowNotificationInChat($"Could not locate {target}");
             }
         }
     }

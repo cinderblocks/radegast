@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -29,13 +29,13 @@ namespace Radegast
 {
     public partial class AvatarPicker : UserControl
     {
-        RadegastInstance instance;
-        GridClient client => instance.Client;
-        UUID searchID;
+        private readonly RadegastInstanceForms instance;
+        private GridClient client => instance.Client;
+        private UUID searchID;
         public ListView currentList;
 
         [Browsable(true)]
-        public event EventHandler SelectionChaged;
+        public event EventHandler SelectionChanged;
 
         [Browsable(false)]
         public Dictionary<UUID, string> SelectedAvatars
@@ -54,7 +54,7 @@ namespace Radegast
             }
         }
 
-        public AvatarPicker(RadegastInstance instance)
+        public AvatarPicker(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += AvatarPicker_Disposed;
@@ -74,12 +74,12 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void AvatarPicker_Disposed(object sender, EventArgs e)
+        private void AvatarPicker_Disposed(object sender, EventArgs e)
         {
             client.Avatars.AvatarPickerReply -= Avatars_AvatarPickerReply;
         }
 
-        void Avatars_AvatarPickerReply(object sender, AvatarPickerReplyEventArgs e)
+        private void Avatars_AvatarPickerReply(object sender, AvatarPickerReplyEventArgs e)
         {
             if (searchID == e.QueryID && e.Avatars.Count > 0)
             {
@@ -112,13 +112,13 @@ namespace Radegast
         private void lvwNear_SelectedIndexChanged(object sender, EventArgs e)
         {
             currentList = lvwNear;
-            SelectionChaged?.Invoke(this, EventArgs.Empty);
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void lvwSearch_SelectedIndexChanged(object sender, EventArgs e)
         {
             currentList = lvwSearch;
-            SelectionChaged?.Invoke(this, EventArgs.Empty);
+            SelectionChanged?.Invoke(this, EventArgs.Empty);
         }
 
         private void lvwSearch_SizeChanged(object sender, EventArgs e)

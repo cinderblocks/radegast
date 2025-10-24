@@ -163,12 +163,12 @@ namespace Radegast.Rendering
         private readonly RenderTerrain terrain;
 
         private readonly GridClient Client;
-        private readonly RadegastInstance Instance;
+        private readonly RadegastInstanceForms Instance;
 
         #endregion Private fields
 
         #region Construction and disposal
-        public SceneWindow(RadegastInstance instance)
+        public SceneWindow(RadegastInstanceForms instance)
             : base(instance)
         {
             InitializeComponent();
@@ -216,7 +216,7 @@ namespace Radegast.Rendering
             Client.Avatars.AvatarAnimation += AvatarAnimationChanged;
             Client.Avatars.AvatarAppearance += Avatars_AvatarAppearance;
             Client.Appearance.AppearanceSet += Appearance_AppearanceSet;
-            Instance.Netcom.ClientDisconnected += Netcom_ClientDisconnected;
+            Instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
             Application.Idle += Application_Idle;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
@@ -268,9 +268,9 @@ namespace Radegast.Rendering
                 genericTaskThread = null;
             }
 
-            if (instance.Netcom != null)
+            if (instance.NetCom != null)
             {
-                Instance.Netcom.ClientDisconnected -= Netcom_ClientDisconnected;
+                Instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
             }
 
             lock (sculptCache)
@@ -1444,7 +1444,7 @@ namespace Radegast.Rendering
 
                     var tagPos = RHelp.TKVector3(avPos);
                     tagPos.Z += 1.2f;
-                    if (!Math3D.GluProject(tagPos, ModelMatrix, ProjectionMatrix, Viewport, 
+                    if (!GLU.Project(tagPos, ModelMatrix, ProjectionMatrix, Viewport, 
                             out var screenPos))
                     {
                         continue;
@@ -1519,7 +1519,7 @@ namespace Radegast.Rendering
                     primPos.Z += prim.BasePrim.Scale.Z * 0.8f;
 
                     // Convert objects world position to 2D screen position in pixels
-                    if (!Math3D.GluProject(primPos, ModelMatrix, ProjectionMatrix, Viewport,
+                    if (!GLU.Project(primPos, ModelMatrix, ProjectionMatrix, Viewport,
                             out var screenPos))
                     {
                         continue;
@@ -2513,7 +2513,7 @@ namespace Radegast.Rendering
             GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, color);
             var depth = 0f;
             GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.DepthComponent, PixelType.Float, ref depth);
-            Math3D.GluUnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
+            GLU.UnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
             worldPos = RHelp.OMVVector3(worldPosTK);
             GL.PopAttrib();
 
@@ -3000,7 +3000,7 @@ namespace Radegast.Rendering
                 // Profile button
                 item = new ToolStripMenuItem("Profile", null, (sender, e) =>
                 {
-                    Instance.MainForm.ShowAgentProfile("", av.avatar.ID);
+                    Instance.ShowAgentProfile(string.Empty, av.avatar.ID);
                 });
                 ctxMenu.Items.Add(item);
 

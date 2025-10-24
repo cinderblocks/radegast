@@ -32,14 +32,14 @@ using SkiaSharp.Views.Desktop;
 
 namespace Radegast
 {
-    public class ChatTextManager : TextManagerBase, IDisposable
+    public class ChatTextManager : TextManagerBase
     {
         public event EventHandler<ChatLineAddedArgs> ChatLineAdded;
 
         private bool showTimestamps;
-        private List<ChatBufferItem> textBuffer;
+        private readonly List<ChatBufferItem> textBuffer;
 
-        public ChatTextManager(RadegastInstance instance, ITextPrinter textPrinter)
+        public ChatTextManager(RadegastInstanceForms instance, ITextPrinter textPrinter)
             : base(instance, textPrinter)
         {
             textBuffer = new List<ChatBufferItem>();
@@ -47,16 +47,16 @@ namespace Radegast
             InitializeConfig();
 
             // Callbacks
-            instance.Netcom.ChatReceived += netcom_ChatReceived;
-            instance.Netcom.ChatSent += netcom_ChatSent;
-            instance.Netcom.AlertMessageReceived += netcom_AlertMessageReceived;
+            instance.NetCom.ChatReceived += netcom_ChatReceived;
+            instance.NetCom.ChatSent += netcom_ChatSent;
+            instance.NetCom.AlertMessageReceived += netcom_AlertMessageReceived;
         }
 
         public override void Dispose()
         {
-            instance.Netcom.ChatReceived -= netcom_ChatReceived;
-            instance.Netcom.ChatSent -= netcom_ChatSent;
-            instance.Netcom.AlertMessageReceived -= netcom_AlertMessageReceived;
+            instance.NetCom.ChatReceived -= netcom_ChatReceived;
+            instance.NetCom.ChatSent -= netcom_ChatSent;
+            instance.NetCom.AlertMessageReceived -= netcom_AlertMessageReceived;
 
             base.Dispose();
         }
@@ -119,7 +119,7 @@ namespace Radegast
             ProcessBufferItem(ready, true);
         }
 
-        private Object SyncChat = new Object();
+        private readonly object SyncChat = new object();
 
         public void ProcessBufferItem(ChatBufferItem item, bool isNewMessage)
         {
@@ -144,7 +144,7 @@ namespace Radegast
                     {
                         TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
                         TextPrinter.BackColor = SKColors.Transparent;
-                        TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                        TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                         TextPrinter.PrintText(item.Timestamp.ToString("[HH:mm] "));
                     }
                 }
@@ -160,7 +160,7 @@ namespace Radegast
                 {
                     TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
                     TextPrinter.BackColor = SKColors.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                 }
 
                 if (item.Style == ChatBufferTextStyle.Normal && item.ID != UUID.Zero && instance.GlobalSettings["av_name_link"])
@@ -183,7 +183,7 @@ namespace Radegast
                 {
                     TextPrinter.ForeColor = SystemColors.WindowText.ToSKColor();
                     TextPrinter.BackColor = SKColors.Transparent;
-                    TextPrinter.Font = Settings.FontSetting.DefaultFont;
+                    TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
                 }
 
                 ProcessAndPrintText(item.Text, isNewMessage, true);

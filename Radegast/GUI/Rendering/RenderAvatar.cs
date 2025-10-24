@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2022, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -53,8 +53,8 @@ namespace Radegast.Rendering
             location = node.Attributes.GetNamedItem("location").Value;
             position = VisualParamEx.XmlParseVector(node.Attributes.GetNamedItem("position").Value);
             rotation = VisualParamEx.XmlParseRotation(node.Attributes.GetNamedItem("rotation").Value);
-            id = Int32.Parse(node.Attributes.GetNamedItem("id").Value);
-            @group = Int32.Parse(node.Attributes.GetNamedItem("group").Value);
+            id = int.Parse(node.Attributes.GetNamedItem("id").Value);
+            @group = int.Parse(node.Attributes.GetNamedItem("group").Value);
         }
 
     }
@@ -477,7 +477,7 @@ namespace Radegast.Rendering
 
     public class GLAvatar
     {
-        private static Dictionary<string, GLMesh> _defaultmeshes = new Dictionary<string, GLMesh>();
+        private static readonly Dictionary<string, GLMesh> _defaultmeshes = new Dictionary<string, GLMesh>();
         public Dictionary<string, GLMesh> _meshes = new Dictionary<string, GLMesh>();
 
         public skeleton skel = new skeleton();
@@ -489,7 +489,7 @@ namespace Radegast.Rendering
         public VisualParamEx.EparamSex msex;
 
         public byte[] VisualAppearanceParameters = new byte[1024];
-        static bool lindenMeshesLoaded = false;
+        private static bool lindenMeshesLoaded = false;
 
         public GLAvatar()
         {
@@ -560,7 +560,7 @@ namespace Radegast.Rendering
             foreach (XmlNode meshNode in meshes)
             {
                 string type = meshNode.Attributes?.GetNamedItem("type").Value;
-                int lod = Int32.Parse(meshNode.Attributes?.GetNamedItem("lod").Value);
+                int lod = int.Parse(meshNode.Attributes?.GetNamedItem("lod").Value);
                 string fileName = meshNode.Attributes?.GetNamedItem("file_name").Value;
 
                 GLMesh mesh = null;
@@ -891,8 +891,8 @@ namespace Radegast.Rendering
     public class skeleton
     {
         public Dictionary<string, Bone> mBones;
-        private Dictionary<string, int> mPriority = new Dictionary<string, int>();
-        private Dictionary<string, joint> jointdeforms = new Dictionary<string, joint>();
+        private readonly Dictionary<string, int> mPriority = new Dictionary<string, int>();
+        private readonly Dictionary<string, joint> jointdeforms = new Dictionary<string, joint>();
 
         public static Dictionary<int, string> mUpperMeshMapping = new Dictionary<int, string>();
         public static Dictionary<int, string> mLowerMeshMapping = new Dictionary<int, string>();
@@ -1557,7 +1557,7 @@ namespace Radegast.Rendering
         public Vector3 orig_scale;
         public Vector3 orig_piviot;
 
-        Matrix4 mDeformMatrix = Matrix4.Identity;
+        private Matrix4 mDeformMatrix = Matrix4.Identity;
 
         public Vector3 animation_offset;
 
@@ -1567,7 +1567,7 @@ namespace Radegast.Rendering
 
         public static Dictionary<string, Bone> mBones = new Dictionary<string, Bone>();
         public static Dictionary<int, Bone> mIndexedBones = new Dictionary<int, Bone>();
-        static int boneaddindex = 0;
+        private static int boneaddindex = 0;
 
         private bool rotdirty = true;
         private bool posdirty = true;
@@ -1850,7 +1850,7 @@ namespace Radegast.Rendering
 
         public string MorphMesh = null;
 
-        enum GroupType
+        private enum GroupType
         {
             VISUAL_PARAM_GROUP_TWEAKABLE = 0,
             VISUAL_PARAM_GROUP_ANIMATABLE,
@@ -1974,9 +1974,9 @@ namespace Radegast.Rendering
         public VisualParamEx(XmlNode node)
         {
 
-            ParamID = Int32.Parse(node.Attributes.GetNamedItem("id").Value);
+            ParamID = int.Parse(node.Attributes.GetNamedItem("id").Value);
             Name = node.Attributes.GetNamedItem("name").Value;
-            Group = Int32.Parse(node.Attributes.GetNamedItem("group").Value);
+            Group = int.Parse(node.Attributes.GetNamedItem("group").Value);
 
             //These dont exist for facal expresion morphs
             if (node.Attributes.GetNamedItem("wearable") != null)
@@ -2092,7 +2092,7 @@ namespace Radegast.Rendering
 
         }
 
-        void ParseBoneDeforms(XmlNodeList deforms)
+        private void ParseBoneDeforms(XmlNodeList deforms)
         {
             foreach (XmlNode node in deforms)
             {
@@ -2115,7 +2115,7 @@ namespace Radegast.Rendering
             }
         }
 
-        void ParseVolumeDeforms(XmlNodeList deforms)
+        private void ParseVolumeDeforms(XmlNodeList deforms)
         {
             foreach (XmlNode node in deforms)
             {
@@ -2139,13 +2139,13 @@ namespace Radegast.Rendering
             }
         }
 
-        void ParseDrivers(XmlNodeList drivennodes)
+        private void ParseDrivers(XmlNodeList drivennodes)
         {
             foreach (XmlNode node in drivennodes)
             {
                 if (node.Name == "driven")
                 {
-                    driven d = new driven {id = Int32.Parse(node.Attributes.GetNamedItem("id").Value)};
+                    driven d = new driven {id = int.Parse(node.Attributes.GetNamedItem("id").Value)};
 
                     XmlNode param = node.Attributes.GetNamedItem("max1");
                     if (param != null)

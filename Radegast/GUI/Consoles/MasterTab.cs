@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -30,23 +30,20 @@ namespace Radegast
 {
     public partial class MasterTab : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
-        private Radegast.Netcom netcom => instance.Netcom;
-        private Avatar avatar;
+        private INetCom netcom => instance.NetCom;
+        private readonly Avatar avatar;
         public UUID selectedID;
         public Primitive selectedPrim;
 
-        public MasterTab(RadegastInstance instance, Avatar avatar)
+        public MasterTab(RadegastInstanceForms instance, Avatar avatar)
         {
             InitializeComponent();
             Disposed += MasterTab_Disposed;
 
-            if (!instance.advancedDebugging)
-            {
-                saveBtn.Visible = false;
-                texturesBtn.Visible = false;
-            }
+            saveBtn.Visible = false;
+            texturesBtn.Visible = false;
 
             this.instance = instance;
             this.avatar = avatar;
@@ -58,13 +55,13 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void MasterTab_Disposed(object sender, EventArgs e)
+        private void MasterTab_Disposed(object sender, EventArgs e)
         {
             client.Avatars.ViewerEffectPointAt -= Avatars_ViewerEffectPointAt;
             client.Objects.ObjectProperties -= Objects_ObjectProperties;
         }
 
-        void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
             if (selectedPrim != null) {
                 if (selectedPrim.ID == e.Properties.ObjectID) {
@@ -74,7 +71,7 @@ namespace Radegast
             }
         }
 
-        void UpdateDisplay()
+        private void UpdateDisplay()
         {
             if (InvokeRequired) {
                 Invoke(new MethodInvoker(UpdateDisplay));
@@ -84,7 +81,7 @@ namespace Radegast
             lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
         }
 
-        void UpdateLLUUID()
+        private void UpdateLLUUID()
         {
             if (InvokeRequired) {
                 Invoke(new MethodInvoker(UpdateLLUUID));
@@ -103,7 +100,7 @@ namespace Radegast
             btnPoint.Enabled = true;
         }
 
-        void Avatars_ViewerEffectPointAt(object sender, ViewerEffectPointAtEventArgs e)
+        private void Avatars_ViewerEffectPointAt(object sender, ViewerEffectPointAtEventArgs e)
         {
             if (e.SourceID != avatar.ID || e.TargetID == UUID.Zero) { return; }
 
@@ -209,7 +206,7 @@ namespace Radegast
                         System.IO.File.WriteAllText(dlg.FileName, primsXmls);
                         s.CleanUp();
                         s = null;
-                        MessageBox.Show(mainWindow, "Successfully saved " + dlg.FileName, "Success",
+                        MessageBox.Show(mainWindow, $"Successfully saved {dlg.FileName}", "Success",
                             MessageBoxButtons.OK, MessageBoxIcon.Information);
                     }
                     catch (Exception excp)
@@ -223,7 +220,45 @@ namespace Radegast
         }
         private void loadBtn_Click(object sender, EventArgs e)
         {
-            PrimDeserializer.ImportFromFile(client);
+            if (Form.ActiveForm == null) return;
+            WindowWrapper mainWindow = new WindowWrapper(Form.ActiveForm.Handle);
+            OpenFileDialog dlg = new OpenFileDialog
+            {
+                Title = "Open object file",
+                Filter = "XML file (*.xml)|*.xml",
+                Multiselect = false
+            };
+            DialogResult res = dlg.ShowDialog();
+
+            if (res == DialogResult.OK)
+            {
+
+                Thread t = new Thread(delegate ()
+                {
+                    try
+                    {
+                        PrimDeserializer d = new PrimDeserializer(client);
+                        string primsXmls = System.IO.File.ReadAllText(dlg.FileName);
+                        d.CreateObjectFromXml(primsXmls);
+                        d.CleanUp();
+                        d = null;
+                        MessageBox.Show(mainWindow, $"Successfully imported {dlg.FileName}", "Success",
+                            MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception excp)
+                    {
+                        MessageBox.Show(mainWindow, excp.Message, "Saving failed", MessageBoxButtons.OK,
+                            MessageBoxIcon.Error);
+                    }
+                })
+                {
+                    IsBackground = true,
+                    Name = $"Deserialize {dlg.FileName}"
+                };
+
+                t.Start();
+
+            }
         }
 
         private void btnPoint_Click(object sender, EventArgs e)

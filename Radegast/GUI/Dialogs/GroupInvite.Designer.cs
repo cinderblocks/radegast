@@ -97,7 +97,7 @@ namespace Radegast
             this.btnIvite.TabIndex = 1;
             this.btnIvite.Text = "Send invtitations";
             this.btnIvite.UseVisualStyleBackColor = true;
-            this.btnIvite.Click += new System.EventHandler(this.btnIvite_Click);
+            this.btnIvite.Click += new System.EventHandler(this.btnInvite_Click);
             // 
             // GroupInvite
             // 

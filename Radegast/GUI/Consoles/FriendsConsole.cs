@@ -1,7 +1,7 @@
 /**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2020, Sjofn, LLC
+ * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -31,13 +31,13 @@ namespace Radegast
 {
     public partial class FriendsConsole : UserControl
     {
-        private RadegastInstance instance;
+        private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private FriendInfo selectedFriend;
         private bool settingFriend = false;
         private readonly object lockOneAtaTime = new object();
 
-        public FriendsConsole(RadegastInstance instance)
+        public FriendsConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += FriendsConsole_Disposed;
@@ -66,7 +66,7 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
-        void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
+        private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
             bool moded = e.Names.Keys.Any(id => client.Friends.FriendList.ContainsKey(id));
 
@@ -79,7 +79,7 @@ namespace Radegast
             }
         }
 
-        void FriendsConsole_Disposed(object sender, EventArgs e)
+        private void FriendsConsole_Disposed(object sender, EventArgs e)
         {
             client.Friends.FriendOffline -= Friends_FriendOffline;
             client.Friends.FriendOnline -= Friends_FriendOnline;
@@ -88,7 +88,7 @@ namespace Radegast
             client.Friends.FriendNames -= Friends_FriendNames;
         }
 
-        void FriendsConsole_Load(object sender, EventArgs e)
+        private void FriendsConsole_Load(object sender, EventArgs e)
         {
             InitializeFriendsList();
             listFriends.Select();
@@ -101,12 +101,15 @@ namespace Radegast
             
             friends.Sort((fi1, fi2) =>
                 {
-                    if (fi1.IsOnline && !fi2.IsOnline)
-                        return -1;
-                    else if (!fi1.IsOnline && fi2.IsOnline)
-                        return 1;
-                    else
-                        return String.CompareOrdinal(fi1.Name, fi2.Name);
+                    switch (fi1.IsOnline)
+                    {
+                        case true when !fi2.IsOnline:
+                            return -1;
+                        case false when fi2.IsOnline:
+                            return 1;
+                        default:
+                            return string.CompareOrdinal(fi1.Name, fi2.Name);
+                    }
                 }
             );
 
@@ -128,7 +131,7 @@ namespace Radegast
             SetControls();
         }
 
-        void Friends_FriendNames(object sender, FriendNamesEventArgs e)
+        private void Friends_FriendNames(object sender, FriendNamesEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -139,7 +142,7 @@ namespace Radegast
             RefreshFriendsList();
         }
 
-        void Friends_FriendshipResponse(object sender, FriendshipResponseEventArgs e)
+        private void Friends_FriendshipResponse(object sender, FriendshipResponseEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -150,7 +153,7 @@ namespace Radegast
             RefreshFriendsList();
         }
 
-        bool TryFindIMTab(UUID friendID, out IMTabWindow console)
+        private bool TryFindIMTab(UUID friendID, out IMTabWindow console)
         {
             console = null;
             string tabID = (client.Self.AgentID ^ friendID).ToString();
@@ -162,17 +165,17 @@ namespace Radegast
             return false;
         }
 
-        void DisplayNotification(UUID friendID, string msg)
+        private void DisplayNotification(UUID friendID, string msg)
         {
             IMTabWindow console;
             if (TryFindIMTab(friendID, out console))
             {
                 console.TextManager.DisplayNotification(msg);
             }
-            instance.TabConsole.DisplayNotificationInChat(msg, ChatBufferTextStyle.ObjectChat, instance.GlobalSettings["friends_notification_highlight"]);
+            instance.ShowNotificationInChat(msg, ChatBufferTextStyle.ObjectChat, instance.GlobalSettings["friends_notification_highlight"]);
         }
 
-        void Friends_FriendOffline(object sender, FriendInfoEventArgs e)
+        private void Friends_FriendOffline(object sender, FriendInfoEventArgs e)
         {
             if (!instance.GlobalSettings["show_friends_online_notifications"]) return;
 
@@ -196,7 +199,7 @@ namespace Radegast
             });
         }
 
-        void Friends_FriendOnline(object sender, FriendInfoEventArgs e)
+        private void Friends_FriendOnline(object sender, FriendInfoEventArgs e)
         {
             if (!instance.GlobalSettings["show_friends_online_notifications"]) return;
 
@@ -220,7 +223,7 @@ namespace Radegast
             });
         }
 
-        void Friends_FriendshipTerminated(object sender, FriendshipTerminatedEventArgs e)
+        private void Friends_FriendshipTerminated(object sender, FriendshipTerminatedEventArgs e)
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
@@ -285,7 +288,7 @@ namespace Radegast
                     participants.Add(((FriendInfo)item).UUID);
                 UUID tmpID = UUID.Random();
                 lblFriendName.Text = "Startings friends conference...";
-                instance.TabConsole.DisplayNotificationInChat(lblFriendName.Text, ChatBufferTextStyle.Invisible);
+                instance.ShowNotificationInChat(lblFriendName.Text, ChatBufferTextStyle.Invisible);
                 btnIM.Enabled = false;
 
                 ThreadPool.QueueUserWorkItem(sync =>

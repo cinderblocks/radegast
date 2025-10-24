@@ -8,8 +8,7 @@ namespace Radegast.Plugin.Alice
     public sealed class TalkToAvatar : ContextAction
     {
         private readonly AIMLBot aimlBot;
-        public TalkToAvatar(RadegastInstance inst, AIMLBot bot)
-            : base(inst)
+        public TalkToAvatar(RadegastInstanceForms inst, AIMLBot bot) : base(inst)
         {
             ContextType = typeof (Avatar);
             Label = "Talk to";
@@ -49,7 +48,7 @@ namespace Radegast.Plugin.Alice
             }
             if (username==null)
             {
-                instance.TabConsole.DisplayNotificationInChat($"I don't know how to DeRef {target} being a {target.GetType()}");                               
+                instance.ShowNotificationInChat($"I don't know how to DeRef {target} being a {target.GetType()}");                               
                 return;
             }
             string outp = username + ", " + aimlBot.Chat("INTERJECTION", username).Output;
