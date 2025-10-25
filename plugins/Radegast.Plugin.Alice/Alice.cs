@@ -245,19 +245,19 @@ namespace Radegast.Plugin.Alice
             MenuButton.DropDownItems.Add(btn_whisper2whisper);
 
             respondWithoutNameButton.Checked = respondWithoutName;
-            if (respondRange == 5.0)
+            if (respondRange == 5)
             {
                 distance_5m.Checked = true;
             }
-            else if (respondRange == 10.0)
+            else if (respondRange == 10)
             {
                 distance_10m.Checked = true;
             }
-            else if (respondRange == 15.0)
+            else if (respondRange == 15)
             {
                 distance_15m.Checked = true;
             }
-            else if (respondRange == 20.0)
+            else if (respondRange == 20)
             {
                 distance_20m.Checked = true;
             }
@@ -319,7 +319,7 @@ namespace Radegast.Plugin.Alice
         }
 
 
-        public void StopPlugin(RadegastInstanceForms Instance)
+        public void StopPlugin(RadegastInstanceForms instance)
         {
             // Remove the menu buttons
             EnabledButton.Dispose();
@@ -327,7 +327,7 @@ namespace Radegast.Plugin.Alice
 
             if (talkToAvatar != null)
             {
-                Instance.ContextActionManager.DeregisterContextAction(talkToAvatar);
+                instance.ContextActionManager.DeregisterContextAction(talkToAvatar);
             }
             // Unregister events
             UnregisterClientEvents(Client);
