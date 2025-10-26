@@ -75,22 +75,21 @@ namespace Radegast
 
         public override void CleanUp()
         {
-            base.CleanUp();
-
-            if (ContextActionManager != null)
-            {
-                ContextActionManager.Dispose();
-                ContextActionManager = null;
-            }
             if (PluginManager != null)
             {
                 PluginManager.Dispose();
                 PluginManager = null;
             }
+            if (ContextActionManager != null)
+            {
+                ContextActionManager.Dispose();
+                ContextActionManager = null;
+            }
             if (MainForm != null)
             {
                 MainForm.Load -= mainForm_Load;
             }
+            base.CleanUp();
         }
 
         private void mainForm_Load(object sender, EventArgs e)
