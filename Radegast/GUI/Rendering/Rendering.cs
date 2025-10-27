@@ -1087,12 +1087,16 @@ namespace Radegast.Rendering
 
                     bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
 
-                    instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                    if (instance.MainForm.IsHandleCreated)
                     {
-                        item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
-                        // GL.Flush();
-                        bitmap.Dispose();
-                    }));
+                        instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                        {
+                            item.Data.TextureInfo.TexturePointer =
+                                RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
+                            // GL.Flush();
+                            bitmap.Dispose();
+                        }));
+                    }
                 }
 
                 item.TextureData = null;
