@@ -135,7 +135,7 @@ namespace Radegast
                     }
                 }
 
-                if (instance.MonoRuntime)
+                if (instance.MonoRuntime || instance.GlobalSettings["resolve_uris_as_plaintext"])
                 {
                     TextPrinter.PrintText(linkTextInfo.DisplayText);
                 }

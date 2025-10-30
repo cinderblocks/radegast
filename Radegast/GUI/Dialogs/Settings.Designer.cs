@@ -68,6 +68,7 @@ namespace Radegast
             this.cbFriendsHighlight = new System.Windows.Forms.CheckBox();
             this.cbTaskBarHighLight = new System.Windows.Forms.CheckBox();
             this.cbMisc = new System.Windows.Forms.GroupBox();
+            this.cbResolveURIsAsPlaintext = new System.Windows.Forms.CheckBox();
             this.cbThemeCompatibilityMode = new System.Windows.Forms.CheckBox();
             this.cbConfirmExit = new System.Windows.Forms.CheckBox();
             this.txtResolveURITime = new System.Windows.Forms.TextBox();
@@ -273,6 +274,7 @@ namespace Radegast
             // 
             // cbMisc
             // 
+            this.cbMisc.Controls.Add(this.cbResolveURIsAsPlaintext);
             this.cbMisc.Controls.Add(this.cbThemeCompatibilityMode);
             this.cbMisc.Controls.Add(this.cbConfirmExit);
             this.cbMisc.Controls.Add(this.txtResolveURITime);
@@ -298,10 +300,20 @@ namespace Radegast
             this.cbMisc.TabIndex = 2;
             this.cbMisc.TabStop = false;
             // 
+            // cbResolveURIsAsPlaintext
+            // 
+            this.cbResolveURIsAsPlaintext.AutoSize = true;
+            this.cbResolveURIsAsPlaintext.Location = new System.Drawing.Point(6, 284);
+            this.cbResolveURIsAsPlaintext.Name = "cbResolveURIsAsPlaintext";
+            this.cbResolveURIsAsPlaintext.Size = new System.Drawing.Size(151, 17);
+            this.cbResolveURIsAsPlaintext.TabIndex = 23;
+            this.cbResolveURIsAsPlaintext.Text = "Resolve URIs as plain text";
+            this.cbResolveURIsAsPlaintext.UseVisualStyleBackColor = true;
+            // 
             // cbThemeCompatibilityMode
             // 
             this.cbThemeCompatibilityMode.AutoSize = true;
-            this.cbThemeCompatibilityMode.Location = new System.Drawing.Point(6, 300);
+            this.cbThemeCompatibilityMode.Location = new System.Drawing.Point(6, 321);
             this.cbThemeCompatibilityMode.Name = "cbThemeCompatibilityMode";
             this.cbThemeCompatibilityMode.Size = new System.Drawing.Size(150, 17);
             this.cbThemeCompatibilityMode.TabIndex = 22;
@@ -312,7 +324,7 @@ namespace Radegast
             // cbConfirmExit
             // 
             this.cbConfirmExit.AutoSize = true;
-            this.cbConfirmExit.Location = new System.Drawing.Point(6, 282);
+            this.cbConfirmExit.Location = new System.Drawing.Point(6, 303);
             this.cbConfirmExit.Name = "cbConfirmExit";
             this.cbConfirmExit.Size = new System.Drawing.Size(81, 17);
             this.cbConfirmExit.TabIndex = 21;
@@ -1461,5 +1473,6 @@ namespace Radegast
         public System.Windows.Forms.CheckBox cbIgnoreConferenceChats;
         public System.Windows.Forms.CheckBox cbAllowConferenceChatsFromFriends;
         public System.Windows.Forms.CheckBox cbLogIgnoredConferencesToChat;
+        private System.Windows.Forms.CheckBox cbResolveURIsAsPlaintext;
     }
 }
