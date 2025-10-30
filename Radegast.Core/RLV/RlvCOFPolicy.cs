@@ -103,6 +103,11 @@ namespace Radegast.Core.RLV
 
         public async Task ReportItemChange(List<InventoryItem> addedItems, List<InventoryItem> removedItems, CancellationToken cancellationToken = default)
         {
+            if (!instance.RLV.Enabled)
+            {
+                return;
+            }
+
             await instance.RLV.ReportItemChange(addedItems, removedItems, cancellationToken);
         }
     }
