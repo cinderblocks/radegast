@@ -213,6 +213,11 @@ namespace Radegast.Core.RLV
 
         public async Task ReportItemChange(List<InventoryItem> itemsBeingAdded, List<InventoryItem> itemsBeingRemoved, CancellationToken cancellationToken = default)
         {
+            if (!Enabled)
+            {
+                return;
+            }
+
             foreach (var item in itemsBeingRemoved)
             {
                 if (!(item is InventoryWearable))
