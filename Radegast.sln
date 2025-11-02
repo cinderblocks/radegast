@@ -79,6 +79,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LibreMetaverse", "libremetaverse\LibreMetaverse\LibreMetaverse.csproj", "{27C70F3A-0000-0000-0000-000000000000}"
 	ProjectSection(ProjectDependencies) = postProject
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158} = {690E8C3F-A9A7-1026-6EDE-8B3C2A703158}
 		{96B3EF17-A54C-04CB-B50E-E53D4D205150} = {96B3EF17-A54C-04CB-B50E-E53D4D205150}
 	EndProjectSection
 EndProject
@@ -101,6 +102,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radegast.Core", "Radegast.Core\Radegast.Core.csproj", "{F08F7BF4-013C-476A-A88C-62E9E2E8CC79}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PacketSourceGenerator", "libremetaverse\SourceGenerators\PacketSourceGenerator\PacketSourceGenerator.csproj", "{96B3EF17-A54C-04CB-B50E-E53D4D205150}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisualParamGenerator", "libremetaverse\SourceGenerators\VisualParamGenerator\VisualParamGenerator.csproj", "{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Generators", "Generators", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -926,9 +931,53 @@ Global
 		{96B3EF17-A54C-04CB-B50E-E53D4D205150}.ReleaseWindows|x64.Build.0 = Release|Any CPU
 		{96B3EF17-A54C-04CB-B50E-E53D4D205150}.ReleaseWindows|x86.ActiveCfg = Release|Any CPU
 		{96B3EF17-A54C-04CB-B50E-E53D4D205150}.ReleaseWindows|x86.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|ARM64.ActiveCfg = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|ARM64.Build.0 = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|x64.Build.0 = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Debug|x86.Build.0 = Debug|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|Any CPU.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|ARM64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|ARM64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|x64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|x64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|x86.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.Release|x86.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|Any CPU.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|Any CPU.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|ARM64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|ARM64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|x64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|x64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|x86.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseLinux|x86.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|Any CPU.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|Any CPU.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|ARM64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|ARM64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|x64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|x64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|x86.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseMacOS|x86.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|Any CPU.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|Any CPU.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|ARM64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|ARM64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|x64.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|x64.Build.0 = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|x86.ActiveCfg = Release|Any CPU
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158}.ReleaseWindows|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{96B3EF17-A54C-04CB-B50E-E53D4D205150} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
+		{690E8C3F-A9A7-1026-6EDE-8B3C2A703158} = {02EA681E-C7D8-13C7-8484-4AC65E1B71E8}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {826CED37-F899-43A9-8117-21878E146F81}
