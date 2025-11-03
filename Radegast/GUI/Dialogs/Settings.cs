@@ -243,6 +243,10 @@ namespace Radegast
             cbResolveURIs.Checked = settings["resolve_uris"].AsBoolean();
             cbResolveURIs.CheckedChanged += cbResolveURIs_CheckedChanged;
 
+            cbResolveURIsAsPlaintext.Checked = settings["resolve_uris_as_plaintext"].AsBoolean();
+            cbResolveURIsAsPlaintext.Enabled = cbResolveURIs.Checked;
+            cbResolveURIsAsPlaintext.CheckedChanged += CbResolveURIsAsPlaintext_CheckedChanged;
+
             cbHideLoginGraphics.Checked = settings["hide_login_graphics"].AsBoolean();
             cbHideLoginGraphics.CheckedChanged += cbHideLoginGraphics_CheckedChanged;
 
@@ -468,7 +472,14 @@ namespace Radegast
 
         private void cbResolveURIs_CheckedChanged(object sender, EventArgs e)
         {
+            cbResolveURIsAsPlaintext.Enabled = cbResolveURIs.Checked;
+
             settings["resolve_uris"] = OSD.FromBoolean(cbResolveURIs.Checked);
+        }
+
+        private void CbResolveURIsAsPlaintext_CheckedChanged(object sender, EventArgs e)
+        {
+            settings["resolve_uris_as_plaintext"] = OSD.FromBoolean(cbResolveURIsAsPlaintext.Checked);
         }
 
         private void cbFriendsNotifications_CheckedChanged(object sender, EventArgs e)
