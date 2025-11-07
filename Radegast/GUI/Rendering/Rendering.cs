@@ -128,7 +128,7 @@ namespace Radegast.Rendering
         private readonly MeshmerizerR renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
         private readonly AutoResetEvent TextureThreadContextReady = new AutoResetEvent(false);
-
+        private readonly SemaphoreSlim PendingTexturesAvailable = new SemaphoreSlim(0);
         private CancellationTokenSource cancellationTokenSource = null;
 
         private delegate void GenericTask();
@@ -232,7 +232,8 @@ namespace Radegast.Rendering
             
             TextureThreadContextReady.Reset();
             TextureThreadRunning = false;
-            TextureThreadContextReady.WaitOne(5000, false);
+            PendingTexturesAvailable?.Release();
+            TextureThreadContextReady.WaitOne(TimeSpan.FromSeconds(5), false);
 
             if (chatOverlay != null)
             {
@@ -1028,6 +1029,9 @@ namespace Radegast.Rendering
 
             while (TextureThreadRunning)
             {
+                PendingTexturesAvailable.Wait(cancellationTokenSource.Token);
+                if (!TextureThreadRunning) { break; }
+
                 if (!PendingTextures.TryDequeue(out var item)) { continue; }
 
                 // Already have this one loaded
@@ -2673,11 +2677,13 @@ namespace Radegast.Rendering
                                     out item.Data.TextureInfo.HasAlpha, out item.Data.TextureInfo.FullAlpha, out item.Data.TextureInfo.IsMask))
                             {
                                 PendingTextures.Enqueue(item);
+                                PendingTexturesAvailable.Release();
                             }
                             else if (Client.Assets.Cache.HasAsset(item.Data.TextureInfo.TextureID))
                             {
                                 item.LoadAssetFromCache = true;
                                 PendingTextures.Enqueue(item);
+                                PendingTexturesAvailable.Release();
                             }
                             else if (!item.Data.TextureInfo.FetchFailed)
                             {
@@ -2688,6 +2694,7 @@ namespace Radegast.Rendering
                                         case TextureRequestState.Finished:
                                             item.TextureData = asset.AssetData;
                                             PendingTextures.Enqueue(item);
+                                            PendingTexturesAvailable.Release();
                                             break;
 
                                         case TextureRequestState.Aborted:
@@ -2713,6 +2720,7 @@ namespace Radegast.Rendering
                         else
                         {
                             PendingTextures.Enqueue(item);
+                            PendingTexturesAvailable.Release();
                         }
                     }
                 }
