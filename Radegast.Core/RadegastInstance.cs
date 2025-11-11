@@ -380,12 +380,31 @@ namespace Radegast
 
         public string ChatFileName(string session)
         {
-            string dir = GlobalSettings["chat_log_dir"] && !string.IsNullOrWhiteSpace(GlobalSettings["chat_log_dir"].AsString())
-                ? Path.Combine(GlobalSettings["chat_log_dir"].AsString(), !string.IsNullOrEmpty(Client?.Self?.Name)
-                    ? Path.Combine(UserDir, Client.Self.Name) : Environment.CurrentDirectory) 
-                : ClientDir;
-            string fileName = SafeFileName(session);
-            return Path.Combine(dir, fileName);
+            var chatLogDir = GlobalSettings["chat_log_dir"]?.AsString();
+
+            if (string.IsNullOrWhiteSpace(chatLogDir))
+            {
+                chatLogDir = UserDir;
+            }
+
+            if (string.IsNullOrWhiteSpace(chatLogDir))
+            {
+                chatLogDir = Environment.CurrentDirectory;
+            }
+
+            var clientName = SafeFileName(Client.Self.Name);
+            if (!string.IsNullOrWhiteSpace(clientName))
+            {
+                chatLogDir = Path.Combine(chatLogDir, clientName);
+            }
+
+            if (!Directory.Exists(chatLogDir))
+            {
+                Directory.CreateDirectory(chatLogDir);
+            }
+
+            var fileName = SafeFileName(session);
+            return Path.Combine(chatLogDir, fileName);
         }
 
         public void LogClientMessage(string sessionName, string message)
