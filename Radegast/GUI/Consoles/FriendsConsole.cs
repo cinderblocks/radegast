@@ -150,13 +150,35 @@ namespace Radegast
                 return;
             }
 
+            if (e.Accepted)
+            {
+                ThreadPool.QueueUserWorkItem(sync =>
+                {
+                    string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                    MethodInvoker display = () =>
+                    {
+                        DisplayNotification(e.AgentID, e.AgentName + " accepted your friendship offer");
+                    };
+
+                    if (InvokeRequired)
+                    {
+                        BeginInvoke(display);
+                    }
+                    else
+                    {
+                        display();
+                    }
+                });
+            }
+
             RefreshFriendsList();
         }
 
-        private bool TryFindIMTab(UUID friendID, out IMTabWindow console)
+        public static bool TryFindIMTab(RadegastInstanceForms instance, UUID friendID, out IMTabWindow console)
         {
             console = null;
-            string tabID = (client.Self.AgentID ^ friendID).ToString();
+
+            string tabID = (instance.Client.Self.AgentID ^ friendID).ToString();
             if (instance.TabConsole.TabExists(tabID))
             {
                 console = (IMTabWindow)instance.TabConsole.Tabs[tabID].Control;
@@ -168,7 +190,7 @@ namespace Radegast
         private void DisplayNotification(UUID friendID, string msg)
         {
             IMTabWindow console;
-            if (TryFindIMTab(friendID, out console))
+            if (TryFindIMTab(instance, friendID, out console))
             {
                 console.TextManager.DisplayNotification(msg);
             }

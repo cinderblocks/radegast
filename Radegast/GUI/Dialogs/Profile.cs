@@ -640,6 +640,17 @@ namespace Radegast
         private void btnFriend_Click(object sender, EventArgs e)
         {
             Client.Friends.OfferFriendship(AgentID);
+            this.btnFriend.Enabled = false;
+            this.btnFriend.Text = "Sent Request";
+
+            var message = $"You have offered friendship to {fullName}.";
+
+            if (FriendsConsole.TryFindIMTab(Instance, AgentID, out var console))
+            {
+                console.TextManager.DisplayNotification(message);
+            }
+
+            Instance.TabConsole.DisplayNotificationInChat(message);
         }
 
         private void btnIM_Click(object sender, EventArgs e)
