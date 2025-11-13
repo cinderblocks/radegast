@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web;
 using OpenMetaverse;
 
@@ -450,6 +451,58 @@ namespace Radegast
 
             return name;
         }
+        private async Task<string> GetAgentNameAsync(UUID agentID, ResolveType nameType)
+        {
+            string name = RadegastInstance.INCOMPLETE_NAME;
+
+            if (nameType == ResolveType.AgentDefaultName)
+            {
+                name = instance.Names.Get(agentID);
+            }
+            else if (nameType == ResolveType.AgentUsername)
+            {
+                name = instance.Names.GetUserName(agentID);
+            }
+            else if (nameType == ResolveType.AgentDisplayName)
+            {
+                name = instance.Names.GetDisplayName(agentID);
+            }
+            else
+            {
+                return agentID.ToString();
+            }
+
+            if (name != RadegastInstance.INCOMPLETE_NAME)
+            {
+                return name;
+            }
+
+            var tcs = new TaskCompletionSource<string>();
+            EventHandler<UUIDNameReplyEventArgs> handler = (sender, e) =>
+            {
+                if (e.Names.TryGetValue(agentID, out var found))
+                {
+                    tcs.TrySetResult(found);
+                }
+            };
+
+            instance.Names.NameUpdated += handler;
+            try
+            {
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
+                if (completed == tcs.Task)
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+            }
+            catch { }
+            finally
+            {
+                instance.Names.NameUpdated -= handler;
+            }
+
+            return RadegastInstance.INCOMPLETE_NAME;
+        }
 
         /// <summary>
         /// Gets the name of a group by UUID. Will block for a short period of time to allow for name resolution.
@@ -486,6 +539,35 @@ namespace Radegast
             }
 
             return name;
+        }
+        private async Task<string> GetGroupNameAsync(UUID groupID)
+        {
+            var tcs = new TaskCompletionSource<string>();
+            EventHandler<GroupNamesEventArgs> handler = (sender, e) =>
+            {
+                if (e.GroupNames.TryGetValue(groupID, out var found))
+                {
+                    tcs.TrySetResult(found);
+                }
+            };
+
+            instance.Client.Groups.GroupNamesReply += handler;
+            try
+            {
+                instance.Client.Groups.RequestGroupName(groupID);
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
+                if (completed == tcs.Task)
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+            }
+            catch { }
+            finally
+            {
+                instance.Client.Groups.GroupNamesReply -= handler;
+            }
+
+            return RadegastInstance.INCOMPLETE_NAME;
         }
 
         /// <summary>
@@ -524,6 +606,35 @@ namespace Radegast
 
             return name;
         }
+        private async Task<string> GetParcelNameAsync(UUID parcelID)
+        {
+            var tcs = new TaskCompletionSource<string>();
+            EventHandler<ParcelInfoReplyEventArgs> handler = (sender, e) =>
+            {
+                if (e.Parcel.ID == parcelID)
+                {
+                    tcs.TrySetResult(e.Parcel.Name);
+                }
+            };
+
+            instance.Client.Parcels.ParcelInfoReply += handler;
+            try
+            {
+                instance.Client.Parcels.RequestParcelInfo(parcelID);
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
+                if (completed == tcs.Task)
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+            }
+            catch { }
+            finally
+            {
+                instance.Client.Parcels.ParcelInfoReply -= handler;
+            }
+
+            return RadegastInstance.INCOMPLETE_NAME;
+        }
         #endregion
 
         /// <summary>
@@ -544,6 +655,22 @@ namespace Radegast
                     return GetGroupName(id);
                 case ResolveType.Parcel:
                     return GetParcelName(id);
+                default:
+                    return id.ToString();
+            }
+        }
+        private async Task<string> ResolveAsync(UUID id, ResolveType type)
+        {
+            switch (type)
+            {
+                case ResolveType.AgentDefaultName:
+                case ResolveType.AgentDisplayName:
+                case ResolveType.AgentUsername:
+                    return await GetAgentNameAsync(id, type);
+                case ResolveType.Group:
+                    return await GetGroupNameAsync(id);
+                case ResolveType.Parcel:
+                    return await GetParcelNameAsync(id);
                 default:
                     return id.ToString();
             }
