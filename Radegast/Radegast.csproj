@@ -2,11 +2,11 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
-	  <AssemblyTitle>Radegast-ng</AssemblyTitle>
+	<AssemblyTitle>Radegast-ng</AssemblyTitle>
     <ApplicationIcon>radegast.ico</ApplicationIcon>
-	  <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-	  <UseWindowsForms>true</UseWindowsForms>
-	  <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	<UseWindowsForms>true</UseWindowsForms>
+	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
 	<OutputPath>..\bin\$(Configuration)\</OutputPath>

@@ -41,6 +41,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Threading;
 using CoreJ2K;
+using CoreJ2K.Util;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
@@ -127,7 +128,7 @@ namespace Radegast.Rendering
         private readonly MeshmerizerR renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
         private readonly AutoResetEvent TextureThreadContextReady = new AutoResetEvent(false);
-
+        private readonly SemaphoreSlim PendingTexturesAvailable = new SemaphoreSlim(0);
         private CancellationTokenSource cancellationTokenSource = null;
 
         private delegate void GenericTask();
@@ -231,7 +232,8 @@ namespace Radegast.Rendering
             
             TextureThreadContextReady.Reset();
             TextureThreadRunning = false;
-            TextureThreadContextReady.WaitOne(5000, false);
+            PendingTexturesAvailable?.Release();
+            TextureThreadContextReady.WaitOne(TimeSpan.FromSeconds(5), false);
 
             if (chatOverlay != null)
             {
@@ -1027,12 +1029,17 @@ namespace Radegast.Rendering
 
             while (TextureThreadRunning)
             {
+                PendingTexturesAvailable.Wait(cancellationTokenSource.Token);
+                if (!TextureThreadRunning) { break; }
+
                 if (!PendingTextures.TryDequeue(out var item)) { continue; }
 
                 // Already have this one loaded
                 if (item.Data.TextureInfo.TexturePointer != 0) { continue; }
 
                 byte[] imageBytes = null;
+                PortableImage j2kImage = null;
+                SKBitmap skBitmap = null;
                 if (item.TextureData != null || item.LoadAssetFromCache)
                 {
                     if (item.LoadAssetFromCache)
@@ -1041,61 +1048,104 @@ namespace Radegast.Rendering
                     }
                     if (item.TextureData == null) { continue; }
 
-                    // TODO: eliminate this.
-                    var mi = new ManagedImage(J2kImage.FromBytes(item.TextureData));
-                    
-                    var hasAlpha = false;
-                    var fullAlpha = false;
-                    var isMask = false;
-                    if ((mi.Channels & ManagedImage.ImageChannels.Alpha) != 0)
+                    try
                     {
-                        fullAlpha = true;
-                        isMask = true;
-
-                        // Do we really have alpha, is it all full alpha, or is it a mask
-                        foreach (var b in mi.Alpha)
-                        {
-                            if (b < 255)
-                            {
-                                hasAlpha = true;
-                            }
-                            if (b != 0)
-                            {
-                                fullAlpha = false;
-                            }
-                            if (b != 0 && b != 255)
-                            {
-                                isMask = false;
-                            }
-                        }
+                        j2kImage = J2kImage.FromBytes(item.TextureData);
+                    }
+                    catch
+                    {
+                        j2kImage = null;
                     }
 
-                    item.Data.TextureInfo.HasAlpha = hasAlpha;
-                    item.Data.TextureInfo.FullAlpha = fullAlpha;
-                    item.Data.TextureInfo.IsMask = isMask;
-
-                    imageBytes = item.TextureData;
-                    if (CacheDecodedTextures)
+                    if (j2kImage != null)
                     {
-                        RHelp.SaveCachedImage(imageBytes, item.TeFace.TextureID, hasAlpha, fullAlpha, isMask);
+                        // TODO: eliminate this.
+                        var mi = new ManagedImage(j2kImage);
+
+                        var hasAlpha = false;
+                        var fullAlpha = false;
+                        var isMask = false;
+                        if ((mi.Channels & ManagedImage.ImageChannels.Alpha) != 0)
+                        {
+                            fullAlpha = true;
+                            isMask = true;
+
+                            // Do we really have alpha, is it all full alpha, or is it a mask
+                            foreach (var b in mi.Alpha)
+                            {
+                                if (b < 255)
+                                {
+                                    hasAlpha = true;
+                                }
+                                if (b != 0)
+                                {
+                                    fullAlpha = false;
+                                }
+                                if (b != 0 && b != 255)
+                                {
+                                    isMask = false;
+                                }
+                            }
+                        }
+
+                        item.Data.TextureInfo.HasAlpha = hasAlpha;
+                        item.Data.TextureInfo.FullAlpha = fullAlpha;
+                        item.Data.TextureInfo.IsMask = isMask;
+
+                        // Keep original bytes for optional caching and upload path
+                        imageBytes = item.TextureData;
+
+                        // Convert decoded image to SKBitmap once
+                        try
+                        {
+                            skBitmap = j2kImage.As<SKBitmap>();
+                        }
+                        catch
+                        {
+                            skBitmap = null;
+                        }
+
+                        if (CacheDecodedTextures)
+                        {
+                            RHelp.SaveCachedImage(imageBytes, item.TeFace.TextureID, hasAlpha, fullAlpha, isMask);
+                        }
                     }
                 }
 
                 if (imageBytes != null)
                 {
-                    var bitmap = J2kImage.FromBytes(imageBytes).As<SKBitmap>().ToBitmap();
-
-                    bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
-
-                    if (instance.MainForm.IsHandleCreated)
+                    // If we didn't produce an SKBitmap above (unexpected path), decode now as fallback
+                    if (skBitmap == null)
                     {
-                        instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                        try
                         {
-                            item.Data.TextureInfo.TexturePointer =
-                                RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
-                            // GL.Flush();
-                            bitmap.Dispose();
-                        }));
+                            var decoded = J2kImage.FromBytes(imageBytes);
+                            skBitmap = decoded?.As<SKBitmap>();
+                        }
+                        catch
+                        {
+                            skBitmap = null;
+                        }
+                    }
+
+                    if (skBitmap != null)
+                    {
+                        var bitmap = skBitmap.ToBitmap();
+
+                        try { skBitmap.Dispose(); } catch { }
+
+                        bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+
+                        if (instance.MainForm.IsHandleCreated)
+                        {
+                            instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                            {
+                                item.Data.TextureInfo.TexturePointer =
+                                    RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
+                                // GL.Flush();
+                                bitmap.Dispose();
+                            }));
+                        }
                     }
                 }
 
@@ -2627,11 +2677,13 @@ namespace Radegast.Rendering
                                     out item.Data.TextureInfo.HasAlpha, out item.Data.TextureInfo.FullAlpha, out item.Data.TextureInfo.IsMask))
                             {
                                 PendingTextures.Enqueue(item);
+                                PendingTexturesAvailable.Release();
                             }
                             else if (Client.Assets.Cache.HasAsset(item.Data.TextureInfo.TextureID))
                             {
                                 item.LoadAssetFromCache = true;
                                 PendingTextures.Enqueue(item);
+                                PendingTexturesAvailable.Release();
                             }
                             else if (!item.Data.TextureInfo.FetchFailed)
                             {
@@ -2642,6 +2694,7 @@ namespace Radegast.Rendering
                                         case TextureRequestState.Finished:
                                             item.TextureData = asset.AssetData;
                                             PendingTextures.Enqueue(item);
+                                            PendingTexturesAvailable.Release();
                                             break;
 
                                         case TextureRequestState.Aborted:
@@ -2667,6 +2720,7 @@ namespace Radegast.Rendering
                         else
                         {
                             PendingTextures.Enqueue(item);
+                            PendingTexturesAvailable.Release();
                         }
                     }
                 }

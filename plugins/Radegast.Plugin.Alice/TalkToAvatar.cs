@@ -38,12 +38,12 @@ namespace Radegast.Plugin.Alice
             if (ali != null)
             {
                 uuid = (UUID)ali.Tag;
-                username = instance.Names.Get(uuid);
+                username = instance.Names.GetAsync(uuid).GetAwaiter().GetResult();
             }
             else
             {
                 if (target is FriendInfo fi) { uuid = fi.UUID; }
-                username = instance.Names.Get(uuid);
+                username = instance.Names.GetAsync(uuid).GetAwaiter().GetResult();
 
             }
             if (username==null)

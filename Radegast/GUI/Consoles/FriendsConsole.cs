@@ -96,33 +96,49 @@ namespace Radegast
 
         private void InitializeFriendsList()
         {
-            if (!Monitor.TryEnter(lockOneAtaTime)) return;
-            var friends = client.Friends.FriendList.Values.ToList();
-            
-            friends.Sort((fi1, fi2) =>
+            // Try to avoid overlapping updates; if we can't get the lock, skip this update
+            if (!Monitor.TryEnter(lockOneAtaTime)) { return; }
+
+            try
+            {
+                var friends = client.Friends.FriendList.Values
+                    .OrderByDescending(fi => fi.IsOnline)
+                    .ThenBy(fi => fi.Name, StringComparer.Ordinal)
+                    .ToArray();
+
+                UUID selectedId = selectedFriend?.UUID ?? UUID.Zero;
+
+                listFriends.BeginUpdate();
+                try
                 {
-                    switch (fi1.IsOnline)
+                    listFriends.Items.Clear();
+                    if (friends.Length > 0)
                     {
-                        case true when !fi2.IsOnline:
-                            return -1;
-                        case false when fi2.IsOnline:
-                            return 1;
-                        default:
-                            return string.CompareOrdinal(fi1.Name, fi2.Name);
+                        listFriends.Items.AddRange(friends);
+
+                        if (selectedId != UUID.Zero)
+                        {
+                            for (int i = 0; i < listFriends.Items.Count; i++)
+                            {
+                                if (listFriends.Items[i] is FriendInfo fi && fi.UUID == selectedId)
+                                {
+                                    listFriends.SelectedIndex = i;
+                                    selectedFriend = fi;
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
-            );
-
-            listFriends.BeginUpdate();
-            
-            listFriends.Items.Clear();
-            foreach (FriendInfo friend in friends)
-            {
-                listFriends.Items.Add(friend);
+                finally
+                {
+                    listFriends.EndUpdate();
+                }
             }
-            
-            listFriends.EndUpdate();
-            Monitor.Exit(lockOneAtaTime);
+            finally
+            {
+                Monitor.Exit(lockOneAtaTime);
+            }
         }
 
         private void RefreshFriendsList()
@@ -150,13 +166,35 @@ namespace Radegast
                 return;
             }
 
+            if (e.Accepted)
+            {
+                ThreadPool.QueueUserWorkItem(sync =>
+                {
+                    string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                    MethodInvoker display = () =>
+                    {
+                        DisplayNotification(e.AgentID, $"{e.AgentName} accepted your friendship offer");
+                    };
+
+                    if (InvokeRequired)
+                    {
+                        BeginInvoke(display);
+                    }
+                    else
+                    {
+                        display();
+                    }
+                });
+            }
+
             RefreshFriendsList();
         }
 
-        private bool TryFindIMTab(UUID friendID, out IMTabWindow console)
+        public static bool TryFindIMTab(RadegastInstanceForms instance, UUID friendID, out IMTabWindow console)
         {
             console = null;
-            string tabID = (client.Self.AgentID ^ friendID).ToString();
+
+            string tabID = (instance.Client.Self.AgentID ^ friendID).ToString();
             if (instance.TabConsole.TabExists(tabID))
             {
                 console = (IMTabWindow)instance.TabConsole.Tabs[tabID].Control;
@@ -168,7 +206,7 @@ namespace Radegast
         private void DisplayNotification(UUID friendID, string msg)
         {
             IMTabWindow console;
-            if (TryFindIMTab(friendID, out console))
+            if (TryFindIMTab(instance, friendID, out console))
             {
                 console.TextManager.DisplayNotification(msg);
             }
@@ -184,7 +222,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, name + " is offline");
+                    DisplayNotification(e.Friend.UUID, $"{name} is offline");
                     RefreshFriendsList();
                 };
 
@@ -208,7 +246,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, name + " is online");
+                    DisplayNotification(e.Friend.UUID, $"{name} is online");
                     RefreshFriendsList();
                 };
 
@@ -230,7 +268,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.AgentID, name + " is no longer on your friend list");
+                    DisplayNotification(e.AgentID, $"{name} is no longer on your friend list");
                     RefreshFriendsList();
                 };
 
@@ -424,7 +462,16 @@ namespace Radegast
                     if (item is FriendInfo)
                     {
                         var friend = (FriendInfo)((ListBox)sender).Items[e.Index];
-                        string title = instance.Names.Get(friend.UUID);
+                        // Prefer the name stored on the FriendInfo if it is available; fall back to the global NameManager
+                        string title;
+                        if (!string.IsNullOrEmpty(friend.Name) && friend.Name != RadegastInstance.INCOMPLETE_NAME)
+                        {
+                            title = friend.Name;
+                        }
+                        else
+                        {
+                            title = instance.Names.Get(friend.UUID);
+                        }
 
                         using (var brush = new SolidBrush(e.ForeColor))
                         {
