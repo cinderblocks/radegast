@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text;
 using OpenMetaverse;
 using Radegast.Core.Commands;
 
@@ -347,7 +348,7 @@ namespace Radegast.Commands
         public static string[] ParseArguments(string str)
         {
             List<string> list = new List<string>();
-            string current = string.Empty;
+            StringBuilder current = new StringBuilder();
             string trimmed = null;
             bool withinQuote = false;
             bool escaped = false;
@@ -358,12 +359,12 @@ namespace Radegast.Commands
                 {
                     if (escaped)
                     {
-                        current += '"';
+                        current.Append('"');
                         escaped = false;
                     }
                     else
                     {
-                        current += '"';
+                        current.Append('"');
                         withinQuote = !withinQuote;
                     }
                 }
@@ -371,28 +372,26 @@ namespace Radegast.Commands
                 {
                     if (escaped || withinQuote)
                     {
-                        current += c;
+                        current.Append(c);
                         escaped = false;
                     }
                     else
                     {
-                        trimmed = current.Trim();
+                        trimmed = current.ToString().Trim();
                         if (trimmed.StartsWith("\"") && trimmed.EndsWith("\""))
                         {
-                            trimmed = trimmed.Remove(0, 1);
-                            trimmed = trimmed.Remove(trimmed.Length - 1);
-                            trimmed = trimmed.Trim();
+                            trimmed = trimmed.Substring(1, trimmed.Length - 2).Trim();
                         }
                         if (trimmed.Length > 0)
                             list.Add(trimmed);
-                        current = string.Empty;
+                        current.Clear();
                     }
                 }
                 else if (c == '\\')
                 {
                     if (escaped)
                     {
-                        current += '\\';
+                        current.Append('\\');
                         escaped = false;
                     }
                     else
@@ -404,17 +403,15 @@ namespace Radegast.Commands
                 {
                     if (escaped) escaped = false;
                     //throw new FormatException(c.ToString() + " is not an escapable character.");
-                    current += c;
+                    current.Append(c);
                 }
             }
 
-            trimmed = current.Trim();
+            trimmed = current.ToString().Trim();
 
             if (trimmed.StartsWith("\"") && trimmed.EndsWith("\""))
             {
-                trimmed = trimmed.Remove(0, 1);
-                trimmed = trimmed.Remove(trimmed.Length - 1);
-                trimmed = trimmed.Trim();
+                trimmed = trimmed.Substring(1, trimmed.Length - 2).Trim();
             }
 
             if (trimmed.Length > 0)

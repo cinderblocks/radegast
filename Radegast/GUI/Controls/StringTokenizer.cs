@@ -48,12 +48,33 @@ namespace Radegast
 
     public class Token
     {
+        private readonly string source;
+        private readonly int start;
+        private readonly int length;
+        private string valueCache;
+
+        // Existing constructor for callers that already have the string
         public Token(TokenKind kind, string value, int line, int column)
         {
             Kind = kind;
-            Value = value;
+            valueCache = value;
+            source = null;
+            start = 0;
+            length = 0;
             Line = line;
             Column = column;
+        }
+
+        // New constructor that lazily captures a slice of the source
+        internal Token(TokenKind kind, string source, int start, int length, int line, int column)
+        {
+            Kind = kind;
+            this.source = source;
+            this.start = start;
+            this.length = length;
+            Line = line;
+            Column = column;
+            valueCache = null;
         }
 
         public int Column { get; }
@@ -62,7 +83,15 @@ namespace Radegast
 
         public int Line { get; }
 
-        public string Value { get; }
+        public string Value
+        {
+            get
+            {
+                if (valueCache != null) return valueCache;
+                if (length == 0) return valueCache = string.Empty;
+                return valueCache = source.Substring(start, length);
+            }
+        }
     }
 
 	/// <summary>
@@ -74,7 +103,7 @@ namespace Radegast
 
         private int line;
         private int column;
-        private int pos;	// position within data
+        private int pos;    // position within data
 
         private readonly string data;
 
@@ -110,7 +139,7 @@ namespace Radegast
 		/// </summary>
 		public bool IgnoreWhiteSpace { get; set; }
 
-	    private void Reset()
+		private void Reset()
 		{
 			IgnoreWhiteSpace = false;
 			SymbolChars = new char[]{'=', '+', '-', '/', ',', '.', '*', '~', '!', '@', '#', '$', '%', '^', '&', '(', ')', '{', '}', '[', ']', ':', ';', '<', '>', '?', '|', '\\'};
@@ -142,10 +171,11 @@ namespace Radegast
 			return new Token(kind, value, line, column);
 		}
 
+		// Modified: create a Token that lazily refers to the source string slice
 		protected Token CreateToken(TokenKind kind)
 		{
-			string tokenData = data.Substring(savePos, pos-savePos);
-			return new Token(kind, tokenData, saveLine, saveCol);
+			int length = pos - savePos;
+			return new Token(kind, data, savePos, length, saveLine, saveCol);
 		}
 
 		public Token Next()
@@ -186,7 +216,7 @@ namespace Radegast
 					StartRead();
 					Consume();
 					if (LA(0) == '\n')
-						Consume();	// on DOS/Windows we have \r\n for new line
+						Consume();    // on DOS/Windows we have \r\n for new line
 
 					line++;
 					column=1;
@@ -208,23 +238,23 @@ namespace Radegast
 					return ReadString();
 				}
 
-                case '/':
-                {
-                    if (LA(1) == '/')
-                    {
-                        return ReadComment();
-                    }
-                    else if (LA(1) == '*')
-                    {
-                        return ReadStarComment();
-                    }
-                    else
-                    {
-                        StartRead();
-                        Consume();
-                        return CreateToken(TokenKind.Symbol);
-                    }
-                }
+				case '/':
+				{
+					if (LA(1) == '/')
+					{
+						return ReadComment();
+					}
+					else if (LA(1) == '*')
+					{
+						return ReadStarComment();
+					}
+					else
+					{
+						StartRead();
+						Consume();
+						return CreateToken(TokenKind.Symbol);
+					}
+				}
 
 				default:
 				{
@@ -240,7 +270,7 @@ namespace Radegast
 					{
 						StartRead();
 						Consume();
-						return CreateToken(TokenKind.Unknown);						
+						return CreateToken(TokenKind.Unknown);                        
 					}
 				}
 
@@ -399,16 +429,16 @@ namespace Radegast
 				char ch = LA(0);
 				if (ch == EOF)
 					break;
-				else if (ch == '\r')	// handle CR in strings
+				else if (ch == '\r')    // handle CR in strings
 				{
 					Consume();
-					if (LA(0) == '\n')	// for DOS & windows
+					if (LA(0) == '\n')    // for DOS & windows
 						Consume();
 
 					line++;
 					column = 1;
 				}
-				else if (ch == '\n')	// new line in quoted string
+				else if (ch == '\n')    // new line in quoted string
 				{
 					Consume();
 
@@ -419,7 +449,7 @@ namespace Radegast
 				{
 					Consume();
 					if (LA(0) != '"')
-						break;	// done reading, and this quotes does not have escape character
+						break;    // done reading, and this quotes does not have escape character
 					else
 						Consume(); // consume second ", because first was just an escape
 				}
