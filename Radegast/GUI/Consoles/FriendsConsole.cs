@@ -157,7 +157,7 @@ namespace Radegast
                     string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
                     MethodInvoker display = () =>
                     {
-                        DisplayNotification(e.AgentID, e.AgentName + " accepted your friendship offer");
+                        DisplayNotification(e.AgentID, $"{e.AgentName} accepted your friendship offer");
                     };
 
                     if (InvokeRequired)
@@ -206,7 +206,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, name + " is offline");
+                    DisplayNotification(e.Friend.UUID, $"{name} is offline");
                     RefreshFriendsList();
                 };
 
@@ -230,7 +230,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, name + " is online");
+                    DisplayNotification(e.Friend.UUID, $"{name} is online");
                     RefreshFriendsList();
                 };
 
@@ -252,7 +252,7 @@ namespace Radegast
                 string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.AgentID, name + " is no longer on your friend list");
+                    DisplayNotification(e.AgentID, $"{name} is no longer on your friend list");
                     RefreshFriendsList();
                 };
 

@@ -235,15 +235,15 @@ namespace SimpleBuilderNamespace
 
             if (prim.ParentID == client.Self.LocalID)
             {
-                return string.Format("{0} attached to {1}", name, prim.PrimData.AttachmentPoint);
+                return $"{name} attached to {prim.PrimData.AttachmentPoint}";
             }
             else if (ownerName != "Loading...")
             {
-                return string.Format("{0} ({1}m) owned by {2}", name, distance, ownerName);
+                return $"{name} ({distance}m) owned by {ownerName}";
             }
             else
             {
-                return string.Format("{0} ({1}m)", name, distance);
+                return $"{name} ({distance}m)";
             }
 
         }
