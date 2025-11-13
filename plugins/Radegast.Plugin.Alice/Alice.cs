@@ -26,10 +26,11 @@ using System.Windows.Forms;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using AIMLbot;
+using System.Threading.Tasks;
 
 namespace Radegast.Plugin.Alice
 {
-    [Plugin(Name = "ALICE Chatbot", Description = "A.L.I.C.E. based AI chat bot", Version = "1.1")]
+    [Plugin(Name = "ALICE Chatbot", Description = "A.L.I.C.E. based AI chat bot", Version = "1.2")]
     public class AliceAI : IRadegastPlugin
     {
         private RadegastInstanceForms Instance;
@@ -268,9 +269,16 @@ namespace Radegast.Plugin.Alice
             MenuButton.DropDownItems.Add(btn_DisableOnStart);
             MenuButton.DropDownItems.Add("Reload AIML", null, (sender, e) =>
             {
-                Alice = null;
-                GC.Collect();
-                LoadALICE();
+                Task.Run(async () =>
+                {
+                    Alice = null;
+                    GC.Collect();
+                    bool ok = await LoadALICEAsync();
+                    if (!ok)
+                    {
+                        Console.WriteLine("Failed reloading ALICE");
+                    }
+                });
             });
 
             SetEnabled(Enabled);
@@ -282,15 +290,37 @@ namespace Radegast.Plugin.Alice
         private bool SetEnabled(bool e)
         {
             if (!e || AimlLoaded) return e;
-            if (!LoadALICE()) return false;
-            if (Client.Network.Connected)
+
+            _ = Task.Run(async () =>
             {
-                Alice.GlobalSettings.updateSetting("name", FirstName(Client.Self.Name));
-            }
-            AimlLoaded = true;
-            talkToAvatar = new TalkToAvatar(Instance, Alice);
-            Instance.ContextActionManager.RegisterContextAction(talkToAvatar);
-            return true;
+                bool ok = await LoadALICEAsync();
+                if (ok)
+                {
+                    if (Client.Network.Connected)
+                    {
+                        Alice.GlobalSettings.updateSetting("name", FirstName(Client.Self.Name));
+                    }
+
+                    AimlLoaded = true;
+                    talkToAvatar = new TalkToAvatar(Instance, Alice);
+                    Instance.ContextActionManager.RegisterContextAction(talkToAvatar);
+                }
+                else
+                {
+                    Enabled = false;
+                    Instance.ShowNotificationInChat("Failed to load ALICE AIML files", ChatBufferTextStyle.Invisible);
+                }
+            });
+
+            return e;
+        }
+
+        /// <summary>
+        /// Run AIML load on a background thread
+        /// </summary>
+        private Task<bool> LoadALICEAsync()
+        {
+            return Task.Run(() => LoadALICE());
         }
 
         private bool LoadALICE()
