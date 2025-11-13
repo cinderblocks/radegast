@@ -67,13 +67,16 @@ namespace Radegast
         private readonly TokenBucketRateLimiter rateLimiter = new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions()
         {
             AutoReplenishment = true,
-            // Queue Limit shouldn't matter, since its only used in NameManager and from a single background task, a queue of 1 should be sufficient
+            // Queue Limit shouldn't matter, since it's only used in NameManager and from a single background task, a queue of 1 should be sufficient
             QueueLimit = 1,
             QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
             ReplenishmentPeriod = TimeSpan.FromSeconds(1),
             TokenLimit = 20,
             TokensPerPeriod = 5
         });
+
+        private readonly HashSet<UUID> batchedNamesBuffer = new HashSet<UUID>();
+        private readonly List<UUID> batchedListBuffer = new List<UUID>(128);
 
         public NameManager(RadegastInstance instance)
         {
@@ -111,32 +114,72 @@ namespace Radegast
 
         private async Task ProcessNameRequests(ChannelReader<UUID> reader, CancellationToken cancellationToken = default)
         {
-            HashSet<UUID> batchedNames = new HashSet<UUID>();
+            batchedNamesBuffer.Clear();
             Stopwatch stopwatch = Stopwatch.StartNew();
 
-            while (stopwatch.ElapsedMilliseconds < 100 && batchedNames.Count < 100)
+            // Wait for the first item (blocking asynchronously)
+            UUID firstAvatar;
+            try
             {
-                if (!reader.TryRead(out UUID nextAvatarId))
+                firstAvatar = await reader.ReadAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) { return; }
+            catch (ChannelClosedException) { return; }
+
+            batchedNamesBuffer.Add(firstAvatar);
+
+            // Continue to collect items until timeout (100ms) or max count (100)
+            while (stopwatch.ElapsedMilliseconds < 100 && batchedNamesBuffer.Count < 100)
+            {
+                // Drain any immediately-available items without awaiting
+                while (reader.TryRead(out UUID next) && batchedNamesBuffer.Count < 100)
                 {
-                    await Task.Delay(5, cancellationToken);
-                    continue;
+                    batchedNamesBuffer.Add(next);
                 }
 
-                batchedNames.Add(nextAvatarId);
+                if (batchedNamesBuffer.Count >= 100) break;
+
+                int remaining = (int)Math.Max(1, 100 - stopwatch.ElapsedMilliseconds);
+
+                // Wait either for a new item or timeout
+                var readTask = reader.ReadAsync(cancellationToken).AsTask();
+                var delayTask = Task.Delay(remaining, cancellationToken);
+
+                var completed = await Task.WhenAny(readTask, delayTask).ConfigureAwait(false);
+
+                if (completed == readTask)
+                {
+                    try
+                    {
+                        UUID got = await readTask; // propagate exceptions/cancellation
+                        batchedNamesBuffer.Add(got);
+                    }
+                    catch (OperationCanceledException) { break; }
+                    catch (ChannelClosedException) { break; }
+                    catch { break; }
+                }
+                else
+                {
+                    // timeout elapsed
+                    break;
+                }
             }
+
             stopwatch.Stop();
 
-            // Not too happy with that, but can't do much as long as RequestAvatarNames and GetDisplayNames accept List<UUID>
-            // instead of IEnumerable<UUID> or ICollection<UUID>...
-            List<UUID> batchedList = batchedNames.ToList();
+            if (batchedNamesBuffer.Count == 0) return;
+
+            batchedListBuffer.Clear();
+            batchedListBuffer.AddRange(batchedNamesBuffer);
+
             if (Mode == NameMode.Standard || (!Client.Avatars.DisplayNamesAvailable()))
             {
-                Client.Avatars.RequestAvatarNames(batchedList);
+                Client.Avatars.RequestAvatarNames(batchedListBuffer);
             }
             else
             {
                 // use display names
-                _ = Client.Avatars.GetDisplayNames(batchedList, (success, names, badIDs) =>
+                _ = Client.Avatars.GetDisplayNames(batchedListBuffer, (success, names, badIDs) =>
                 {
                     if (success)
                     {
@@ -148,6 +191,9 @@ namespace Radegast
                     }
                 }, cancellationToken);
             }
+
+            batchedNamesBuffer.Clear();
+            batchedListBuffer.Clear();
         }
         private void LoadCachedNames()
         {
