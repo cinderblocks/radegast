@@ -24,6 +24,7 @@ using System.Drawing;
 using System.Windows.Forms;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using CoreJ2K;
 using OpenMetaverse;
 using SkiaSharp;
@@ -695,26 +696,41 @@ namespace Radegast
 
         private void GetTargetParcel()
         {
-            ThreadPool.QueueUserWorkItem(sync =>
+            // Run asynchronously to avoid blocking threads with ManualResetEvent
+            Task.Run(async () =>
             {
                 UUID parcelID = Client.Parcels.RequestRemoteParcelID(
                     new Vector3((float)(targetX % regionSize), (float)(targetY % regionSize), 20f),
                     targetRegion.RegionHandle, UUID.Zero);
-                if (parcelID != UUID.Zero)
+
+                if (parcelID == UUID.Zero) return;
+
+                var tcs = new TaskCompletionSource<ParcelInfoReplyEventArgs>();
+
+                EventHandler<ParcelInfoReplyEventArgs> handler = (sender, e) =>
                 {
-                    ManualResetEvent done = new ManualResetEvent(false);
-                    EventHandler<ParcelInfoReplyEventArgs> handler = (sender, e) =>
+                    if (e.Parcel.ID == parcelID)
                     {
-                        if (e.Parcel.ID == parcelID)
-                        {
-                            targetParcelName = e.Parcel.Name;
-                            done.Set();
-                            needRepaint = true;
-                        }
-                    };
-                    Client.Parcels.ParcelInfoReply += handler;
+                        try { tcs.TrySetResult(e); }
+                        catch { }
+                    }
+                };
+
+                Client.Parcels.ParcelInfoReply += handler;
+                try
+                {
                     Client.Parcels.RequestParcelInfo(parcelID);
-                    done.WaitOne(30 * 1000, false);
+
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+                    if (completed == tcs.Task && tcs.Task.Result != null)
+                    {
+                        targetParcelName = tcs.Task.Result.Parcel.Name;
+                        needRepaint = true;
+                    }
+                }
+                catch { }
+                finally
+                {
                     Client.Parcels.ParcelInfoReply -= handler;
                 }
             });

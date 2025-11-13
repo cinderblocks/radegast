@@ -22,6 +22,7 @@ using System;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
@@ -135,11 +136,11 @@ namespace Radegast
                             {
                                 if (savedRegion != null)
                                 {
-                                    gotoRegion(savedRegion, savedX, savedY);
+                                    _ = gotoRegion(savedRegion, savedX, savedY);
                                 }
                                 else if (Active)
                                 {
-                                    gotoRegion(client.Network.CurrentSim.Name, 128, 128);
+                                    _ = gotoRegion(client.Network.CurrentSim.Name, 128, 128);
                                 }
                             }
                     ));
@@ -396,7 +397,7 @@ namespace Radegast
         private string savedRegion = null;
         private int savedX, savedY;
 
-        private void gotoRegion(string regionName, int simX, int simY)
+        private async Task gotoRegion(string regionName, int simX, int simY)
         {
             savedRegion = regionName;
             savedX = simX;
@@ -406,30 +407,60 @@ namespace Radegast
 
             if (mapCtrl != null)
             {
-                if (!regionHandles.ContainsKey(regionName))
+                bool hasHandle;
+                ulong handleValue = 0;
+                lock (regionHandles)
                 {
-                    ThreadPool.QueueUserWorkItem(sync =>
+                    hasHandle = regionHandles.TryGetValue(regionName, out handleValue);
+                }
+
+                if (!hasHandle)
+                {
+                    var tcs = new TaskCompletionSource<bool>();
+
+                    EventHandler<GridRegionEventArgs> handler = (sender, e) =>
+                    {
+                        lock (regionHandles)
                         {
-                            ManualResetEvent done = new ManualResetEvent(false);
-                            EventHandler<GridRegionEventArgs> handler = (sender, e) =>
-                                {
-                                    regionHandles[e.Region.Name] = Utils.UIntsToLong((uint)e.Region.X, (uint)e.Region.Y);
-                                    if (e.Region.Name == regionName)
-                                        done.Set();
-                                };
-                            client.Grid.GridRegion += handler;
-                            client.Grid.RequestMapRegion(regionName, GridLayerType.Objects);
-                            if (done.WaitOne(TimeSpan.FromSeconds(30), false))
-                            {
-                                if (!instance.MonoRuntime || IsHandleCreated)
-                                    BeginInvoke(new MethodInvoker(() => gotoRegion(regionName, simX, simY)));
-                            }
-                            client.Grid.GridRegion -= handler;
+                            regionHandles[e.Region.Name] = Utils.UIntsToLong((uint)e.Region.X, (uint)e.Region.Y);
                         }
-                    );
+                        if (e.Region.Name == regionName)
+                        {
+                            tcs.TrySetResult(true);
+                        }
+                    };
+
+                    client.Grid.GridRegion += handler;
+                    try
+                    {
+                        client.Grid.RequestMapRegion(regionName, GridLayerType.Objects);
+
+                        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+                        if (completed == tcs.Task)
+                        {
+                            // Get the handle we stored in the handler
+                            lock (regionHandles)
+                            {
+                                if (regionHandles.TryGetValue(regionName, out handleValue))
+                                {
+                                    if (InvokeRequired)
+                                        BeginInvoke(new MethodInvoker(() => mapCtrl.CenterMap(handleValue, (uint)simX, (uint)simY, true)));
+                                    else
+                                        mapCtrl.CenterMap(handleValue, (uint)simX, (uint)simY, true);
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        client.Grid.GridRegion -= handler;
+                    }
+
                     return;
                 }
-                mapCtrl.CenterMap(regionHandles[regionName], (uint)simX, (uint)simY, true);
+
+                mapCtrl.CenterMap(handleValue, (uint)simX, (uint)simY, true);
                 return;
             }
 
