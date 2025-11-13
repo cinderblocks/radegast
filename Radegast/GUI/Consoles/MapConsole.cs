@@ -416,7 +416,7 @@ namespace Radegast
 
                 if (!hasHandle)
                 {
-                    var tcs = new TaskCompletionSource<bool>();
+                    var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
                     EventHandler<GridRegionEventArgs> handler = (sender, e) =>
                     {
@@ -431,14 +431,16 @@ namespace Radegast
                     };
 
                     client.Grid.GridRegion += handler;
+                    CancellationTokenSource cts = new CancellationTokenSource();
                     try
                     {
                         client.Grid.RequestMapRegion(regionName, GridLayerType.Objects);
 
-                        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+                        // Wait for either the handler to signal or the timeout
+                        var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30), cts.Token)).ConfigureAwait(false);
                         if (completed == tcs.Task)
                         {
-                            // Get the handle we stored in the handler
+                            // Successful: get the handle and center map on UI thread
                             lock (regionHandles)
                             {
                                 if (regionHandles.TryGetValue(regionName, out handleValue))
@@ -450,11 +452,31 @@ namespace Radegast
                                 }
                             }
                         }
+                        else
+                        {
+                            // Timeout
+                            Logger.Log($"Map Console timed out waiting for region handle for '{regionName}'", 
+                                Helpers.LogLevel.Warning, instance.Client);
+                            try
+                            {
+                                if (InvokeRequired)
+                                    BeginInvoke(new MethodInvoker(() 
+                                        => instance.ShowNotificationInChat($"Timed out looking up region {regionName}")));
+                                else
+                                    instance.ShowNotificationInChat($"Timed out looking up region {regionName}");
+                            }
+                            catch { }
+                        }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"Exception while requesting map region {regionName}: {ex}", Helpers.LogLevel.Error, instance.Client);
+                    }
                     finally
                     {
                         client.Grid.GridRegion -= handler;
+                        cts.Cancel();
+                        cts.Dispose();
                     }
 
                     return;
@@ -502,7 +524,7 @@ namespace Radegast
             lblStatus.Text = "Ready for " + txtRegion.Text;
             nudX.Value = 128;
             nudY.Value = 128;
-            gotoRegion(txtRegion.Text, (int)nudX.Value, (int)nudY.Value);
+            _ = gotoRegion(txtRegion.Text, (int)nudX.Value, (int)nudY.Value);
         }
 
         private void lstRegions_Enter(object sender, EventArgs e)
@@ -538,14 +560,14 @@ namespace Radegast
 
         private void btnMyPos_Click(object sender, EventArgs e)
         {
-            gotoRegion(client.Network.CurrentSim.Name, (int)client.Self.SimPosition.X, (int)client.Self.SimPosition.Y);
+            _ = gotoRegion(client.Network.CurrentSim.Name, (int)client.Self.SimPosition.X, (int)client.Self.SimPosition.Y);
         }
 
         private void btnDestination_Click(object sender, EventArgs e)
         {
             if (txtRegion.Text != string.Empty)
             {
-                gotoRegion(txtRegion.Text, (int)nudX.Value, (int)nudY.Value);
+                _ = gotoRegion(txtRegion.Text, (int)nudX.Value, (int)nudY.Value);
             }
         }
 
@@ -574,7 +596,7 @@ namespace Radegast
             }
             else if (Visible && instance.MonoRuntime && savedRegion != null)
             {
-                gotoRegion(savedRegion, savedX, savedY);
+                _ =gotoRegion(savedRegion, savedX, savedY);
             }
         }
 
