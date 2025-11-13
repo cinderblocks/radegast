@@ -34,6 +34,13 @@ namespace Radegast
     public partial class ObjectsConsole : UserControl, IContextMenuProvider
     {
         public List<Primitive> Prims = new List<Primitive>();
+        private readonly HashSet<UUID> primIds = new HashSet<UUID>();
+        private readonly Dictionary<UUID, string> displayNameCache = new Dictionary<UUID, string>();
+        private string searchLower = string.Empty;
+
+        // UI debounce timer to batch redraws when many updates arrive
+        private readonly System.Windows.Forms.Timer uiUpdateTimer;
+        private volatile bool pendingRefresh = false;
 
         private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
@@ -53,6 +60,24 @@ namespace Radegast
 
             this.instance = instance;
 
+            // UI update timer - runs on UI thread
+            uiUpdateTimer = new System.Windows.Forms.Timer();
+            uiUpdateTimer.Interval = 150; // ms
+            uiUpdateTimer.Tick += (s, a) =>
+            {
+                uiUpdateTimer.Stop();
+                pendingRefresh = false;
+                try
+                {
+                    lock (Prims)
+                    {
+                        lstPrims.VirtualListSize = Prims.Count;
+                    }
+                    lstPrims.Invalidate();
+                }
+                catch { }
+            };
+
             propRequester = new PropertiesQueue(instance);
             propRequester.OnTick += propRequester_OnTick;
 
@@ -69,11 +94,7 @@ namespace Radegast
 
             filter = (ObjectConsoleFilter)instance.GlobalSettings["object_console_filter"].AsInteger();
             comboFilter.SelectedIndex = 0;
-            try
-            {
-                comboFilter.SelectedIndex = (int)filter;
-            }
-            catch { }
+            comboFilter.SelectedIndex = (int)filter;
             comboFilter.SelectedIndexChanged += (ssender, se) =>
             {
                 instance.GlobalSettings["object_console_filter"] = comboFilter.SelectedIndex;
@@ -95,6 +116,15 @@ namespace Radegast
             instance.Names.NameUpdated += Avatars_UUIDNameReply;
             instance.State.OnWalkStateChanged += State_OnWalkStateChanged;
 
+            // Listen for group name replies so we can update cached display names when group names arrive
+            client.Groups.GroupNamesReply += Groups_GroupNamesReply;
+
+            // Initial population
+            AddAllObjects();
+            // ensure UI shows initial list size immediately
+            lock (Prims) { lstPrims.VirtualListSize = Prims.Count; }
+            lstPrims.Invalidate();
+
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
@@ -105,6 +135,13 @@ namespace Radegast
                 contentsDownloadCancelToken.Cancel();
                 contentsDownloadCancelToken.Dispose();
             } catch (ObjectDisposedException) { }
+
+            try
+            {
+                uiUpdateTimer.Stop();
+                uiUpdateTimer.Dispose();
+            }
+            catch (ObjectDisposedException) { }
 
             propRequester.Dispose();
             instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
@@ -117,6 +154,7 @@ namespace Radegast
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;
             instance.State.OnWalkStateChanged -= State_OnWalkStateChanged;
+            client.Groups.GroupNamesReply -= Groups_GroupNamesReply;
         }
 
         private void State_SitStateChanged(object sender, SitEventArgs e)
@@ -141,6 +179,17 @@ namespace Radegast
         public FrozenSet<Primitive> GetObjects()
         {
             return Prims.ToFrozenSet();
+        }
+
+        private void ScheduleUIRefresh()
+        {
+            // If already pending, ensure timer is running; timer tick will perform the refresh on UI thread
+            pendingRefresh = true;
+            if (!uiUpdateTimer.Enabled)
+            {
+                uiUpdateTimer.Start();
+            }
+
         }
 
         private void propRequester_OnTick(int remaining)
@@ -170,9 +219,9 @@ namespace Radegast
             lock (Prims)
             {
                 Prims.Sort(PrimSorter);
-                lstPrims.VirtualListSize = Prims.Count;
             }
-            lstPrims.Invalidate();
+            // Batch UI update
+            ScheduleUIRefresh();
             lblStatus.Text = sb.ToString();
         }
 
@@ -200,6 +249,8 @@ namespace Radegast
                     var prim = Prims[i];
                     if (prim.Properties != null && e.Names.ContainsKey(prim.Properties.OwnerID))
                     {
+                        // owner name resolved -> invalidate cache for this prim
+                        displayNameCache.Remove(prim.ID);
                         if (minIndex == -1 || i < minIndex) { minIndex = i; }
                         if (i > maxIndex) { maxIndex = i; }
                         updated = true;
@@ -227,18 +278,117 @@ namespace Radegast
             }
         }
 
-        private void UpdateProperties(Primitive.ObjectProperties props)
+        private void Groups_GroupNamesReply(object sender, GroupNamesEventArgs e)
         {
+            var minIndex = -1;
+            var maxIndex = -1;
+            var updated = false;
+
             lock (Prims)
             {
                 for (var i = 0; i < Prims.Count; i++)
                 {
-                    if (Prims[i].ID == props.ObjectID)
+                    var prim = Prims[i];
+                    if (prim.Properties != null && e.GroupNames.ContainsKey(prim.Properties.GroupID))
                     {
-                        Prims[i].Properties = props;
+                        displayNameCache.Remove(prim.ID);
+                        if (minIndex == -1 || i < minIndex) minIndex = i;
+                        if (i > maxIndex) maxIndex = i;
+                        updated = true;
+                    }
+                }
+            }
+
+            if (updated)
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        try { lstPrims.RedrawItems(minIndex, maxIndex, true); } catch { }
+                    }));
+                }
+                else
+                {
+                    try { lstPrims.RedrawItems(minIndex, maxIndex, true); } catch { }
+                }
+            }
+        }
+
+        private string ComputeDisplayName(Primitive prim, int distance)
+        {
+            string name = "Loading...";
+            string ownerName = "Loading...";
+
+            if (prim.Properties != null)
+            {
+                name = prim.Properties.Name;
+                // If group owned, request group name asynchronously and return placeholder
+                if (UUID.Zero == prim.Properties.OwnerID &&
+                    PrimFlags.ObjectGroupOwned == (prim.Flags & PrimFlags.ObjectGroupOwned) &&
+                    UUID.Zero != prim.Properties.GroupID)
+                {
+                    try
+                    {
+                        client.Groups.RequestGroupName(prim.Properties.GroupID);
+                    }
+                    catch { }
+                }
+                else
+                {
+                    ownerName = instance.Names.Get(prim.Properties.OwnerID);
+                }
+            }
+
+            if (prim.ParentID == client.Self.LocalID)
+            {
+                return $"{name} attached to {prim.PrimData.AttachmentPoint}";
+            }
+            else if (ownerName != "Loading...")
+            {
+                return $"{name} ({distance}m) owned by {ownerName}";
+            }
+            else
+            {
+                return $"{name} ({distance}m)";
+            }
+        }
+
+        private string GetCachedDisplayName(Primitive prim)
+        {
+            int distance = (int)Vector3.Distance(client.Self.SimPosition, prim.Position);
+            if (prim.ParentID == client.Self.LocalID) distance = 0;
+
+            lock (displayNameCache)
+            {
+                if (displayNameCache.TryGetValue(prim.ID, out var cached))
+                {
+                    return cached;
+                }
+            }
+
+            var val = ComputeDisplayName(prim, distance);
+            lock (displayNameCache)
+            {
+                displayNameCache[prim.ID] = val;
+            }
+
+            return val;
+        }
+
+        private void UpdateProperties(Primitive.ObjectProperties props)
+        {
+            lock (Prims)
+            {
+                foreach (var prim in Prims)
+                {
+                    if (prim.ID == props.ObjectID)
+                    {
+                        prim.Properties = props;
                         try
                         {
-                            lstPrims.RedrawItems(i, i, true);
+                            lock (displayNameCache) { displayNameCache.Remove(prim.ID); }
+                            ScheduleUIRefresh();
                         }
                         catch { }
                         break;
@@ -677,12 +827,15 @@ namespace Radegast
         {
             lock (Prims)
             {
-                string name = GetObjectName(prim);
-                if (!Prims.Contains(prim) 
-                    && txtSearch.IsHandleCreated 
-                    && (txtSearch.Text.Length == 0 || name.ToLower().Contains(txtSearch.Text.ToLower())))
+                if (primIds.Contains(prim.ID)) { return; }
+
+                if (!txtSearch.IsHandleCreated) { return; }
+
+                var display = GetCachedDisplayName(prim);
+                if (string.IsNullOrEmpty(txtSearch.Text) || display.IndexOf(searchLower, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     Prims.Add(prim);
+                    primIds.Add(prim.ID);
                     if (prim.Properties == null)
                     {
                         propRequester.RequestProps(prim);
@@ -718,6 +871,10 @@ namespace Radegast
                     UpdateCurrentObject(false);
                 }
             }
+
+            // Invalidate cache for this prim so display name will be recomputed with updated position/owner
+            lock (displayNameCache) { displayNameCache.Remove(e.Prim.ID); }
+            ScheduleUIRefresh();
         }
 
         private void Objects_KillObjects(object sender, KillObjectsEventArgs e)
@@ -726,17 +883,17 @@ namespace Radegast
 
             lock (Prims)
             {
-                List<Primitive> killed = Prims.FindAll(p =>
-                {
-                    return e.ObjectLocalIDs.Any(t => p.LocalID == t);
-                });
+                List<Primitive> killed = Prims.FindAll(p => e.ObjectLocalIDs.Any(t => p.LocalID == t));
 
                 foreach (Primitive prim in killed)
                 {
                     Prims.Remove(prim);
+                    primIds.Remove(prim.ID);
+                    lock (displayNameCache) { displayNameCache.Remove(prim.ID); }
                 }
             }
 
+            // Update UI on UI thread
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(() =>
@@ -750,7 +907,6 @@ namespace Radegast
                 lstPrims.VirtualListSize = Prims.Count;
                 lstPrims.Invalidate();
             }
-
         }
 
         private bool IncludePrim(Primitive prim)
@@ -773,39 +929,50 @@ namespace Radegast
         {
             Vector3 location = client.Self.SimPosition;
 
+            // Collect candidates without holding Prims lock to reduce contention
+            var candidates = new List<Primitive>();
+
+            foreach (var kvp in client.Network.CurrentSim.ObjectsPrimitives)
+            {
+                var prim = kvp.Value;
+                if (prim == null) continue;
+
+                int distance = (int)Vector3.Distance(prim.Position, location);
+                if (prim.ParentID == client.Self.LocalID) distance = 0;
+
+                if (!IncludePrim(prim)) continue;
+                if (prim.Position == Vector3.Zero) continue;
+                if (distance >= searchRadius) continue;
+
+                // Apply search filter using cached lower-case string where possible
+                if (!string.IsNullOrEmpty(searchLower))
+                {
+                    if (prim.Properties == null || prim.Properties.Name.IndexOf(searchLower, StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+                }
+
+                candidates.Add(prim);
+            }
+
+            // Add new candidates under lock and request properties for unknowns
             lock (Prims)
             {
-                /*
-                var prims = client.Network.CurrentSim.ObjectsPrimitives.FindAll(prim =>
+                foreach (var prim in candidates)
                 {
-                    return ((prim.ParentID == client.Self.LocalID) && (filter == ObjectConsoleFilter.Attached || filter == ObjectConsoleFilter.Both)) ||
-                        ((prim.ParentID == 0) && (filter == ObjectConsoleFilter.Rezzed || filter == ObjectConsoleFilter.Both));
-                });
-                */
-                foreach(var kvp in client.Network.CurrentSim.ObjectsPrimitives)
-                {
-                    if (kvp.Value == null) { continue; }
-                    var prim = kvp.Value;
-                    int distance = (int)Vector3.Distance(prim.Position, location);
-                    if (prim.ParentID == client.Self.LocalID)
-                    {
-                        distance = 0;
-                    }
-                    if (IncludePrim(prim) &&
-                        (prim.Position != Vector3.Zero) &&
-                        (distance < searchRadius) &&
-                        (txtSearch.Text.Length == 0 || 
-                         (prim.Properties != null && prim.Properties.Name.ToLower().Contains(txtSearch.Text.ToLower()))) && //root prims and attachments only
-                        !Prims.Contains(prim))
+                    if (!primIds.Contains(prim.ID))
                     {
                         Prims.Add(prim);
+                        primIds.Add(prim.ID);
                         if (prim.Properties == null)
                         {
                             propRequester.RequestProps(prim);
                         }
                     }
                 }
+
                 Prims.Sort(PrimSorter);
+
+                // Update UI immediately to reflect new list
                 lstPrims.VirtualListSize = Prims.Count;
                 lstPrims.Invalidate();
             }
@@ -837,7 +1004,8 @@ namespace Radegast
 
         private void txtSearch_TextChanged(object sender, EventArgs e)
         {
-            btnRefresh_Click(null, null);
+           searchLower = txtSearch.Text?.Trim() ?? string.Empty;
+           btnRefresh_Click(null, null);
         }
 
         private void btnClear_Click(object sender, EventArgs e)
@@ -851,7 +1019,8 @@ namespace Radegast
         {
             instance.State.SetDefaultCamera();
             Cursor.Current = Cursors.WaitCursor;
-            lock (Prims) { Prims.Clear(); }
+            lock (Prims) { Prims.Clear(); primIds.Clear(); }
+            lock (displayNameCache) { displayNameCache.Clear(); }
             AddAllObjects();
 
             Cursor.Current = Cursors.Default;
@@ -877,7 +1046,8 @@ namespace Radegast
                 gbxInworld.Enabled = true;
                 btnBuy.Tag = CurrentPrim;
 
-                if (CurrentPrim.Properties == null || CurrentPrim.OwnerID == UUID.Zero || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero))
+                if (CurrentPrim.Properties == null || CurrentPrim.OwnerID == UUID.Zero 
+                    || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero))
                 {
                     client.Objects.SelectObject(client.Network.CurrentSim, CurrentPrim.LocalID);
                 }
@@ -900,7 +1070,8 @@ namespace Radegast
                 CurrentPrim = lstChildren.SelectedItems[0].Tag as Primitive;
                 btnBuy.Tag = CurrentPrim;
 
-                if (CurrentPrim != null && (CurrentPrim.Properties == null || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero)))
+                if (CurrentPrim != null && (CurrentPrim.Properties == null 
+                    || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero)))
                 {
                     client.Objects.SelectObject(client.Network.CurrentSim, CurrentPrim.LocalID);
                 }
@@ -1158,19 +1329,6 @@ namespace Radegast
                 }
             }
 
-            //if (currentPrim.MediaURL != null && currentPrim.MediaURL.StartsWith("x-mv:"))
-            //{
-            //    ctxMenuObjects.Items.Add("Test", null, (object menuSender, EventArgs menuE) =>
-            //        {
-            //            client.Objects.RequestObjectMedia(currentPrim.ID, client.Network.CurrentSim, (bool success, string version, MediaEntry[] faceMedia) =>
-            //                {
-            //                    int foo = 1;
-            //                }
-            //            );
-            //        }
-            //    );
-            //}
-
             instance.ContextActionManager.AddContributions(ctxMenuObjects, CurrentPrim);
         }
 
@@ -1251,22 +1409,6 @@ namespace Radegast
 
                 e.SuppressKeyPress = e.Handled = true;
             }
-            //else if (e.KeyCode == Keys.Apps)
-            //{
-            //    Point pos = new Point(50, 30);
-
-            //    if (lstContents.SelectedItems.Count > 0)
-            //    {
-            //        pos = lstContents.SelectedItems[0].Position;
-            //        pos.Y += 10;
-            //        pos.X += 120;
-            //    }
-
-            //    ctxContents.Show(lstContents, pos);
-
-            //    e.SuppressKeyPress = e.Handled = true;
-            //    return;
-            //}
         }
 
         private void Self_MuteListUpdated(object sender, EventArgs e)
@@ -1371,8 +1513,9 @@ namespace Radegast
                 return;
             }
 
-            string name = GetObjectName(prim);
-            var item = new ListViewItem(name) {Tag = prim, Name = prim.ID.ToString()};
+            // Use cached/non-blocking display name
+            string name = GetCachedDisplayName(prim);
+            var item = new ListViewItem(name) { Tag = prim, Name = prim.ID.ToString() };
             e.Item = item;
         }
 
