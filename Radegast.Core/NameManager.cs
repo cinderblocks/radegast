@@ -24,7 +24,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Threading;
 using System.Threading.RateLimiting;
 using System.Threading.Channels;
@@ -620,25 +619,75 @@ namespace Radegast
                 Updated = DateTime.Now
             });
 
-            string[] parts = name.Trim().Split(' ');
-            if (parts.Length != 2)
+            if (!TryParseTwoNames(name, out string first, out string last))
             {
                 return null;
             }
 
             if (IsValidName(agentDisplayName.DisplayName))
             {
-                agentDisplayName.DisplayName = $"{parts[0]} {parts[1]}";
+                agentDisplayName.DisplayName = first + " " + last;
             }
 
-            agentDisplayName.LegacyFirstName = parts[0];
-            agentDisplayName.LegacyLastName = parts[1];
+            agentDisplayName.LegacyFirstName = first;
+            agentDisplayName.LegacyLastName = last;
             agentDisplayName.UserName = agentDisplayName.LegacyLastName == "Resident"
                 ? agentDisplayName.LegacyFirstName.ToLower()
-                : $"{parts[0]}.{parts[1]}".ToLower();
+                : (first + "." + last).ToLower();
 
             hasUpdates = true;
             return FormatName(agentDisplayName);
+        }
+
+        /// <summary>
+        /// Attempts to parse the input string into exactly two name parts: first and last.
+        /// </summary>
+        /// <remarks>This method avoids allocations from <see cref="string.Split"/> and temporary
+        /// character arrays. It ensures that the input string contains exactly two non-whitespace tokens, with no
+        /// additional content before, between, or after the tokens.</remarks>
+        /// <param name="input">The input string to parse. The string may contain leading or trailing whitespace.</param>
+        /// <param name="first">When this method returns, contains the first name part, if the parsing is successful; otherwise, <see
+        /// langword="null"/>.</param>
+        /// <param name="last">When this method returns, contains the last name part, if the parsing is successful; otherwise, <see
+        /// langword="null"/>.</param>
+        /// <returns><see langword="true"/> if the input string contains exactly two name tokens separated by whitespace;
+        /// otherwise, <see langword="false"/>.</returns>
+        private static bool TryParseTwoNames(string input, out string first, out string last)
+        {
+            first = null;
+            last = null;
+            if (string.IsNullOrEmpty(input)) return false;
+
+            int len = input.Length;
+            int i = 0;
+
+            // skip leading whitespace
+            while (i < len && char.IsWhiteSpace(input[i])) i++;
+            if (i >= len) return false;
+
+            int j = i;
+            // find end of first token
+            while (j < len && !char.IsWhiteSpace(input[j])) j++;
+            if (j == i) return false;
+
+            // skip spaces between first and second
+            int k = j;
+            while (k < len && char.IsWhiteSpace(input[k])) k++;
+            if (k >= len) return false;
+
+            int l = k;
+            // find end of second token
+            while (l < len && !char.IsWhiteSpace(input[l])) l++;
+            if (l == k) return false;
+
+            // ensure no non-space content after second token
+            int m = l;
+            while (m < len && char.IsWhiteSpace(input[m])) m++;
+            if (m != len) return false;
+
+            first = input.Substring(i, j - i);
+            last = input.Substring(k, l - k);
+            return true;
         }
     }
 

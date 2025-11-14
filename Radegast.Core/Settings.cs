@@ -49,6 +49,15 @@ namespace Radegast
             {
                 Logger.DebugLog($"Failed opening Settings file: {fileName}");
                 SettingsData = new OSDMap();
+                // Provide sensible defaults so the generated settings.xml contains
+                // user-exposable options for image decoding and caching.
+                try
+                {
+                    SettingsData["image_cache_enabled"] = OSD.FromBoolean(true);
+                    SettingsData["image_cache_expire_minutes"] = OSD.FromInteger(30);
+                    SettingsData["image_decode_concurrency"] = OSD.FromInteger(Math.Max(1, Environment.ProcessorCount / 2));
+                }
+                catch { }
                 Save();
             }
         }
