@@ -95,7 +95,26 @@ namespace Radegast
                 monoRuntime = true;
             }
 
-            rtfHeader = Rtf.Substring(0, Rtf.IndexOf('{', 2)) + " ";
+            // Extract a minimal RTF header fragment and ensure it contains
+            // an ANSI code page and the unicode fallback (\uc1) so that
+            // \uN? sequences are interpreted correctly by the control.
+            try
+            {
+                rtfHeader = Rtf.Substring(0, Rtf.IndexOf('{', 2)) + " ";
+                if (!rtfHeader.Contains("\\ansicpg"))
+                {
+                    rtfHeader = rtfHeader.Replace("{\\rtf1\\ansi", "{\\rtf1\\ansi\\ansicpg1252");
+                }
+                if (!rtfHeader.Contains("\\uc"))
+                {
+                    rtfHeader = rtfHeader + "\\uc1 ";
+                }
+            }
+            catch
+            {
+                // Fallback to a safe default header
+                rtfHeader = "{\\rtf1\\ansi\\ansicpg1252\\deff0\\deflang1033 \\uc1 ";
+            }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -268,15 +287,16 @@ namespace Radegast
 
             colorTable.Append("}");
 
-            // Construct final rtf
+            // Construct final rtf. Include the ANSI code page and unicode fallback (\uc1)
+            // so that \uN? sequences are handled correctly.
             StringBuilder rtf = new StringBuilder();
-            rtf.AppendLine(@"{\rtf1\ansi\deff0{\fonttbl{\f0\fnil\fcharset0 " + rtfEscaped(Font.Name) + ";}}");
+            rtf.AppendLine("{\rtf1\\ansi\\ansicpg1252\\deff0{\\fonttbl{\\f0\\fnil\\fcharset0 " + rtfEscaped(Font.Name) + ";}}\\viewkind4\\uc1");
             rtf.AppendLine(colorTable.ToString());
-            rtf.Append(@"\pard\f0\fs" + (int)(Font.SizeInPoints * 2)+ " ");
+            rtf.Append("\\pard\\f0\\fs" + (int)(Font.SizeInPoints * 2) + " ");
             rtf.Append(body);
-            rtf.AppendLine(@"}");
+            rtf.AppendLine("}");
 
-            return rtf.ToString();
+             return rtf.ToString();
         }
 
         public override string Text

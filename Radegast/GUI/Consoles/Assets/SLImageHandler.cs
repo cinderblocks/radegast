@@ -29,11 +29,25 @@ using CoreJ2K;
 using OpenMetaverse.Imaging;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
+using System.Threading.Tasks;
+using System.Runtime.Caching;
+using System.Threading;
+using OpenMetaverse.StructuredData;
 
 namespace Radegast
 {
     public partial class SLImageHandler : DetachableControl
     {
+        // Shared cache for decoded images to avoid repeated expensive J2K decodes
+        private static readonly MemoryCache DecodedImageCache = new MemoryCache("SLImageHandlerDecoded");
+
+        // Per-instance settings (configurable via instance.GlobalSettings)
+        private bool cacheEnabled = true;
+        private TimeSpan cacheSlidingExpiration = TimeSpan.FromMinutes(30);
+        private SemaphoreSlim instanceDecodeSemaphore;
+        private int decodeConcurrency = Math.Max(1, Environment.ProcessorCount / 2);
+        private readonly object settingsLock = new object();
+
         private RadegastInstanceForms instance;
         private GridClient client => instance.Client;
         private UUID imageID;
@@ -97,6 +111,14 @@ namespace Radegast
             this.instance = instance;
             imageID = image;
 
+            // Apply settings from globals (with validation) and subscribe for live changes
+            ApplySettingsFromGlobals();
+            try
+            {
+                instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
+            }
+            catch { }
+
             Text = string.IsNullOrEmpty(label) ? "Image" : label;
 
             if (image == UUID.Zero)
@@ -112,36 +134,140 @@ namespace Radegast
             UpdateImage(imageID);
         }
 
+        private void SLImageHandler_Disposed(object sender, EventArgs e)
+        {
+            client.Assets.ImageReceiveProgress -= Assets_ImageReceiveProgress;
+            try
+            {
+                if (instance?.GlobalSettings != null)
+                {
+                    instance.GlobalSettings.OnSettingChanged -= GlobalSettings_OnSettingChanged;
+                }
+            }
+            catch { }
+
+            try
+            {
+                lock (settingsLock)
+                {
+                    instanceDecodeSemaphore?.Dispose();
+                    instanceDecodeSemaphore = null;
+                }
+            }
+            catch { }
+        }
+
+        private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
+        {
+            if (e == null || string.IsNullOrEmpty(e.Key)) return;
+
+            // Only react to relevant keys
+            if (e.Key == "image_cache_enabled" || e.Key == "image_cache_expire_minutes" || e.Key == "image_decode_concurrency")
+            {
+                // Apply settings on UI thread to keep behavior consistent
+                try
+                {
+                    if (this.InvokeRequired)
+                    {
+                        this.BeginInvoke(new MethodInvoker(() => ApplySettingsFromGlobals()));
+                    }
+                    else
+                    {
+                        ApplySettingsFromGlobals();
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private void ApplySettingsFromGlobals()
+        {
+            if (instance?.GlobalSettings == null) return;
+
+            bool newCacheEnabled = cacheEnabled;
+            TimeSpan newCacheExpiration = cacheSlidingExpiration;
+            int newConcurrency = decodeConcurrency;
+
+            try
+            {
+                if (!instance.GlobalSettings.ContainsKey("image_cache_enabled"))
+                {
+                    instance.GlobalSettings["image_cache_enabled"] = OSD.FromBoolean(true);
+                }
+                newCacheEnabled = instance.GlobalSettings["image_cache_enabled"].AsBoolean();
+            }
+            catch { newCacheEnabled = true; }
+
+            try
+            {
+                if (!instance.GlobalSettings.ContainsKey("image_cache_expire_minutes"))
+                {
+                    instance.GlobalSettings["image_cache_expire_minutes"] = OSD.FromInteger((int)cacheSlidingExpiration.TotalMinutes);
+                }
+                int minutes = instance.GlobalSettings["image_cache_expire_minutes"].AsInteger();
+                // validate range
+                minutes = Math.Max(1, Math.Min(minutes, 1440));
+                newCacheExpiration = TimeSpan.FromMinutes(minutes);
+            }
+            catch { newCacheExpiration = cacheSlidingExpiration; }
+
+            try
+            {
+                if (!instance.GlobalSettings.ContainsKey("image_decode_concurrency"))
+                {
+                    instance.GlobalSettings["image_decode_concurrency"] = OSD.FromInteger(decodeConcurrency);
+                }
+                int concurrency = instance.GlobalSettings["image_decode_concurrency"].AsInteger();
+                // validate range: at least 1, and not excessively large
+                concurrency = Math.Max(1, Math.Min(concurrency, Math.Max(1, Environment.ProcessorCount * 4)));
+                newConcurrency = concurrency;
+            }
+            catch { newConcurrency = decodeConcurrency; }
+
+            lock (settingsLock)
+            {
+                cacheEnabled = newCacheEnabled;
+                cacheSlidingExpiration = newCacheExpiration;
+
+                if (instanceDecodeSemaphore == null || decodeConcurrency != newConcurrency)
+                {
+                    try
+                    {
+                        instanceDecodeSemaphore?.Dispose();
+                    }
+                    catch { }
+
+                    decodeConcurrency = newConcurrency;
+                    instanceDecodeSemaphore = new SemaphoreSlim(Math.Max(1, decodeConcurrency));
+                }
+            }
+        }
+
         public void UpdateImage(UUID imageID)
         {
             this.imageID = imageID;
             progressBar1.Visible = true;
             pictureBox1.Image = null;
-            
+
             if (imageID == UUID.Zero)
             {
                 progressBar1.Visible = false;
                 return;
             }
 
-            client.Assets.RequestImage(imageID, ImageType.Normal, 101300.0f, 0, 0, 
-                delegate(TextureRequestState state, AssetTexture assetTexture)
-            {
-                if (state == TextureRequestState.Finished || state == TextureRequestState.Timeout)
+            client.Assets.RequestImage(imageID, ImageType.Normal, 101300.0f, 0, 0,
+                delegate (TextureRequestState state, AssetTexture assetTexture)
                 {
-                    Assets_OnImageReceived(assetTexture);
-                }
-                else if (state == TextureRequestState.Progress)
-                {
-                    DisplayPartialImage(assetTexture);
-                }
-            },
-            true);
-        }
-
-        private void SLImageHandler_Disposed(object sender, EventArgs e)
-        {
-            client.Assets.ImageReceiveProgress -= Assets_ImageReceiveProgress;
+                    if (state == TextureRequestState.Finished || state == TextureRequestState.Timeout)
+                    {
+                        Assets_OnImageReceived(assetTexture);
+                    }
+                    else if (state == TextureRequestState.Progress)
+                    {
+                        DisplayPartialImage(assetTexture);
+                    }
+                },
+                true);
         }
 
         private void Assets_ImageReceiveProgress(object sender, ImageReceiveProgressEventArgs e)
@@ -159,7 +285,7 @@ namespace Radegast
             }
 
             int pct = 0;
-            if (e.Total> 0)
+            if (e.Total > 0)
             {
                 pct = (e.Received * 100) / e.Total;
             }
@@ -180,15 +306,87 @@ namespace Radegast
                 return;
             }
 
-            try
+            string cacheKey = assetTexture.AssetID.ToString();
+
+            // If we have a cached decoded image, use it directly
+            if (cacheEnabled && DecodedImageCache.Contains(cacheKey))
             {
-                pictureBox1.Image = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>().ToBitmap();
-                pictureBox1.Enabled = true;
+                var cached = DecodedImageCache.Get(cacheKey) as Image;
+                if (cached != null)
+                {
+                    var oldImg = pictureBox1.Image as Image;
+                    pictureBox1.Image = cached;
+                    pictureBox1.Enabled = true;
+                    if (oldImg != null && oldImg != cached)
+                    {
+                        try { oldImg.Dispose(); } catch { }
+                    }
+                    return;
+                }
             }
-            catch (Exception e) {
-                Hide();
-                Console.WriteLine("Error decoding image: " + e.Message);
-            }
+
+            // Decode off the UI thread and then marshal the bitmap back to the UI
+            byte[] data = assetTexture.AssetData;
+            Task.Run(async () =>
+            {
+                // Ensure semaphore exists
+                SemaphoreSlim sem;
+                lock (settingsLock) { sem = instanceDecodeSemaphore ?? new SemaphoreSlim(Math.Max(1, decodeConcurrency)); }
+                await sem.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    try
+                    {
+                        var bmp = J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
+                        return bmp;
+                    }
+                    catch (Exception)
+                    {
+                        return null;
+                    }
+                }
+                finally
+                {
+                    try { sem.Release(); } catch { }
+                }
+            }).ContinueWith(t =>
+            {
+                if (t.IsCanceled || t.Result == null)
+                {
+                    // decoding failed; hide the control on UI thread
+                    try { Hide(); } catch { }
+                    return;
+                }
+
+                try
+                {
+                    // replace image on UI thread
+                    var newBmp = t.Result;
+
+                    // Store in cache for future reuse if enabled. Use configured sliding expiration.
+                    if (cacheEnabled)
+                    {
+                        try
+                        {
+                            DecodedImageCache.Set(cacheKey, newBmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                        }
+                        catch { /* cache failures shouldn't break the UI update */ }
+                    }
+
+                    var old = pictureBox1.Image as Image;
+                    pictureBox1.Image = newBmp;
+                    pictureBox1.Enabled = true;
+                    if (old != null && old != newBmp)
+                    {
+                        try { old.Dispose(); } catch { }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Hide();
+                    Console.WriteLine("Error decoding image: " + e.Message);
+                }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         private void Assets_OnImageReceived(AssetTexture assetTexture)
@@ -210,16 +408,104 @@ namespace Radegast
                 progressBar1.Hide();
                 lblProgress.Hide();
 
-                image = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>().ToBitmap();
-                Text = Text; // yeah, really ;)
+                byte[] data = assetTexture.AssetData;
+                string cacheKey = assetTexture.AssetID.ToString();
 
-                pictureBox1.Image = image;
-                pictureBox1.Enabled = true;
-                j2kdata = assetTexture.AssetData;
-                if (Detached)
+                // If cached decoded image exists, use it and avoid decoding
+                if (cacheEnabled && DecodedImageCache.Contains(cacheKey))
                 {
-                    ClientSize = pictureBox1.Size = new Size(image.Width, image.Height);
+                    var cachedImg = DecodedImageCache.Get(cacheKey) as Image;
+                    if (cachedImg != null)
+                    {
+                        var oldCached = image as Image;
+                        image = cachedImg;
+                        Text = Text; // yeah, really ;)
+
+                        pictureBox1.Image = image;
+                        pictureBox1.Enabled = true;
+                        j2kdata = data;
+                        if (Detached)
+                        {
+                            ClientSize = pictureBox1.Size = new Size(image.Width, image.Height);
+                        }
+
+                        if (oldCached != null && oldCached != image)
+                        {
+                            try { oldCached.Dispose(); } catch { }
+                        }
+
+                        return;
+                    }
                 }
+
+                // Decode off the UI thread and then update UI
+                Task.Run(async () =>
+                {
+                    // Ensure semaphore exists
+                    SemaphoreSlim sem;
+                    lock (settingsLock) { sem = instanceDecodeSemaphore ?? new SemaphoreSlim(Math.Max(1, decodeConcurrency)); }
+                    await sem.WaitAsync().ConfigureAwait(false);
+                    try
+                    {
+                        try
+                        {
+                            return J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
+                        }
+                        catch (Exception)
+                        {
+                            return null;
+                        }
+                    }
+                    finally
+                    {
+                        try { sem.Release(); } catch { }
+                    }
+                }).ContinueWith(t =>
+                {
+                    if (t.IsCanceled || t.Result == null)
+                    {
+                        try { Hide(); } catch { }
+                        return;
+                    }
+
+                    try
+                    {
+                        var bmp = t.Result;
+
+                        // Attempt to cache decoded image for reuse
+                        if (cacheEnabled)
+                        {
+                            try
+                            {
+                                DecodedImageCache.Set(cacheKey, bmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                            }
+                            catch { }
+                        }
+
+                        // dispose previous image if present and not the same as cached one
+                        var old = image as Image;
+                        image = bmp;
+                        Text = Text; // yeah, really ;)
+
+                        pictureBox1.Image = image;
+                        pictureBox1.Enabled = true;
+                        j2kdata = data;
+                        if (Detached)
+                        {
+                            ClientSize = pictureBox1.Size = new Size(image.Width, image.Height);
+                        }
+
+                        if (old != null && old != image)
+                        {
+                            try { old.Dispose(); } catch { }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Hide();
+                        Console.WriteLine("Error decoding image: " + e.Message);
+                    }
+                }, TaskScheduler.FromCurrentSynchronizationContext());
             }
             catch (Exception e)
             {
@@ -247,8 +533,6 @@ namespace Radegast
                 Filter =
                     "Targa (*.tga)|*.tga|Jpeg2000 (*.j2c)|*.j2c|PNG (*.png)|*.png|Jpeg (*.jpg)|*.jpg|Bitmap (*.bmp)|*.bmp"
             };
-
-
 
             if (dlg.ShowDialog() == DialogResult.OK)
             {
@@ -394,7 +678,6 @@ namespace Radegast
                 tbtnSave.Visible = false;
             }
         }
-
 
         private void tbtnClear_Click(object sender, EventArgs e)
         {

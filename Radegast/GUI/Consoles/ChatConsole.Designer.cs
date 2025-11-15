@@ -362,7 +362,7 @@ namespace Radegast
             this.btnRun.Size = new System.Drawing.Size(29, 19);
             this.btnRun.TabIndex = 9;
             this.btnRun.TabStop = false;
-            this.btnRun.Text = "🏃";
+            this.btnRun.Text = "Run";
             this.btnRun.Click += new System.EventHandler(this.btnRun_Click);
             // 
             // btnFly
@@ -376,7 +376,7 @@ namespace Radegast
             this.btnFly.Size = new System.Drawing.Size(29, 19);
             this.btnFly.TabIndex = 8;
             this.btnFly.TabStop = false;
-            this.btnFly.Text = "✈️";
+            this.btnFly.Text = "Fly";
             this.btnFly.Click += new System.EventHandler(this.btnFly_Click);
             // 
             // btnJump

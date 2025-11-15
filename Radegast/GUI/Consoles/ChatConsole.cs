@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -25,13 +25,24 @@ using System.Drawing;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
+using System.Drawing.Text;
 using OpenMetaverse;
 
 namespace Radegast
 {
     public partial class ChatConsole : UserControl
     {
-        private readonly RadegastInstanceForms instance;
+        // List of common emoji-capable font family names to detect
+        private static readonly string[] EmojiFontNames = new[]
+        {
+            "Segoe UI Emoji",
+            "Segoe UI Symbol",
+            "Apple Color Emoji",
+            "Noto Color Emoji",
+            "EmojiOne Color",
+            "Twitter Color Emoji"
+        };
+         private readonly RadegastInstanceForms instance;
         private INetCom NetCom => instance.NetCom;
         private GridClient client => instance.Client;
         private TabsConsole tabConsole;
@@ -71,6 +82,58 @@ namespace Radegast
             cbChatType.SelectedIndex = 1;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
+
+            // Choose appropriate labels for movement buttons depending on emoji support
+            try
+            {
+                if (EmojiFontAvailable())
+                {
+                    btnFwd.Text = "▲";
+                    btnMoveBack.Text = "▼";
+                    btnJump.Text = "↑";
+                    btnCrouch.Text = "↓";
+                    btnTurnLeft.Text = "◄";
+                    btnTurnRight.Text = "►";
+                }
+                else
+                {
+                    // ASCII fallbacks
+                    btnFwd.Text = "^";
+                    btnMoveBack.Text = "v";
+                    btnJump.Text = "^";
+                    btnCrouch.Text = "v";
+                    btnTurnLeft.Text = "<";
+                    btnTurnRight.Text = ">";
+                }
+            }
+            catch
+            {
+                // Keep designer defaults on any failure
+            }
+        }
+
+        private bool EmojiFontAvailable()
+        {
+            try
+            {
+                using (var ifc = new InstalledFontCollection())
+                {
+                    foreach (var ff in ifc.Families)
+                    {
+                        var name = ff.Name;
+                        foreach (var candidate in EmojiFontNames)
+                        {
+                            if (string.Equals(name, candidate, StringComparison.OrdinalIgnoreCase))
+                                return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // ignore and fallback
+            }
+            return false;
         }
 
         private void RegisterClientEvents(GridClient client)
