@@ -44,6 +44,9 @@ namespace Radegast
             descBox.BackColor = instance.MainForm.NotificationBackground;
             descBox.Text = firstName + " " + lastName + "'s " + objectName + "\r\n\r\n" + message.Replace("\n", "\r\n") + "\r\n";
 
+            // Accessible metadata
+            InitializeAccessibleMetadata("Script Dialog", descBox.Text);
+
             NotificationEventArgs args = new NotificationEventArgs(instance) {Text = descBox.Text};
 
             int btnWidth = 90;

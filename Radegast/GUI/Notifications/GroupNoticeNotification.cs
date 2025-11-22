@@ -70,6 +70,9 @@ namespace Radegast
             lblSentBy.Text = $"Sent by {msg.FromAgentName}";
             txtNotice.Text = text;
 
+            // Accessible metadata
+            InitializeAccessibleMetadata("Group Notice", lblTitle.Text + " " + lblSentBy.Text + " " + txtNotice.Text);
+
             if (instance.Groups.TryGetValue(groupID, out var id))
             {
                 group = id;

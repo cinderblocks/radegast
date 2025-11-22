@@ -921,6 +921,42 @@ namespace Radegast.Properties {
         }
         
         /// <summary>
+        ///   Looks up a localized string for friend online notification.
+        /// </summary>
+        internal static string FriendIsOnline {
+            get {
+                return ResourceManager.GetString("FriendIsOnline", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string for friend offline notification.
+        /// </summary>
+        internal static string FriendIsOffline {
+            get {
+                return ResourceManager.GetString("FriendIsOffline", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string for friend removed notification.
+        /// </summary>
+        internal static string FriendRemoved {
+            get {
+                return ResourceManager.GetString("FriendRemoved", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string for friendship accepted notification.
+        /// </summary>
+        internal static string FriendshipAccepted {
+            get {
+                return ResourceManager.GetString("FriendshipAccepted", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized resource of type System.Drawing.Icon similar to (Icon).
         /// </summary>
         internal static System.Drawing.Icon radegast_icon {

@@ -26,6 +26,8 @@ using System.Windows.Forms;
 using OpenMetaverse.StructuredData;
 using System.Threading;
 using OpenMetaverse;
+using System.Reflection;
+using Radegast.Properties;
 
 namespace Radegast
 {
@@ -171,9 +173,11 @@ namespace Radegast
                 ThreadPool.QueueUserWorkItem(sync =>
                 {
                     string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                    string text = string.Format(Resources.FriendshipAccepted, !string.IsNullOrEmpty(e.AgentName) ? e.AgentName : name);
                     MethodInvoker display = () =>
                     {
-                        DisplayNotification(e.AgentID, $"{e.AgentName} accepted your friendship offer");
+                        DisplayNotification(e.AgentID, text);
+                        AnnounceForScreenReader(text);
                     };
 
                     if (InvokeRequired)
@@ -211,6 +215,25 @@ namespace Radegast
                 console.TextManager.DisplayNotification(msg);
             }
             instance.ShowNotificationInChat(msg, ChatBufferTextStyle.ObjectChat, instance.GlobalSettings["friends_notification_highlight"]);
+        }
+
+        // Helper - announce text to screen readers by invoking protected AccessibilityNotifyClients
+        private void AnnounceForScreenReader(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+
+            try
+            {
+                MethodInfo mi = typeof(Control).GetMethod("AccessibilityNotifyClients", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (mi != null && instance?.MainForm != null)
+                {
+                    mi.Invoke(instance.MainForm, new object[] { AccessibleEvents.Alert, message });
+                }
+            }
+            catch
+            {
+                // Best-effort, ignore failures
+            }
         }
 
         /// <summary>
@@ -267,9 +290,11 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
+                string text = string.Format(Resources.FriendIsOffline, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, $"{name} is offline");
+                    DisplayNotification(e.Friend.UUID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 
@@ -291,9 +316,11 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
+                string text = string.Format(Resources.FriendIsOnline, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, $"{name} is online");
+                    DisplayNotification(e.Friend.UUID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 
@@ -313,9 +340,11 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.AgentID);
+                string text = string.Format(Resources.FriendRemoved, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.AgentID, $"{name} is no longer on your friend list");
+                    DisplayNotification(e.AgentID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 

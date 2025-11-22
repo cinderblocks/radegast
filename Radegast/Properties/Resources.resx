@@ -415,4 +415,18 @@
   <data name="inv_item_settings_water" type="System.Resources.ResXFileRef, System.Windows.Forms">
     <value>..\Resources\inv_item_settings_water.png;System.Drawing.Bitmap, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a</value>
   </data>
+  <!-- Friends notifications localized strings -->
+  <data name="FriendIsOnline" xml:space="preserve">
+    <value>{0} is online</value>
+  </data>
+  <data name="FriendIsOffline" xml:space="preserve">
+    <value>{0} is offline</value>
+  </data>
+  <data name="FriendRemoved" xml:space="preserve">
+    <value>{0} is no longer on your friend list</value>
+  </data>
+  <data name="FriendshipAccepted" xml:space="preserve">
+    <value>{0} accepted your friendship offer</value>
+  </data>
+
 </root>

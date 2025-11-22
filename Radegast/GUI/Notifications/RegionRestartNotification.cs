@@ -53,6 +53,9 @@ namespace Radegast
 
             this.instance.MediaManager.PlayUISound(UISounds.Warning);
 
+            // Accessible metadata
+            InitializeAccessibleMetadata("Region Restart", "Region restart scheduled for " + this.RegionName + ", countdown: " + this.CountdownSeconds + " seconds.");
+
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 

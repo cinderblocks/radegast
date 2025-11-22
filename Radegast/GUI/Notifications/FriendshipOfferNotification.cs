@@ -41,6 +41,9 @@ namespace Radegast
             txtMessage.Text = msg.Message;
             btnYes.Focus();
 
+            // Accessible metadata for assistive tech
+            InitializeAccessibleMetadata(msg.FromAgentName + " friendship offer", txtHead.Text + " " + txtMessage.Text);
+
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance) {Text = txtHead.Text};
             args.Buttons.Add(btnYes);

@@ -38,6 +38,10 @@ namespace Radegast
         /// </summary>
         public NotificationType Type;
 
+        // Add accessible name/description support to Notification base class
+        private string accessibleDescription = string.Empty;
+        private string accessibleName = string.Empty;
+
         /// <summary>
         /// Callback when blue dialog notification is displayed or closed
         /// </summary>
@@ -96,6 +100,61 @@ namespace Radegast
                 Console.WriteLine("" + ex);
                 Logger.Log("Error executing notification displayed", Helpers.LogLevel.Warning, ex);
             }
+        }
+
+        /// <summary>
+        /// Accessible description of the notification
+        /// </summary>
+        public string AccessibleDescription
+        {
+            get => accessibleDescription;
+            set
+            {
+                accessibleDescription = value;
+                UpdateAccessibleProperties();
+            }
+        }
+
+        /// <summary>
+        /// Accessible name of the notification
+        /// </summary>
+        public string AccessibleName
+        {
+            get => accessibleName;
+            set
+            {
+                accessibleName = value;
+                UpdateAccessibleProperties();
+            }
+        }
+
+        private void UpdateAccessibleProperties()
+        {
+            // Update accessible properties of the notification's handle
+            if (this.IsHandleCreated)
+            {
+                this.Invoke((MethodInvoker)delegate
+                {
+                    // Write directly to the base Control implementation to avoid
+                    // calling these property setters again and causing recursion.
+                    base.AccessibleDescription = accessibleDescription;
+                    base.AccessibleName = accessibleName;
+                });
+            }
+        }
+
+        /// <summary>
+        /// Initialize accessible metadata for this notification.
+        /// Sets AccessibleName and AccessibleDescription in a single call and
+        /// updates the underlying control accessibility properties on the UI thread.
+        /// </summary>
+        /// <param name="name">Short name for the notification (announced by screen readers)</param>
+        /// <param name="description">Longer description / body text for assistive tech</param>
+        public void InitializeAccessibleMetadata(string name, string description)
+        {
+            accessibleName = name ?? string.Empty;
+            accessibleDescription = description ?? string.Empty;
+            UpdateAccessibleProperties();
         }
     }
     /// <summary>
