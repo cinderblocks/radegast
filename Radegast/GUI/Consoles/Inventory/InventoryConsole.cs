@@ -141,8 +141,8 @@ namespace Radegast
 
             inventoryUpdateCancelToken = new CancellationTokenSource();
 
-            inventoryUpdateTask = Task.Factory.StartNew(StartTraverseNodes,
-                inventoryUpdateCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
+            // Start traversal asynchronously on a thread-pool thread and pass the cancellation token
+            inventoryUpdateTask = Task.Run(() => StartTraverseNodes(inventoryUpdateCancelToken.Token), inventoryUpdateCancelToken.Token);
 
             invRootNode.Expand();
 
@@ -161,23 +161,60 @@ namespace Radegast
             Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
         }
 
-        private void InventoryConsole_Disposed(object sender, EventArgs e)
+        private async void InventoryConsole_Disposed(object sender, EventArgs e)
         {
-            instance.GestureManager.StopMonitoring();
+            // Signal stop of background traversal and wait for it to finish (best-effort)
+            try
+            {
+                instance.GestureManager.StopMonitoring();
 
+                if (inventoryUpdateCancelToken != null)
+                {
+                    try { inventoryUpdateCancelToken.Cancel(); } catch { }
+                }
+
+                if (inventoryUpdateTask != null)
+                {
+                    try
+                    {
+                        // Wait for the task to complete, but don't block shutdown indefinitely
+                        var finished = await Task.WhenAny(inventoryUpdateTask, Task.Delay(5000)).ConfigureAwait(false);
+                        if (finished != inventoryUpdateTask)
+                        {
+                            Logger.Log("inventoryUpdateTask did not terminate within timeout after disposal.", Helpers.LogLevel.Warning, Client);
+                        }
+                        else
+                        {
+                            // Observe exceptions
+                            await inventoryUpdateTask.ConfigureAwait(false);
+                        }
+                    }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex)
+                    {
+                        Logger.Log("Error while waiting for inventory update task: " + ex.Message, Helpers.LogLevel.Error, ex);
+                    }
+                }
+            }
+            catch (Exception) { }
+
+            // Stop timers and unsubscribe events
             if (TreeUpdateTimer != null)
             {
-                TreeUpdateTimer.Stop();
-                TreeUpdateTimer.Dispose();
+                try { TreeUpdateTimer.Stop(); TreeUpdateTimer.Dispose(); } catch { }
                 TreeUpdateTimer = null;
             }
 
-            Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded;
-            Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
-            Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
+            try
+            {
+                Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded;
+                Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
+                Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
 
-            Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
-            Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
+                Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
+                Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
+            }
+            catch (Exception) { }
         }
         #endregion
 
@@ -607,7 +644,7 @@ namespace Radegast
             }
         }
 
-        private async Task FetchQueuedFolders()
+        private async Task FetchQueuedFolders(CancellationToken token)
         {
             Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
 
@@ -618,6 +655,7 @@ namespace Radegast
 
                 while (!QueuedFoldersNeedingUpdate.IsEmpty)
                 {
+                    token.ThrowIfCancellationRequested();
                     var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
                     var tasks = folderKeys
                         .Select(folderKey => Client.Inventory.RequestFolderContents(
@@ -626,10 +664,10 @@ namespace Radegast
                             true,
                             true,
                             InventorySortOrder.ByDate,
-                            inventoryUpdateCancelToken.Token
+                            token
                         ));
 
-                    await Task.WhenAll(tasks);
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
                     TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
                 }
             }
@@ -639,73 +677,94 @@ namespace Radegast
             }
         }
 
-        private void StartTraverseNodes()
-        {
-            if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
-            {
-                Logger.Log("Could not traverse inventory. Event Queue is not running.", Helpers.LogLevel.Warning, Client);
-                return;
-            }
+        /// <summary>
+        /// Inventory traversal that accepts a cancellation token for explicit control.
+        /// </summary>
+        private async Task StartTraverseNodes(CancellationToken token)
+         {
+             if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
+             {
+                 Logger.Log("Could not traverse inventory. Event Queue is not running.", Helpers.LogLevel.Warning, Client);
+                 return;
+             }
 
-            UpdateStatus("Loading...");
-            TreeUpdateInProgress = true;
-            TreeUpdateTimer.Start();
+             UpdateStatus("Loading...");
+             TreeUpdateInProgress = true;
+             TreeUpdateTimer.Start();
 
-            instance.GestureManager.BeginMonitoring();
+             instance.GestureManager.BeginMonitoring();
 
-            FetchQueuedFolders().Wait();
+             try
+             {
+                await FetchQueuedFolders(token).ConfigureAwait(false);
+             }
+             catch (OperationCanceledException)
+             {
+                 Logger.Log("Inventory traversal cancelled.", Helpers.LogLevel.Info, Client);
+                 TreeUpdateTimer.Stop();
+                 TreeUpdateInProgress = false;
+                 UpdateStatus("Reading cache");
+                 return;
+             }
+             catch (Exception ex)
+             {
+                 Logger.Log("Error during inventory traversal: " + ex.Message, Helpers.LogLevel.Error, ex);
+             }
 
-            TreeUpdateTimer.Stop();
-            if (IsHandleCreated)
-            {
-                Invoke(new MethodInvoker(() => TreeUpdateTimerTick(null, null)));
-            }
-            TreeUpdateInProgress = false;
-            UpdateStatus("OK");
-            instance.ShowNotificationInChat("Inventory update completed.");
+             TreeUpdateTimer.Stop();
+             if (IsHandleCreated)
+             {
+                 Invoke(new MethodInvoker(() => TreeUpdateTimerTick(null, null)));
+             }
+             TreeUpdateInProgress = false;
+             UpdateStatus("OK");
+             instance.ShowNotificationInChat("Inventory update completed.");
 
-            if ((Client.Network.LoginResponseData.FirstLogin) && !string.IsNullOrEmpty(Client.Network.LoginResponseData.InitialOutfit))
-            {
-                Client.Self.SetAgentAccess("A");
-                var initOutfit = new InitialOutfit(instance);
-                initOutfit.SetInitialOutfit(Client.Network.LoginResponseData.InitialOutfit);
-            }
+             if ((Client.Network.LoginResponseData.FirstLogin) && !string.IsNullOrEmpty(Client.Network.LoginResponseData.InitialOutfit))
+             {
+                 Client.Self.SetAgentAccess("A");
+                 var initOutfit = new InitialOutfit(instance);
+                 initOutfit.SetInitialOutfit(Client.Network.LoginResponseData.InitialOutfit);
+             }
 
-            // Updated labels on clothes that we are wearing
-            UpdateWornLabels();
+             // Updated labels on clothes that we are wearing
+             UpdateWornLabels();
 
-            // Update attachments now that we are done
-            foreach (var attachment in Client.Appearance.GetAttachments())
-            {
-                if (Inventory.Contains(attachment))
-                {
-                    UpdateNodeLabel(attachment.UUID);
-                }
-                else
-                {
-                    Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID);
-                    return;
-                }
-            }
+             // Update attachments now that we are done
+             foreach (var attachment in Client.Appearance.GetAttachments())
+             {
+                 if (Inventory.Contains(attachment))
+                 {
+                     UpdateNodeLabel(attachment.UUID);
+                 }
+                 else
+                 {
+                     Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID);
+                     return;
+                 }
+             }
 
-            Logger.Log("Finished updating inventory folders, saving cache...", Helpers.LogLevel.Debug, Client);
+             Logger.Log("Finished updating inventory folders, saving cache...", Helpers.LogLevel.Debug, Client);
 
-            ThreadPool.QueueUserWorkItem(state => Inventory.SaveToDisk(instance.InventoryCacheFileName));
+             ThreadPool.QueueUserWorkItem(state => Inventory.SaveToDisk(instance.InventoryCacheFileName));
 
-            if (!instance.MonoRuntime || IsHandleCreated)
-                Invoke(new MethodInvoker(() =>
-                {
-                    invTree.Sort();
-                }
-            ));
-        }
+             if (!instance.MonoRuntime || IsHandleCreated)
+                 Invoke(new MethodInvoker(() =>
+                 {
+                     invTree.Sort();
+                 }
+             ));
+         }
 
         public void ReloadInventory()
         {
             if (TreeUpdateInProgress)
             {
                 TreeUpdateTimer.Stop();
-                inventoryUpdateCancelToken.Cancel();
+                // Cancel the running traversal and replace the token for the next run
+                try { inventoryUpdateCancelToken.Cancel(); } catch { }
+                try { inventoryUpdateCancelToken.Dispose(); } catch { }
+                inventoryUpdateCancelToken = new CancellationTokenSource();
             }
 
             saveAllTToolStripMenuItem.Enabled = false;
@@ -718,8 +777,8 @@ namespace Radegast
             invRootNode = AddDir(null, Inventory.RootFolder);
             Inventory.RootNode.NeedsUpdate = true;
 
-            Task inventoryUpdateTask = Task.Factory.StartNew(StartTraverseNodes,
-                inventoryUpdateCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
+            // Start traversal on thread-pool and keep reference so we can cancel later
+            inventoryUpdateTask = Task.Run(() => StartTraverseNodes(inventoryUpdateCancelToken.Token), inventoryUpdateCancelToken.Token);
 
             invRootNode.Expand();
         }
