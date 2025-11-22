@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using SkiaSharp;
 using System.Text.RegularExpressions;
+using System.Drawing;
 
 namespace Radegast
 {
@@ -93,6 +94,9 @@ namespace Radegast
 
         protected void ProcessAndPrintText(string text, bool isNewMessage, bool addNewline)
         {
+            // Sanitize incoming text to remove any embedded HTML tags or control characters
+            text = SanitizeText(text);
+
             var playedSounds = new HashSet<UUID>();
             var lineParts = SlUriParser.UrlRegex.Split(text);
             int linePartIndex;
@@ -117,7 +121,9 @@ namespace Radegast
                 // process inline markup for non-link text
                 RenderInlineAndPrint(beforeLink, isNewMessage);
 
-                var linkTextInfo = uriParser.GetLinkName(lineParts[linePartIndex + 1]);
+                var rawLink = lineParts[linePartIndex + 1];
+                var sanitizedLink = SanitizeLinkUri(rawLink);
+                var linkTextInfo = uriParser.GetLinkName(rawLink);
 
                 var originalForeColor = TextPrinter.ForeColor;
                 var originalBackColor = TextPrinter.BackColor;
@@ -148,13 +154,14 @@ namespace Radegast
                     }
                 }
 
-                if (instance.MonoRuntime || instance.GlobalSettings["resolve_uris_as_plaintext"])
+                // If link is not sanitized or settings force plaintext, print as text. Otherwise insert a safe link.
+                if (sanitizedLink == null || instance.MonoRuntime || instance.GlobalSettings["resolve_uris_as_plaintext"])
                 {
                     TextPrinter.PrintText(linkTextInfo.DisplayText);
                 }
                 else
                 {
-                    TextPrinter.InsertLink(linkTextInfo.DisplayText, lineParts[linePartIndex + 1]);
+                    TextPrinter.InsertLink(linkTextInfo.DisplayText, sanitizedLink);
                 }
 
                 TextPrinter.Font = originalFont;
@@ -171,6 +178,65 @@ namespace Radegast
             {
                 TextPrinter.PrintTextLine("");
             }
+        }
+
+        // Remove basic HTML tags and control characters; limit overall length
+        private string SanitizeText(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            // Strip basic HTML tags
+            string noHtml = Regex.Replace(input, "<.*?>", string.Empty);
+
+            // Remove non-printable control chars except CR/LF/TAB
+            noHtml = Regex.Replace(noHtml, "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", string.Empty);
+
+            // Trim and limit length to avoid extremely long crafted payloads
+            noHtml = noHtml.Trim();
+            const int MaxLen = 2000;
+            if (noHtml.Length > MaxLen) noHtml = noHtml.Substring(0, MaxLen);
+            return noHtml;
+        }
+
+        // Basic URI sanitization: allow http, https and secondlife schemes; reject javascript/data/file schemes
+        private string SanitizeLinkUri(string uri)
+        {
+            if (string.IsNullOrWhiteSpace(uri)) return null;
+            string trimmed = uri.Trim();
+            string lower = trimmed.ToLowerInvariant();
+
+            // Reject obviously dangerous schemes
+            if (lower.StartsWith("javascript:") || lower.StartsWith("data:") || lower.StartsWith("file:") || lower.StartsWith("vbscript:"))
+            {
+                return null;
+            }
+
+            // Allow secondlife protocol directly
+            if (lower.StartsWith("secondlife:")) return trimmed;
+
+            // Allow http(s)
+            if (lower.StartsWith("http://") || lower.StartsWith("https://"))
+            {
+                if (Uri.TryCreate(trimmed, UriKind.Absolute, out var u))
+                {
+                    return u.AbsoluteUri;
+                }
+                return null;
+            }
+
+            // Support links that start with www. by prepending http://
+            if (Regex.IsMatch(trimmed, "^www\\.", RegexOptions.IgnoreCase))
+            {
+                var candidate = "http://" + trimmed;
+                if (Uri.TryCreate(candidate, UriKind.Absolute, out var u2))
+                {
+                    return u2.AbsoluteUri;
+                }
+                return null;
+            }
+
+            // Otherwise reject unknown schemes
+            return null;
         }
 
         private void RenderInlineAndPrint(string text, bool isNewMessage)
