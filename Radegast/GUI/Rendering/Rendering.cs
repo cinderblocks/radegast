@@ -43,6 +43,8 @@ using System.Threading;
 using CoreJ2K;
 using CoreJ2K.Util;
 using OpenTK.Graphics.OpenGL;
+using OpenTK.Graphics;
+using OpenTK.Platform;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using OpenMetaverse.Assets;
@@ -127,6 +129,10 @@ namespace Radegast.Rendering
         private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
         private readonly MeshmerizerR renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
+        // Worker context for background texture uploads
+        private IGraphicsContext textureContext = null;
+        private IWindowInfo sharedWindowInfo = null;
+        private Thread textureDecodingThread = null;
         private readonly AutoResetEvent TextureThreadContextReady = new AutoResetEvent(false);
         private readonly SemaphoreSlim PendingTexturesAvailable = new SemaphoreSlim(0);
         private CancellationTokenSource cancellationTokenSource = null;
@@ -290,10 +296,50 @@ namespace Radegast.Rendering
             if (glControl != null)
             {
                 glControl_UnhookEvents();
-                glControl?.MakeCurrent();
-                glControl?.Dispose();
+
+                try
+                {
+                    // Protect against null internal context / already-disposed control
+                    var ctx = glControl.Context;
+                    if (ctx != null && !glControl.IsDisposed && glControl.IsHandleCreated)
+                    {
+                        try
+                        {
+                            glControl.MakeCurrent();
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log("MakeCurrent failed during dispose: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log any unexpected state access
+                    Logger.Log("Unexpected GL control state during dispose: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                }
+
+                try { glControl.Dispose(); } catch { }
             }
             glControl = null;
+
+            // Ensure texture thread stopped and worker context disposed
+            try
+            {
+                if (textureDecodingThread != null)
+                {
+                    try { textureDecodingThread.Join(2000); } catch { }
+                    textureDecodingThread = null;
+                }
+
+                if (textureContext != null)
+                {
+                    try { textureContext.Dispose(); } catch (Exception ex) { Logger.Log("Failed disposing textureContext: " + ex.Message, Helpers.LogLevel.Debug, Client, ex); }
+                    textureContext = null;
+                }
+                sharedWindowInfo = null;
+            }
+            catch { }
 
             GC.Collect();
         }
@@ -728,12 +774,124 @@ namespace Radegast.Rendering
 
                 // glControl.Context.MakeCurrent(null);
                 TextureThreadContextReady.Reset();
-                var textureThread = new Thread(TextureThread)
+                // Attempt to create a shared worker GraphicsContext for OpenTK 3.3.3
+                try
+                {
+                    // Try to obtain the GLControl's internal IWindowInfo via reflection and create a shared GraphicsContext on this thread
+                    object winInfoObj = null;
+                    var t = glControl.GetType();
+                    var f = t.GetField("windowInfo", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                            ?? t.GetField("m_windowInfo", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                    if (f != null)
+                    {
+                        winInfoObj = f.GetValue(glControl);
+                    }
+
+                    if (winInfoObj == null)
+                    {
+                        foreach (var fi in t.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic))
+                        {
+                            if (typeof(IWindowInfo).IsAssignableFrom(fi.FieldType))
+                            {
+                                winInfoObj = fi.GetValue(glControl);
+                                if (winInfoObj != null) break;
+                            }
+                        }
+                    }
+
+                    sharedWindowInfo = winInfoObj as IWindowInfo;
+
+                    if (sharedWindowInfo != null)
+                    {
+                        // Use reflection to find a compatible GraphicsContext constructor and create the worker context that shares with the GLControl
+                        var gcType = typeof(GraphicsContext);
+                        var ctors = gcType.GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                        object created = null;
+                        foreach (var ctor in ctors)
+                        {
+                            var pars = ctor.GetParameters();
+                            var args = new object[pars.Length];
+                            var ok = true;
+                            var intPadValue = 0;
+                            for (var i = 0; i < pars.Length; i++)
+                            {
+                                var pType = pars[i].ParameterType;
+                                if (pType == typeof(GraphicsMode) || pType.FullName.Contains("GraphicsMode"))
+                                {
+                                    args[i] = GLMode ?? new GraphicsMode();
+                                }
+                                else if (typeof(IWindowInfo).IsAssignableFrom(pType))
+                                {
+                                    args[i] = sharedWindowInfo;
+                                }
+                                else if (pType == typeof(int))
+                                {
+                                    // supply major/minor or placeholder
+                                    if (intPadValue == 0) { args[i] = 3; intPadValue++; }
+                                    else { args[i] = 0; }
+                                }
+                                else if (pType.FullName.Contains("GraphicsContextFlags"))
+                                {
+                                    args[i] = GraphicsContextFlags.Default;
+                                }
+                                else if (typeof(IGraphicsContext).IsAssignableFrom(pType) || pType.FullName.Contains("IGraphicsContext"))
+                                {
+                                    args[i] = glControl.Context;
+                                }
+                                else
+                                {
+                                    ok = false;
+                                    break;
+                                }
+                            }
+
+                            if (!ok) continue;
+
+                            try
+                            {
+                                created = ctor.Invoke(args);
+                                if (created != null) break;
+                            }
+                            catch
+                            {
+                                created = null;
+                            }
+                        }
+
+                        textureContext = created as IGraphicsContext;
+                        if (textureContext == null)
+                        {
+                            Logger.Log("No compatible GraphicsContext constructor found or creation failed on texture thread", Helpers.LogLevel.Debug, Client);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                textureContext.MakeCurrent(sharedWindowInfo);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Log("Failed to make worker context current: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                                try { textureContext.MakeCurrent(null); } catch { }
+                                textureContext = null;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log("Failed to prepare shared texture context: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                    textureContext = null;
+                    sharedWindowInfo = null;
+                }
+
+                // Start the texture decoding thread (it will use textureContext if available)
+                textureDecodingThread = new Thread(TextureThread)
                 {
                     IsBackground = true,
                     Name = "TextureDecodingThread"
                 };
-                textureThread.Start();
+                textureDecodingThread.Start();
                 TextureThreadContextReady.WaitOne(1000, false);
                 // glControl.MakeCurrent();
                 InitWater();
@@ -1023,13 +1181,132 @@ namespace Radegast.Rendering
 
         private void TextureThread()
         {
+            // Signal that the texture thread started
             TextureThreadContextReady.Set();
 
             Logger.DebugLog("Started Texture Thread");
 
+            try
+            {
+                // Try to obtain the GLControl's internal IWindowInfo via reflection and create a shared GraphicsContext on this thread
+                object winInfoObj = null;
+                var t = glControl.GetType();
+                var f = t.GetField("windowInfo", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                        ?? t.GetField("m_windowInfo", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                if (f != null)
+                {
+                    winInfoObj = f.GetValue(glControl);
+                }
+
+                if (winInfoObj == null)
+                {
+                    foreach (var fi in t.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic))
+                    {
+                        if (typeof(IWindowInfo).IsAssignableFrom(fi.FieldType))
+                        {
+                            winInfoObj = fi.GetValue(glControl);
+                            if (winInfoObj != null) break;
+                        }
+                    }
+                }
+
+                sharedWindowInfo = winInfoObj as IWindowInfo;
+
+                if (sharedWindowInfo != null)
+                {
+                    // Use reflection to find a compatible GraphicsContext constructor and create the worker context that shares with the GLControl
+                    var gcType = typeof(GraphicsContext);
+                    var ctors = gcType.GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                    object created = null;
+                    foreach (var ctor in ctors)
+                    {
+                        var pars = ctor.GetParameters();
+                        var args = new object[pars.Length];
+                        var ok = true;
+                        var intPadValue = 0;
+                        for (var i = 0; i < pars.Length; i++)
+                        {
+                            var pType = pars[i].ParameterType;
+                            if (pType == typeof(GraphicsMode) || pType.FullName.Contains("GraphicsMode"))
+                            {
+                                args[i] = GLMode ?? new GraphicsMode();
+                            }
+                            else if (typeof(IWindowInfo).IsAssignableFrom(pType))
+                            {
+                                args[i] = sharedWindowInfo;
+                            }
+                            else if (pType == typeof(int))
+                            {
+                                // supply major/minor or placeholder
+                                if (intPadValue == 0) { args[i] = 3; intPadValue++; }
+                                else { args[i] = 0; }
+                            }
+                            else if (pType.FullName.Contains("GraphicsContextFlags"))
+                            {
+                                args[i] = GraphicsContextFlags.Default;
+                            }
+                            else if (typeof(IGraphicsContext).IsAssignableFrom(pType) || pType.FullName.Contains("IGraphicsContext"))
+                            {
+                                args[i] = glControl.Context;
+                            }
+                            else
+                            {
+                                ok = false;
+                                break;
+                            }
+                        }
+
+                        if (!ok) continue;
+
+                        try
+                        {
+                            created = ctor.Invoke(args);
+                            if (created != null) break;
+                        }
+                        catch
+                        {
+                            created = null;
+                        }
+                    }
+
+                    textureContext = created as IGraphicsContext;
+                    if (textureContext == null)
+                    {
+                        Logger.Log("No compatible GraphicsContext constructor found or creation failed on texture thread", Helpers.LogLevel.Debug, Client);
+                    }
+                    else
+                    {
+                        try
+                        {
+                            textureContext.MakeCurrent(sharedWindowInfo);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log("Failed to make worker context current: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                            try { textureContext.MakeCurrent(null); } catch { }
+                            textureContext = null;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Unexpected exception creating worker context: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                textureContext = null;
+                sharedWindowInfo = null;
+            }
+
             while (TextureThreadRunning)
             {
-                PendingTexturesAvailable.Wait(cancellationTokenSource.Token);
+                try
+                {
+                    PendingTexturesAvailable.Wait(cancellationTokenSource.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
                 if (!TextureThreadRunning) { break; }
 
                 if (!PendingTextures.TryDequeue(out var item)) { continue; }
@@ -1059,7 +1336,6 @@ namespace Radegast.Rendering
 
                     if (j2kImage != null)
                     {
-                        // TODO: eliminate this.
                         var mi = new ManagedImage(j2kImage);
 
                         var hasAlpha = false;
@@ -1070,21 +1346,11 @@ namespace Radegast.Rendering
                             fullAlpha = true;
                             isMask = true;
 
-                            // Do we really have alpha, is it all full alpha, or is it a mask
                             foreach (var b in mi.Alpha)
                             {
-                                if (b < 255)
-                                {
-                                    hasAlpha = true;
-                                }
-                                if (b != 0)
-                                {
-                                    fullAlpha = false;
-                                }
-                                if (b != 0 && b != 255)
-                                {
-                                    isMask = false;
-                                }
+                                if (b < 255) hasAlpha = true;
+                                if (b != 0) fullAlpha = false;
+                                if (b != 0 && b != 255) isMask = false;
                             }
                         }
 
@@ -1092,18 +1358,9 @@ namespace Radegast.Rendering
                         item.Data.TextureInfo.FullAlpha = fullAlpha;
                         item.Data.TextureInfo.IsMask = isMask;
 
-                        // Keep original bytes for optional caching and upload path
                         imageBytes = item.TextureData;
 
-                        // Convert decoded image to SKBitmap once
-                        try
-                        {
-                            skBitmap = j2kImage.As<SKBitmap>();
-                        }
-                        catch
-                        {
-                            skBitmap = null;
-                        }
+                        try { skBitmap = j2kImage.As<SKBitmap>(); } catch { skBitmap = null; }
 
                         if (CacheDecodedTextures)
                         {
@@ -1114,37 +1371,59 @@ namespace Radegast.Rendering
 
                 if (imageBytes != null)
                 {
-                    // If we didn't produce an SKBitmap above (unexpected path), decode now as fallback
                     if (skBitmap == null)
                     {
-                        try
-                        {
-                            var decoded = J2kImage.FromBytes(imageBytes);
-                            skBitmap = decoded?.As<SKBitmap>();
-                        }
-                        catch
-                        {
-                            skBitmap = null;
-                        }
+                        try { var decoded = J2kImage.FromBytes(imageBytes); skBitmap = decoded?.As<SKBitmap>(); } catch { skBitmap = null; }
                     }
 
                     if (skBitmap != null)
                     {
                         var bitmap = skBitmap.ToBitmap();
-
                         try { skBitmap.Dispose(); } catch { }
-
                         bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
 
-                        if (instance.MainForm.IsHandleCreated)
+                        if (textureContext != null)
                         {
-                            instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                            try
                             {
-                                item.Data.TextureInfo.TexturePointer =
-                                    RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
-                                // GL.Flush();
-                                bitmap.Dispose();
-                            }));
+                                textureContext.MakeCurrent(sharedWindowInfo);
+                                item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Log("Texture thread GL upload failed, falling back to UI thread: " + ex.Message, Helpers.LogLevel.Warning, Client, ex);
+                                if (instance.MainForm.IsHandleCreated)
+                                {
+                                    instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                                    {
+                                        item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
+                                        try { bitmap.Dispose(); } catch { }
+                                    }));
+                                }
+                                else
+                                {
+                                    try { bitmap.Dispose(); } catch { }
+                                }
+                            }
+                            finally
+                            {
+                                try { bitmap.Dispose(); } catch { }
+                            }
+                        }
+                        else
+                        {
+                            if (instance.MainForm.IsHandleCreated)
+                            {
+                                instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                                {
+                                    item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
+                                    try { bitmap.Dispose(); } catch { }
+                                }));
+                            }
+                            else
+                            {
+                                try { bitmap.Dispose(); } catch { }
+                            }
                         }
                     }
                 }
@@ -1152,9 +1431,10 @@ namespace Radegast.Rendering
                 item.TextureData = null;
                 imageBytes = null;
             }
-            //context.MakeCurrent(window.WindowInfo);
-            //context.Dispose();
-            //window.Dispose();
+
+            // Cleanup worker context
+            try { if (textureContext != null) { try { textureContext.MakeCurrent(null); } catch { } try { textureContext.Dispose(); } catch { } textureContext = null; } } catch { }
+
             TextureThreadContextReady.Set();
             Logger.DebugLog("Texture thread exited");
         }
@@ -2745,6 +3025,7 @@ namespace Radegast.Rendering
                 rprim.BoundingVolume.AddVolume(data.BoundingVolume, prim.Scale);
 
                 // With linear texture animation in effect, texture repeats and offset are ignored
+                // prim.TextureAnim.Face == 255 checks for all faces
                 if ((prim.TextureAnim.Flags & Primitive.TextureAnimMode.ANIM_ON) != 0
                     && (prim.TextureAnim.Flags & Primitive.TextureAnimMode.ROTATE) == 0
                     && (prim.TextureAnim.Face == 255 || prim.TextureAnim.Face == j))
