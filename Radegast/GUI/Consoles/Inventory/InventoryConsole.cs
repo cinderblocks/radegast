@@ -645,37 +645,43 @@ namespace Radegast
         }
 
         private async Task FetchQueuedFolders(CancellationToken token)
-        {
-            Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
+         {
+             Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
 
-            try
-            {
-                QueuedFoldersNeedingUpdate.Clear();
-                TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+             try
+             {
+                 QueuedFoldersNeedingUpdate.Clear();
+                 TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
 
-                while (!QueuedFoldersNeedingUpdate.IsEmpty)
-                {
-                    token.ThrowIfCancellationRequested();
-                    var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
-                    var tasks = folderKeys
-                        .Select(folderKey => Client.Inventory.RequestFolderContents(
-                            folderKey,
-                            Client.Self.AgentID,
-                            true,
-                            true,
-                            InventorySortOrder.ByDate,
-                            token
-                        ));
+                 while (!QueuedFoldersNeedingUpdate.IsEmpty)
+                 {
+                     token.ThrowIfCancellationRequested();
+                     var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
+                     // Update UI with current progress: number of items cached and folders remaining
+                     try
+                     {
+                         UpdateStatus($"Loading... {UUID2NodeCache.Count} items, {folderKeys.Count} folders remaining");
+                     }
+                     catch { }
+                     var tasks = folderKeys
+                         .Select(folderKey => Client.Inventory.RequestFolderContents(
+                             folderKey,
+                             Client.Self.AgentID,
+                             true,
+                             true,
+                             InventorySortOrder.ByDate,
+                             token
+                         ));
 
-                    await Task.WhenAll(tasks).ConfigureAwait(false);
-                    TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
-                }
-            }
-            finally
-            {
-                Client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
-            }
-        }
+                     await Task.WhenAll(tasks).ConfigureAwait(false);
+                     TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+                 }
+             }
+             finally
+             {
+                 Client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
+             }
+         }
 
         /// <summary>
         /// Inventory traversal that accepts a cancellation token for explicit control.
@@ -1038,7 +1044,7 @@ namespace Radegast
             }
         }
 
-        private void FetchFolder(UUID folderID, UUID ownerID, bool force)
+        private async Task FetchFolder(UUID folderID, UUID ownerID, bool force, CancellationToken token = default)
         {
             if (force || !fetchedFolders.Contains(folderID))
             {
@@ -1047,8 +1053,8 @@ namespace Radegast
                     fetchedFolders.Add(folderID);
                 }
 
-                Task task = Client.Inventory.RequestFolderContents(folderID, ownerID,
-                    true, true, InventorySortOrder.ByDate, inventoryUpdateCancelToken.Token);
+                await Client.Inventory.RequestFolderContents(folderID, ownerID,
+                    true, true, InventorySortOrder.ByDate, token).ConfigureAwait(false);
             }
         }
 
@@ -1458,7 +1464,7 @@ namespace Radegast
                                 ToolStripMenuItem ptItem =
                                     new ToolStripMenuItem(name, null, OnInvContextClick)
                                     {
-                                        Name = pt.ToString(),
+                                        Name = "attach_to",
                                         Tag = pt
                                     };
                                 ptItem.Name = "attach_to";
@@ -1477,7 +1483,7 @@ namespace Radegast
                                 ToolStripMenuItem ptItem =
                                     new ToolStripMenuItem(name, null, OnInvContextClick)
                                     {
-                                        Name = pt.ToString(),
+                                        Name = "attach_to",
                                         Tag = pt
                                     };
                                 ptItem.Name = "attach_to";
@@ -1568,7 +1574,7 @@ namespace Radegast
         }
 
         #region Context menu folder
-        private void OnInvContextClick(object sender, EventArgs e)
+        private async void OnInvContextClick(object sender, EventArgs e)
         {
             if (!(invTree.SelectedNode?.Tag is InventoryBase))
             {
@@ -1591,7 +1597,15 @@ namespace Radegast
                                 RemoveNode(old);
                             }
                         }
-                        FetchFolder(folder.UUID, folder.OwnerID, true);
+                        try
+                        {
+                            await FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None).ConfigureAwait(true);
+                        }
+                        catch (OperationCanceledException) { }
+                        catch (Exception ex)
+                        {
+                            Logger.Log("Error fetching folder: " + ex.Message, Helpers.LogLevel.Error, Client);
+                        }
                         break;
 
                     case "backup":
@@ -2231,14 +2245,15 @@ namespace Radegast
                     invTree.SelectedNode.BeginEdit();
                     break;
                 case Keys.F5 when invTree.SelectedNode != null:
-                {
-                    if (invTree.SelectedNode.Tag is InventoryFolder folder)
-                    {
-                        FetchFolder(folder.UUID, folder.OwnerID, true);
-                    }
+                 {
+                     if (invTree.SelectedNode.Tag is InventoryFolder folder)
+                     {
+                        // Start async fetch but don't block UI thread
+                        FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
+                     }
 
-                    break;
-                }
+                     break;
+                 }
                 case Keys.Delete when invTree.SelectedNode != null:
                 {
                     var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
