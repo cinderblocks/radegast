@@ -24,6 +24,8 @@ using System.Drawing;
 using System.Text.RegularExpressions;
 using System.IO;
 using System.Windows.Forms;
+using System.Threading;
+using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
 
@@ -671,83 +673,143 @@ namespace Radegast
                 ChatBufferTextStyle.Invisible);
         }
 
-        private void tbtbSave_Click(object sender, EventArgs e)
+        private async void tbtbSave_Click(object sender, EventArgs e)
         {
-            InventoryManager.ScriptUpdatedCallback handler = (uploadSuccess, uploadStatus, compileSuccess, compileMessages, itemID, assetID) =>
-            {
-                if (!IsHandleCreated && instance.MonoRuntime) return;
-
-                BeginInvoke(new MethodInvoker(() =>
-                {
-                    if (uploadSuccess && compileSuccess)
-                    {
-                        lblScripStatus.Text = "Saved OK";
-                    }
-                    else
-                    {
-                        if (!compileSuccess)
-                        {
-                            lblScripStatus.Text = "Compilation failed";
-                            if (compileMessages != null)
-                            {
-                                txtStatus.Show();
-                                txtStatus.Text = string.Empty;
-                                for (int i = 0; i < compileMessages.Count; i++)
-                                {
-                                    Match m = Regex.Match(compileMessages[i], @"\((?<line>\d+),\s*(?<column>\d+)\s*\)\s*:\s*(?<kind>\w+)\s*:\s*(?<msg>.*)", RegexOptions.IgnoreCase);
-
-                                    if (m.Success)
-                                    {
-                                        int line = 1 + int.Parse(m.Groups["line"].Value, Utils.EnUsCulture);
-                                        int column = 1 + int.Parse(m.Groups["column"].Value, Utils.EnUsCulture);
-                                        string kind = m.Groups["kind"].Value;
-                                        string msg = m.Groups["msg"].Value;
-                                        instance.ShowNotificationInChat(
-                                            $"{kind} on line {line}, column {column}: {msg}",
-                                            ChatBufferTextStyle.Invisible);
-                                        txtStatus.Text += $"{kind} (Ln {line}, Col {column}): {msg}";
-
-                                        if (i == 0)
-                                        {
-                                            rtb.CursorPosition = new RRichTextBox.CursorLocation(line - 1, column - 1);
-                                            ReadCursorPosition();
-                                            rtb.Focus();
-                                        }
-                                    }
-                                    else
-                                    {
-                                        txtStatus.Text += compileMessages[i] + Environment.NewLine;
-                                        instance.ShowNotificationInChat(compileMessages[i]);
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            lblScripStatus.Text = rtb.Text = "Failed to download.";
-                        }
-
-                    }
-                }
-                ));
-            };
-
-
             lblScripStatus.Text = "Saving...";
             txtStatus.Hide();
             txtStatus.Text = string.Empty;
 
-            AssetScriptText n = new AssetScriptText {Source = rtb.Text};
+            AssetScriptText n = new AssetScriptText { Source = rtb.Text };
             n.Encode();
 
-            if (prim != null)
+            try
             {
-                client.Inventory.RequestUpdateScriptTask(n.AssetData, script.UUID, prim.ID, cbMono.Checked, cbRunning.Checked, handler);
+                // Use a cancellation token with a reasonable timeout to avoid waiting indefinitely
+                using (var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1)))
+                {
+                    var result = await UpdateScriptAsync(n.AssetData, script.UUID, cbMono.Checked, prim?.ID, cbRunning.Checked, cts.Token).ConfigureAwait(false);
+
+                    // Resume on UI thread to update controls
+                    if (!IsHandleCreated && instance.MonoRuntime) return;
+
+                    BeginInvoke(new MethodInvoker(() =>
+                    {
+                        if (result.UploadSuccess && result.CompileSuccess)
+                        {
+                            lblScripStatus.Text = "Saved OK";
+                        }
+                        else
+                        {
+                            if (!result.CompileSuccess)
+                            {
+                                lblScripStatus.Text = "Compilation failed";
+                                if (result.CompileMessages != null)
+                                {
+                                    txtStatus.Show();
+                                    txtStatus.Text = string.Empty;
+                                    for (int i = 0; i < result.CompileMessages.Count; i++)
+                                    {
+                                        Match m = Regex.Match(result.CompileMessages[i], @"\((?<line>\d+),\s*(?<column>\d+)\s*\)\s*:\s*(?<kind>\w+)\s*:\s*(?<msg>.*)", RegexOptions.IgnoreCase);
+
+                                        if (m.Success)
+                                        {
+                                            int line = 1 + int.Parse(m.Groups["line"].Value, Utils.EnUsCulture);
+                                            int column = 1 + int.Parse(m.Groups["column"].Value, Utils.EnUsCulture);
+                                            string kind = m.Groups["kind"].Value;
+                                            string msg = m.Groups["msg"].Value;
+                                            instance.ShowNotificationInChat($"{kind} on line {line}, column {column}: {msg}", ChatBufferTextStyle.Invisible);
+                                            txtStatus.Text += $"{kind} (Ln {line}, Col {column}): {msg}";
+
+                                            if (i == 0)
+                                            {
+                                                rtb.CursorPosition = new RRichTextBox.CursorLocation(line - 1, column - 1);
+                                                ReadCursorPosition();
+                                                rtb.Focus();
+                                            }
+                                        }
+                                        else
+                                        {
+                                            txtStatus.Text += result.CompileMessages[i] + Environment.NewLine;
+                                            instance.ShowNotificationInChat(result.CompileMessages[i]);
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                lblScripStatus.Text = rtb.Text = "Failed to download.";
+                            }
+                        }
+                    }));
+                }
             }
-            else
+            catch (OperationCanceledException)
             {
-                client.Inventory.RequestUpdateScriptAgentInventory(n.AssetData, script.UUID, cbMono.Checked, handler);
+                lblScripStatus.Text = "Save cancelled";
             }
+            catch (Exception ex)
+            {
+                lblScripStatus.Text = $"Save failed: {ex.Message}";
+            }
+        }
+
+        private class ScriptUpdateResult
+        {
+            public bool UploadSuccess { get; set; }
+            public string UploadStatus { get; set; }
+            public bool CompileSuccess { get; set; }
+            public List<string> CompileMessages { get; set; }
+            public UUID ItemID { get; set; }
+            public UUID AssetID { get; set; }
+        }
+
+        private Task<ScriptUpdateResult> UpdateScriptAsync(byte[] data, UUID itemID, bool mono, UUID? taskID, bool running, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<ScriptUpdateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            InventoryManager.ScriptUpdatedCallback cb = (uploadSuccess, uploadStatus, compileSuccess, compileMessages, returnedItemID, assetID) =>
+            {
+                var res = new ScriptUpdateResult
+                {
+                    UploadSuccess = uploadSuccess,
+                    UploadStatus = uploadStatus,
+                    CompileSuccess = compileSuccess,
+                    CompileMessages = compileMessages,
+                    ItemID = returnedItemID,
+                    AssetID = assetID
+                };
+
+                tcs.TrySetResult(res);
+            };
+
+            // Register cancellation to cancel the task
+            if (cancellationToken.CanBeCanceled)
+            {
+                cancellationToken.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false);
+            }
+
+            // Fire the async request which will invoke our callback when done
+            Task.Run(async () =>
+            {
+                try
+                {
+                    if (taskID.HasValue)
+                    {
+                        await client.Inventory.RequestUpdateScriptTaskAsync(data, itemID, taskID.Value, mono, running, cb, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await client.Inventory.RequestUpdateScriptAgentInventoryAsync(data, itemID, mono, cb, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Surface exception to awaiting code
+                    tcs.TrySetException(ex);
+                }
+            }, cancellationToken);
+
+            return tcs.Task;
         }
     }
 }

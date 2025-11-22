@@ -20,6 +20,7 @@
 
 using System;
 using System.Windows.Forms;
+using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
 
@@ -127,38 +128,55 @@ namespace Radegast
             tlblStatus.Text = msg;
         }
 
-        private void tbtnReupload_Click(object sender, EventArgs e)
+        private async void tbtnReupload_Click(object sender, EventArgs e)
         {
-            UpdateStatus("Creating new item...");
+            if (gestureAsset?.AssetData == null)
+            {
+                UpdateStatus("No gesture data to upload");
+                return;
+            }
 
-            client.Inventory.RequestCreateItem(gesture.ParentUUID, "Copy of " + gesture.Name, gesture.Description, AssetType.Gesture, UUID.Random(), InventoryType.Gesture, PermissionMask.All,
-                delegate(bool success, InventoryItem item)
+            UpdateStatus("Creating and uploading item...");
+
+            var perms = new Permissions
+            {
+                EveryoneMask = PermissionMask.None,
+                GroupMask = PermissionMask.None,
+                NextOwnerMask = PermissionMask.All
+            };
+
+            try
+            {
+                var result = await client.Inventory.CreateItemFromAssetAsync(
+                    gestureAsset.AssetData,
+                    $"Copy of {gesture.Name}",
+                    gesture.Description,
+                    AssetType.Gesture,
+                    InventoryType.Gesture,
+                    gesture.ParentUUID,
+                    perms,
+                    CancellationToken.None).ConfigureAwait(false);
+
+                if (result != null && result.Success)
                 {
-                    if (success)
+                    // Update local gesture asset id if provided
+                    if (result.AssetID != UUID.Zero)
                     {
-                        UpdateStatus("Uploading data...");
+                        gesture.AssetUUID = result.AssetID;
+                    }
 
-                        client.Inventory.RequestUploadGestureAsset(gestureAsset.AssetData, item.UUID,
-                            delegate(bool assetSuccess, string status, UUID itemID, UUID assetID)
-                            {
-                                if (assetSuccess)
-                                {
-                                    gesture.AssetUUID = assetID;
-                                    UpdateStatus("OK");
-                                }
-                                else
-                                {
-                                    UpdateStatus("Asset failed");
-                                }
-                            }
-                        );
-                    }
-                    else
-                    {
-                        UpdateStatus("Inv. failed");
-                    }
+                    UpdateStatus("OK");
                 }
-            );
+                else
+                {
+                    var status = result?.Status ?? "Unknown error";
+                    UpdateStatus($"Failed: {status}");
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Exception: {ex.Message}");
+            }
         }
     }
 }
