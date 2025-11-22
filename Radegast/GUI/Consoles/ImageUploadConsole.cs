@@ -32,6 +32,7 @@ using SkiaSharp.Views.Desktop;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
 using Targa = OpenMetaverse.Imaging.Targa;
+using System.Threading;
 
 namespace Radegast
 {
@@ -369,7 +370,72 @@ namespace Radegast
             txtStatus.AppendText("New image ID: " + AssetID + Environment.NewLine);
         }
 
-        private void btnUpload_Click(object sender, EventArgs e)
+        private sealed class UploadProgressDialog : Form
+        {
+            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+            private readonly ProgressBar _bar;
+            private readonly Button _cancel;
+            private readonly Label _label;
+
+            public CancellationToken Token => _cts.Token;
+
+            public UploadProgressDialog()
+            {
+                Text = "Uploading...";
+                StartPosition = FormStartPosition.CenterParent;
+                FormBorderStyle = FormBorderStyle.FixedDialog;
+                MaximizeBox = false;
+                MinimizeBox = false;
+                ShowInTaskbar = false;
+                Width = 420;
+                Height = 120;
+
+                _bar = new ProgressBar
+                {
+                    Style = ProgressBarStyle.Marquee,
+                    MarqueeAnimationSpeed = 30,
+                    Dock = DockStyle.Top,
+                    Height = 20
+                };
+
+                _label = new Label
+                {
+                    Text = "Uploading...",
+                    Dock = DockStyle.Fill,
+                    TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
+                    Padding = new Padding(10)
+                };
+
+                _cancel = new Button
+                {
+                    Text = "Cancel",
+                    Dock = DockStyle.Bottom,
+                    Height = 30
+                };
+                _cancel.Click += (s, e) =>
+                {
+                    _cancel.Enabled = false;
+                    _label.Text = "Cancelling...";
+                    _cts.Cancel();
+                };
+
+                Controls.Add(_label);
+                Controls.Add(_bar);
+                Controls.Add(_cancel);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    try { _cts.Cancel(); } catch { }
+                    _cts.Dispose();
+                }
+                base.Dispose(disposing);
+            }
+        }
+
+        private async void btnUpload_Click(object sender, EventArgs e)
         {
             txtStatus.AppendText("Uploading..." + Environment.NewLine);
             btnLoad.Enabled = false;
@@ -379,13 +445,65 @@ namespace Radegast
             TextureName = Path.GetFileNameWithoutExtension(FileName);
             TextureDescription = $"Uploaded with Radegast on {DateTime.Now.ToLongDateString()}";
 
-            Permissions perms = new Permissions {EveryoneMask = PermissionMask.All, NextOwnerMask = PermissionMask.All};
-
+            Permissions perms = new Permissions { EveryoneMask = PermissionMask.All, NextOwnerMask = PermissionMask.All };
 
             client.Settings.CAPS_TIMEOUT = 180 * 1000;
-            client.Inventory.RequestCreateItemFromAsset(UploadData, TextureName, TextureDescription, 
-                AssetType.Texture, InventoryType.Texture,
-                client.Inventory.FindFolderForType(AssetType.Texture), perms, UploadHandler);
+
+            using (var progress = new UploadProgressDialog())
+            {
+                // show modeless so UI remains responsive
+                progress.Show(this);
+
+                try
+                {
+                    var folder = client.Inventory.FindFolderForType(AssetType.Texture);
+                    var result = await client.Inventory.CreateItemFromAssetAsync(UploadData, TextureName, TextureDescription,
+                        AssetType.Texture, InventoryType.Texture, folder, perms, progress.Token);
+
+                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+
+                    if (result != null && result.Success)
+                    {
+                        AssetID = result.AssetID;
+                        InventoryID = result.ItemID;
+
+                        UpdateButtons();
+                        txtAssetID.Text = AssetID.ToString();
+
+                        txtStatus.AppendText("Upload success." + Environment.NewLine);
+                        txtStatus.AppendText("New image ID: " + AssetID + Environment.NewLine);
+                    }
+                    else
+                    {
+                        var status = result?.Status ?? "Unknown error";
+                        txtStatus.AppendText("Upload failed: " + status + Environment.NewLine);
+                        if (result?.Error != null)
+                        {
+                            txtStatus.AppendText("Error: " + result.Error.Message + Environment.NewLine);
+                        }
+                        UpdateButtons();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+                    txtStatus.AppendText("Upload cancelled." + Environment.NewLine);
+                    UpdateButtons();
+                }
+                catch (Exception ex)
+                {
+                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+                    txtStatus.AppendText("Upload failed: " + ex.Message + Environment.NewLine);
+                    UpdateButtons();
+                }
+                finally
+                {
+                    if (!progress.IsDisposed)
+                    {
+                        progress.Close();
+                    }
+                }
+            }
         }
     }
 }

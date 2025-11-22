@@ -2670,10 +2670,10 @@ namespace Radegast
             txtInvID.SelectAll();
         }
 
-        private void copyInitialOutfitsToolStripMenuItem_Click(object sender, EventArgs e)
+        private async void copyInitialOutfitsToolStripMenuItem_Click(object sender, EventArgs e)
         {
             var c = new FolderCopy(instance);
-            c.GetFolders("Initial Outfits");
+            await c.GetFoldersAsync("Initial Outfits").ConfigureAwait(true);
         }
     }
 

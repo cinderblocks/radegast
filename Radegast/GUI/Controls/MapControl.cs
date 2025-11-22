@@ -315,16 +315,23 @@ namespace Radegast
                     {
                         Query = $"texture_id={imageID}"
                     };
-                    _ = Client.HttpCapsClient.GetRequestAsync(uriBuilder.Uri, mapTileCts.Token,
-                        (response, responseData, error) =>
+                    _ = Task.Run(async () =>
+                    {
+                        try
                         {
-                            if (error == null && responseData != null)
+                            var result = await Client.Assets.HttpDownloadManager.DownloadAsync(uriBuilder.Uri, null, null, mapTileCts.Token).ConfigureAwait(false);
+                            var response = result.response;
+                            var responseData = result.data;
+                            if (response != null && responseData != null && response.IsSuccessStatusCode)
                             {
                                 regionTiles[handle] = J2kImage.FromBytes(responseData).As<SKBitmap>().ToBitmap();
                                 needRepaint = true;
-                                Client.Assets.Cache.SaveAssetToCache(imageID, responseData);
+                                await Client.Assets.Cache.SaveAssetToCacheAsync(imageID, responseData);
                             }
-
+                        }
+                        catch { }
+                        finally
+                        {
                             lock (tileRequests)
                             {
                                 if (tileRequests.Contains(handle))
@@ -332,7 +339,8 @@ namespace Radegast
                                     tileRequests.Remove(handle);
                                 }
                             }
-                        });
+                        }
+                    });
                 }
             }
             else
@@ -391,12 +399,15 @@ namespace Radegast
             regY /= regionSize;
             const int zoomLevel = 1;
 
-            Client.HttpCapsClient.GetRequestAsync(
-                new Uri($"http://map.secondlife.com/map-{zoomLevel}-{regX}-{regY}-objects.jpg"), mapTileCts.Token,
-                (response, responseData, error) =>
+            _ = Task.Run(async () =>
+            {
+                try
                 {
-                    if (error == null && responseData != null)
-                    {
+                    var result = await Client.Assets.HttpDownloadManager.DownloadAsync(new Uri($"http://map.secondlife.com/map-{zoomLevel}-{regX}-{regY}-objects.jpg"), null, null, mapTileCts.Token).ConfigureAwait(false);
+                    var response = result.response;
+                    var responseData = result.data;
+                    if (response != null && responseData != null && response.IsSuccessStatusCode)
+                     {
                         try
                         {
                             using (MemoryStream s = new MemoryStream(responseData))
@@ -411,7 +422,18 @@ namespace Radegast
                         catch { }
                     }
                 }
-            ).ConfigureAwait(false);
+                catch { }
+                finally
+                {
+                    lock (tileRequests)
+                    {
+                        if (tileRequests.Contains(handle))
+                        {
+                            tileRequests.Remove(handle);
+                        }
+                    }
+                }
+            });
 
             lock (regionTiles)
             {

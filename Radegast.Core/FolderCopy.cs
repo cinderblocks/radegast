@@ -20,6 +20,9 @@
 
 using System;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Linq;
 using OpenMetaverse;
 
 namespace Radegast
@@ -30,13 +33,17 @@ namespace Radegast
         private readonly IRadegastInstance Instance;
         private readonly GridClient Client;
 
+        // Batch size for copy operations
+        private const int COPY_BATCH_SIZE = 10;
+        private const int COPY_BATCH_RETRIES = 2;
+
         public FolderCopy(IRadegastInstance instance)
         {
             Instance = instance;
             Client = Instance.Client;
         }
 
-        public void GetFolders(string folder)
+        public async Task GetFoldersAsync(string folder, CancellationToken cancellationToken = default)
         {
             var f = FindFolder(folder, Client.Inventory.Store.LibraryRootNode);
             if (f == null) return;
@@ -46,38 +53,156 @@ namespace Radegast
 
             var destFolder = (InventoryFolder)Client.Inventory.Store[dest];
 
-            ThreadPool.QueueUserWorkItem(sync =>
+            Instance.ShowNotificationInChat("Starting copy operation...");
+            foreach (var node in f.Nodes.Values)
             {
-                Instance.ShowNotificationInChat("Starting copy operation...");
-                foreach (var node in f.Nodes.Values)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (node.Data is InventoryFolder sourceFolder)
                 {
-                    if (node.Data is InventoryFolder sourceFolder)
+                    Instance.ShowNotificationInChat($"  Copying {sourceFolder.Name} to {destFolder.Name}");
+                    try
                     {
-                        Instance.ShowNotificationInChat($"  Copying {sourceFolder.Name} to {destFolder.Name}");
-                        CopyFolder(destFolder, sourceFolder);
+                        await CopyFolderAsync(destFolder, sourceFolder, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        Instance.ShowNotificationInChat($"  Copy of {sourceFolder.Name} cancelled or timed out.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Instance.ShowNotificationInChat($"  Failed copying {sourceFolder.Name}: {ex.Message}");
                     }
                 }
-                Instance.ShowNotificationInChat("Done.");
-            });
+            }
+            Instance.ShowNotificationInChat("Done.");
         }
 
-        public void CopyFolder(InventoryFolder dest, InventoryFolder folder)
+        public async Task CopyFolderAsync(InventoryFolder dest, InventoryFolder folder, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Create destination folder locally and on server
             UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, folder.Name, FolderType.None);
-            Thread.Sleep(500);
-            var items = Client.Inventory.FolderContents(folder.UUID, folder.OwnerID, true, true, InventorySortOrder.ByDate, TimeSpan.FromSeconds(45));
-            AutoResetEvent copied = new AutoResetEvent(false);
-            foreach (var item in items)
+
+            // small delay to give the server time to create the folder record if needed
+            await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+
+            // Use the async FolderContents API with a timeout
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
-                if (item is InventoryItem)
+                cts.CancelAfter(TimeSpan.FromSeconds(45));
+                var items = await Client.Inventory.FolderContentsAsync(folder.UUID, folder.OwnerID, true, true, InventorySortOrder.ByDate, cts.Token).ConfigureAwait(false);
+                if (items == null) return;
+
+                // First, handle subfolders to preserve hierarchy
+                var subfolders = items.OfType<InventoryFolder>().ToList();
+                foreach (var sub in subfolders)
                 {
-                    copied.Reset();
-                    Client.Inventory.RequestCopyItem(item.UUID, newFolderID, item.Name, folder.OwnerID, target =>
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    // Create corresponding subfolder inside newFolderID
+                    UUID newChildFolderID = Client.Inventory.CreateFolder(newFolderID, sub.Name, sub.PreferredType);
+
+                    // Small delay to allow server/store to register the new folder
+                    await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+
+                    // Construct a lightweight InventoryFolder instance to represent the destination
+                    var newChildFolder = new InventoryFolder(newChildFolderID)
                     {
-                        Instance.ShowNotificationInChat($"    * Copied {item.Name} to {dest.Name}");
-                        copied.Set();
-                    });
-                    copied.WaitOne(15 * 1000, false);
+                        ParentUUID = newFolderID,
+                        Name = sub.Name,
+                        PreferredType = sub.PreferredType,
+                        OwnerID = Client.Self.AgentID
+                    };
+
+                    // Recurse into the subfolder
+                    await CopyFolderAsync(newChildFolder, sub, cancellationToken).ConfigureAwait(false);
+                }
+
+                // Then process items in this folder (exclude subfolders)
+                var invItems = items.OfType<InventoryItem>().ToList();
+                var total = invItems.Count;
+                if (total == 0) return;
+
+                int copiedCount = 0;
+
+                // Process in batches
+                for (int i = 0; i < total; i += COPY_BATCH_SIZE)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var batch = invItems.Skip(i).Take(COPY_BATCH_SIZE).ToList();
+                    var itemIds = batch.Select(it => it.UUID).ToList();
+                    var targetFolders = Enumerable.Repeat(newFolderID, batch.Count).ToList();
+                    var names = batch.Select(it => it.Name).ToList();
+
+                    bool batchSuccess = false;
+                    Exception lastEx = null;
+
+                    for (int attempt = 0; attempt <= COPY_BATCH_RETRIES; attempt++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        try
+                        {
+                            var copyResult = await Client.Inventory.RequestCopyItemsWithResultAsync(itemIds, targetFolders, names, folder.OwnerID, cancellationToken).ConfigureAwait(false);
+
+                            if (copyResult != null && copyResult.Success)
+                            {
+                                batchSuccess = true;
+                                copiedCount += batch.Count;
+                                Instance.ShowNotificationInChat($"    * Copied {copiedCount}/{total} items to {dest.Name}");
+                                break;
+                            }
+
+                            // If not success, record exception and retry
+                            lastEx = copyResult?.Error ?? new Exception("CopyItemsWithResult reported failure");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            lastEx = ex;
+                        }
+
+                        // small backoff before retry
+                        await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (!batchSuccess)
+                    {
+                        // Try per-item fallback for the batch to maximize partial success
+                        foreach (var it in batch)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            try
+                            {
+                                var singleResult = await Client.Inventory.RequestCopyItemsWithResultAsync(
+                                    new List<UUID> { it.UUID }, new List<UUID> { newFolderID }, new List<string> { it.Name }, folder.OwnerID, cancellationToken).ConfigureAwait(false);
+
+                                if (singleResult != null && singleResult.Success)
+                                {
+                                    copiedCount++;
+                                    Instance.ShowNotificationInChat($"    * Copied {copiedCount}/{total} items to {dest.Name}");
+                                }
+                                else
+                                {
+                                    Instance.ShowNotificationInChat($"    ! Failed copying {it.Name} to {dest.Name}");
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                throw;
+                            }
+                            catch (Exception ex)
+                            {
+                                Instance.ShowNotificationInChat($"    ! Exception copying {it.Name}: {ex.Message}");
+                            }
+                        }
+                    }
                 }
             }
         }
