@@ -915,6 +915,26 @@ namespace Radegast.Rendering
             {
                 shinyProgram.Load("shiny.vert", "shiny.frag");
                 shinyProgram.SetUniform1("colorMap", 0);
+                // Set default lighting uniforms if present
+                shinyProgram.Start();
+                try
+                {
+                    var uLight = shinyProgram.Uni("lightDir");
+                    if (uLight != -1)
+                    {
+                        // approximate light direction from sun position
+                        GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                    }
+
+                    var ua = shinyProgram.Uni("ambientColor");
+                    if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                    var ud = shinyProgram.Uni("diffuseColor");
+                    if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                    var us = shinyProgram.Uni("specularColor");
+                    if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+                }
+                catch { }
+                finally { ShaderProgram.Stop(); }
             }
         }
 
@@ -2233,11 +2253,10 @@ namespace Radegast.Rendering
         #endregion avatars
 
         #region Keyboard
+
         private float upKeyHeld = 0;
         private bool isHoldingHome = false;
-        ///<summary>
-        ///The time before we fly instead of trying to jump (in seconds)
-        ///</summary>
+        ///<summary>The time before we fly instead of trying to jump (in seconds)</summary>
         private const float upKeyHeldBeforeFly = 0.5f;
 
         private void CheckKeyboard(float time)
@@ -2781,6 +2800,27 @@ namespace Radegast.Rendering
 
                 CheckKeyboard(lastFrameTime);
 
+                // If programmable shaders are available and enabled, start the shiny shader
+                var useShaders = RenderSettings.HasShaders && RenderSettings.EnableShiny;
+                if (useShaders)
+                {
+                    StartShiny();
+                    // Update dynamic uniforms each frame
+                    try
+                    {
+                        var uLight = shinyProgram.Uni("lightDir");
+                        if (uLight != -1) GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+
+                        var ua = shinyProgram.Uni("ambientColor");
+                        if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                        var ud = shinyProgram.Uni("diffuseColor");
+                        if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                        var us = shinyProgram.Uni("specularColor");
+                        if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+                    }
+                    catch { }
+                }
+
                 terrain.Render(RenderPass.Simple, 0, this, lastFrameTime);
 
                 // Alpha mask elements, no blending, alpha test for A > 0.5
@@ -2791,14 +2831,11 @@ namespace Radegast.Rendering
                 RenderAvatars(RenderPass.Simple);
                 GL.Disable(EnableCap.AlphaTest);
 
-                GL.DepthMask(false);
-                RenderOccludedObjects();
-
-                // Alpha blending elements, disable writing to depth buffer
-                GL.Enable(EnableCap.Blend);
-                RenderWater();
-                RenderObjects(RenderPass.Alpha);
-                GL.DepthMask(true);
+                if (useShaders)
+                {
+                    // Stop using the shader program and restore fixed-function pipeline
+                    ShaderProgram.Stop();
+                }
 
                 GLHUDBegin();
                 RenderText(RenderPass.Simple);
