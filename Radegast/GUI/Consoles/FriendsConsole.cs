@@ -213,13 +213,60 @@ namespace Radegast
             instance.ShowNotificationInChat(msg, ChatBufferTextStyle.ObjectChat, instance.GlobalSettings["friends_notification_highlight"]);
         }
 
+        /// <summary>
+        /// Resolve a usable display name synchronously with sensible fallbacks to avoid "Loading..." appearing in notifications.
+        /// Preference order:
+        /// 1) provided knownName (if non-empty)
+        /// 2) NameManager.GetAsync (wait)
+        /// 3) NameManager.GetLegacyName
+        /// 4) FriendInfo.Name from friends list
+        /// 5) INCOMPLETE_NAME
+        /// </summary>
+        private string ResolveNameBlocking(UUID agentId, string knownName = null)
+        {
+            // Prefer provided known name if it is usable
+            if (!string.IsNullOrEmpty(knownName) && knownName != RadegastInstance.INCOMPLETE_NAME)
+                return knownName;
+
+            // Try to get the best name from the names manager
+            try
+            {
+                string resolved = instance.Names.GetAsync(agentId).GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(resolved) && resolved != RadegastInstance.INCOMPLETE_NAME)
+                    return resolved;
+            }
+            catch { /* ignore and fallback */ }
+
+            // Fallback to legacy name
+            try
+            {
+                string legacy = instance.Names.GetLegacyName(agentId);
+                if (!string.IsNullOrEmpty(legacy) && legacy != RadegastInstance.INCOMPLETE_NAME)
+                    return legacy;
+            }
+            catch { /* ignore and fallback */ }
+
+            // Last fallback: friend list stored name
+            try
+            {
+                if (client.Friends.FriendList.TryGetValue(agentId, out FriendInfo fi) &&
+                    !string.IsNullOrEmpty(fi.Name) && fi.Name != RadegastInstance.INCOMPLETE_NAME)
+                {
+                    return fi.Name;
+                }
+            }
+            catch { }
+
+            return RadegastInstance.INCOMPLETE_NAME;
+        }
+
         private void Friends_FriendOffline(object sender, FriendInfoEventArgs e)
         {
             if (!instance.GlobalSettings["show_friends_online_notifications"]) return;
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.Friend.UUID, $"{name} is offline");
@@ -243,7 +290,7 @@ namespace Radegast
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.Friend.UUID, $"{name} is online");
@@ -265,7 +312,7 @@ namespace Radegast
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.AgentID);
                 MethodInvoker display = () =>
                 {
                     DisplayNotification(e.AgentID, $"{name} is no longer on your friend list");
