@@ -44,14 +44,20 @@ namespace Radegast
         private readonly Inventory Inventory;
         private TreeNode invRootNode;
         private string newItemName = string.Empty;
-        private readonly List<UUID> fetchedFolders = new List<UUID>();
+        private readonly ConcurrentDictionary<UUID, byte> fetchedFolders = new ConcurrentDictionary<UUID, byte>();
         private System.Threading.Timer _EditTimer;
         private TreeNode _EditNode;
         private System.Timers.Timer TreeUpdateTimer;
-        private readonly Queue<InventoryBase> ItemsToAdd = new Queue<InventoryBase>();
-        private readonly Queue<InventoryBase> ItemsToUpdate = new Queue<InventoryBase>();
+        private readonly ConcurrentQueue<InventoryBase> ItemsToAdd = new ConcurrentQueue<InventoryBase>();
+        private readonly ConcurrentQueue<InventoryBase> ItemsToUpdate = new ConcurrentQueue<InventoryBase>();
+        private readonly ConcurrentDictionary<UUID, byte> ItemsToUpdateSet = new ConcurrentDictionary<UUID, byte>();
+        // Queue bounds to prevent runaway memory growth
+        private const int MAX_QUEUE_SIZE = 20000; // maximum items allowed in each queue
+        private const int MAX_BATCH_PROCESS = 400; // items processed per timer tick
+        private int itemsToAddCount = 0;
+        private int itemsToUpdateCount = 0;
         private bool TreeUpdateInProgress = false;
-        private readonly Dictionary<UUID, TreeNode> UUID2NodeCache = new Dictionary<UUID, TreeNode>();
+        private readonly ConcurrentDictionary<UUID, TreeNode> UUID2NodeCache = new ConcurrentDictionary<UUID, TreeNode>();
         private bool appearanceWasBusy;
         private InvNodeSorter sorter;
         private readonly ConcurrentDictionary<UUID, int> QueuedFoldersNeedingUpdate = new ConcurrentDictionary<UUID, int>();
@@ -272,9 +278,17 @@ namespace Radegast
 
             if (TreeUpdateInProgress)
             {
-                lock (ItemsToAdd)
+                // Enqueue with bounds check
+                int newCount = Interlocked.Increment(ref itemsToAddCount);
+                if (newCount <= MAX_QUEUE_SIZE)
                 {
                     ItemsToAdd.Enqueue(e.Obj);
+                }
+                else
+                {
+                    // Queue full, drop this update and log once
+                    Interlocked.Decrement(ref itemsToAddCount);
+                    Logger.Log("ItemsToAdd queue full, dropping inventory add event.", Helpers.LogLevel.Warning, Client);
                 }
             }
             else
@@ -334,17 +348,26 @@ namespace Radegast
         {
             if (TreeUpdateInProgress)
             {
-                lock (ItemsToUpdate)
+                if (e.NewObject is InventoryFolder)
                 {
-                    if (e.NewObject is InventoryFolder)
-                    {
-                        TreeNode currentNode = FindNodeForItem(e.NewObject.UUID);
-                        if (currentNode != null && currentNode.Text == e.NewObject.Name) return;
-                    }
+                    TreeNode currentNode = FindNodeForItem(e.NewObject.UUID);
+                    if (currentNode != null && currentNode.Text == e.NewObject.Name) return;
+                }
 
-                    if (!ItemsToUpdate.Contains(e.NewObject))
+                // Deduplicate updates by UUID and enforce bounds
+                if (ItemsToUpdateSet.TryAdd(e.NewObject.UUID, 0))
+                {
+                    int newCount = Interlocked.Increment(ref itemsToUpdateCount);
+                    if (newCount <= MAX_QUEUE_SIZE)
                     {
                         ItemsToUpdate.Enqueue(e.NewObject);
+                    }
+                    else
+                    {
+                        // Queue full, remove dedupe entry and drop
+                        Interlocked.Decrement(ref itemsToUpdateCount);
+                        ItemsToUpdateSet.TryRemove(e.NewObject.UUID, out _);
+                        Logger.Log("ItemsToUpdate queue full, dropping inventory update event.", Helpers.LogLevel.Warning, Client);
                     }
                 }
             }
@@ -517,12 +540,9 @@ namespace Radegast
 
         private TreeNode FindNodeForItem(UUID itemID)
         {
-            lock (UUID2NodeCache)
+            if (UUID2NodeCache.TryGetValue(itemID, out var item))
             {
-                if (UUID2NodeCache.TryGetValue(itemID, out var item))
-                {
-                    return item;
-                }
+                return item;
             }
             return null;
         }
@@ -536,10 +556,7 @@ namespace Radegast
             {
                 CacheNode(child);
             }
-            lock (UUID2NodeCache)
-            {
-                UUID2NodeCache[item.UUID] = node;
-            }
+            UUID2NodeCache[item.UUID] = node;
         }
 
         private void RemoveNode(TreeNode node)
@@ -553,10 +570,7 @@ namespace Radegast
                         RemoveNode(child);
                 }
 
-                lock (UUID2NodeCache)
-                {
-                    UUID2NodeCache.Remove(item.UUID);
-                }
+                UUID2NodeCache.TryRemove(item.UUID, out _);
             }
             node.Remove();
         }
@@ -745,7 +759,7 @@ namespace Radegast
                  }
                  else
                  {
-                     Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID);
+                     Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID, token);
                      return;
                  }
              }
@@ -796,36 +810,40 @@ namespace Radegast
 
         private void TreeUpdateTimerTick(object sender, EventArgs e)
         {
-            lock (ItemsToAdd)
+            int processed = 0;
+            if (ItemsToAdd.TryDequeue(out var addItem))
             {
-                if (ItemsToAdd.Count > 0)
+                invTree.BeginUpdate();
+                do
                 {
-                    invTree.BeginUpdate();
-                    while (ItemsToAdd.Count > 0)
+                    InventoryBase item = addItem;
+                    TreeNode node = FindNodeForItem(item.ParentUUID);
+                    if (node != null)
                     {
-                        InventoryBase item = ItemsToAdd.Dequeue();
-                        TreeNode node = FindNodeForItem(item.ParentUUID);
-                        if (node != null)
-                        {
-                            AddBase(node, item);
-                        }
+                        AddBase(node, item);
                     }
-                    invTree.EndUpdate();
-                }
+
+                    Interlocked.Decrement(ref itemsToAddCount);
+                    processed++;
+                    if (processed >= MAX_BATCH_PROCESS) break;
+                } while (ItemsToAdd.TryDequeue(out addItem));
+                invTree.EndUpdate();
             }
 
-            lock (ItemsToUpdate)
+            processed = 0;
+            if (ItemsToUpdate.TryDequeue(out var updItem))
             {
-                if (ItemsToUpdate.Count > 0)
+                invTree.BeginUpdate();
+                do
                 {
-                    invTree.BeginUpdate();
-                    while (ItemsToUpdate.Count > 0)
-                    {
-                        InventoryBase item = ItemsToUpdate.Dequeue();
-                        Exec_OnInventoryObjectUpdated(item, item);
-                    }
-                    invTree.EndUpdate();
-                }
+                    InventoryBase item = updItem;
+                    Exec_OnInventoryObjectUpdated(item, item);
+                    try { ItemsToUpdateSet.TryRemove(item.UUID, out _); } catch { }
+                    Interlocked.Decrement(ref itemsToUpdateCount);
+                    processed++;
+                    if (processed >= MAX_BATCH_PROCESS) break;
+                } while (ItemsToUpdate.TryDequeue(out updItem));
+                invTree.EndUpdate();
             }
 
             UpdateStatus($"Loading... {UUID2NodeCache.Count} items");
@@ -1046,11 +1064,11 @@ namespace Radegast
 
         private async Task FetchFolder(UUID folderID, UUID ownerID, bool force, CancellationToken token = default)
         {
-            if (force || !fetchedFolders.Contains(folderID))
+            if (force || !fetchedFolders.ContainsKey(folderID))
             {
-                if (!fetchedFolders.Contains(folderID))
+                if (fetchedFolders.TryAdd(folderID, 0))
                 {
-                    fetchedFolders.Add(folderID);
+                    // recorded as fetched
                 }
 
                 await Client.Inventory.RequestFolderContents(folderID, ownerID,
