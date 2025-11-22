@@ -175,7 +175,29 @@ namespace Radegast
         {
             if (SelectionLength > 0)
             {
-                Clipboard.SetText(SelectedText);
+                try
+                {
+                    // Place both plain text and RTF on the clipboard for richer paste targets
+                    var data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, true, SelectedText);
+                    try
+                    {
+                        var rtf = SelectedRtf;
+                        if (!string.IsNullOrEmpty(rtf))
+                        {
+                            data.SetData(DataFormats.Rtf, true, rtf);
+                        }
+                    }
+                    catch { }
+
+                    Clipboard.Clear();
+                    Clipboard.SetDataObject(data, true);
+                }
+                catch
+                {
+                    // Fallback to plain text if clipboard operations fail
+                    Clipboard.SetText(SelectedText);
+                }
             }
         }
 
@@ -183,21 +205,69 @@ namespace Radegast
         {
             if (SelectionLength > 0)
             {
-                Clipboard.SetText(SelectedText);
+                try
+                {
+                    var data = new DataObject();
+                    data.SetData(DataFormats.UnicodeText, true, SelectedText);
+                    try
+                    {
+                        var rtf = SelectedRtf;
+                        if (!string.IsNullOrEmpty(rtf))
+                        {
+                            data.SetData(DataFormats.Rtf, true, rtf);
+                        }
+                    }
+                    catch { }
+
+                    Clipboard.Clear();
+                    Clipboard.SetDataObject(data, true);
+                }
+                catch
+                {
+                    Clipboard.SetText(SelectedText);
+                }
+
                 SelectedText = string.Empty;
             }
         }
 
         public new void Paste()
         {
-            string toPaste = Clipboard.GetText();
-            if (syntaxHighLightEnabled && toPaste.Contains("\n") && !monoRuntime)
+            try
             {
-                SelectedRtf = ReHighlight(toPaste);
+                // Prefer rich text if available
+                if (!monoRuntime && Clipboard.ContainsData(DataFormats.Rtf))
+                {
+                    var rtfObj = Clipboard.GetData(DataFormats.Rtf) as string;
+                    if (!string.IsNullOrEmpty(rtfObj))
+                    {
+                        SelectedRtf = rtfObj;
+                        return;
+                    }
+                }
+
+                // Prefer Unicode text when available
+                if (Clipboard.ContainsText(TextDataFormat.UnicodeText))
+                {
+                    var toPaste = Clipboard.GetText(TextDataFormat.UnicodeText);
+                    if (syntaxHighLightEnabled && toPaste.Contains("\n") && !monoRuntime)
+                    {
+                        SelectedRtf = ReHighlight(toPaste);
+                    }
+                    else
+                    {
+                        SelectedText = toPaste;
+                    }
+                    return;
+                }
+
+                // Fallback to any text format
+                SelectedText = Clipboard.GetText();
             }
-            else
+            catch
             {
-                SelectedText = toPaste;
+                // Last-resort fallback
+                try { SelectedText = Clipboard.GetText(); } catch { }
             }
         }
         #endregion
