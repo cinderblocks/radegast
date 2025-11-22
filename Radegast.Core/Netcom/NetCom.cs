@@ -19,6 +19,8 @@
  */
 
 using System;
+using System.Collections.Concurrent;
+using System.Linq;
 using OpenMetaverse;
 
 namespace Radegast
@@ -34,6 +36,49 @@ namespace Radegast
 
         public bool AgreeToTos { get; set; } = false;
         public Grid Grid { get; private set; }
+
+        // Duplicate suppression caches (short lived)
+        private readonly ConcurrentDictionary<string, DateTime> _recentChatHashes = new ConcurrentDictionary<string, DateTime>();
+        private readonly ConcurrentDictionary<string, DateTime> _recentIMHashes = new ConcurrentDictionary<string, DateTime>();
+        private readonly TimeSpan _duplicateWindow = TimeSpan.FromSeconds(2);
+
+        private void CleanupRecentCaches()
+        {
+            var cutoff = DateTime.UtcNow - _duplicateWindow;
+            foreach (var k in _recentChatHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
+                _recentChatHashes.TryRemove(k, out _);
+            foreach (var k in _recentIMHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
+                _recentIMHashes.TryRemove(k, out _);
+        }
+
+        private bool IsDuplicateChat(ChatEventArgs e)
+        {
+            try
+            {
+                CleanupRecentCaches();
+                var key = $"{e.SourceID}:{e.FromName}:{e.Message}";
+                var now = DateTime.UtcNow;
+                if (_recentChatHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
+                _recentChatHashes[key] = now;
+            }
+            catch { }
+            return false;
+        }
+
+        private bool IsDuplicateIM(InstantMessageEventArgs e)
+        {
+            try
+            {
+                CleanupRecentCaches();
+                var im = e.IM;
+                var key = $"{im.FromAgentID}:{im.IMSessionID}:{im.Message}";
+                var now = DateTime.UtcNow;
+                if (_recentIMHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
+                _recentIMHashes[key] = now;
+            }
+            catch { }
+            return false;
+        }
 
         // NetcomSync is used for raising certain events on the
         // GUI/main thread. Useful if you're modifying GUI controls
@@ -196,6 +241,14 @@ namespace Radegast
             if (!IsLoggedIn) return;
 
             Client.Self.Chat(chat, channel, type);
+
+            try
+            {
+                var key = $"out:{Client.Self.AgentID}:{chat}";
+                _recentChatHashes[key] = DateTime.UtcNow;
+            }
+            catch { }
+
             OnChatSent(new ChatSentEventArgs(chat, type, channel));
         }
 
@@ -207,7 +260,15 @@ namespace Radegast
                 LoginOptions.FullName, target, message, session, InstantMessageDialog.MessageFromAgent,
                 InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim.ID, null);
 
-            OnInstantMessageSent(new InstantMessageSentEventArgs(message, target, session, DateTime.Now));
+            var ev = new InstantMessageSentEventArgs(message, target, session, DateTime.Now, LoginOptions.FullName, Client.Self.AgentID);
+            try
+            {
+                var key = $"outim:{ev.FromAgentID}:{ev.SessionID}:{ev.Message}";
+                _recentIMHashes[key] = DateTime.UtcNow;
+            }
+            catch { }
+
+            OnInstantMessageSent(ev);
         }
 
         public void SendIMStartTyping(UUID target, UUID session)
@@ -234,6 +295,7 @@ namespace Radegast
 
         private void Self_IM(object sender, InstantMessageEventArgs e)
         {
+            if (IsDuplicateIM(e)) return;
             OnInstantMessageReceived(e);
         }
 
@@ -264,6 +326,7 @@ namespace Radegast
 
         private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
         {
+            if (IsDuplicateChat(e)) return;
             OnChatReceived(e);
         }
 

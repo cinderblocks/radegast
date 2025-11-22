@@ -62,6 +62,11 @@ namespace Radegast
             NetCom.ClientLoginStatus += NetComClientLoginStatus;
             NetCom.ClientDisconnected += NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged += GlobalSettings_OnSettingChanged;
+            if (instance.IMSessions != null)
+            {
+                instance.IMSessions.TypingStarted += IMSessions_TypingStarted;
+                instance.IMSessions.TypingStopped += IMSessions_TypingStopped;
+            }
         }
 
         private void RemoveNetcomEvents()
@@ -69,6 +74,11 @@ namespace Radegast
             NetCom.ClientLoginStatus -= NetComClientLoginStatus;
             NetCom.ClientDisconnected -= NetComClientDisconnected;
             instance.GlobalSettings.OnSettingChanged -= GlobalSettings_OnSettingChanged;
+            if (instance.IMSessions != null)
+            {
+                instance.IMSessions.TypingStarted -= IMSessions_TypingStarted;
+                instance.IMSessions.TypingStopped -= IMSessions_TypingStopped;
+            }
         }
 
         private void GlobalSettings_OnSettingChanged(object sender, SettingsEventArgs e)
@@ -259,6 +269,40 @@ namespace Radegast
         private void cbAlwaysDing_CheckedChanged(object sender, EventArgs e)
         {
             TextManager.DingOnAllIncoming = ((CheckBox)sender).Checked;
+        }
+
+        private void IMSessions_TypingStarted(object sender, IMTypingEventArgs e)
+        {
+            if (e.SessionID != SessionId) return;
+            SetTypingIndicator(true);
+        }
+
+        private void IMSessions_TypingStopped(object sender, IMTypingEventArgs e)
+        {
+            if (e.SessionID != SessionId) return;
+            SetTypingIndicator(false);
+        }
+
+        private void SetTypingIndicator(bool typingOn)
+        {
+            try
+            {
+                if (instance.MainForm != null && instance.MainForm.InvokeRequired)
+                {
+                    instance.MainForm.BeginInvoke(new MethodInvoker(() => SetTypingIndicator(typingOn)));
+                    return;
+                }
+
+                if (typingOn)
+                {
+                    tsLblTyping.Text = string.IsNullOrEmpty(TargetName) ? "typing..." : $"{TargetName} is typing...";
+                }
+                else
+                {
+                    tsLblTyping.Text = string.Empty;
+                }
+            }
+            catch { }
         }
     }
 }

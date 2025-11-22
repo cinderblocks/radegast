@@ -31,6 +31,17 @@ namespace Radegast
             TargetID = targetID;
             SessionID = sessionID;
             Timestamp = timestamp;
+            FromName = string.Empty;
+            FromAgentID = UUID.Zero;
+            MessageId = Guid.NewGuid();
+        }
+
+        // New constructor allowing sender metadata
+        public InstantMessageSentEventArgs(string message, UUID targetID, UUID sessionID, DateTime timestamp, string fromName, UUID fromAgentID)
+            : this(message, targetID, sessionID, timestamp)
+        {
+            FromName = fromName ?? string.Empty;
+            FromAgentID = fromAgentID;
         }
 
         public string Message { get; }
@@ -40,5 +51,13 @@ namespace Radegast
         public UUID SessionID { get; }
 
         public DateTime Timestamp { get; }
+
+        // Optional metadata about the sender (useful for logging / symmetry with incoming IMs)
+        public string FromName { get; }
+
+        public UUID FromAgentID { get; }
+
+        // Unique id for this outgoing message (helps avoid duplicate handling in listeners)
+        public Guid MessageId { get; }
     }
 }

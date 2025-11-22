@@ -104,6 +104,8 @@ namespace Radegast
             }
         }
 
+        public IMSessionManager IMSessions { get; private set; }
+
         #region Events
 
         #region ClientChanged event
@@ -188,6 +190,33 @@ namespace Radegast
             Names = new NameManager(this);
             GestureManager = new GestureManager(this);
             LslSyntax = new LslSyntax(Client);
+
+            // IMSession manager
+            IMSessions = new IMSessionManager(this);
+            IMSessions.SessionOpened += IMSessions_SessionOpened;
+            IMSessions.SessionClosed += IMSessions_SessionClosed;
+            IMSessions.TypingStarted += IMSessions_TypingStarted;
+            IMSessions.TypingStopped += IMSessions_TypingStopped;
+        }
+
+        private void IMSessions_SessionOpened(object sender, IMSessionEventArgs e)
+        {
+            // default: no-op; UI can subscribe to instance.IMSessions.SessionOpened
+        }
+
+        private void IMSessions_SessionClosed(object sender, IMSessionEventArgs e)
+        {
+            // default: no-op
+        }
+
+        private void IMSessions_TypingStarted(object sender, IMTypingEventArgs e)
+        {
+            // could be used to show typing indicators at UI level
+        }
+
+        private void IMSessions_TypingStopped(object sender, IMTypingEventArgs e)
+        {
+            // could be used to clear typing indicators
         }
 
         private void InitializeClient(GridClient client)
@@ -312,6 +341,11 @@ namespace Radegast
             {
                 State.Dispose();
                 State = null;
+            }
+            if (IMSessions != null)
+            {
+                IMSessions.Dispose();
+                IMSessions = null;
             }
             if (NetCom != null)
             {
