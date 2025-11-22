@@ -227,7 +227,15 @@ namespace Radegast
                 MethodInfo mi = typeof(Control).GetMethod("AccessibilityNotifyClients", BindingFlags.Instance | BindingFlags.NonPublic);
                 if (mi != null && instance?.MainForm != null)
                 {
-                    mi.Invoke(instance.MainForm, new object[] { AccessibleEvents.Alert, message });
+                    // Use DescriptionChange which is available on supported .NET Framework versions
+                    try
+                    {
+                        mi.Invoke(instance.MainForm, new object[] { AccessibleEvents.DescriptionChange, message });
+                    }
+                    catch
+                    {
+                        // best-effort: ignore failures
+                    }
                 }
             }
             catch
