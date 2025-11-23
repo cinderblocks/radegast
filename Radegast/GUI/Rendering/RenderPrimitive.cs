@@ -38,6 +38,7 @@ namespace Radegast.Rendering
         public int PickingID = -1;
         public int VertexVBO = -1;
         public int IndexVBO = -1;
+        public int Vao = -1;
         public TextureInfo TextureInfo = new TextureInfo();
         public BoundingVolume BoundingVolume = new BoundingVolume();
         public static int VertexSize = 32; // sizeof (vertex), 2  x vector3 + 1 x vector2 = 8 floats x 4 bytes = 32 bytes 
@@ -50,10 +51,12 @@ namespace Radegast.Rendering
         /// </summary>
         public void Dispose()
         {
-            if (VertexVBO != -1) Compat.DeleteBuffer(VertexVBO);
-            if (IndexVBO != -1) Compat.DeleteBuffer(IndexVBO);
+            if (VertexVBO != -1) { try { Compat.DeleteBuffer(VertexVBO); } catch { } }
+            if (IndexVBO != -1) { try { Compat.DeleteBuffer(IndexVBO); } catch { } }
+            if (Vao != -1) { try { Compat.DeleteVertexArray(Vao); } catch { } }
             VertexVBO = -1;
             IndexVBO = -1;
+            Vao = -1;
         }
 
         /// <summary>
@@ -92,6 +95,42 @@ namespace Radegast.Rendering
                     Compat.DeleteBuffer(IndexVBO);
                     IndexVBO = -1;
                     return false;
+                }
+            }
+
+            // If VAO not created, try to create and capture attribute state
+            if (Vao == -1)
+            {
+                try
+                {
+                    Compat.GenVertexArrays(out Vao);
+                    if (Vao != -1)
+                    {
+                        Compat.BindVertexArray(Vao);
+
+                        Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+
+                        // Set generic attribute layout: pos (0), normal (1), texcoord (2)
+                        GL.EnableVertexAttribArray(0);
+                        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, VertexSize, 0);
+                        GL.EnableVertexAttribArray(1);
+                        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, VertexSize, 12);
+                        GL.EnableVertexAttribArray(2);
+                        GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, VertexSize, 24);
+
+                        // Unbind VAO
+                        Compat.BindVertexArray(0);
+                        Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    }
+                }
+                catch
+                {
+                    // failed to create VAO, leave Vao = -1
+                    try { Compat.BindBuffer(BufferTarget.ArrayBuffer, 0); } catch { }
+                    try { Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0); } catch { }
+                    Vao = -1;
                 }
             }
 
@@ -616,34 +655,72 @@ namespace Radegast.Rendering
                         }
                         catch { useAttribs = false; }
 
-                        Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
-                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
-
-                        if (useAttribs)
+                        // Prefer VAO if available to minimize state change
+                        if (data.Vao != -1)
                         {
-                            GL.EnableVertexAttribArray(posLoc);
-                            GL.EnableVertexAttribArray(normLoc);
-                            GL.EnableVertexAttribArray(texLoc);
+                            // If shader attrs present, we need to (temporarily) bind shader attribs mapped to buffer
+                            if (useAttribs)
+                            {
+                                Compat.BindVertexArray(data.Vao);
 
-                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
-                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
-                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
+                                // Set attribute pointers for shader attribute locations (these modify VAO state)
+                                GL.EnableVertexAttribArray(posLoc);
+                                GL.EnableVertexAttribArray(normLoc);
+                                GL.EnableVertexAttribArray(texLoc);
 
-                            GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                                GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
+                                GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
+                                GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
 
-                            GL.DisableVertexAttribArray(posLoc);
-                            GL.DisableVertexAttribArray(normLoc);
-                            GL.DisableVertexAttribArray(texLoc);
+                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                GL.DisableVertexAttribArray(posLoc);
+                                GL.DisableVertexAttribArray(normLoc);
+                                GL.DisableVertexAttribArray(texLoc);
+
+                                Compat.BindVertexArray(0);
+                            }
+                            else
+                            {
+                                Compat.BindVertexArray(data.Vao);
+                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                                Compat.BindVertexArray(0);
+                            }
                         }
                         else
                         {
-                            GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
-                            GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)(24));
-                            GL.VertexPointer(3, VertexPointerType.Float, FaceData.VertexSize, (IntPtr)(0));
+                            // VAO not available, bind buffers and set pointers as before
+                            Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
+                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
 
-                            GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                            if (useAttribs)
+                            {
+                                GL.EnableVertexAttribArray(posLoc);
+                                GL.EnableVertexAttribArray(normLoc);
+                                GL.EnableVertexAttribArray(texLoc);
+
+                                GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
+                                GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
+                                GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
+
+                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                GL.DisableVertexAttribArray(posLoc);
+                                GL.DisableVertexAttribArray(normLoc);
+                                GL.DisableVertexAttribArray(texLoc);
+                            }
+                            else
+                            {
+                                GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
+                                GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)(24));
+                                GL.VertexPointer(3, VertexPointerType.Float, FaceData.VertexSize, (IntPtr)(0));
+
+                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                            }
+
                         }
                     }
+                    // Unbind any bound array/element buffers if VAO path wasn't used
                     Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
                     Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
 

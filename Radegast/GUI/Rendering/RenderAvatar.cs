@@ -64,7 +64,7 @@ namespace Radegast.Rendering
     /// Subclass of LindenMesh that adds vertex, index, and texture coordinate
     /// arrays suitable for pushing direct to OpenGL
     /// </summary>
-    public class GLMesh : LindenMesh
+    public class GLMesh : LindenMesh, IDisposable
     {
         /// <summary>
         /// Subclass of LODMesh that adds an index array suitable for pushing
@@ -581,6 +581,40 @@ namespace Radegast.Rendering
 
             }
         }
+
+        // Dispose GL resources (VBOs and VAO) for this mesh
+        public void Dispose()
+        {
+            try
+            {
+                if (VertexVBO != -1)
+                {
+                    try { Compat.DeleteBuffer(VertexVBO); } catch { }
+                    VertexVBO = -1;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (IndexVBO != -1)
+                {
+                    try { Compat.DeleteBuffer(IndexVBO); } catch { }
+                    IndexVBO = -1;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (Vao != -1)
+                {
+                    try { Compat.DeleteVertexArray(Vao); } catch { }
+                    Vao = -1;
+                }
+            }
+            catch { }
+        }
     }
 
     public class GLAvatar
@@ -606,6 +640,18 @@ namespace Radegast.Rendering
                 GLMesh mesh = new GLMesh(kvp.Value, this); // Instance our meshes
                 _meshes.Add(kvp.Key, mesh);
 
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_meshes)
+            {
+                foreach (var kvp in _meshes)
+                {
+                    try { kvp.Value.Dispose(); } catch { }
+                }
+                _meshes.Clear();
             }
         }
 
@@ -1337,7 +1383,7 @@ namespace Radegast.Rendering
 
                         int prio = 0;
                         //Quick hack to stack animations in the correct order
-                        //TODO we need to do this per joint as they all have their own priorities as well ;-(
+                        //TODO we need to do this per joint as they all have their own priorities as well ;-)
                         if (av.glavatar.skel.mPriority.TryGetValue(joint.Name, out prio))
                         {
                             if (prio > (ar.anim.Priority))
@@ -2382,7 +2428,7 @@ namespace Radegast.Rendering
                             ankle.Z * knee_scale.Z -
                             foot.Z * ankle_scale.Z;
 
-            Vector3 new_body_size;
+            Vector3 new_body_size = new Vector3();
             new_body_size.Z = mPelvisToFoot +
                 // the sqrt(2) correction below is an approximate
                 // correction to get to the top of the head
@@ -2390,7 +2436,8 @@ namespace Radegast.Rendering
                                head.Z * neck_scale.Z +
                                neck.Z * chest_scale.Z +
                                chest.Z * torso_scale.Z +
-                               torso.Z * pelvis_scale.Z;
+                               torso.Z * pelvis_scale.Z +
+                               new_body_size.Z;
 
             Height = new_body_size.Z;
             PelvisToFoot = mPelvisToFoot;
@@ -2399,6 +2446,16 @@ namespace Radegast.Rendering
         public Vector3 AdjustedPosition(Vector3 source)
         {
             return new Vector3(source.X, source.Y, source.Z - Height + PelvisToFoot);
+        }
+
+        public override void Dispose()
+        {
+            try
+            {
+                glavatar?.Dispose();
+            }
+            catch { }
+            base.Dispose();
         }
     }
 }

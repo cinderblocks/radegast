@@ -288,8 +288,60 @@ namespace Radegast.Rendering
                 sculptCache.Clear();
             }
 
-            lock (Prims) Prims.Clear();
-            lock (Avatars) Avatars.Clear();
+            // Deterministically dispose contained scene objects to free GL resources
+            lock (Prims)
+            {
+                foreach (var kvp in Prims)
+                {
+                    try
+                    {
+                        kvp.Value?.Dispose();
+                    }
+                    catch { }
+                }
+                Prims.Clear();
+            }
+
+            lock (Avatars)
+            {
+                foreach (var kvp in Avatars)
+                {
+                    try
+                    {
+                        kvp.Value?.Dispose();
+                    }
+                    catch { }
+                }
+                Avatars.Clear();
+            }
+
+            // Also dispose any lists of scene objects
+            if (SortedObjects != null)
+            {
+                foreach (var so in SortedObjects)
+                {
+                    try { so?.Dispose(); } catch { }
+                }
+                SortedObjects = null;
+            }
+
+            if (OccludedObjects != null)
+            {
+                foreach (var so in OccludedObjects)
+                {
+                    try { so?.Dispose(); } catch { }
+                }
+                OccludedObjects = null;
+            }
+
+            if (VisibleAvatars != null)
+            {
+                foreach (var av in VisibleAvatars)
+                {
+                    try { av?.Dispose(); } catch { }
+                }
+                VisibleAvatars = null;
+            }
 
             TexturesPtrMap.Clear();
 
@@ -3379,7 +3431,7 @@ namespace Radegast.Rendering
                             gotImage.Set();
                         }
                     );
-                    gotImage.WaitOne(30 * 1000, false);
+                    gotImage.WaitOne(TimeSpan.FromMinutes(1), false);
                 }
 
                 if (img == null) { return false; }
