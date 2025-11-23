@@ -428,6 +428,16 @@ namespace Radegast.Rendering
             // Prim rotation and position and scale
             GL.MultMatrix(Math3D.CreateSRTMatrix(Prim.Scale, RenderRotation, RenderPosition));
 
+            // If scene supports shader uniform updates, call it
+            try
+            {
+                if (scene is SceneWindow sw)
+                {
+                    sw.UpdateShaderMatrices();
+                }
+            }
+            catch { }
+
             // Do we have animated texture on this face
             bool animatedTexture = false;
 
@@ -590,13 +600,49 @@ namespace Radegast.Rendering
                 {
                     if (data.CheckVBO(face))
                     {
+                        // If shaders active and attribute locations available, use glVertexAttribPointer path
+                        var sw = scene as SceneWindow;
+                        var useAttribs = false;
+                        int posLoc = -1, normLoc = -1, texLoc = -1;
+                        try
+                        {
+                            if (sw != null && RenderSettings.HasShaders && RenderSettings.EnableShiny && sw != null)
+                            {
+                                posLoc = sw.GetShaderAttr("aPosition");
+                                normLoc = sw.GetShaderAttr("aNormal");
+                                texLoc = sw.GetShaderAttr("aTexCoord");
+                                useAttribs = posLoc != -1 && normLoc != -1 && texLoc != -1;
+                            }
+                        }
+                        catch { useAttribs = false; }
+
                         Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
                         Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
-                        GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
-                        GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)(24));
-                        GL.VertexPointer(3, VertexPointerType.Float, FaceData.VertexSize, (IntPtr)(0));
 
-                        GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                        if (useAttribs)
+                        {
+                            GL.EnableVertexAttribArray(posLoc);
+                            GL.EnableVertexAttribArray(normLoc);
+                            GL.EnableVertexAttribArray(texLoc);
+
+                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
+                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
+                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
+
+                            GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                            GL.DisableVertexAttribArray(posLoc);
+                            GL.DisableVertexAttribArray(normLoc);
+                            GL.DisableVertexAttribArray(texLoc);
+                        }
+                        else
+                        {
+                            GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
+                            GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)(24));
+                            GL.VertexPointer(3, VertexPointerType.Float, FaceData.VertexSize, (IntPtr)(0));
+
+                            GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                        }
                     }
                     Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
                     Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);

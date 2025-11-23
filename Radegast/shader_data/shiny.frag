@@ -1,33 +1,26 @@
-﻿#define MAX_LIGHTS 8
-#define NUM_LIGHTS 1
-varying vec3 normal, lightDir[MAX_LIGHTS], eyeVec;
-varying vec2 texCoord;
+#version 120
 
 uniform sampler2D colorMap;
-//uniform int numLights;
+uniform vec3 lightDir; // normalized
+uniform vec4 ambientColor;
+uniform vec4 diffuseColor;
+uniform vec4 specularColor;
 
-void main (void)
+varying vec3 vNormal;
+varying vec2 vTexCoord;
+varying vec3 vPos;
+
+void main()
 {
-  int numLights = 1;
-  vec4 base_color = texture2D(colorMap, texCoord);
-  //vec4 final_color = gl_FrontLightModelProduct.sceneColor;
-  vec4 final_color = (gl_FrontLightModelProduct.sceneColor * gl_FrontMaterial.ambient) + 
-	(gl_LightSource[0].ambient * gl_FrontMaterial.ambient);
-  vec3 N = normalize(normal);
-  int i;
-  for (i=0; i<NUM_LIGHTS; ++i)
-  {  
-    vec3 L = normalize(lightDir[i]);
-    float lambertTerm = dot(N,L);
-    if (lambertTerm > 0.0)
-    {
-      final_color += gl_LightSource[i].diffuse * gl_FrontMaterial.diffuse * lambertTerm;	
-      vec3 E = normalize(eyeVec);
-      vec3 R = reflect(-L, N);
-      float specular = clamp(pow( max(dot(R, E), 0.0), gl_FrontMaterial.shininess), 0.001, 1.0);
-      final_color += gl_LightSource[i].specular * specular;
-    }
-  }
-  final_color = clamp(final_color, 0.0, 1.0);
-  gl_FragColor = final_color * base_color;
+    vec4 tex = texture2D(colorMap, vTexCoord);
+    vec3 n = normalize(vNormal);
+    vec3 ld = normalize(lightDir);
+    float lambert = max(dot(n, ld), 0.0);
+    vec4 color = ambientColor * tex + diffuseColor * lambert * tex;
+    // simple specular
+    vec3 viewDir = normalize(-vPos);
+    vec3 halfVec = normalize(ld + viewDir);
+    float spec = pow(max(dot(n, halfVec), 0.0), 16.0);
+    color += specularColor * spec;
+    gl_FragColor = color;
 }

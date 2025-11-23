@@ -144,6 +144,13 @@ namespace Radegast.Rendering
             return GL.GetUniformLocation(ID, var);
         }
 
+        public int Attr(string name)
+        {
+            if (!RenderSettings.HasShaders) return -1;
+            if (ID < 1) return -1;
+            return GL.GetAttribLocation(ID, name);
+        }
+
         public void SetUniform1(string var, int value)
         {
             if (!RenderSettings.HasShaders || ID < 1) return;

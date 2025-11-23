@@ -911,31 +911,89 @@ namespace Radegast.Rendering
 
         private void InitShaders()
         {
-            if (RenderSettings.HasShaders)
-            {
-                shinyProgram.Load("shiny.vert", "shiny.frag");
-                shinyProgram.SetUniform1("colorMap", 0);
-                // Set default lighting uniforms if present
-                shinyProgram.Start();
-                try
-                {
-                    var uLight = shinyProgram.Uni("lightDir");
-                    if (uLight != -1)
-                    {
-                        // approximate light direction from sun position
-                        GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
-                    }
+            if (!RenderSettings.HasShaders) { return; }
 
-                    var ua = shinyProgram.Uni("ambientColor");
-                    if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                    var ud = shinyProgram.Uni("diffuseColor");
-                    if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                    var us = shinyProgram.Uni("specularColor");
-                    if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+            shinyProgram.Load("shiny.vert", "shiny.frag");
+            shinyProgram.SetUniform1("colorMap", 0);
+            // Set default lighting uniforms if present
+            shinyProgram.Start();
+            try
+            {
+                var uLight = shinyProgram.Uni("lightDir");
+                if (uLight != -1)
+                {
+                    // approximate light direction from sun position
+                    GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
                 }
-                catch { }
-                finally { ShaderProgram.Stop(); }
+
+                var ua = shinyProgram.Uni("ambientColor");
+                if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                var ud = shinyProgram.Uni("diffuseColor");
+                if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                var us = shinyProgram.Uni("specularColor");
+                if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
             }
+            catch { }
+            finally { ShaderProgram.Stop(); }
+        }
+
+        // Return attribute location from current shiny program
+        public int GetShaderAttr(string name)
+        {
+            if (!RenderSettings.HasShaders) return -1;
+            try
+            {
+                return shinyProgram?.Attr(name) ?? -1;
+            }
+            catch { return -1; }
+        }
+
+        // Update shader matrix uniforms (call when modelview has been modified)
+        public void UpdateShaderMatrices()
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var uMVP = shinyProgram.Uni("uMVP");
+                var uModelView = shinyProgram.Uni("uModelView");
+                var uNormal = shinyProgram.Uni("uNormalMatrix");
+
+                if (uMVP == -1 && uModelView == -1 && uNormal == -1) return;
+
+                OpenTK.Matrix4 proj;
+                OpenTK.Matrix4 mv;
+                GL.GetFloat(GetPName.ProjectionMatrix, out proj);
+                GL.GetFloat(GetPName.ModelviewMatrix, out mv);
+
+                if (uMVP != -1)
+                {
+                    var mvp = proj * mv;
+                    GL.UniformMatrix4(uMVP, false, ref mvp);
+                }
+
+                if (uModelView != -1)
+                {
+                    GL.UniformMatrix4(uModelView, false, ref mv);
+                }
+
+                if (uNormal != -1)
+                {
+                    var normal = new OpenTK.Matrix3(
+                        mv.M11, mv.M12, mv.M13,
+                        mv.M21, mv.M22, mv.M23,
+                        mv.M31, mv.M32, mv.M33);
+                    // inverse
+                    normal = normal.Inverted();
+                    // transpose
+                    normal = new OpenTK.Matrix3(
+                        normal.M11, normal.M21, normal.M31,
+                        normal.M12, normal.M22, normal.M32,
+                        normal.M13, normal.M23, normal.M33);
+                    GL.UniformMatrix3(uNormal, false, ref normal);
+                }
+            }
+            catch { }
         }
 
         #endregion glControl setup and disposal
@@ -2226,14 +2284,72 @@ namespace Radegast.Rendering
                                 }
                             }
 
-                            GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, mesh.RenderData.TexCoords);
-                            GL.VertexPointer(3, VertexPointerType.Float, 0, mesh.RenderData.Vertices);
-                            GL.NormalPointer(NormalPointerType.Float, 0, mesh.MorphRenderData.Normals);
+                            // Attempt VBO + attribute-based rendering for avatar mesh
+                            bool usedAttribs = false;
+                            if (RenderSettings.UseVBO)
+                            {
+                                try
+                                {
+                                    if (mesh.VertexVBO == -1 && mesh.IndexVBO == -1)
+                                    {
+                                        mesh.PrepareVBO();
+                                    }
 
-                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, mesh.RenderData.Indices);
+                                    if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed && RenderSettings.HasShaders && RenderSettings.EnableShiny)
+                                    {
+                                        var posLoc = GetShaderAttr("aPosition");
+                                        var normLoc = GetShaderAttr("aNormal");
+                                        var texLoc = GetShaderAttr("aTexCoord");
+                                        if (posLoc != -1 && normLoc != -1 && texLoc != -1)
+                                        {
+                                            // Bind VAO if available to reduce state changes
+                                            if (mesh.Vao != -1)
+                                            {
+                                                Compat.BindVertexArray(mesh.Vao);
+                                            }
 
-                            GL.BindTexture(TextureTarget.Texture2D, 0);
+                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
 
+                                            GL.EnableVertexAttribArray(posLoc);
+                                            GL.EnableVertexAttribArray(normLoc);
+                                            GL.EnableVertexAttribArray(texLoc);
+
+                                            int stride = 8 * sizeof(float);
+                                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, stride, 0);
+                                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, stride, 3 * sizeof(float));
+                                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, stride, 6 * sizeof(float));
+
+                                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                            GL.DisableVertexAttribArray(posLoc);
+                                            GL.DisableVertexAttribArray(normLoc);
+                                            GL.DisableVertexAttribArray(texLoc);
+
+                                            // Unbind buffers
+                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+
+                                            if (mesh.Vao != -1)
+                                            {
+                                                Compat.BindVertexArray(0);
+                                            }
+
+                                            usedAttribs = true;
+                                        }
+                                    }
+                                }
+                                catch { usedAttribs = false; }
+                            }
+
+                            if (!usedAttribs)
+                            {
+                                GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, mesh.RenderData.TexCoords);
+                                GL.VertexPointer(3, VertexPointerType.Float, 0, mesh.RenderData.Vertices);
+                                GL.NormalPointer(NormalPointerType.Float, 0, mesh.MorphRenderData.Normals);
+
+                                GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, mesh.RenderData.Indices);
+                            }
                         }
 
                         av.glavatar.skel.mNeedsMeshRebuild = false;
@@ -2640,6 +2756,7 @@ namespace Radegast.Rendering
 
             if (pass == RenderPass.Invisible)
             {
+                GL.ClearColor(1f, 1f, 1f, 1f);
                 GL.Disable(EnableCap.Texture2D);
                 GL.StencilFunc(StencilFunction.Always, 1, 1);
                 GL.StencilOp(StencilOp.Keep, StencilOp.Keep, StencilOp.Replace);

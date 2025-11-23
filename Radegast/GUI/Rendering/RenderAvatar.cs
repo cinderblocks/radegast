@@ -26,6 +26,7 @@ using System.Linq;
 using System.Threading;
 using System.Xml;
 using OpenMetaverse;
+using OpenTK.Graphics.OpenGL;
 using OpenMetaverse.Rendering;
 using Path = System.IO.Path;
 
@@ -110,6 +111,13 @@ namespace Radegast.Rendering
         public GLData OrigRenderData;
         public GLData MorphRenderData;
 
+        // VBO handles for rendering with programmable pipeline
+        public int VertexVBO = -1;
+        public int IndexVBO = -1;
+        // VAO handle
+        public int Vao = -1;
+        public bool VBOFailed = false;
+
         public GLAvatar av;
 
         public GLMesh(string name)
@@ -189,6 +197,106 @@ namespace Radegast.Rendering
         public void setMeshRot(Vector3 rot)
         {
             RotationAngles = rot;
+        }
+
+        /// <summary>
+        /// Prepare interleaved VBO for this mesh. Returns true on success.
+        /// </summary>
+        public bool PrepareVBO()
+        {
+            if (VertexVBO != -1 && IndexVBO != -1) return !VBOFailed;
+
+            try
+            {
+                var numVerts = RenderData.Vertices.Length / 3;
+                // interleaved: pos(3) norm(3) tex(2) = 8 floats
+                var interleaved = new float[numVerts * 8];
+                for (int i = 0, vi = 0, ti = 0, ni = 0; i < numVerts; i++)
+                {
+                    // position
+                    interleaved[vi++] = RenderData.Vertices[i * 3];
+                    interleaved[vi++] = RenderData.Vertices[i * 3 + 1];
+                    interleaved[vi++] = RenderData.Vertices[i * 3 + 2];
+                    // normal
+                    interleaved[vi++] = RenderData.Normals[i * 3];
+                    interleaved[vi++] = RenderData.Normals[i * 3 + 1];
+                    interleaved[vi++] = RenderData.Normals[i * 3 + 2];
+                    // texcoord
+                    interleaved[vi++] = RenderData.TexCoords[i * 2];
+                    interleaved[vi++] = RenderData.TexCoords[i * 2 + 1];
+                }
+
+                // Create vertex buffer
+                Compat.GenBuffers(out VertexVBO);
+                Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+                Compat.BufferData(BufferTarget.ArrayBuffer, (IntPtr)(interleaved.Length * sizeof(float)), interleaved, BufferUsageHint.StaticDraw);
+                if (Compat.BufferSize(BufferTarget.ArrayBuffer) != interleaved.Length * sizeof(float))
+                {
+                    VBOFailed = true;
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.DeleteBuffer(VertexVBO);
+                    VertexVBO = -1;
+                    return false;
+                }
+
+                // Create index buffer
+                Compat.GenBuffers(out IndexVBO);
+                Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+                Compat.BufferData(BufferTarget.ElementArrayBuffer, (IntPtr)(RenderData.Indices.Length * sizeof(ushort)), RenderData.Indices, BufferUsageHint.StaticDraw);
+                if (Compat.BufferSize(BufferTarget.ElementArrayBuffer) != RenderData.Indices.Length * sizeof(ushort))
+                {
+                    VBOFailed = true;
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    Compat.DeleteBuffer(IndexVBO);
+                    IndexVBO = -1;
+                    // cleanup vertex
+                    if (VertexVBO != -1) { Compat.BindBuffer(BufferTarget.ArrayBuffer, 0); Compat.DeleteBuffer(VertexVBO); VertexVBO = -1; }
+                    return false;
+                }
+
+                // Create VAO for attribute state if supported
+                try
+                {
+                    Compat.GenVertexArrays(out Vao);
+                    Compat.BindVertexArray(Vao);
+
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+
+                    // position (3 floats), normal (3), texcoord (2) stride 8 floats
+                    int posLoc = 0; // fallback attribute location for fixed-function
+                    // If shader attributes are available, use those at render time
+                    GL.EnableVertexAttribArray(0);
+                    GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
+                    GL.EnableVertexAttribArray(1);
+                    GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 3 * sizeof(float));
+                    GL.EnableVertexAttribArray(2);
+                    GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 * sizeof(float));
+
+                    // Unbind VAO
+                    Compat.BindVertexArray(0);
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                }
+                catch
+                {
+                    // If VAO creation fails, fall back to VBO-only
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    Vao = -1;
+                }
+
+                VBOFailed = false;
+                return true;
+            }
+            catch
+            {
+                VBOFailed = true;
+                try { if (VertexVBO != -1) Compat.DeleteBuffer(VertexVBO); } catch { }
+                try { if (IndexVBO != -1) Compat.DeleteBuffer(IndexVBO); } catch { }
+                VertexVBO = -1; IndexVBO = -1;
+                return false;
+            }
         }
 
         public override void LoadMesh(string filename)
@@ -1148,8 +1256,8 @@ namespace Radegast.Rendering
                 state.rot_loopinframe = 0;
                 state.rot_loopoutframe = joint.rotationkeys.Length - 1;
 
-                state.easeoutfactor = 1.0f;
                 state.easeoutrot = Quaternion.Identity;
+                state.easeoutfactor = 1.0f;
 
                 if (b.Loop)
                 {

@@ -1,16 +1,25 @@
-﻿#define MAX_LIGHTS 8
-#define NUM_LIGHTS 1
-varying vec3 normal, lightDir[MAX_LIGHTS], eyeVec;
-varying vec2 texCoord;
+#version 120
+
+// Attributes for vertex data
+attribute vec3 aPosition;
+attribute vec3 aNormal;
+attribute vec2 aTexCoord;
+
+// Uniforms for transformations
+uniform mat4 uMVP;
+uniform mat4 uModelView;
+uniform mat3 uNormalMatrix;
+
+// Varying variables that will be passed to the fragment shader
+varying vec3 vNormal;
+varying vec2 vTexCoord;
+varying vec3 vPos;
 
 void main()
-{	
-  gl_Position = ftransform();		
-  normal = gl_NormalMatrix * gl_Normal;
-  vec4 vVertex = gl_ModelViewMatrix * gl_Vertex;
-  eyeVec = -vVertex.xyz;
-  texCoord = gl_MultiTexCoord0.xy;
-  int i;
-  for (i=0; i<NUM_LIGHTS; ++i)
-    lightDir[i] = vec3(gl_LightSource[i].position.xyz - vVertex.xyz);
+{
+    // Transform normal to eye space
+    vNormal = normalize(uNormalMatrix * aNormal);
+    vTexCoord = aTexCoord;
+    vPos = vec3(uModelView * vec4(aPosition, 1.0));
+    gl_Position = uMVP * vec4(aPosition, 1.0);
 }
