@@ -64,6 +64,9 @@ namespace Radegast
                     txtInfo.Text = objectOfferText();
                 }
 
+                // Accessible metadata
+                InitializeAccessibleMetadata("Inventory Offer", txtInfo.Text);
+
                 // Fire off event
                 NotificationEventArgs args = new NotificationEventArgs(instance) {Text = txtInfo.Text};
                 args.Buttons.Add(btnAccept);

@@ -67,6 +67,7 @@ namespace Radegast
             this.btnOfferTeleport = new System.Windows.Forms.Button();
             this.btnProfile = new System.Windows.Forms.Button();
             this.cbAlwaysDing = new System.Windows.Forms.CheckBox();
+            this.tsLblTyping = new System.Windows.Forms.ToolStripLabel();
             this.pnlChatInput.SuspendLayout();
             this.SuspendLayout();
             // 
@@ -99,11 +100,20 @@ namespace Radegast
             // toolStrip1
             // 
             this.toolStrip1.GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden;
+            this.toolStrip1.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
+            this.tsLblTyping});
             this.toolStrip1.Location = new System.Drawing.Point(0, 0);
             this.toolStrip1.Name = "toolStrip1";
             this.toolStrip1.Size = new System.Drawing.Size(500, 25);
             this.toolStrip1.TabIndex = 2;
             this.toolStrip1.Text = "toolStrip1";
+            // 
+            // tsLblTyping
+            // 
+            this.tsLblTyping.Alignment = System.Windows.Forms.ToolStripItemAlignment.Right;
+            this.tsLblTyping.Name = "tsLblTyping";
+            this.tsLblTyping.Size = new System.Drawing.Size(0, 22);
+            this.tsLblTyping.Text = "";
             // 
             // pnlChatInput
             // 
@@ -196,6 +206,7 @@ namespace Radegast
         public ChatInputBox cbxInput;
         public System.Windows.Forms.Button btnSend;
         public System.Windows.Forms.ToolStrip toolStrip1;
+        public System.Windows.Forms.ToolStripLabel tsLblTyping;
         public System.Windows.Forms.Button btnPay;
         public System.Windows.Forms.Button btnOfferTeleport;
         public System.Windows.Forms.Button btnProfile;

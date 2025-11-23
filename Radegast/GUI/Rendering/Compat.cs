@@ -142,5 +142,45 @@ namespace Radegast.Rendering
             }
         }
         #endregion Occlusion query functions
+
+        #region VAO functions
+        public static void GenVertexArrays(out int array)
+        {
+            try
+            {
+                GL.GenVertexArrays(1, out array);
+            }
+            catch
+            {
+                // failed to create VAO - signal failure with -1
+                array = -1;
+            }
+        }
+
+        public static void BindVertexArray(int id)
+        {
+            try
+            {
+                GL.BindVertexArray(id);
+            }
+            catch
+            {
+                // no-op if VAO not supported
+            }
+        }
+
+        public static void DeleteVertexArray(int id)
+        {
+            try
+            {
+                GL.DeleteVertexArray(id);
+            }
+            catch
+            {
+                // ignore if not supported
+            }
+        }
+
+        #endregion VAO functions
     }
 }

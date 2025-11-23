@@ -80,6 +80,9 @@ namespace Radegast
                 ev.ObjectName,
                 instance.Names.Get(ev.OwnerID)
             );
+
+            // Accessible metadata
+            InitializeAccessibleMetadata("Load URL", rtbText.Text);
         }
 
         private void btnCancel_Click(object sender, EventArgs e)

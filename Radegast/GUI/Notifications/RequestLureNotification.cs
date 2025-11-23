@@ -41,6 +41,9 @@ namespace Radegast
             txtMessage.Text = msg.Message;
             btnTeleport.Focus();
 
+            // Accessible metadata
+            InitializeAccessibleMetadata("Teleport Request", txtHead.Text + " " + txtMessage.Text);
+
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance)
             {

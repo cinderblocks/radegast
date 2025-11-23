@@ -41,6 +41,9 @@ namespace Radegast
             }
             btnOk.Focus();
 
+            // Set accessible metadata for assistive technologies
+            InitializeAccessibleMetadata("Notification", txtMessage.Text);
+
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance) {Text = txtMessage.Text};
             args.Buttons.Add(btnOk);

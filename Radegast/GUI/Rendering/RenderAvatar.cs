@@ -26,6 +26,7 @@ using System.Linq;
 using System.Threading;
 using System.Xml;
 using OpenMetaverse;
+using OpenTK.Graphics.OpenGL;
 using OpenMetaverse.Rendering;
 using Path = System.IO.Path;
 
@@ -63,7 +64,7 @@ namespace Radegast.Rendering
     /// Subclass of LindenMesh that adds vertex, index, and texture coordinate
     /// arrays suitable for pushing direct to OpenGL
     /// </summary>
-    public class GLMesh : LindenMesh
+    public class GLMesh : LindenMesh, IDisposable
     {
         /// <summary>
         /// Subclass of LODMesh that adds an index array suitable for pushing
@@ -109,6 +110,13 @@ namespace Radegast.Rendering
         public GLData RenderData;
         public GLData OrigRenderData;
         public GLData MorphRenderData;
+
+        // VBO handles for rendering with programmable pipeline
+        public int VertexVBO = -1;
+        public int IndexVBO = -1;
+        // VAO handle
+        public int Vao = -1;
+        public bool VBOFailed = false;
 
         public GLAvatar av;
 
@@ -189,6 +197,106 @@ namespace Radegast.Rendering
         public void setMeshRot(Vector3 rot)
         {
             RotationAngles = rot;
+        }
+
+        /// <summary>
+        /// Prepare interleaved VBO for this mesh. Returns true on success.
+        /// </summary>
+        public bool PrepareVBO()
+        {
+            if (VertexVBO != -1 && IndexVBO != -1) return !VBOFailed;
+
+            try
+            {
+                var numVerts = RenderData.Vertices.Length / 3;
+                // interleaved: pos(3) norm(3) tex(2) = 8 floats
+                var interleaved = new float[numVerts * 8];
+                for (int i = 0, vi = 0, ti = 0, ni = 0; i < numVerts; i++)
+                {
+                    // position
+                    interleaved[vi++] = RenderData.Vertices[i * 3];
+                    interleaved[vi++] = RenderData.Vertices[i * 3 + 1];
+                    interleaved[vi++] = RenderData.Vertices[i * 3 + 2];
+                    // normal
+                    interleaved[vi++] = RenderData.Normals[i * 3];
+                    interleaved[vi++] = RenderData.Normals[i * 3 + 1];
+                    interleaved[vi++] = RenderData.Normals[i * 3 + 2];
+                    // texcoord
+                    interleaved[vi++] = RenderData.TexCoords[i * 2];
+                    interleaved[vi++] = RenderData.TexCoords[i * 2 + 1];
+                }
+
+                // Create vertex buffer
+                Compat.GenBuffers(out VertexVBO);
+                Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+                Compat.BufferData(BufferTarget.ArrayBuffer, (IntPtr)(interleaved.Length * sizeof(float)), interleaved, BufferUsageHint.StaticDraw);
+                if (Compat.BufferSize(BufferTarget.ArrayBuffer) != interleaved.Length * sizeof(float))
+                {
+                    VBOFailed = true;
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.DeleteBuffer(VertexVBO);
+                    VertexVBO = -1;
+                    return false;
+                }
+
+                // Create index buffer
+                Compat.GenBuffers(out IndexVBO);
+                Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+                Compat.BufferData(BufferTarget.ElementArrayBuffer, (IntPtr)(RenderData.Indices.Length * sizeof(ushort)), RenderData.Indices, BufferUsageHint.StaticDraw);
+                if (Compat.BufferSize(BufferTarget.ElementArrayBuffer) != RenderData.Indices.Length * sizeof(ushort))
+                {
+                    VBOFailed = true;
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    Compat.DeleteBuffer(IndexVBO);
+                    IndexVBO = -1;
+                    // cleanup vertex
+                    if (VertexVBO != -1) { Compat.BindBuffer(BufferTarget.ArrayBuffer, 0); Compat.DeleteBuffer(VertexVBO); VertexVBO = -1; }
+                    return false;
+                }
+
+                // Create VAO for attribute state if supported
+                try
+                {
+                    Compat.GenVertexArrays(out Vao);
+                    Compat.BindVertexArray(Vao);
+
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+
+                    // position (3 floats), normal (3), texcoord (2) stride 8 floats
+                    int posLoc = 0; // fallback attribute location for fixed-function
+                    // If shader attributes are available, use those at render time
+                    GL.EnableVertexAttribArray(0);
+                    GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
+                    GL.EnableVertexAttribArray(1);
+                    GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 3 * sizeof(float));
+                    GL.EnableVertexAttribArray(2);
+                    GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 * sizeof(float));
+
+                    // Unbind VAO
+                    Compat.BindVertexArray(0);
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                }
+                catch
+                {
+                    // If VAO creation fails, fall back to VBO-only
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    Vao = -1;
+                }
+
+                VBOFailed = false;
+                return true;
+            }
+            catch
+            {
+                VBOFailed = true;
+                try { if (VertexVBO != -1) Compat.DeleteBuffer(VertexVBO); } catch { }
+                try { if (IndexVBO != -1) Compat.DeleteBuffer(IndexVBO); } catch { }
+                VertexVBO = -1; IndexVBO = -1;
+                return false;
+            }
         }
 
         public override void LoadMesh(string filename)
@@ -473,6 +581,40 @@ namespace Radegast.Rendering
 
             }
         }
+
+        // Dispose GL resources (VBOs and VAO) for this mesh
+        public void Dispose()
+        {
+            try
+            {
+                if (VertexVBO != -1)
+                {
+                    try { Compat.DeleteBuffer(VertexVBO); } catch { }
+                    VertexVBO = -1;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (IndexVBO != -1)
+                {
+                    try { Compat.DeleteBuffer(IndexVBO); } catch { }
+                    IndexVBO = -1;
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (Vao != -1)
+                {
+                    try { Compat.DeleteVertexArray(Vao); } catch { }
+                    Vao = -1;
+                }
+            }
+            catch { }
+        }
     }
 
     public class GLAvatar
@@ -498,6 +640,18 @@ namespace Radegast.Rendering
                 GLMesh mesh = new GLMesh(kvp.Value, this); // Instance our meshes
                 _meshes.Add(kvp.Key, mesh);
 
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_meshes)
+            {
+                foreach (var kvp in _meshes)
+                {
+                    try { kvp.Value.Dispose(); } catch { }
+                }
+                _meshes.Clear();
             }
         }
 
@@ -1148,8 +1302,8 @@ namespace Radegast.Rendering
                 state.rot_loopinframe = 0;
                 state.rot_loopoutframe = joint.rotationkeys.Length - 1;
 
-                state.easeoutfactor = 1.0f;
                 state.easeoutrot = Quaternion.Identity;
+                state.easeoutfactor = 1.0f;
 
                 if (b.Loop)
                 {
@@ -1229,7 +1383,7 @@ namespace Radegast.Rendering
 
                         int prio = 0;
                         //Quick hack to stack animations in the correct order
-                        //TODO we need to do this per joint as they all have their own priorities as well ;-(
+                        //TODO we need to do this per joint as they all have their own priorities as well ;-)
                         if (av.glavatar.skel.mPriority.TryGetValue(joint.Name, out prio))
                         {
                             if (prio > (ar.anim.Priority))
@@ -2274,7 +2428,7 @@ namespace Radegast.Rendering
                             ankle.Z * knee_scale.Z -
                             foot.Z * ankle_scale.Z;
 
-            Vector3 new_body_size;
+            Vector3 new_body_size = new Vector3();
             new_body_size.Z = mPelvisToFoot +
                 // the sqrt(2) correction below is an approximate
                 // correction to get to the top of the head
@@ -2282,7 +2436,8 @@ namespace Radegast.Rendering
                                head.Z * neck_scale.Z +
                                neck.Z * chest_scale.Z +
                                chest.Z * torso_scale.Z +
-                               torso.Z * pelvis_scale.Z;
+                               torso.Z * pelvis_scale.Z +
+                               new_body_size.Z;
 
             Height = new_body_size.Z;
             PelvisToFoot = mPelvisToFoot;
@@ -2291,6 +2446,16 @@ namespace Radegast.Rendering
         public Vector3 AdjustedPosition(Vector3 source)
         {
             return new Vector3(source.X, source.Y, source.Z - Height + PelvisToFoot);
+        }
+
+        public override void Dispose()
+        {
+            try
+            {
+                glavatar?.Dispose();
+            }
+            catch { }
+            base.Dispose();
         }
     }
 }

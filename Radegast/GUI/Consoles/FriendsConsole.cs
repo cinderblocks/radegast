@@ -26,6 +26,8 @@ using System.Windows.Forms;
 using OpenMetaverse.StructuredData;
 using System.Threading;
 using OpenMetaverse;
+using System.Reflection;
+using Radegast.Properties;
 
 namespace Radegast
 {
@@ -171,9 +173,11 @@ namespace Radegast
                 ThreadPool.QueueUserWorkItem(sync =>
                 {
                     string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                    string text = string.Format(Resources.FriendshipAccepted, !string.IsNullOrEmpty(e.AgentName) ? e.AgentName : name);
                     MethodInvoker display = () =>
                     {
-                        DisplayNotification(e.AgentID, $"{e.AgentName} accepted your friendship offer");
+                        DisplayNotification(e.AgentID, text);
+                        AnnounceForScreenReader(text);
                     };
 
                     if (InvokeRequired)
@@ -213,16 +217,92 @@ namespace Radegast
             instance.ShowNotificationInChat(msg, ChatBufferTextStyle.ObjectChat, instance.GlobalSettings["friends_notification_highlight"]);
         }
 
+        // Helper - announce text to screen readers by invoking protected AccessibilityNotifyClients
+        private void AnnounceForScreenReader(string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+
+            try
+            {
+                MethodInfo mi = typeof(Control).GetMethod("AccessibilityNotifyClients", BindingFlags.Instance | BindingFlags.NonPublic);
+                if (mi != null && instance?.MainForm != null)
+                {
+                    // Use DescriptionChange which is available on supported .NET Framework versions
+                    try
+                    {
+                        mi.Invoke(instance.MainForm, new object[] { AccessibleEvents.DescriptionChange, message });
+                    }
+                    catch
+                    {
+                        // best-effort: ignore failures
+                    }
+                }
+            }
+            catch
+            {
+                // Best-effort, ignore failures
+            }
+        }
+
+        /// <summary>
+        /// Resolve a usable display name synchronously with sensible fallbacks to avoid "Loading..." appearing in notifications.
+        /// Preference order:
+        /// 1) provided knownName (if non-empty)
+        /// 2) NameManager.GetAsync (wait)
+        /// 3) NameManager.GetLegacyName
+        /// 4) FriendInfo.Name from friends list
+        /// 5) INCOMPLETE_NAME
+        /// </summary>
+        private string ResolveNameBlocking(UUID agentId, string knownName = null)
+        {
+            // Prefer provided known name if it is usable
+            if (!string.IsNullOrEmpty(knownName) && knownName != RadegastInstance.INCOMPLETE_NAME)
+                return knownName;
+
+            // Try to get the best name from the names manager
+            try
+            {
+                string resolved = instance.Names.GetAsync(agentId).GetAwaiter().GetResult();
+                if (!string.IsNullOrEmpty(resolved) && resolved != RadegastInstance.INCOMPLETE_NAME)
+                    return resolved;
+            }
+            catch { /* ignore and fallback */ }
+
+            // Fallback to legacy name
+            try
+            {
+                string legacy = instance.Names.GetLegacyName(agentId);
+                if (!string.IsNullOrEmpty(legacy) && legacy != RadegastInstance.INCOMPLETE_NAME)
+                    return legacy;
+            }
+            catch { /* ignore and fallback */ }
+
+            // Last fallback: friend list stored name
+            try
+            {
+                if (client.Friends.FriendList.TryGetValue(agentId, out FriendInfo fi) &&
+                    !string.IsNullOrEmpty(fi.Name) && fi.Name != RadegastInstance.INCOMPLETE_NAME)
+                {
+                    return fi.Name;
+                }
+            }
+            catch { }
+
+            return RadegastInstance.INCOMPLETE_NAME;
+        }
+
         private void Friends_FriendOffline(object sender, FriendInfoEventArgs e)
         {
             if (!instance.GlobalSettings["show_friends_online_notifications"]) return;
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
+                string text = string.Format(Resources.FriendIsOffline, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, $"{name} is offline");
+                    DisplayNotification(e.Friend.UUID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 
@@ -243,10 +323,12 @@ namespace Radegast
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.Friend.UUID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
+                string text = string.Format(Resources.FriendIsOnline, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.Friend.UUID, $"{name} is online");
+                    DisplayNotification(e.Friend.UUID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 
@@ -265,10 +347,12 @@ namespace Radegast
         {
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                string name = ResolveNameBlocking(e.AgentID);
+                string text = string.Format(Resources.FriendRemoved, name);
                 MethodInvoker display = () =>
                 {
-                    DisplayNotification(e.AgentID, $"{name} is no longer on your friend list");
+                    DisplayNotification(e.AgentID, text);
+                    AnnounceForScreenReader(text);
                     RefreshFriendsList();
                 };
 

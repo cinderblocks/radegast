@@ -44,6 +44,9 @@ namespace Radegast
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnOffer.Focus();
 
+            // Accessible metadata
+            InitializeAccessibleMetadata($"Offer teleport to {agentName}", txtHead.Text + " " + txtMessage.Text);
+
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance)
             {

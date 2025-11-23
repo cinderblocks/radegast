@@ -40,6 +40,9 @@ namespace Radegast
             txtMessage.Text = msg.Message.Replace("\n", "\r\n");
             btnYes.Focus();
 
+            // Accessible metadata
+            InitializeAccessibleMetadata("Group Invitation", txtMessage.Text);
+
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance) {Text = txtMessage.Text};
             args.Buttons.Add(btnYes);

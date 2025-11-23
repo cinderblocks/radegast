@@ -4,6 +4,8 @@ using OpenMetaverse;
 using System;
 using System.Collections.Generic;
 using SkiaSharp;
+using System.Text.RegularExpressions;
+using System.Drawing;
 
 namespace Radegast
 {
@@ -14,6 +16,16 @@ namespace Radegast
 
         public ITextPrinter TextPrinter { get; }
         protected Dictionary<string, SettingsForms.FontSetting> FontSettings { get; set; }
+
+        private static readonly Dictionary<string, string> EmojiMap = new Dictionary<string, string>
+        {
+            {":smile:", "😊"},
+            {":laugh:", "😄"},
+            {":sad:", "😢"},
+            {":wink:", "😉"},
+            {":heart:", "❤️"},
+            {":thumbsup:", "👍"}
+        };
 
         protected TextManagerBase(RadegastInstanceForms instance, ITextPrinter textPrinter)
         {
@@ -82,6 +94,9 @@ namespace Radegast
 
         protected void ProcessAndPrintText(string text, bool isNewMessage, bool addNewline)
         {
+            // Sanitize incoming text to remove any embedded HTML tags or control characters
+            text = SanitizeText(text);
+
             var playedSounds = new HashSet<UUID>();
             var lineParts = SlUriParser.UrlRegex.Split(text);
             int linePartIndex;
@@ -102,9 +117,13 @@ namespace Radegast
             // ...
             for (linePartIndex = 0; linePartIndex < lineParts.Length - 1; linePartIndex += 2)
             {
-                var linkTextInfo = uriParser.GetLinkName(lineParts[linePartIndex + 1]);
+                var beforeLink = lineParts[linePartIndex];
+                // process inline markup for non-link text
+                RenderInlineAndPrint(beforeLink, isNewMessage);
 
-                TextPrinter.PrintText(lineParts[linePartIndex]);
+                var rawLink = lineParts[linePartIndex + 1];
+                var sanitizedLink = SanitizeLinkUri(rawLink);
+                var linkTextInfo = uriParser.GetLinkName(rawLink);
 
                 var originalForeColor = TextPrinter.ForeColor;
                 var originalBackColor = TextPrinter.BackColor;
@@ -135,13 +154,14 @@ namespace Radegast
                     }
                 }
 
-                if (instance.MonoRuntime || instance.GlobalSettings["resolve_uris_as_plaintext"])
+                // If link is not sanitized or settings force plaintext, print as text. Otherwise insert a safe link.
+                if (sanitizedLink == null || instance.MonoRuntime || instance.GlobalSettings["resolve_uris_as_plaintext"])
                 {
                     TextPrinter.PrintText(linkTextInfo.DisplayText);
                 }
                 else
                 {
-                    TextPrinter.InsertLink(linkTextInfo.DisplayText, lineParts[linePartIndex + 1]);
+                    TextPrinter.InsertLink(linkTextInfo.DisplayText, sanitizedLink);
                 }
 
                 TextPrinter.Font = originalFont;
@@ -151,13 +171,200 @@ namespace Radegast
 
             if (linePartIndex != lineParts.Length)
             {
-                TextPrinter.PrintText(lineParts[linePartIndex]);
+                RenderInlineAndPrint(lineParts[linePartIndex], isNewMessage);
             }
 
             if (addNewline)
             {
                 TextPrinter.PrintTextLine("");
             }
+        }
+
+        // Remove basic HTML tags and control characters; limit overall length
+        private string SanitizeText(string input)
+        {
+            if (string.IsNullOrEmpty(input)) return input;
+
+            // Strip basic HTML tags
+            string noHtml = Regex.Replace(input, "<.*?>", string.Empty);
+
+            // Remove non-printable control chars except CR/LF/TAB
+            noHtml = Regex.Replace(noHtml, "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", string.Empty);
+
+            // Trim and limit length to avoid extremely long crafted payloads
+            noHtml = noHtml.Trim();
+            const int MaxLen = 2000;
+            if (noHtml.Length > MaxLen) noHtml = noHtml.Substring(0, MaxLen);
+            return noHtml;
+        }
+
+        // Basic URI sanitization: allow http, https and secondlife schemes; reject javascript/data/file schemes
+        private string SanitizeLinkUri(string uri)
+        {
+            if (string.IsNullOrWhiteSpace(uri)) return null;
+            string trimmed = uri.Trim();
+            string lower = trimmed.ToLowerInvariant();
+
+            // Reject obviously dangerous schemes
+            if (lower.StartsWith("javascript:") || lower.StartsWith("data:") || lower.StartsWith("file:") || lower.StartsWith("vbscript:"))
+            {
+                return null;
+            }
+
+            // Allow secondlife protocol directly
+            if (lower.StartsWith("secondlife:")) return trimmed;
+
+            // Allow http(s)
+            if (lower.StartsWith("http://") || lower.StartsWith("https://"))
+            {
+                if (Uri.TryCreate(trimmed, UriKind.Absolute, out var u))
+                {
+                    return u.AbsoluteUri;
+                }
+                return null;
+            }
+
+            // Support links that start with www. by prepending http://
+            if (Regex.IsMatch(trimmed, "^www\\.", RegexOptions.IgnoreCase))
+            {
+                var candidate = "http://" + trimmed;
+                if (Uri.TryCreate(candidate, UriKind.Absolute, out var u2))
+                {
+                    return u2.AbsoluteUri;
+                }
+                return null;
+            }
+
+            // Otherwise reject unknown schemes
+            return null;
+        }
+
+        private void RenderInlineAndPrint(string text, bool isNewMessage)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            // Replace emoji shortcodes
+            foreach (var kv in EmojiMap)
+            {
+                text = text.Replace(kv.Key, kv.Value);
+            }
+
+            // Handle bold (**text**)
+            var boldRegex = new Regex(@"\*\*(.+?)\*\*");
+            int pos = 0;
+            foreach (Match m in boldRegex.Matches(text))
+            {
+                if (m.Index > pos)
+                {
+                    PrintTextWithMentions(text.Substring(pos, m.Index - pos));
+                }
+                PrintWithFontStyle(m.Groups[1].Value, FontStyle.Bold);
+                pos = m.Index + m.Length;
+            }
+
+            if (pos < text.Length)
+            {
+                var remainder = text.Substring(pos);
+                // Handle italic inside remainder
+                var italicRegex = new Regex(@"\*(.+?)\*");
+                int p2 = 0;
+                foreach (Match mi in italicRegex.Matches(remainder))
+                {
+                    if (mi.Index > p2)
+                    {
+                        PrintTextWithMentions(remainder.Substring(p2, mi.Index - p2));
+                    }
+                    PrintWithFontStyle(mi.Groups[1].Value, FontStyle.Italic);
+                    p2 = mi.Index + mi.Length;
+                }
+
+                if (p2 < remainder.Length)
+                {
+                    PrintTextWithMentions(remainder.Substring(p2));
+                }
+            }
+        }
+
+        private void PrintWithFontStyle(string text, FontStyle style)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            var originalFont = TextPrinter.Font;
+            try
+            {
+                var newFont = new Font(originalFont, style);
+                TextPrinter.Font = newFont;
+                PrintTextWithMentions(text);
+            }
+            catch
+            {
+                // fallback
+                PrintTextWithMentions(text);
+            }
+            finally
+            {
+                TextPrinter.Font = originalFont;
+            }
+        }
+
+        private void PrintTextWithMentions(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+
+            var mentionRegex = new Regex(@"@([\w\-\.]+)", RegexOptions.Compiled);
+            int pos = 0;
+            foreach (Match m in mentionRegex.Matches(text))
+            {
+                if (m.Index > pos)
+                {
+                    TextPrinter.PrintText(text.Substring(pos, m.Index - pos));
+                }
+
+                var mention = m.Groups[1].Value;
+                var originalFore = TextPrinter.ForeColor;
+                var originalBack = TextPrinter.BackColor;
+                var originalFont = TextPrinter.Font;
+
+                bool isMe = IsMentioningMe(mention);
+                var settingName = isMe ? "MentionMe" : "MentionOthers";
+                if (FontSettings.ContainsKey(settingName))
+                {
+                    var fs = FontSettings[settingName];
+                    if (fs.ForeColor != SKColors.Transparent) TextPrinter.ForeColor = fs.ForeColor;
+                    if (fs.BackColor != SKColors.Transparent) TextPrinter.BackColor = fs.BackColor;
+                    if (fs.Font != null) TextPrinter.Font = fs.Font;
+                }
+
+                TextPrinter.PrintText(m.Value);
+
+                TextPrinter.ForeColor = originalFore;
+                TextPrinter.BackColor = originalBack;
+                TextPrinter.Font = originalFont;
+
+                pos = m.Index + m.Length;
+            }
+
+            if (pos < text.Length)
+            {
+                TextPrinter.PrintText(text.Substring(pos));
+            }
+        }
+
+        private bool IsMentioningMe(string mention)
+        {
+            try
+            {
+                var self = instance.Client?.Self?.Name ?? instance.NetCom?.LoginOptions?.FullName ?? string.Empty;
+                if (string.IsNullOrEmpty(self)) return false;
+                var tokens = self.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var t in tokens)
+                {
+                    if (string.Equals(t, mention, StringComparison.OrdinalIgnoreCase)) return true;
+                }
+                // Also handle common aliases like "me"
+                if (string.Equals(mention, "me", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            catch { }
+            return false;
         }
     }
 }
