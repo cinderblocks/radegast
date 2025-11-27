@@ -1577,11 +1577,11 @@ namespace Radegast
                 }
                 catch (TaskCanceledException ex)
                 {
-                    Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                    Logger.Error("Timed out running inventory console background task", ex);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                    Logger.Error("Exception while running inventory console background task", ex);
                 }
 
                 if (uiCallback != null)

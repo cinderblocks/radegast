@@ -1153,11 +1153,11 @@ namespace Radegast
                 }
                 catch (TaskCanceledException ex)
                 {
-                    Logger.LogInstance.Error("Timed out while detaching object from object console", ex);
+                    Logger.Error("Timed out while detaching object from object console", ex);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogInstance.Error("Exception while detaching object from object console", ex);
+                    Logger.Error("Exception while detaching object from object console", ex);
                 }
             });
         }
