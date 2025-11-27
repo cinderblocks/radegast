@@ -231,7 +231,7 @@ namespace Radegast
             if (!queriedDevices)
             {
                 queriedDevices = true;
-                Logger.Log("Voice session started, asking for device info", Helpers.LogLevel.Debug);
+                Logger.Debug("Voice session started, asking for device info");
                 gateway.AuxGetCaptureDevices();
                 gateway.AuxGetRenderDevices();
             }

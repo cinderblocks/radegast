@@ -212,17 +212,17 @@ namespace Radegast.Rendering
             }
             catch (Exception ex)
             {
-                Logger.Log(ex.Message, Helpers.LogLevel.Warning, Client);
+                Logger.Warn(ex.Message, ex, Client);
                 glControl = null;
             }
 
             if (glControl == null)
             {
-                Logger.Log("Failed to initialize OpenGL control, cannot continue", Helpers.LogLevel.Error, Client);
+                Logger.Error("Failed to initialize OpenGL control, cannot continue", Client);
                 return;
             }
 
-            Logger.Log("Initializing OpenGL mode: " + (GLMode == null ? "" : GLMode.ToString()), Helpers.LogLevel.Info);
+            Logger.Info("Initializing OpenGL mode: " + (GLMode == null ? "" : GLMode.ToString()));
 
             glControl.Paint += glControl_Paint;
             glControl.Resize += glControl_Resize;
@@ -336,7 +336,7 @@ namespace Radegast.Rendering
             catch (Exception ex)
             {
                 RenderingEnabled = false;
-                Logger.Log("Failed to initialize OpenGL control", Helpers.LogLevel.Warning, Client, ex);
+                Logger.Warn("Failed to initialize OpenGL control", ex, Client);
             }
         }
         #endregion glControl setup and disposal
@@ -923,7 +923,7 @@ namespace Radegast.Rendering
                             {
                                 if (!success || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out mesh))
                                 {
-                                    Logger.Log("Failed to fetch or decode the mesh asset", Helpers.LogLevel.Warning, Client);
+                                    Logger.Warn("Failed to fetch or decode the mesh asset", Client);
                                 }
                                 else
                                 {
@@ -1055,7 +1055,7 @@ namespace Radegast.Rendering
             }
             catch (Exception e)
             {
-                Logger.Log(e.Message, Helpers.LogLevel.Error, instance.Client, e);
+                Logger.Error(e.Message, e, instance.Client);
                 return false;
             }
         }

@@ -849,7 +849,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log($"Failed to execute link: {link}", Helpers.LogLevel.Error, instance.Client, ex);
+                    Logger.Error($"Failed to execute link: {link}", ex, instance.Client);
                     return false;
                 }
 
@@ -1082,7 +1082,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed to clean the cache directory", Helpers.LogLevel.Warning, ex);
+                    Logger.Warn("Failed to clean the cache directory", ex);
                 }
             });
             instance.Names.CleanCache();

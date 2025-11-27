@@ -40,7 +40,6 @@ namespace Radegast
 
         // UI debounce timer to batch redraws when many updates arrive
         private readonly System.Windows.Forms.Timer uiUpdateTimer;
-        private volatile bool pendingRefresh = false;
 
         private readonly RadegastInstanceForms instance;
         private GridClient client => instance.Client;
@@ -66,7 +65,6 @@ namespace Radegast
             uiUpdateTimer.Tick += (s, a) =>
             {
                 uiUpdateTimer.Stop();
-                pendingRefresh = false;
                 try
                 {
                     lock (Prims)
@@ -184,7 +182,6 @@ namespace Radegast
         private void ScheduleUIRefresh()
         {
             // If already pending, ensure timer is running; timer tick will perform the refresh on UI thread
-            pendingRefresh = true;
             if (!uiUpdateTimer.Enabled)
             {
                 uiUpdateTimer.Start();
@@ -301,16 +298,13 @@ namespace Radegast
 
             if (updated)
             {
-                if (InvokeRequired)
+                // Always marshal redraw asynchronously to avoid re-entrant synchronous recursion
+                if (!IsDisposed && IsHandleCreated)
                 {
                     BeginInvoke(new MethodInvoker(() =>
                     {
                         try { lstPrims.RedrawItems(minIndex, maxIndex, true); } catch { }
                     }));
-                }
-                else
-                {
-                    try { lstPrims.RedrawItems(minIndex, maxIndex, true); } catch { }
                 }
             }
         }

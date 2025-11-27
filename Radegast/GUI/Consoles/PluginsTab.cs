@@ -72,7 +72,7 @@ namespace Radegast
                 var plugin = item.Tag as PluginInfo;
                 if (plugin == null)
                 {
-                    Logger.Log($"ERROR Attempting to unload a null plugin: {item}", Helpers.LogLevel.Warning);
+                    Logger.Warn($"ERROR Attempting to unload a null plugin: {item}");
                     continue;
                 }
 
@@ -123,7 +123,7 @@ namespace Radegast
                 var plugin = item.Tag as PluginInfo;
                 if (plugin == null)
                 {
-                    Logger.Log($"ERROR Attempting to reload a null plugin: {item}", Helpers.LogLevel.Warning);
+                    Logger.Warn($"ERROR Attempting to reload a null plugin: {item}");
                     continue;
                 }
 

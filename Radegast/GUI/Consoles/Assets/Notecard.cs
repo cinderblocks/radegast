@@ -325,7 +325,7 @@ namespace Radegast
             }
             else
             {
-                client.Inventory.RequestUpdateNotecardTask(n.AssetData, notecard.UUID, prim.ID, handler);
+                _ = client.Inventory.RequestUpdateNotecardTaskAsync(n.AssetData, notecard.UUID, prim.ID, handler);
             }
         }
 

@@ -65,7 +65,7 @@ namespace Radegast
                 {
                     if (!seenAnim.Contains(a.AnimationID))
                     {
-                        Logger.Log("New anim for " + av.Name + ": " + a.AnimationID, Helpers.LogLevel.Debug);
+                        Logger.Debug($"New anim for {av.Name}: {a.AnimationID}");
                         seenAnim.Add(a.AnimationID);
                         AnimDetail ad = new AnimDetail(instance, av, a.AnimationID, n);
                         ad.Location = new Point(0, n++ * ad.Height);

@@ -361,14 +361,14 @@ namespace Radegast.Rendering
                         }
                         catch (Exception ex)
                         {
-                            Logger.Log("MakeCurrent failed during dispose: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                            Logger.Debug($"MakeCurrent failed during dispose: {ex.Message}", ex, Client);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     // Log any unexpected state access
-                    Logger.Log("Unexpected GL control state during dispose: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                    Logger.Debug("Unexpected GL control state during dispose: {ex.Message}", ex, Client);
                 }
 
                 try { glControl.Dispose(); } catch { }
@@ -386,7 +386,7 @@ namespace Radegast.Rendering
 
                 if (textureContext != null)
                 {
-                    try { textureContext.Dispose(); } catch (Exception ex) { Logger.Log("Failed disposing textureContext: " + ex.Message, Helpers.LogLevel.Debug, Client, ex); }
+                    try { textureContext.Dispose(); } catch (Exception ex) { Logger.Debug("Failed disposing textureContext: " + ex.Message, ex); }
                     textureContext = null;
                 }
                 sharedWindowInfo = null;
@@ -691,17 +691,17 @@ namespace Radegast.Rendering
             }
             catch (Exception ex)
             {
-                Logger.Log(ex.Message, Helpers.LogLevel.Warning, Client);
+                Logger.Warn(ex.Message, Client);
                 glControl = null;
             }
 
             if (glControl == null)
             {
-                Logger.Log("Failed to initialize OpenGL control, cannot continue", Helpers.LogLevel.Error, Client);
+                Logger.Error("Failed to initialize OpenGL control, cannot continue", Client);
                 return;
             }
 
-            Logger.Log("Initializing OpenGL mode: " + GLMode, Helpers.LogLevel.Info);
+            Logger.Info($"Initializing OpenGL mode: {GLMode}");
 
             glControl.Paint += glControl_Paint;
             glControl.Resize += glControl_Resize;
@@ -913,7 +913,7 @@ namespace Radegast.Rendering
                         textureContext = created as IGraphicsContext;
                         if (textureContext == null)
                         {
-                            Logger.Log("No compatible GraphicsContext constructor found or creation failed on texture thread", Helpers.LogLevel.Debug, Client);
+                            Logger.Debug("No compatible GraphicsContext constructor found or creation failed on texture thread", Client);
                         }
                         else
                         {
@@ -923,7 +923,7 @@ namespace Radegast.Rendering
                             }
                             catch (Exception ex)
                             {
-                                Logger.Log("Failed to make worker context current: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                                Logger.Debug("Failed to make worker context current: " + ex.Message, ex);
                                 try { textureContext.MakeCurrent(null); } catch { }
                                 textureContext = null;
                             }
@@ -932,7 +932,7 @@ namespace Radegast.Rendering
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed to prepare shared texture context: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                    Logger.Debug("Failed to prepare shared texture context: " + ex.Message, ex);
                     textureContext = null;
                     sharedWindowInfo = null;
                 }
@@ -955,7 +955,7 @@ namespace Radegast.Rendering
             catch (Exception ex)
             {
                 RenderingEnabled = false;
-                Logger.Log("Failed to initialize OpenGL control", Helpers.LogLevel.Warning, Client, ex);
+                Logger.Warn("Failed to initialize OpenGL control", ex, Client);
             }
         }
 
@@ -1402,7 +1402,7 @@ namespace Radegast.Rendering
                     textureContext = created as IGraphicsContext;
                     if (textureContext == null)
                     {
-                        Logger.Log("No compatible GraphicsContext constructor found or creation failed on texture thread", Helpers.LogLevel.Debug, Client);
+                        Logger.Debug("No compatible GraphicsContext constructor found or creation failed on texture thread");
                     }
                     else
                     {
@@ -1412,7 +1412,7 @@ namespace Radegast.Rendering
                         }
                         catch (Exception ex)
                         {
-                            Logger.Log("Failed to make worker context current: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                            Logger.Debug("Failed to make worker context current: " + ex.Message, ex);
                             try { textureContext.MakeCurrent(null); } catch { }
                             textureContext = null;
                         }
@@ -1421,7 +1421,7 @@ namespace Radegast.Rendering
             }
             catch (Exception ex)
             {
-                Logger.Log("Unexpected exception creating worker context: " + ex.Message, Helpers.LogLevel.Debug, Client, ex);
+                Logger.Debug("Unexpected exception creating worker context: " + ex.Message, ex);
                 textureContext = null;
                 sharedWindowInfo = null;
             }
@@ -1521,7 +1521,7 @@ namespace Radegast.Rendering
                             }
                             catch (Exception ex)
                             {
-                                Logger.Log("Texture thread GL upload failed, falling back to UI thread: " + ex.Message, Helpers.LogLevel.Warning, Client, ex);
+                                Logger.Warn($"Texture thread GL upload failed, falling back to UI thread: {ex.Message}", ex, Client);
                                 if (instance.MainForm.IsHandleCreated)
                                 {
                                     instance.MainForm.BeginInvoke(new MethodInvoker(() =>
@@ -1584,13 +1584,13 @@ namespace Radegast.Rendering
                     task.Invoke();
                 }
             }
-            catch (ObjectDisposedException e)
+            catch (ObjectDisposedException)
             {
-                Logger.Log("GenericTaskRunner was cancelled", Helpers.LogLevel.Debug, e);
+                Logger.Debug("GenericTaskRunner was cancelled");
             }
-            catch (OperationCanceledException e)
+            catch (OperationCanceledException)
             {
-                Logger.Log("GenericTaskRunner was cancelled", Helpers.LogLevel.Debug, e);
+                Logger.Debug("GenericTaskRunner was cancelled");
             }
 
             Logger.DebugLog("Generic task thread exited");
@@ -2101,12 +2101,12 @@ namespace Radegast.Rendering
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"Failure in skel.addanimation: {ex.Message}", Helpers.LogLevel.Error);
+                        Logger.Error($"Failure in skel.addanimation: {ex.Message}", ex);
                     }
                     continue;
                 }
 
-                Logger.Log($"Requesting new animation asset {anim.AnimationID}", Helpers.LogLevel.Debug);
+                Logger.Debug($"Requesting new animation asset {anim.AnimationID}");
 
                 Client.Assets.RequestAsset(anim.AnimationID, AssetType.Animation, false, SourceType.Asset, tid, AnimReceivedCallback);
             }
@@ -3338,7 +3338,7 @@ namespace Radegast.Rendering
                         {
                             if (!success || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, RenderSettings.MeshRenderDetail, out mesh))
                             {
-                                Logger.Log("Failed to fetch or decode the mesh asset", Helpers.LogLevel.Warning, Client);
+                                Logger.Warn("Failed to fetch or decode the mesh asset", Client);
                             }
                             gotMesh.Set();
                         });
@@ -3438,9 +3438,9 @@ namespace Radegast.Rendering
                 texture = img;
                 return true;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                Logger.Log(e.Message, Helpers.LogLevel.Error, instance.Client, e);
+                Logger.Error(ex.Message, ex, instance.Client);
                 return false;
             }
         }

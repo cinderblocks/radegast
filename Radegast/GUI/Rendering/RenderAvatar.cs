@@ -1270,17 +1270,17 @@ namespace Radegast.Rendering
             {
                 b = new BinBVHAnimationReader(asset.AssetData);
                 mAnimationCache[asset.AssetID] = b;
-                Logger.Log($"Adding new decoded animaton known animations {asset.AssetID}", Helpers.LogLevel.Debug);
+                Logger.Debug($"Adding new decoded animation known animations {asset.AssetID}");
             }
 
-            if (!av.glavatar.skel.mAnimationsWrapper.ContainsKey(animKey))
+            if (!av.glavatar.skel.mAnimationsWrapper.TryGetValue(animKey, out var anim))
             {
-                Logger.Log($"Animation {animKey} is not in mAnimationsWrapper! ", Helpers.LogLevel.Warning);
+                Logger.Warn($"Animation {animKey} is not in mAnimationsWrapper! ");
                 return;
             }
 
             // This sets the anim in the wrapper class;
-            av.glavatar.skel.mAnimationsWrapper[animKey].anim = b;
+            anim.anim = b;
 
             int pos = 0;
             foreach (binBVHJoint joint in b.joints)
@@ -1808,7 +1808,7 @@ namespace Radegast.Rendering
             lock (mBones) mBones.Add(b.name, b);
             mIndexedBones.Add(boneaddindex++, b);
 
-            Logger.Log($"Found bone {b.name}", Helpers.LogLevel.Debug);
+            Logger.Debug($"Found bone {b.name}");
 
             foreach (XmlNode childbone in bone.ChildNodes)
             {
@@ -2181,7 +2181,7 @@ namespace Radegast.Rendering
                 }
                 else
                 {
-                    Logger.Log($"Warning duplicate tweakable parameter ID {count} {Name}", Helpers.LogLevel.Warning);
+                    Logger.Warn($"Warning duplicate tweakable parameter ID {count} {Name}");
                 }
                 count++;
             }

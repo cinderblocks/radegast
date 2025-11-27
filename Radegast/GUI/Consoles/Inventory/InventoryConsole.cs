@@ -1617,7 +1617,7 @@ namespace Radegast
                         catch (OperationCanceledException) { }
                         catch (Exception ex)
                         {
-                            Logger.Log("Error fetching folder: " + ex.Message, Helpers.LogLevel.Error, Client);
+                            Logger.Error($"Error fetching folder: {ex.Message}", Client);
                         }
                         break;
 
@@ -2262,7 +2262,7 @@ namespace Radegast
                      if (invTree.SelectedNode.Tag is InventoryFolder folder)
                      {
                         // Start async fetch but don't block UI thread
-                        FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
+                        _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
                      }
 
                      break;

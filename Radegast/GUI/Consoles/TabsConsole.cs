@@ -363,7 +363,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed executing automation action: " + ex, Helpers.LogLevel.Warning);
+                Logger.Warn("Failed executing automation action", ex);
             }
 
             switch (e.IM.Dialog)
@@ -869,7 +869,7 @@ namespace Radegast
             // fire in the wrong order
             if (TabExists(name))
             {
-                Logger.Log("Force closing tab '" + name + "'", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Force closing tab '{name}'", client);
                 ForceCloseTab(name);
             }
 

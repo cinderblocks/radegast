@@ -37,9 +37,12 @@ namespace Radegast
 
         public override string ToString()
         {
-            return Exception != null 
-                ? $"{TimeStamp:o} [{Level}] {Message} - {Exception}" 
-                : $"{TimeStamp:o} [{Level}] {Message}";
+            // Include category/scope in brackets followed by level
+            if (Exception != null)
+            {
+                return $"{TimeStamp:o} [{Category}] [{Level}] {Message} - {Exception}";
+            }
+            return $"{TimeStamp:o} [{Category}] [{Level}] {Message}";
         }
     }
 
@@ -133,7 +136,10 @@ namespace Radegast
                 if (m_Log != null)
                     OnLog(typeof(RadegastAppender), new LogEventArgs(entry));
 
+                // Print time, then category in brackets, then level in brackets
                 Console.Write("{0:HH:mm:ss} [", entry.TimeStamp);
+                WriteColorText(ConsoleColor.Cyan, entry.Category ?? "");
+                Console.Write("] [");
                 WriteColorText(DeriveColor(entry.Level), entry.Level.ToString());
                 Console.Write("]: - ");
 

@@ -101,7 +101,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log($"ERROR scanning and loading plugins: {ex}", Helpers.LogLevel.Warning);
+                Logger.Warn($"Error scanning and loading plugins", ex);
             }
         }
 

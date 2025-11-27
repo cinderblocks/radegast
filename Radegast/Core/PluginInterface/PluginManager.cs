@@ -144,7 +144,7 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"ERROR unloading plugin: {plugin} because {ex}", Helpers.LogLevel.Warning, ex);
+                        Logger.Warn($"ERROR unloading plugin {plugin}: {ex.Message}", ex);
                     }
                 }
             }
@@ -167,7 +167,7 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"ERROR stopping plugin: {pluginToUnload} because {ex}", Helpers.LogLevel.Warning, ex);
+                        Logger.Warn($"Error stopping plugin {pluginToUnload}: {ex.Message}", ex);
                     }
                     Plugins.Remove(pluginToUnload);
                 }
@@ -206,7 +206,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log($"ERROR unable to load plugin: {pluginPath} because {ex}", Helpers.LogLevel.Warning);
+                Logger.Warn($"Error unable to load plugin {pluginPath}: {ex.Message}", ex);
             }
 
             StartPlugins(newPlugins);
@@ -230,7 +230,7 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"ERROR in Starting Radegast Plugin: {newPlugin} because {ex}", Helpers.LogLevel.Warning);
+                        Logger.Warn($"Error starting Plugin {newPlugin}: {ex.Message}", ex);
                     }
                     Plugins.Add(newPlugin);
                 }
@@ -396,7 +396,7 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"Cannot load {type.Name} from {pluginAssembly.FullName} because: {ex}", Helpers.LogLevel.Warning);
+                        Logger.Warn($"Cannot load {type.Name} from {pluginAssembly.FullName}: {ex.Message}", ex);
                     }
                 }
                 else
