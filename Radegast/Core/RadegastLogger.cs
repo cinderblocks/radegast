@@ -164,6 +164,19 @@ namespace Radegast
 
                 Console.WriteLine();
 
+                // Also write a structured line to Debug output so IDEs (Visual Studio) show logs in Debug pane
+                try
+                {
+                    string dbgMsg =
+                        $"{entry.TimeStamp:HH:mm:ss.fff} [{entry.Level}] {entry.Message ?? ""}";
+                    if (entry.Exception != null)
+                    {
+                        dbgMsg += " - " + entry.Exception;
+                    }
+                    System.Diagnostics.Debug.WriteLine(dbgMsg);
+                }
+                catch { }
+
                 if (RadegastInstanceForms.Initialized
                     && RadegastInstanceForms.Instance.GlobalLogFile != null
                     && (!RadegastInstanceForms.Instance.GlobalSettings.ContainsKey("log_to_file")
