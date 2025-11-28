@@ -122,7 +122,7 @@ namespace Radegast
             // Build out logger and set it for Radegast/LibreMetaverse
             LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
             {
-                builder.SetMinimumLevel(LogLevel.Information);
+                builder.SetMinimumLevel(LogLevel.Debug);
                 builder.AddProvider(new RadegastAppender());
             });
             Logger.SetLoggerFactory(LoggerFactory, "Radegast");
