@@ -680,13 +680,13 @@
       <DependentUpon>PrimWorkshop.cs</DependentUpon>
       <SubType>DesignerType</SubType>
     </EmbeddedResource>
-    <Compile Update="GUI\Rendering\Rendering.Designer.cs">
-      <DependentUpon>Rendering.cs</DependentUpon>
+    <Compile Update="GUI\Rendering\SceneWindow.Designer.cs">
+      <DependentUpon>SceneWindow.cs</DependentUpon>
       <SubType>Dependency</SubType>
     </Compile>
-    <Compile Update="GUI\Rendering\Rendering.cs" />
-    <EmbeddedResource Update="GUI\Rendering\Rendering.resx">
-      <DependentUpon>Rendering.cs</DependentUpon>
+    <Compile Update="GUI\Rendering\SceneWindow.cs" />
+    <EmbeddedResource Update="GUI\Rendering\SceneWindow.resx">
+      <DependentUpon>SceneWindow.cs</DependentUpon>
       <SubType>DesignerType</SubType>
     </EmbeddedResource>
     <Compile Update="GUI\Rendering\Water.cs" />
