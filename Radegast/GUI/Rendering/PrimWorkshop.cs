@@ -207,6 +207,10 @@ namespace Radegast.Rendering
         private Thread textureThread;
         private volatile bool textureThreadRunning = false;
 
+        // Shader Management
+        private ShaderManager shaderManager;
+        private bool shadersAvailable = false;
+
         #endregion Private fields
 
         #region Construction and disposal
@@ -310,6 +314,19 @@ namespace Radegast.Rendering
                     Logger.Debug($"Error disposing textRendering: {ex.Message}", Client);
                 }
                 textRendering = null;
+            }
+
+            if (shaderManager != null)
+            {
+                try
+                {
+                    shaderManager.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error disposing shader manager: {ex.Message}", Client);
+                }
+                shaderManager = null;
             }
         }
 
@@ -546,6 +563,9 @@ namespace Radegast.Rendering
                 // Shiny
                 RenderSettings.EnableShiny = Instance.GlobalSettings["scene_viewer_shiny"];
                 #endregion Compatibility checks
+
+                // Initialize shader manager if shaders are supported
+                InitializeShaders();
 
                 RenderingEnabled = true;
                 // Call the resizing function which sets up the GL drawing window
@@ -1339,6 +1359,44 @@ namespace Radegast.Rendering
                 // Control already disposed
             }
         }
+
+        /// <summary>
+        /// Initialize shader manager and load available shaders
+        /// </summary>
+        private void InitializeShaders()
+        {
+            if (!RenderSettings.HasShaders)
+            {
+                shadersAvailable = false;
+                return;
+            }
+
+            try
+            {
+                shaderManager = new ShaderManager();
+                shadersAvailable = shaderManager.Initialize();
+
+                if (shadersAvailable)
+                {
+                    Logger.Debug("Shader system initialized successfully");
+                }
+                else
+                {
+                    Logger.Debug("Shader system available but no shaders loaded");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to initialize shader system: {ex.Message}");
+                shadersAvailable = false;
+
+                if (shaderManager != null)
+                {
+                    shaderManager.Dispose();
+                    shaderManager = null;
+                }
+            }
+        }
         #endregion Private methods (the meat)
 
         #region Form controls handlers
@@ -1474,8 +1532,281 @@ namespace Radegast.Rendering
             Close();
         }
         #endregion Context menu
-
-
-
     }
+
+    #region Shader Management
+
+    /// <summary>
+    /// Manages shader programs for the object viewer
+    /// </summary>
+    public class ShaderManager : IDisposable
+    {
+        private readonly Dictionary<string, ShaderProgram> programs = new Dictionary<string, ShaderProgram>();
+        private string activeShader = null;
+        private bool disposed = false;
+
+        /// <summary>
+        /// Initialize and load all available shaders
+        /// </summary>
+        public bool Initialize()
+        {
+            if (!RenderSettings.HasShaders)
+            {
+                Logger.Debug("Shaders not supported, skipping shader initialization");
+                return false;
+            }
+
+            try
+            {
+                // Get the shader directory path
+                string shaderDir = GetShaderDirectory();
+                if (!System.IO.Directory.Exists(shaderDir))
+                {
+                    Logger.Warn($"Shader directory not found: {shaderDir}");
+                    return false;
+                }
+
+                Logger.Debug($"Shader directory: {shaderDir}");
+
+                // Try to load basic shiny shader if enabled
+                if (RenderSettings.EnableShiny)
+                {
+                    LoadShader("shiny", "shiny.vert", "shiny.frag");
+                }
+
+                Logger.Info($"Shader manager initialized with {programs.Count} shader(s)");
+                return programs.Count > 0;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to initialize shaders: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Get the shader directory path
+        /// </summary>
+        private static string GetShaderDirectory()
+        {
+            // Try application base directory first
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string shaderDir = System.IO.Path.Combine(baseDir, "shader_data");
+            
+            if (System.IO.Directory.Exists(shaderDir))
+            {
+                return shaderDir;
+            }
+
+            // Try current directory as fallback
+            shaderDir = System.IO.Path.Combine(Environment.CurrentDirectory, "shader_data");
+            if (System.IO.Directory.Exists(shaderDir))
+            {
+                return shaderDir;
+            }
+
+            // Try parent directory (for when running from bin\Debug or bin\Release)
+            string parentDir = System.IO.Directory.GetParent(baseDir)?.FullName;
+            if (parentDir != null)
+            {
+                shaderDir = System.IO.Path.Combine(parentDir, "shader_data");
+                if (System.IO.Directory.Exists(shaderDir))
+                {
+                    return shaderDir;
+                }
+
+                // Try going up one more level
+                string grandParentDir = System.IO.Directory.GetParent(parentDir)?.FullName;
+                if (grandParentDir != null)
+                {
+                    shaderDir = System.IO.Path.Combine(grandParentDir, "shader_data");
+                    if (System.IO.Directory.Exists(shaderDir))
+                    {
+                        return shaderDir;
+                    }
+                }
+            }
+
+            // Return the expected path even if it doesn't exist
+            return System.IO.Path.Combine(baseDir, "shader_data");
+        }
+
+        /// <summary>
+        /// Load a shader program
+        /// </summary>
+        private bool LoadShader(string name, params string[] shaderFiles)
+        {
+            if (!RenderSettings.HasShaders) return false;
+
+            try
+            {
+                string shaderDir = GetShaderDirectory();
+                
+                // Check if all shader files exist
+                foreach (var shaderFile in shaderFiles)
+                {
+                    string fullPath = System.IO.Path.Combine(shaderDir, shaderFile);
+                    if (!System.IO.File.Exists(fullPath))
+                    {
+                        Logger.Debug($"Shader file not found: {fullPath}");
+                        return false;
+                    }
+                }
+
+                var program = new ShaderProgram();
+                
+                // Pass full paths to the shader program
+                var fullPaths = shaderFiles.Select(f => System.IO.Path.Combine(shaderDir, f)).ToArray();
+                
+                if (program.Load(fullPaths))
+                {
+                    programs[name] = program;
+                    Logger.Debug($"Loaded shader program: {name}");
+                    return true;
+                }
+                else
+                {
+                    program.Dispose();
+                    Logger.Debug($"Failed to load shader program: {name}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Error loading shader {name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Start using a specific shader program
+        /// </summary>
+        public bool StartShader(string name)
+        {
+            if (!RenderSettings.HasShaders || disposed) return false;
+
+            if (programs.TryGetValue(name, out var program))
+            {
+                try
+                {
+                    program.Start();
+                    activeShader = name;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error starting shader {name}: {ex.Message}");
+                    return false;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Stop using shaders and return to fixed-function pipeline
+        /// </summary>
+        public void StopShader()
+        {
+            if (!RenderSettings.HasShaders || disposed) return;
+
+            try
+            {
+                ShaderProgram.Stop();
+                activeShader = null;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Error stopping shader: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Get a shader program by name
+        /// </summary>
+        public ShaderProgram GetProgram(string name)
+        {
+            return programs.TryGetValue(name, out var program) ? program : null;
+        }
+
+        /// <summary>
+        /// Check if a shader is currently active
+        /// </summary>
+        public bool IsShaderActive => !string.IsNullOrEmpty(activeShader);
+
+        /// <summary>
+        /// Get the name of the currently active shader
+        /// </summary>
+        public string ActiveShaderName => activeShader;
+
+        /// <summary>
+        /// Check if shaders are available
+        /// </summary>
+        public bool HasShaders => RenderSettings.HasShaders && programs.Count > 0;
+
+        /// <summary>
+        /// Set a uniform value for the active shader
+        /// </summary>
+        public bool SetUniform(string name, float value)
+        {
+            if (!IsShaderActive || !programs.TryGetValue(activeShader, out var program))
+                return false;
+
+            try
+            {
+                program.SetUniform1(name, value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Error setting uniform {name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Set a uniform value for the active shader
+        /// </summary>
+        public bool SetUniform(string name, int value)
+        {
+            if (!IsShaderActive || !programs.TryGetValue(activeShader, out var program))
+                return false;
+
+            try
+            {
+                program.SetUniform1(name, value);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Error setting uniform {name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        public void Dispose()
+        {
+            if (disposed) return;
+
+            disposed = true;
+
+            StopShader();
+
+            foreach (var program in programs.Values)
+            {
+                try
+                {
+                    program?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error disposing shader program: {ex.Message}");
+                }
+            }
+
+            programs.Clear();
+        }
+    }
+
+    #endregion Shader Management
 }
