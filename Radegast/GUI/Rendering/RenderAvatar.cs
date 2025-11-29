@@ -2388,35 +2388,62 @@ namespace Radegast.Rendering
 
         public void UpdateSize()
         {
+            // Check if skeleton has all required bones loaded before calculating size
+            if (glavatar.skel.mBones.Count < 10)
+            {
+                // Skeleton not fully loaded yet, use default values
+                Height = 2.0f;
+                PelvisToFoot = 1.0f;
+                return;
+            }
+
             float F_SQRT2 = 1.4142135623730950488016887242097f;
 
-            Vector3 pelvis_scale = glavatar.skel.mBones["mPelvis"].scale;
+            // Safely retrieve bones with defensive checks
+            if (!glavatar.skel.mBones.TryGetValue("mPelvis", out var pelvisBone) ||
+                !glavatar.skel.mBones.TryGetValue("mSkull", out var skullBone) ||
+                !glavatar.skel.mBones.TryGetValue("mNeck", out var neckBone) ||
+                !glavatar.skel.mBones.TryGetValue("mChest", out var chestBone) ||
+                !glavatar.skel.mBones.TryGetValue("mHead", out var headBone) ||
+                !glavatar.skel.mBones.TryGetValue("mTorso", out var torsoBone) ||
+                !glavatar.skel.mBones.TryGetValue("mHipLeft", out var hipBone) ||
+                !glavatar.skel.mBones.TryGetValue("mKneeLeft", out var kneeBone) ||
+                !glavatar.skel.mBones.TryGetValue("mAnkleLeft", out var ankleBone) ||
+                !glavatar.skel.mBones.TryGetValue("mFootLeft", out var footBone))
+            {
+                // One or more required bones are missing, use default values
+                Height = 2.0f;
+                PelvisToFoot = 1.0f;
+                return;
+            }
 
-            Vector3 skull = glavatar.skel.mBones["mSkull"].pos;
-            Vector3 skull_scale = glavatar.skel.mBones["mSkull"].scale;
+            Vector3 pelvis_scale = pelvisBone.scale;
 
-            Vector3 neck = glavatar.skel.mBones["mNeck"].pos;
-            Vector3 neck_scale = glavatar.skel.mBones["mNeck"].scale;
+            Vector3 skull = skullBone.pos;
+            Vector3 skull_scale = skullBone.scale;
 
-            Vector3 chest = glavatar.skel.mBones["mChest"].pos;
-            Vector3 chest_scale = glavatar.skel.mBones["mChest"].scale;
+            Vector3 neck = neckBone.pos;
+            Vector3 neck_scale = neckBone.scale;
 
-            Vector3 head = glavatar.skel.mBones["mHead"].pos;
-            Vector3 head_scale = glavatar.skel.mBones["mHead"].scale;
+            Vector3 chest = chestBone.pos;
+            Vector3 chest_scale = chestBone.scale;
 
-            Vector3 torso = glavatar.skel.mBones["mTorso"].pos;
-            Vector3 torso_scale = glavatar.skel.mBones["mTorso"].scale;
+            Vector3 head = headBone.pos;
+            Vector3 head_scale = headBone.scale;
 
-            Vector3 hip = glavatar.skel.mBones["mHipLeft"].pos;
-            Vector3 hip_scale = glavatar.skel.mBones["mHipLeft"].scale;
+            Vector3 torso = torsoBone.pos;
+            Vector3 torso_scale = torsoBone.scale;
 
-            Vector3 knee = glavatar.skel.mBones["mKneeLeft"].pos;
-            Vector3 knee_scale = glavatar.skel.mBones["mKneeLeft"].scale;
+            Vector3 hip = hipBone.pos;
+            Vector3 hip_scale = hipBone.scale;
 
-            Vector3 ankle = glavatar.skel.mBones["mAnkleLeft"].pos;
-            Vector3 ankle_scale = glavatar.skel.mBones["mAnkleLeft"].scale;
+            Vector3 knee = kneeBone.pos;
+            Vector3 knee_scale = kneeBone.scale;
 
-            Vector3 foot = glavatar.skel.mBones["mFootLeft"].pos;
+            Vector3 ankle = ankleBone.pos;
+            Vector3 ankle_scale = ankleBone.scale;
+
+            Vector3 foot = footBone.pos;
 
             // mAvatarOffset.Z = getVisualParamWeight(11001);
 
