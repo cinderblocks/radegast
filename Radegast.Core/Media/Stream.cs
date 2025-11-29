@@ -21,6 +21,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Threading.Tasks;
 using FMOD;
 using OpenMetaverse;
 
@@ -66,14 +67,38 @@ namespace Radegast.Media
 
         public void StopStream()
         {
+            // Preserve synchronous behavior for callers by waiting for async cleanup to finish
+            try
+            {
+                StopStreamAsync(true).GetAwaiter().GetResult();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Asynchronous stop implementation. When 'blocking' is true the returned Task will complete
+        /// after the FMOD resources have been released inside the invoke callback.
+        /// </summary>
+        /// <param name="blocking">If true, waits for cleanup to finish</param>
+        /// <returns></returns>
+        public async Task StopStreamAsync(bool blocking = false)
+        {
             if (updateTimer != null)
             {
-                updateTimer.Dispose();
+                try
+                {
+                    updateTimer.Dispose();
+                }
+                catch { }
+
                 updateTimer = null;
             }
 
             if (!channel.hasHandle()) return;
-            ManualResetEvent stopped = new ManualResetEvent(false);
+
+            TaskCompletionSource<bool> tcs = null;
+            if (blocking) tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
             invoke(delegate
             {
                 try
@@ -85,9 +110,17 @@ namespace Radegast.Media
                     sound.clearHandle();
                 }
                 catch { }
-                stopped.Set();
+
+                if (blocking)
+                {
+                    try { tcs.TrySetResult(true); } catch { }
+                }
             });
-            stopped.WaitOne();
+
+            if (blocking && tcs != null)
+            {
+                await tcs.Task.ConfigureAwait(false);
+            }
         }
 
         /// <summary>
@@ -135,7 +168,6 @@ namespace Radegast.Media
                 }
             });
         }
-
 
         private void Update(object sender)
         {

@@ -25,6 +25,7 @@ using System.Xml;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using CoreJ2K;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
@@ -230,21 +231,40 @@ namespace Radegast
 
                 try
                 {
-                    AutoResetEvent gotImage = new AutoResetEvent(false);
+                    var tcs = new TaskCompletionSource<(byte[] jpeg, SKBitmap bmp)>();
+
                     Client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
                     {
-                        if (state == TextureRequestState.Finished && asset != null)
+                        try
                         {
-                            jpegData = asset.AssetData;
-                            bitmap = J2kImage.FromBytes(jpegData).As<SKBitmap>();
-                            gotImage.Set();
+                            if (state == TextureRequestState.Finished && asset != null)
+                            {
+                                var data = asset.AssetData;
+                                SKBitmap bmp = null;
+                                try { bmp = J2kImage.FromBytes(data).As<SKBitmap>(); } catch { bmp = null; }
+                                tcs.TrySetResult((data, bmp));
+                                return;
+                            }
+
+                            if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
+                            {
+                                tcs.TrySetResult((null, null));
+                            }
                         }
-                        else if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
+                        catch (Exception ex)
                         {
-                            gotImage.Set();
+                            tcs.TrySetResult((null, null));
                         }
                     });
-                    gotImage.WaitOne(120 * 1000, false);
+
+                    // Wait synchronously up to timeout
+                    var completed = Task.WhenAny(tcs.Task, Task.Delay(120 * 1000)).GetAwaiter().GetResult();
+                    if (completed == tcs.Task)
+                    {
+                        var res = tcs.Task.GetAwaiter().GetResult();
+                        jpegData = res.jpeg;
+                        bitmap = res.bmp;
+                    }
 
                     if (bitmap != null)
                     {
@@ -358,44 +378,68 @@ namespace Radegast
             }
             else
             {
-                var gotMesh = new System.Threading.AutoResetEvent(false);
+                var tcs = new TaskCompletionSource<FacetedMesh>();
 
                 Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
                 {
-                    if (!success || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out mesh))
+                    try
                     {
-                        Logger.Log("Failed to fetch or decode the mesh asset", Helpers.LogLevel.Warning, Client);
+                        FacetedMesh localMesh = null;
+                        if (success && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out localMesh))
+                        {
+                            tcs.TrySetResult(localMesh);
+                        }
+                        else
+                        {
+                            tcs.TrySetResult(null);
+                        }
                     }
-                    gotMesh.Set();
+                    catch
+                    {
+                        tcs.TrySetResult(null);
+                    }
                 });
 
-                gotMesh.WaitOne(20 * 1000, false);
+                var completed = Task.WhenAny(tcs.Task, Task.Delay(20 * 1000)).GetAwaiter().GetResult();
+                if (completed == tcs.Task)
+                {
+                    mesh = tcs.Task.GetAwaiter().GetResult();
+                }
             }
             return mesh;
         }
 
         private bool LoadTexture(UUID textureID, ref SKBitmap texture, bool removeAlpha)
         {
-            var gotImage = new System.Threading.ManualResetEvent(false);
+            var tcs = new TaskCompletionSource<SKBitmap>();
             SKBitmap img = null;
 
             try
             {
-                gotImage.Reset();
                 Client.Assets.RequestImage(textureID, (state, assetTexture) =>
                 {
-                    if (state == TextureRequestState.Finished)
+                    try
                     {
-                        img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>();
+                        if (state == TextureRequestState.Finished && assetTexture != null)
+                        {
+                            try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
+                        }
                     }
-                    gotImage.Set();
+                    finally
+                    {
+                        tcs.TrySetResult(img);
+                    }
                 });
-                gotImage.WaitOne(30 * 1000, false);
 
-                if (img != null)
+                var completed = Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).GetAwaiter().GetResult();
+                if (completed == tcs.Task)
                 {
-                    texture = img;
-                    return true;
+                    var res = tcs.Task.GetAwaiter().GetResult();
+                    if (res != null)
+                    {
+                        texture = res;
+                        return true;
+                    }
                 }
                 return false;
             }

@@ -19,15 +19,15 @@
  */
 
 using System;
-using System.Threading;
 using System.Text;
 using OpenMetaverse;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace Radegast.Commands
 {
     public sealed class ParcelInfoCommand : RadegastCommand
     {
-        private readonly ManualResetEvent ParcelsDownloaded = new ManualResetEvent(false);
         private readonly RadegastInstanceForms instance;
 
         public ParcelInfoCommand(IRadegastInstance instance)
@@ -38,61 +38,97 @@ namespace Radegast.Commands
             Usage = Name;
 
             this.instance = (RadegastInstanceForms)instance;
-            this.instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
         }
 
         public override void Dispose()
         {
             base.Dispose();
-            instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
         }
 
         public override void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)
         {
-            StringBuilder sb = new StringBuilder();
-            string result;
-
-            EventHandler<SimParcelsDownloadedEventArgs> del = delegate(object sender, SimParcelsDownloadedEventArgs e)
+            // Run the long-running network request asynchronously so we don't block the UI thread
+            _ = Task.Run(async () =>
             {
-                ParcelsDownloaded.Set();
-            };
+                StringBuilder sb = new StringBuilder();
 
-            instance.MainForm.PreventParcelUpdate = true;
+                EventHandler<SimParcelsDownloadedEventArgs> del = null;
+                var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            ParcelsDownloaded.Reset();
-            Client.Parcels.SimParcelsDownloaded += del;
-            Client.Parcels.RequestAllSimParcels(Client.Network.CurrentSim, true, TimeSpan.FromMilliseconds(750));
-
-            if (Client.Network.CurrentSim.IsParcelMapFull())
-                ParcelsDownloaded.Set();
-
-            if (ParcelsDownloaded.WaitOne(30000, false) && Client.Network.Connected)
-            {
-                sb.AppendFormat("Downloaded {0} Parcels in {1} " + Environment.NewLine,
-                    Client.Network.CurrentSim.Parcels.Count, Client.Network.CurrentSim.Name);
-
-                Client.Network.CurrentSim.Parcels.ForEach(delegate(Parcel parcel)
+                try
                 {
-                    sb.AppendFormat("Parcel[{0}]: Name: \"{1}\", Description: \"{2}\" ACLBlacklist Count: {3}, ACLWhiteList Count: {5} Traffic: {4}" + Environment.NewLine,
-                        parcel.LocalID, parcel.Name, parcel.Desc, parcel.AccessBlackList.Count, parcel.Dwell, parcel.AccessWhiteList.Count);
-                });
+                    instance.MainForm.PreventParcelUpdate = true;
 
-                result = sb.ToString();
-            }
-            else
-                result = "Failed to retrieve information on all the simulator parcels";
+                    del = (object sender, SimParcelsDownloadedEventArgs e) =>
+                    {
+                        // signal completion
+                        tcs.TrySetResult(true);
+                    };
 
-            Client.Parcels.SimParcelsDownloaded -= del;
+                    Client.Parcels.SimParcelsDownloaded += del;
 
-            Thread.Sleep(2000);
-            instance.MainForm.PreventParcelUpdate = false;
+                    await Client.Parcels.RequestAllSimParcelsAsync(Client.Network.CurrentSim, true, TimeSpan.FromMilliseconds(750));
 
-            WriteLine("Parcel Infro results:\n{0}", result);
-        }
+                    if (Client.Network.CurrentSim.IsParcelMapFull())
+                        tcs.TrySetResult(true);
 
-        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
-        {
-            ParcelsDownloaded.Set();
+                    // Wait up to 30 seconds for the parcels to download
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+
+                    string result;
+                    if (completed == tcs.Task && Client.Network.Connected)
+                    {
+                        sb.AppendFormat("Downloaded {0} Parcels in {1} " + Environment.NewLine,
+                            Client.Network.CurrentSim.Parcels.Count, Client.Network.CurrentSim.Name);
+
+                        Client.Network.CurrentSim.Parcels.ForEach(delegate(Parcel parcel)
+                        {
+                            sb.AppendFormat("Parcel[{0}]: Name: \"{1}\", Description: \"{2}\" ACLBlacklist Count: {3}, ACLWhiteList Count: {5} Traffic: {4}" + Environment.NewLine,
+                                parcel.LocalID, parcel.Name, parcel.Desc, parcel.AccessBlackList.Count, parcel.Dwell, parcel.AccessWhiteList.Count);
+                        });
+
+                        result = sb.ToString();
+                    }
+                    else
+                    {
+                        result = "Failed to retrieve information on all the simulator parcels";
+                    }
+
+                    // Output results (WriteLine may be UI-bound; call it on threadpool to be safe)
+                    try
+                    {
+                        WriteLine("Parcel Info results:\n{0}", result);
+                    }
+                    catch
+                    {
+                        // swallow to avoid throwing from background task
+                    }
+                }
+                catch (Exception ex)
+                {
+                    try { WriteLine("Parcel Info error: {0}", ex.ToString()); } catch { }
+                }
+                finally
+                {
+                    if (del != null) Client.Parcels.SimParcelsDownloaded -= del;
+                    // Ensure we unset PreventParcelUpdate on the UI thread
+                    try
+                    {
+                        if (instance.MainForm != null && instance.MainForm.IsHandleCreated)
+                        {
+                            instance.MainForm.BeginInvoke(new MethodInvoker(() => instance.MainForm.PreventParcelUpdate = false));
+                        }
+                        else
+                        {
+                            instance.MainForm.PreventParcelUpdate = false;
+                        }
+                    }
+                    catch
+                    {
+                        try { instance.MainForm.PreventParcelUpdate = false; } catch { }
+                    }
+                }
+            });
         }
     }
 }

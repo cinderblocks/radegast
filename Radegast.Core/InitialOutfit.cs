@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using OpenMetaverse;
 
 namespace Radegast
@@ -52,32 +53,40 @@ namespace Radegast
         public UUID CreateFolder(UUID parent, string name, FolderType type)
         {
             UUID ret = UUID.Zero;
-            AutoResetEvent folderCreated = new AutoResetEvent(false);
+
+            var tcs = new TaskCompletionSource<UUID>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             EventHandler<InventoryObjectAddedEventArgs> handler = (sender, e) =>
             {
                 if (e.Obj.Name == name && e.Obj is InventoryFolder folder && folder.PreferredType == type)
                 {
                     ret = folder.UUID;
-                    folderCreated.Set();
+                    try { tcs.TrySetResult(folder.UUID); } catch { }
                     Logger.Log("Created folder " + folder.Name, Helpers.LogLevel.Info);
                 }
             };
 
             Client.Inventory.Store.InventoryObjectAdded += handler;
-            ret = Client.Inventory.CreateFolder(parent, name, type);
-            bool success = folderCreated.WaitOne(TimeSpan.FromSeconds(20), false);
-            Client.Inventory.Store.InventoryObjectAdded -= handler;
+            try
+            {
+                ret = Client.Inventory.CreateFolder(parent, name, type);
 
-            return success ? ret : UUID.Zero;
+                var completed = Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).GetAwaiter().GetResult();
+                bool success = completed == tcs.Task && tcs.Task.GetAwaiter().GetResult() != UUID.Zero;
+                return success ? tcs.Task.GetAwaiter().GetResult() : UUID.Zero;
+            }
+            finally
+            {
+                Client.Inventory.Store.InventoryObjectAdded -= handler;
+            }
         }
 
         private List<InventoryBase> FetchFolder(InventoryFolder folder)
         {
             CancellationTokenSource cts = new CancellationTokenSource();
             cts.CancelAfter(TimeSpan.FromSeconds(20));
-            var contents = Client.Inventory.RequestFolderContents(folder.UUID, folder.OwnerID, 
-                true, true, InventorySortOrder.ByName, cts.Token).Result;
+            var contents = Client.Inventory.RequestFolderContents(folder.UUID, folder.OwnerID,
+                true, true, InventorySortOrder.ByName, cts.Token).GetAwaiter().GetResult();
             return contents;
         }
 
@@ -108,12 +117,14 @@ namespace Radegast
             {
                 if (item is InventoryItem)
                 {
-                    AutoResetEvent itemCopied = new AutoResetEvent(false);
+                    var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                     Client.Inventory.RequestCopyItem(item.UUID, newFolderID, item.Name, item.OwnerID, (newItem) =>
                     {
-                        itemCopied.Set();
+                        try { tcs.TrySetResult(true); } catch { }
                     });
-                    if (itemCopied.WaitOne(TimeSpan.FromSeconds(20), false))
+
+                    var completed = Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).GetAwaiter().GetResult();
+                    if (completed == tcs.Task && tcs.Task.GetAwaiter().GetResult())
                     {
                         Logger.Log("Copied item " + item.Name, Helpers.LogLevel.Info);
                     }
@@ -150,7 +161,7 @@ namespace Radegast
 
             CheckFolders();
 
-            UUID newClothingFolder = CopyFolder((InventoryFolder)outfitFolder.Data, 
+            UUID newClothingFolder = CopyFolder((InventoryFolder)outfitFolder.Data,
                 Client.Inventory.FindFolderForType(AssetType.Clothing));
 
             List<InventoryItem> newOutfit = Store.GetContents(newClothingFolder)

@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Threading.Tasks;
 using FMOD;
 using OpenMetaverse;
 
@@ -74,6 +75,26 @@ namespace Radegast.Media
         /// <returns>Length of the sound in ms</returns>
         public uint Play(string speakfile, bool global, Vector3 pos)
         {
+            // Synchronous wrapper preserving previous behavior
+            try
+            {
+                return PlayAsync(speakfile, global, pos).GetAwaiter().GetResult();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Async variant of Play to avoid blocking threads.
+        /// </summary>
+        /// <param name="speakfile"></param>
+        /// <param name="global"></param>
+        /// <param name="pos"></param>
+        /// <returns>Length of the sound in ms</returns>
+        public async Task<uint> PlayAsync(string speakfile, bool global, Vector3 pos)
+        {
             uint len = 0;
 
             speakerPos = pos;
@@ -93,8 +114,7 @@ namespace Radegast.Media
                     mode |= MODE._3D_HEADRELATIVE;
             }
 
-
-            System.Threading.AutoResetEvent done = new System.Threading.AutoResetEvent(false);
+            var tcs = new TaskCompletionSource<uint>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             invoke(delegate
             {
@@ -150,19 +170,29 @@ namespace Radegast.Media
 
                     // Un-pause the sound.
                     FMODExec(channel.setPaused(false));
+
+                    // Signal setup completion with length
+                    try { tcs.TrySetResult(len); } catch { }
                 }
                 catch (Exception ex)
                 {
                     Logger.Log("Error playing speech: ", Helpers.LogLevel.Error, ex);
-                }
-                finally
-                {
-                    done.Set();
+                    try { tcs.TrySetResult(0); } catch { }
                 }
             });
 
-            done.WaitOne(30 * 1000, false);
-            return len;
+            // Wait up to 30 seconds for setup to complete (matches previous WaitOne timeout)
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+            if (completed == tcs.Task)
+            {
+                try
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+                catch { return 0; }
+            }
+
+            return 0;
         }
 
         /// <summary>
@@ -190,7 +220,6 @@ namespace Radegast.Media
                     }
                     catch (Exception) { }
             });
-
 
             return RESULT.OK;
         }
