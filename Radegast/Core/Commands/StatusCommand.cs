@@ -65,21 +65,18 @@ namespace Radegast.Commands
                         }
                         else
                         {
-                            ManualResetEvent gotName = new ManualResetEvent(false);
-                            EventHandler<ObjectPropertiesFamilyEventArgs> handler = (sender, e) =>
-                            {
-                                if (e.Properties.ObjectID == seat.ID)
-                                    gotName.Set();
-                            };
+                            var gotName = Radegast.EventSubscriptionHelper.WaitForEvent<ObjectPropertiesFamilyEventArgs, bool>(
+                                h => { Client.Objects.ObjectPropertiesFamily += h; Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, seat.ID); },
+                                h => Client.Objects.ObjectPropertiesFamily -= h,
+                                e => e?.Properties?.ObjectID == seat.ID,
+                                e => true,
+                                3000,
+                                false);
 
-                            Client.Objects.ObjectPropertiesFamily += handler;
-                            Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, seat.ID);
-                            if (gotName.WaitOne(3000, false))
+                            if (gotName)
                             {
                                 sb.Append(sb.AppendFormat(" on object {0}", seat.Properties != null ? seat.Properties.Name : ""));
                             }
-
-                            Client.Objects.ObjectPropertiesFamily -= handler;
                         }
                     }
                 }

@@ -206,78 +206,72 @@ namespace Radegast
                 ResetAvatarList();
             }
         }
+        
         private void Network_SimDisconnected(object sender, SimDisconnectedEventArgs e)
         {
-            try
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (InvokeRequired)
+                try
                 {
-                    if (!instance.MonoRuntime || IsHandleCreated)
-                        BeginInvoke(new MethodInvoker(() => Network_SimDisconnected(sender, e)));
-                    return;
-                }
-                lock (agentSimHandle)
-                {
-                    var h = e.Simulator.Handle;
-                    List<UUID> remove = new List<UUID>();
-                    foreach (var uh in agentSimHandle)
+                    lock (agentSimHandle)
                     {
-                        if (uh.Value == h)
+                        var h = e.Simulator.Handle;
+                        List<UUID> remove = new List<UUID>();
+                        foreach (var uh in agentSimHandle)
                         {
-                            remove.Add(uh.Key);
+                            if (uh.Value == h)
+                            {
+                                remove.Add(uh.Key);
+                            }
+                        }
+                        if (remove.Count == 0) return;
+                        lvwObjects.BeginUpdate();
+                        try
+                        {
+                            foreach (UUID key in remove)
+                            {
+                                agentSimHandle.Remove(key);
+                                try
+                                {
+                                    lvwObjects.Items.RemoveByKey(key.ToString());
+                                }
+                                catch (Exception)
+                                {
+
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            lvwObjects.EndUpdate();
                         }
                     }
-                    if (remove.Count == 0) return;
-                    lvwObjects.BeginUpdate();
+                }
+                catch (Exception ex)
+                {
+                    Logger.DebugLog("Failed to update radar: " + ex);
+                }
+            }, instance.MonoRuntime);
+        }
+
+        private void ResetAvatarList()
+        {
+            ThreadingHelper.SafeInvoke(this, () =>
+            {
+                lock (agentSimHandle)
+                {
                     try
                     {
-                        foreach (UUID key in remove)
-                        {
-                            agentSimHandle.Remove(key);
-                            try
-                            {
-                                lvwObjects.Items.RemoveByKey(key.ToString());
-                            }
-                            catch (Exception)
-                            {
-
-                            }
-                        }
+                        lvwObjects.BeginUpdate();
+                        agentSimHandle.Clear();
+                        lvwObjects.Clear();
                     }
                     finally
                     {
                         lvwObjects.EndUpdate();
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.DebugLog("Failed to update radar: " + ex);
-            }
-        }
-
-        private void ResetAvatarList()
-        {
-            if (InvokeRequired)
-            {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(ResetAvatarList));
-                return;
-            }
-            lock (agentSimHandle)
-            {
-                try
-                {
-
-                    lvwObjects.BeginUpdate();
-                    agentSimHandle.Clear();
-                    lvwObjects.Clear();
-                }
-                finally
-                {
-                    lvwObjects.EndUpdate();
-                }
-            }
+            }, instance.MonoRuntime);
         }
 
         private void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
@@ -296,143 +290,139 @@ namespace Radegast
                 return;
             }
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => UpdateRadar(e)));
-                return;
-            }
-
-            // *TODO: later on we can set this with something from the GUI
-            const double MAX_DISTANCE = 362.0; // one sim a corner to corner distance
-            lock (agentSimHandle)
-                try
-                {
-                    lvwObjects.BeginUpdate();
-                    var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
-                        ? StateManager.ToVector3D(e.Simulator.Handle, position) 
-                        : client.Self.GlobalPosition;
-
-                    // CoarseLocationUpdate gives us height of 0 when actual height is
-                    // between 1024-4096m.
-                    if (agentPosition.Z < 0.1)
+                // *TODO: later on we can set this with something from the GUI
+                const double MAX_DISTANCE = 362.0; // one sim a corner to corner distance
+                lock (agentSimHandle)
+                    try
                     {
-                        agentPosition.Z = client.Self.GlobalPosition.Z;
-                    }
-
-                    var existing = new List<UUID>();
-                    var removed = new List<UUID>(e.RemovedEntries);
-
-                    foreach (var avatarPos in e.Simulator.AvatarPositions)
-                    {
-                        existing.Add(avatarPos.Key);
-                        if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString()))
-                        {
-                            continue;
-                        }
-                        var name = instance.Names.Get(avatarPos.Key);
-                        var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
-                        if (avatarPos.Key == client.Self.AgentID)
-                        {
-                            // Stops our name saying "Loading..."
-                            item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
-                            item.Font = new Font(item.Font, FontStyle.Bold);
-                        }
-                        item.Tag = avatarPos.Key;
-                        agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
-                    }
-
-                    foreach (ListViewItem item in lvwObjects.Items)
-                    {
-                        if (item == null) continue;
-                        var key = (UUID)item.Tag;
-
-                        if (agentSimHandle[key] != e.Simulator.Handle)
-                        {
-                            // not for this sim
-                            continue;
-                        }
-
-                        if (key == client.Self.AgentID)
-                        {
-                            if (instance.Names.Mode != NameMode.Standard)
-                                item.Text = instance.Names.Get(key);
-                            continue;
-                        }
-
-                        //the AvatarPositions is checked once more because it changes wildly on its own
-                        //even though the !existing should have been adequate
-                        if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
-                        {
-                            // not here anymore
-                            removed.Add(key);
-                            continue;
-                        }
-
-                        var kvp = e.Simulator.ObjectsAvatars.FirstOrDefault(
-                            av => av.Value.ID == key);
-                        var foundAvi = kvp.Value;
+                        lvwObjects.BeginUpdate();
+                        var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
+                            ? PositionHelper.ToGlobalPosition(e.Simulator.Handle, position) 
+                            : client.Self.GlobalPosition;
 
                         // CoarseLocationUpdate gives us height of 0 when actual height is
-                        // between 1024-4096m on OpenSim grids. 1020 on SL
-                        var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
-                        if (unknownAltitude) 
+                        // between 1024-4096m.
+                        if (agentPosition.Z < 0.1)
                         {
-                            if (foundAvi != null)
+                            agentPosition.Z = client.Self.GlobalPosition.Z;
+                        }
+
+                        var existing = new List<UUID>();
+                        var removed = new List<UUID>(e.RemovedEntries);
+
+                        foreach (var avatarPos in e.Simulator.AvatarPositions)
+                        {
+                            existing.Add(avatarPos.Key);
+                            if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString()))
                             {
-                                if (foundAvi.ParentID == 0)
+                                continue;
+                            }
+                            var name = instance.Names.Get(avatarPos.Key);
+                            var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
+                            if (avatarPos.Key == client.Self.AgentID)
+                            {
+                                // Stops our name saying "Loading..."
+                                item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
+                                item.Font = new Font(item.Font, FontStyle.Bold);
+                            }
+                            item.Tag = avatarPos.Key;
+                            agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
+                        }
+
+                        foreach (ListViewItem item in lvwObjects.Items)
+                        {
+                            if (item == null) continue;
+                            var key = (UUID)item.Tag;
+
+                            if (agentSimHandle[key] != e.Simulator.Handle)
+                            {
+                                // not for this sim
+                                continue;
+                            }
+
+                            if (key == client.Self.AgentID)
+                            {
+                                if (instance.Names.Mode != NameMode.Standard)
+                                    item.Text = instance.Names.Get(key);
+                                continue;
+                            }
+
+                            //the AvatarPositions is checked once more because it changes wildly on its own
+                            //even though the !existing should have been adequate
+                            if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
+                            {
+                                // not here anymore
+                                removed.Add(key);
+                                continue;
+                            }
+
+                            var kvp = e.Simulator.ObjectsAvatars.FirstOrDefault(
+                                av => av.Value.ID == key);
+                            var foundAvi = kvp.Value;
+
+                            // CoarseLocationUpdate gives us height of 0 when actual height is
+                            // between 1024-4096m on OpenSim grids. 1020 on SL
+                            var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
+                            if (unknownAltitude) 
+                            {
+                                if (foundAvi != null)
                                 {
-                                    pos.Z = foundAvi.Position.Z;
-                                }
-                                else
-                                {
-                                    if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
+                                    if (foundAvi.ParentID == 0)
                                     {
-                                        pos.Z = primitive.Position.Z;
+                                        pos.Z = foundAvi.Position.Z;
+                                    }
+                                    else
+                                    {
+                                        if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
+                                        {
+                                            pos.Z = primitive.Position.Z;
+                                        }
                                     }
                                 }
                             }
+
+                            var d = (int)Vector3d.Distance(PositionHelper.ToGlobalPosition(e.Simulator.Handle, pos), agentPosition);
+
+                            if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
+                            {
+                                removed.Add(key);
+                                continue;
+                            }
+
+                            if (unknownAltitude)
+                            {
+                                item.Text = instance.Names.Get(key) + " (?m)";
+                            }
+                            else
+                            {
+                                item.Text = instance.Names.Get(key) + $" ({d}m)";
+                            }
+
+                            if (foundAvi != null)
+                            {
+                                item.Text += "*";
+                            }
                         }
 
-                        var d = (int)Vector3d.Distance(StateManager.ToVector3D(e.Simulator.Handle, pos), agentPosition);
-
-                        if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
+                        foreach (var key in removed)
                         {
-                            removed.Add(key);
-                            continue;
+                            lvwObjects.Items.RemoveByKey(key.ToString());
+                            agentSimHandle.Remove(key);
                         }
 
-                        if (unknownAltitude)
-                        {
-                            item.Text = instance.Names.Get(key) + " (?m)";
-                        }
-                        else
-                        {
-                            item.Text = instance.Names.Get(key) + $" ({d}m)";
-                        }
-
-                        if (foundAvi != null)
-                        {
-                            item.Text += "*";
-                        }
+                        lvwObjects.Sort();
                     }
-
-                    foreach (var key in removed)
+                    catch (Exception ex)
                     {
-                        lvwObjects.Items.RemoveByKey(key.ToString());
-                        agentSimHandle.Remove(key);
+                        Logger.Error("Location update exception in ChatConsole", ex, client);
                     }
-
-                    lvwObjects.Sort();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("Location update exception in ChatConsole", ex, client);
-                }
-                finally
-                {
-                    lvwObjects.EndUpdate();
-                }
+                    finally
+                    {
+                        lvwObjects.EndUpdate();
+                    }
+            }, instance.MonoRuntime);
         }
 
 

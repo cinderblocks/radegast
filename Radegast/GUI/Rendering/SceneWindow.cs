@@ -36,22 +36,18 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
-using CoreJ2K;
-using CoreJ2K.Util;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Graphics;
 using OpenTK.Platform;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using OpenMetaverse.Assets;
-using OpenMetaverse.Imaging;
 using OpenMetaverse.Packets;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
+using static Radegast.DisposalHelper;
 
 #endregion Usings
 
@@ -237,23 +233,19 @@ namespace Radegast.Rendering
             Application.Idle -= Application_Idle;
             Instance.State.CameraTracksOwnAvatar = true;
             Instance.State.SetDefaultCamera();
-            
+
             TextureThreadContextReady.Reset();
-            TextureThreadRunning = false;
+            // Signal texture thread to stop (flag lives in textures partial)
+            try { TextureThreadRunning = false; } catch { }
             PendingTexturesAvailable?.Release();
             TextureThreadContextReady.WaitOne(TimeSpan.FromSeconds(5), false);
 
-            if (chatOverlay != null)
-            {
-                chatOverlay.Dispose();
-                chatOverlay = null;
-            }
+            // Safely dispose overlays and render helpers
+            SafeDispose(chatOverlay, "ChatOverlay", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            chatOverlay = null;
 
-            if (textRendering != null)
-            {
-                textRendering.Dispose();
-                textRendering = null;
-            }
+            SafeDispose(textRendering, "TextRendering", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            textRendering = null;
 
             Client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
             Client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
@@ -265,83 +257,55 @@ namespace Radegast.Rendering
             Client.Avatars.AvatarAppearance -= Avatars_AvatarAppearance;
             Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
 
-            if (cancellationTokenSource != null)
-            {
-                cancellationTokenSource.Cancel();
-                cancellationTokenSource.Dispose();
-                cancellationTokenSource = null;
-            }
+            // Cancel and dispose cancellation token source
+            SafeCancelAndDispose(cancellationTokenSource, (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            cancellationTokenSource = null;
 
-            if (genericTaskThread != null)
-            {
-                genericTaskThread.Join(2000);
-                genericTaskThread = null;
-            }
+            // Wait for generic task thread to exit
+            SafeJoinThread(genericTaskThread, TimeSpan.FromSeconds(2), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            genericTaskThread = null;
 
-            if (instance.NetCom != null)
+            if (Instance.NetCom != null)
             {
                 Instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
             }
 
+            // Dispose cached sculpt bitmaps
             lock (sculptCache)
             {
-                foreach (var img in sculptCache.Values)
-                    img.Dispose();
+                SafeDisposeAll(sculptCache.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 sculptCache.Clear();
             }
 
             // Deterministically dispose contained scene objects to free GL resources
             lock (Prims)
             {
-                foreach (var kvp in Prims)
-                {
-                    try
-                    {
-                        kvp.Value?.Dispose();
-                    }
-                    catch { }
-                }
+                SafeDisposeAll(Prims.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 Prims.Clear();
             }
 
             lock (Avatars)
             {
-                foreach (var kvp in Avatars)
-                {
-                    try
-                    {
-                        kvp.Value?.Dispose();
-                    }
-                    catch { }
-                }
+                SafeDisposeAll(Avatars.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 Avatars.Clear();
             }
 
             // Also dispose any lists of scene objects
             if (SortedObjects != null)
             {
-                foreach (var so in SortedObjects)
-                {
-                    try { so?.Dispose(); } catch { }
-                }
+                SafeDisposeAll(SortedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 SortedObjects = null;
             }
 
             if (OccludedObjects != null)
             {
-                foreach (var so in OccludedObjects)
-                {
-                    try { so?.Dispose(); } catch { }
-                }
+                SafeDisposeAll(OccludedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 OccludedObjects = null;
             }
 
             if (VisibleAvatars != null)
             {
-                foreach (var av in VisibleAvatars)
-                {
-                    try { av?.Dispose(); } catch { }
-                }
+                SafeDisposeAll(VisibleAvatars.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 VisibleAvatars = null;
             }
 
@@ -349,10 +313,10 @@ namespace Radegast.Rendering
 
             if (glControl != null)
             {
-                glControl_UnhookEvents();
-
                 try
                 {
+                    glControl_UnhookEvents();
+
                     // Protect against null internal context / already-disposed control
                     var ctx = glControl.Context;
                     if (ctx != null && !glControl.IsDisposed && glControl.IsHandleCreated)
@@ -369,35 +333,28 @@ namespace Radegast.Rendering
                 }
                 catch (Exception ex)
                 {
-                    // Log any unexpected state access
                     Logger.Debug("Unexpected GL control state during dispose: {ex.Message}", ex, Client);
                 }
 
-                try { glControl.Dispose(); } catch { }
+                SafeDispose(glControl, "GLControl", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             }
             glControl = null;
 
             // Ensure texture thread stopped and worker context disposed
             try
             {
-                if (textureDecodingThread != null)
-                {
-                    try { textureDecodingThread.Join(2000); } catch { }
-                    textureDecodingThread = null;
-                }
+                SafeJoinThread(textureDecodingThread, TimeSpan.FromSeconds(2), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                textureDecodingThread = null;
 
-                if (textureContext != null)
-                {
-                    try { textureContext.Dispose(); } catch (Exception ex) { Logger.Debug("Failed disposing textureContext: " + ex.Message, ex); }
-                    textureContext = null;
-                }
+                SafeDispose(textureContext, "TextureContext", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                textureContext = null;
                 sharedWindowInfo = null;
             }
             catch { }
 
             try
             {
-                shaderManager?.Dispose();
+                SafeDispose(shaderManager, "ShaderManager", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
                 shaderManager = null;
             }
             catch { }
@@ -483,18 +440,15 @@ namespace Radegast.Rendering
 
         private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            if (InvokeRequired)
-            {
-                if (!IsHandleCreated) return;
-                BeginInvoke(new MethodInvoker(Dispose));
-            }
+            // Ensure dispose runs on UI thread
+            ThreadingHelper.SafeInvoke(this, new Action(Dispose), Instance.MonoRuntime);
         }
 
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Network_SimChanged(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Network_SimChanged(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -517,10 +471,7 @@ namespace Radegast.Rendering
             if (e.Simulator.Handle != Client.Network.CurrentSim.Handle) return;
             if (InvokeRequired)
             {
-                if (IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => KillObjectHandler(sender, e)));
-                }
+                ThreadingHelper.SafeInvoke(this, new Action(() => KillObjectHandler(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -589,7 +540,7 @@ namespace Radegast.Rendering
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => AvatarAnimationChanged(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => AvatarAnimationChanged(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -606,7 +557,7 @@ namespace Radegast.Rendering
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => AnimReceivedCallback(transfer, asset)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => AnimReceivedCallback(transfer, asset)), Instance.MonoRuntime);
                 return;
             }
 
@@ -1196,7 +1147,7 @@ namespace Radegast.Rendering
             // Ensure that this is done on the main thread
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(AvatarDataInitialized));
+                ThreadingHelper.SafeInvokeSync(this, new Action(AvatarDataInitialized), Instance.MonoRuntime);
                 return;
             }
 

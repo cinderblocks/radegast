@@ -25,6 +25,7 @@ using System.Threading.Tasks;
 using System.Text;
 using OpenMetaverse;
 using Radegast.Core.Commands;
+using static Radegast.DisposalHelper;
 
 namespace Radegast.Commands
 {
@@ -315,8 +316,10 @@ namespace Radegast.Commands
                 InterpretersLoaded.Clear();
             }
             CommandsByName.Clear();
-            commandWorkerCancelToken.Cancel();
-            commandWorkerCancelToken.Dispose();
+            // Safely cancel and dispose the command worker cancellation token
+            SafeCancelAndDispose(commandWorkerCancelToken, (msg, ex) => {
+                if (ex != null) Logger.Debug(msg + ": " + ex.Message, ex); else Logger.Debug(msg);
+            });
             CommandQueued = null;
         }
 

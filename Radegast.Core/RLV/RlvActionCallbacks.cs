@@ -253,48 +253,32 @@ namespace Radegast.Core.RLV
 
         private async Task<(bool, UUID)> TryGetGroupRoleId(UUID groupId, string roleName)
         {
-            var tcs = new TaskCompletionSource<bool>();
-
-            Dictionary<UUID, GroupRole> groupRoles = null;
-            void OnGroupRoleDataReply(object _, GroupRolesDataReplyEventArgs roleArgs)
-            {
-                if (roleArgs.GroupID != groupId)
+            var result = await EventSubscriptionHelper.WaitForEventAsync<GroupRolesDataReplyEventArgs, (bool, UUID)>(
+                h => instance.Client.Groups.GroupRoleDataReply += h,
+                h => instance.Client.Groups.GroupRoleDataReply -= h,
+                e => e.GroupID == groupId,
+                e =>
                 {
-                    return;
-                }
+                    if (e.Roles == null) return (false, UUID.Zero);
+                    
+                    var roleId = e.Roles.Values
+                        .Where(n => n.Name.Equals(roleName, StringComparison.OrdinalIgnoreCase))
+                        .Select(n => n.ID)
+                        .FirstOrDefault();
+                    
+                    return (roleId != default, roleId);
+                },
+                10000,
+                CancellationToken.None,
+                (false, UUID.Zero));
 
-                groupRoles = roleArgs.Roles;
-                tcs.SetResult(true);
-            }
-
-            try
+            if (!result.Item1)
             {
-                instance.Client.Groups.GroupRoleDataReply += OnGroupRoleDataReply;
-                var unused = instance.Client.Groups.RequestGroupRoles(groupId);
-
-                var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
-                if (completedTask != tcs.Task)
-                {
-                    Logger.Error("RLV Commands_SetGroup: Timed out while waiting for GroupRoleDataReply");
-                    return (false, UUID.Zero);
-                }
-            }
-            finally
-            {
-                instance.Client.Groups.GroupRoleDataReply -= OnGroupRoleDataReply;
+                Logger.Error("RLV Commands_SetGroup: Timed out while waiting for GroupRoleDataReply");
             }
 
-            if (groupRoles == null)
-            {
-                return (false, UUID.Zero);
-            }
-
-            var roleId = groupRoles.Values
-                .Where(n => n.Name.Equals(roleName, StringComparison.OrdinalIgnoreCase))
-                .Select(n => n.ID)
-                .FirstOrDefault();
-
-            return (roleId != default, roleId);
+            _ = instance.Client.Groups.RequestGroupRoles(groupId);
+            return result;
         }
     }
 }

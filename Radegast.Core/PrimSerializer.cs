@@ -33,7 +33,6 @@ namespace Radegast
         private UUID SelectedObject = UUID.Zero;
 
         private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
-        private readonly AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
 
         private readonly GridClient Client;
 
@@ -106,14 +105,29 @@ namespace Radegast
             if (localids.Length > 0)
             {
                 Client.Objects.SelectObjects(Client.Network.CurrentSim, localids, false);
-                bool success = AllPropertiesReceived.WaitOne(2000 + msPerRequest * localids.Length, false);
+                // Wait for ObjectProperties events until all requested prims have been removed from PrimsWaiting.
+                var timeout = 2000 + msPerRequest * localids.Length;
+                EventSubscriptionHelper.WaitForCondition<ObjectPropertiesEventArgs>(
+                    h => Client.Objects.ObjectProperties += h,
+                    h => Client.Objects.ObjectProperties -= h,
+                    e =>
+                    {
+                        lock (PrimsWaiting)
+                        {
+                            // If handler in this class already processed the event it will have removed the prim
+                            // and possibly signalled completion. Check remaining count here.
+                            return PrimsWaiting.Count == 0;
+                        }
+                    },
+                    timeout);
+
                 if (PrimsWaiting.Count > 0)
                 {
                     Logger.Warn($"Failed to retrieve object properties for {PrimsWaiting.Count} prims out of {localids.Length}", Client);
-
                 }
+
                 Client.Objects.DeselectObjects(Client.Network.CurrentSim, localids);
-                return success;
+                return PrimsWaiting.Count == 0;
             }
             return true;
         }
@@ -123,9 +137,6 @@ namespace Radegast
             lock (PrimsWaiting)
             {
                 PrimsWaiting.Remove(e.Properties.ObjectID);
-
-                if (PrimsWaiting.Count == 0)
-                    AllPropertiesReceived.Set();
             }
         }
     }

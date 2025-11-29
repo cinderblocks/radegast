@@ -345,7 +345,7 @@ namespace RadegastSpeech
             }
             catch (Exception e)
             {
-                Logger.Log("Failed to shutdown speech modules: ", Helpers.LogLevel.Warning, e);
+                Logger.Warn("Failed to shutdown speech modules", e);
             }
             finally
             {
@@ -371,7 +371,7 @@ namespace RadegastSpeech
             catch (Exception e)
             {
                 MessageBox.Show("Speech can not start.  See log.");
-                Logger.Log("Speech can not start.", Helpers.LogLevel.Error, e);
+                Logger.Error("Speech can not start.", e);
 
                 Console.WriteLine(e.StackTrace);
                 MarkDisabled();

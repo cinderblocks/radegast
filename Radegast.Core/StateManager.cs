@@ -26,6 +26,7 @@ using System.Threading;
 
 using OpenMetaverse;
 using Radegast.Automation;
+using Radegast.Core;
 
 namespace Radegast
 {
@@ -276,25 +277,8 @@ namespace Radegast
             if (!TryFindAvatar(person, out var sim, out position)) { return false; }
             // same sim?
             if (sim == Client.Network.CurrentSim) { return true; }
-            position = ToLocalPosition(sim.Handle, position);
+            position = PositionHelper.ToLocalPosition(sim.Handle, position);
             return true;
-        }
-
-        public Vector3 ToLocalPosition(ulong handle, Vector3 position)
-        {
-            Vector3d diff = ToVector3D(handle, position) - Client.Self.GlobalPosition;
-            position = new Vector3((float) diff.X, (float) diff.Y, (float) diff.Z) - position;
-            return position;
-        }
-
-        public static Vector3d ToVector3D(ulong handle, Vector3 pos)
-        {
-            Utils.LongToUInts(handle, out var globalX, out var globalY);
-
-            return new Vector3d(
-                (double)globalX + (double)pos.X,
-                (double)globalY + (double)pos.Y,
-                (double)pos.Z);
         }
 
         /// <summary>
@@ -598,36 +582,37 @@ namespace Radegast
             return rot;
         }
 
+        /// <summary>
+        /// Get global position of a given simulator and coordinate
+        /// </summary>
+        public static Vector3d GlobalPosition(Simulator sim, Vector3 pos)
+        {
+            return PositionHelper.GlobalPosition(sim, pos);
+        }
+
+        /// <summary>
+        /// Return global position of given primitive
+        /// </summary>
+        public Vector3d GlobalPosition(Primitive prim)
+        {
+            return PositionHelper.GlobalPosition(prim, Client.Network.CurrentSim);
+        }
+
+        public Vector3 AvatarPosition(Simulator sim, Avatar av)
+        {
+            return PositionHelper.GetAvatarPosition(sim, av);
+        }
+
         public Vector3 AvatarPosition(Simulator sim, UUID avID)
         {
-            var pos = Vector3.Zero;
             var av = sim.ObjectsAvatars.FirstOrDefault(a => a.Value.ID == avID);
             if (av.Value != null)
             {
                 return AvatarPosition(sim, av.Value);
             }
 
-            if (!sim.AvatarPositions.TryGetValue(avID, out var coarse)) { return pos; }
-            return coarse.Z > 0.01 ? coarse : pos;
-        }
-
-        public Vector3 AvatarPosition(Simulator sim, Avatar av)
-        {
-            var pos = Vector3.Zero;
-
-            if (av.ParentID == 0)
-            {
-                pos = av.Position;
-            }
-            else
-            {
-                if (sim.ObjectsPrimitives.TryGetValue(av.ParentID, out var prim))
-                {
-                    pos = prim.Position + av.Position;
-                }
-            }
-
-            return pos;
+            if (!sim.AvatarPositions.TryGetValue(avID, out var coarse)) { return Vector3.Zero; }
+            return coarse.Z > 0.01 ? coarse : Vector3.Zero;
         }
 
         public void Follow(string name, UUID id)
@@ -933,32 +918,6 @@ namespace Radegast
             {
                 Client.Self.Animate(stop, true);
             }
-        }
-
-        /// <summary>
-        /// Get global position of a given simulator and coordinate
-        /// </summary>
-        /// <param name="sim"></param>
-        /// <param name="pos"></param>
-        /// <returns>Global position</returns>
-        public static Vector3d GlobalPosition(Simulator sim, Vector3 pos)
-        {
-            Utils.LongToUInts(sim.Handle, out var globalX, out var globalY);
-
-            return new Vector3d(
-                (double)globalX + (double)pos.X,
-                (double)globalY + (double)pos.Y,
-                (double)pos.Z);
-        }
-
-        /// <summary>
-        /// Return global position of given primitive
-        /// </summary>
-        /// <param name="prim"></param>
-        /// <returns></returns>
-        public Vector3d GlobalPosition(Primitive prim)
-        {
-            return GlobalPosition(Client.Network.CurrentSim, prim.Position);
         }
 
         private System.Timers.Timer beamTimer;

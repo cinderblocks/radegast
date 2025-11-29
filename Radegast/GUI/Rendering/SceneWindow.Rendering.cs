@@ -36,7 +36,6 @@ using System.Linq;
 using System.Windows.Forms;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse;
-using OpenMetaverse.Assets;
 
 namespace Radegast.Rendering
 {

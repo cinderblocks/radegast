@@ -734,25 +734,18 @@ namespace Radegast.Rendering
                             break;
                         }
 
-                        if (!instance.MonoRuntime || IsHandleCreated)
-                        {
-                            BeginInvoke(loadOnMainThread);
-                        }
-                        else
-                        {
-                            bitmap?.Dispose();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Debug($"Error processing texture: {ex.Message}", Client);
-                        bitmap?.Dispose();
-                    }
-                }
-            }
-            Logger.DebugLog("Texture thread exited");
-        }
-        #endregion Texture thread
+                        ThreadingHelper.SafeInvoke(this, new Action(loadOnMainThread), instance.MonoRuntime);
+                     }
+                     catch (Exception ex)
+                     {
+                         Logger.Debug($"Error processing texture: {ex.Message}", Client);
+                         bitmap?.Dispose();
+                     }
+                 }
+             }
+             Logger.DebugLog("Texture thread exited");
+         }
+         #endregion Texture thread
 
         private void FrmPrimWorkshop_Shown(object sender, EventArgs e)
         {
@@ -1231,34 +1224,17 @@ namespace Radegast.Rendering
         {
             if (disposed || glControl == null || !RenderingEnabled) return;
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
+                try
                 {
-                    try
-                    {
-                        BeginInvoke(new MethodInvoker(SafeInvalidate));
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Control already disposed
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // Handle already destroyed
-                    }
+                    glControl?.Invalidate();
                 }
-                return;
-            }
-
-            try
-            {
-                glControl?.Invalidate();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Control already disposed
-            }
+                catch (ObjectDisposedException)
+                {
+                    // Control already disposed
+                }
+            }, instance.MonoRuntime);
         }
 
         /// <summary>

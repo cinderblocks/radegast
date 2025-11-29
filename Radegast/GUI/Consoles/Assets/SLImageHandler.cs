@@ -169,7 +169,7 @@ namespace Radegast
                 {
                     if (this.InvokeRequired)
                     {
-                        this.BeginInvoke(new MethodInvoker(() => ApplySettingsFromGlobals()));
+                        ThreadingHelper.SafeInvoke(this, new Action(() => ApplySettingsFromGlobals()), instance.MonoRuntime);
                     }
                     else
                     {
@@ -280,7 +280,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (IsHandleCreated || !instance.MonoRuntime)
-                    BeginInvoke(new MethodInvoker(() => Assets_ImageReceiveProgress(sender, e)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_ImageReceiveProgress(sender, e)), instance.MonoRuntime);
                 return;
             }
 
@@ -302,7 +302,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (IsHandleCreated || !instance.MonoRuntime)
-                    BeginInvoke(new MethodInvoker(() => DisplayPartialImage(assetTexture)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => DisplayPartialImage(assetTexture)), instance.MonoRuntime);
                 return;
             }
 
@@ -399,7 +399,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (IsHandleCreated || !instance.MonoRuntime)
-                    BeginInvoke(new MethodInvoker(() => Assets_OnImageReceived(assetTexture)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnImageReceived(assetTexture)), instance.MonoRuntime);
                 return;
             }
 

@@ -78,8 +78,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => Parcels_ParcelInfoReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Parcels_ParcelInfoReply(sender, e)), instance.MonoRuntime);
                 return;
             }
 

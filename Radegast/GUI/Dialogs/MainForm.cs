@@ -219,10 +219,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                {
-                    BeginInvoke(new MethodInvoker(() => Names_NameUpdated(sender, e)));
-                }
+                ThreadingHelper.SafeInvoke(this, new Action(() => Names_NameUpdated(sender, e)), instance.MonoRuntime);
                 return;
             }
 
@@ -259,7 +256,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(DisplayAutoReconnectForm));
+                ThreadingHelper.SafeInvoke(this, new Action(DisplayAutoReconnectForm), instance.MonoRuntime);
                 return;
             }
 
@@ -400,14 +397,14 @@ namespace Radegast
         }
         #endregion
 
-        # region Update status
+        #region Update status
 
         private void Parcels_ParcelProperties(object sender, ParcelPropertiesEventArgs e)
         {
             if (PreventParcelUpdate || e.Result != ParcelResult.Single) return;
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Parcels_ParcelProperties(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Parcels_ParcelProperties(sender, e)), instance.MonoRuntime);
                 return;
             }
 
@@ -739,7 +736,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => ShowGroupProfile(group)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => ShowGroupProfile(group)), instance.MonoRuntime);
                 return;
             }
 
@@ -884,11 +881,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate()
-                {
-                    AddNotification(notification);
-                }
-                ));
+                ThreadingHelper.SafeInvoke(this, new Action(() => AddNotification(notification)), instance.MonoRuntime);
                 return;
             }
 
@@ -1172,13 +1165,13 @@ namespace Radegast
                 {
                     if (success)
                     {
-                        BeginInvoke(new MethodInvoker(() =>
+                        ThreadingHelper.SafeInvoke(this, new Action(() =>
                             {
                                 Landmark ln = new Landmark(instance, (InventoryLandmark) item)
                                 {
                                     Dock = DockStyle.Fill, Detached = true
                                 };
-                            }));
+                            }), instance.MonoRuntime);
                     }
                 }
             );
@@ -1441,8 +1434,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                    BeginInvoke(new MethodInvoker(() => DisplayExportConsole(localID)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => DisplayExportConsole(localID)), instance.MonoRuntime);
                 return;
             }
 
@@ -1473,8 +1465,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                    BeginInvoke(new MethodInvoker(() => DisplayColladaConsole(prim)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => DisplayColladaConsole(prim)), instance.MonoRuntime);
                 return;
             }
 

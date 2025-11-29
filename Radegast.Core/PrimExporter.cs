@@ -35,15 +35,13 @@ namespace Radegast
 	public class PrimExporter
 	{
         private List<UUID> Textures = new List<UUID>();
-        private readonly AutoResetEvent GotPermissionsEvent = new AutoResetEvent(false);
-        private Primitive.ObjectProperties Properties;
-        private bool GotPermissions = false;
-        private UUID SelectedObject = UUID.Zero;
+         private Primitive.ObjectProperties Properties;
+         private bool GotPermissions = false;
+         private UUID SelectedObject = UUID.Zero;
 
-        private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
-        private readonly AutoResetEvent AllPropertiesReceived = new AutoResetEvent(false);
-        private readonly GridClient Client;
-        private string ExportDirectory;
+         private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
+         private readonly GridClient Client;
+         private string ExportDirectory;
 		private uint uLocalID;
 		public delegate void LogMessageDelegate(string format, params object[] args);
 		public LogMessageDelegate LogMessage;
@@ -58,9 +56,9 @@ namespace Radegast
 		public void CleanUp()
 		{
 			Client.Objects.ObjectPropertiesFamily -= Objects_OnObjectPropertiesFamily;
-			Client.Objects.ObjectProperties += Objects_OnObjectProperties;
+			Client.Objects.ObjectProperties -= Objects_OnObjectProperties;
 		}
-		
+
 		public void ExportToFile(string filename, uint localID)
 		{
 			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename),Path.GetFileNameWithoutExtension(filename));
@@ -75,8 +73,13 @@ namespace Radegast
 				
 				uLocalID = localId;
 				// Check for export permission first
-				Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, exportPrim.ID);
-				GotPermissionsEvent.WaitOne(1000 * 10, false);
+				GotPermissions = EventSubscriptionHelper.WaitForEvent<ObjectPropertiesFamilyEventArgs, bool>(
+                    h => { Client.Objects.ObjectPropertiesFamily += h; Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, exportPrim.ID); },
+                    h => Client.Objects.ObjectPropertiesFamily -= h,
+                    e => e?.Properties?.ObjectID == exportPrim.ID,
+                    e => true,
+                    1000 * 10,
+                    false);
 				
 				if (!GotPermissions)
 				{
@@ -203,23 +206,36 @@ namespace Radegast
 		
 		private bool RequestObjectProperties(List<Primitive> objects, int msPerRequest)
 		{
-			uint[] localids = new uint[objects.Count];
-			
-			lock (PrimsWaiting)
-			{
-				PrimsWaiting.Clear();
-				
-				for (int i = 0; i < objects.Count; ++i)
-				{
-					localids[i] = objects[i].LocalID;
-					PrimsWaiting.Add(objects[i].ID,objects[i]);
-				}
-			}
-			
-			Client.Objects.SelectObjects(Client.Network.CurrentSim, localids);
-			
-			return AllPropertiesReceived.WaitOne(2000 + msPerRequest * objects.Count, false);
-		}
+            uint[] localids = new uint[objects.Count];
+            
+            lock (PrimsWaiting)
+            {
+                PrimsWaiting.Clear();
+                
+                for (int i = 0; i < objects.Count; ++i)
+                {
+                    localids[i] = objects[i].LocalID;
+                    PrimsWaiting.Add(objects[i].ID,objects[i]);
+                }
+            }
+            
+            Client.Objects.SelectObjects(Client.Network.CurrentSim, localids);
+            
+            var timeout = 2000 + msPerRequest * objects.Count;
+            EventSubscriptionHelper.WaitForCondition<ObjectPropertiesEventArgs>(
+                h => Client.Objects.ObjectProperties += h,
+                h => Client.Objects.ObjectProperties -= h,
+                e =>
+                {
+                    lock (PrimsWaiting)
+                    {
+                        return PrimsWaiting.Count == 0;
+                    }
+                },
+                timeout);
+
+            return PrimsWaiting.Count == 0;
+        }
 
         private void Objects_OnObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
 		{
@@ -232,7 +248,6 @@ namespace Radegast
 			else
 			{
 				GotPermissions = true;
-				GotPermissionsEvent.Set();
 			}
 		}
 
@@ -245,15 +260,11 @@ namespace Radegast
 					Properties.CreatorID = e.Properties.CreatorID;
 					Properties.Permissions = e.Properties.Permissions;
 					GotPermissions = true;
-					GotPermissionsEvent.Set();
 				}
 			}
 			lock (PrimsWaiting)
 			{
 				PrimsWaiting.Remove(e.Properties.ObjectID);
-				
-				if (PrimsWaiting.Count == 0)
-					AllPropertiesReceived.Set();
 			}
 		}
 

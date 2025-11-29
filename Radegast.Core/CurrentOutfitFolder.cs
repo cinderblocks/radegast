@@ -171,7 +171,7 @@ namespace Radegast
                     true, true, InventorySortOrder.ByDate, cancellationToken);
             }
 
-            Logger.Log($"Initialized Current Outfit Folder with UUID {COF.UUID} v.{COF.Version}", Helpers.LogLevel.Info, client);
+            Logger.Info($"Initialized Current Outfit Folder with UUID {COF.UUID} v.{COF.Version}", client);
 
             initializedCOF = COF != null;
             return initializedCOF;
@@ -220,13 +220,13 @@ namespace Radegast
 
             if (COF == null)
             {
-                Logger.Log($"COF is null", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"COF is null", client);
                 return new List<InventoryItem>();
             }
 
             if (!client.Inventory.Store.TryGetNodeFor(COF.UUID, out var cofNode))
             {
-                Logger.Log($"Failed to find COF node in inventory store", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Failed to find COF node in inventory store", client);
                 return new List<InventoryItem>();
             }
 
@@ -283,7 +283,7 @@ namespace Radegast
         {
             if (COF == null)
             {
-                Logger.Log("Can't add link; COF hasn't been initialized.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Can't add link; COF hasn't been initialized.", client);
                 return;
             }
 
@@ -340,7 +340,7 @@ namespace Radegast
         {
             if (COF == null)
             {
-                Logger.Log("Can't remove link; COF hasn't been initialized.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Can't remove link; COF hasn't been initialized.", client);
                 return;
             }
 
@@ -379,7 +379,7 @@ namespace Radegast
             var realItem = instance.COF.ResolveInventoryLink(item);
             if (realItem == null)
             {
-                Logger.Log($"Cannot attach an item because the link could not be resolved.", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Cannot attach an item because the link could not be resolved.", client);
                 return false;
             }
 
@@ -391,14 +391,14 @@ namespace Radegast
             var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, trashFolderId, cancellationToken);
             if (isInTrash)
             {
-                Logger.Log($"Cannot attach an item that is currently in the trash.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Cannot attach an item that is currently in the trash.", client);
                 return false;
             }
 
             var isInPlayerInventory = await instance.COF.IsObjectDescendentOf(realItem, rootFolderId, cancellationToken);
             if (!isInPlayerInventory)
             {
-                Logger.Log($"Cannot attach an item that is not in your inventory.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Cannot attach an item that is not in your inventory.", client);
                 return false;
             }
 

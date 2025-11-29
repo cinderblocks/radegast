@@ -477,31 +477,17 @@ namespace Radegast
                 return name;
             }
 
-            var tcs = new TaskCompletionSource<string>();
-            EventHandler<UUIDNameReplyEventArgs> handler = (sender, e) =>
-            {
-                if (e.Names.TryGetValue(agentID, out var found))
-                {
-                    tcs.TrySetResult(found);
-                }
-            };
+            // Use EventSubscriptionHelper to wait for NameUpdated in a non-blocking fashion
+            var result = await EventSubscriptionHelper.WaitForEventAsync<UUIDNameReplyEventArgs, string>(
+                h => instance.Names.NameUpdated += h,
+                h => instance.Names.NameUpdated -= h,
+                e => e.Names.ContainsKey(agentID),
+                e => e.Names[agentID],
+                (int)instance.GlobalSettings["resolve_uri_time"],
+                CancellationToken.None,
+                RadegastInstance.INCOMPLETE_NAME).ConfigureAwait(false);
 
-            instance.Names.NameUpdated += handler;
-            try
-            {
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
-                if (completed == tcs.Task)
-                {
-                    return await tcs.Task.ConfigureAwait(false);
-                }
-            }
-            catch { }
-            finally
-            {
-                instance.Names.NameUpdated -= handler;
-            }
-
-            return RadegastInstance.INCOMPLETE_NAME;
+            return result;
         }
 
         /// <summary>
@@ -542,32 +528,20 @@ namespace Radegast
         }
         private async Task<string> GetGroupNameAsync(UUID groupID)
         {
-            var tcs = new TaskCompletionSource<string>();
-            EventHandler<GroupNamesEventArgs> handler = (sender, e) =>
-            {
-                if (e.GroupNames.TryGetValue(groupID, out var found))
-                {
-                    tcs.TrySetResult(found);
-                }
-            };
+            // Wait for GroupNamesReply with EventSubscriptionHelper and request the group name after subscription is in place
+            var waitTask = EventSubscriptionHelper.WaitForEventAsync<GroupNamesEventArgs, string>(
+                h => instance.Client.Groups.GroupNamesReply += h,
+                h => instance.Client.Groups.GroupNamesReply -= h,
+                e => e.GroupNames != null && e.GroupNames.ContainsKey(groupID),
+                e => e.GroupNames[groupID],
+                (int)instance.GlobalSettings["resolve_uri_time"],
+                CancellationToken.None,
+                RadegastInstance.INCOMPLETE_NAME);
 
-            instance.Client.Groups.GroupNamesReply += handler;
-            try
-            {
-                instance.Client.Groups.RequestGroupName(groupID);
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
-                if (completed == tcs.Task)
-                {
-                    return await tcs.Task.ConfigureAwait(false);
-                }
-            }
-            catch { }
-            finally
-            {
-                instance.Client.Groups.GroupNamesReply -= handler;
-            }
+            instance.Client.Groups.RequestGroupName(groupID);
 
-            return RadegastInstance.INCOMPLETE_NAME;
+            var result = await waitTask.ConfigureAwait(false);
+            return result;
         }
 
         /// <summary>
@@ -606,43 +580,30 @@ namespace Radegast
 
             return name;
         }
-        private async Task<string> GetParcelNameAsync(UUID parcelID)
+        private async Task<string> GetParcelNameAsync(UUID parcelID, CancellationToken cancellationToken = default)
         {
-            var tcs = new TaskCompletionSource<string>();
-            EventHandler<ParcelInfoReplyEventArgs> handler = (sender, e) =>
-            {
-                if (e.Parcel.ID == parcelID)
-                {
-                    tcs.TrySetResult(e.Parcel.Name);
-                }
-            };
+            var waitTask = EventSubscriptionHelper.WaitForEventAsync<ParcelInfoReplyEventArgs, string>(
+                h => instance.Client.Parcels.ParcelInfoReply += h,
+                h => instance.Client.Parcels.ParcelInfoReply -= h,
+                e => e.Parcel.ID == parcelID,
+                e => e.Parcel.Name,
+                (int)instance.GlobalSettings["resolve_uri_time"],
+                cancellationToken,
+                RadegastInstance.INCOMPLETE_NAME);
 
-            instance.Client.Parcels.ParcelInfoReply += handler;
-            try
-            {
-                instance.Client.Parcels.RequestParcelInfo(parcelID);
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(instance.GlobalSettings["resolve_uri_time"])).ConfigureAwait(false);
-                if (completed == tcs.Task)
-                {
-                    return await tcs.Task.ConfigureAwait(false);
-                }
-            }
-            catch { }
-            finally
-            {
-                instance.Client.Parcels.ParcelInfoReply -= handler;
-            }
+            instance.Client.Parcels.RequestParcelInfo(parcelID);
 
-            return RadegastInstance.INCOMPLETE_NAME;
+            var result = await waitTask.ConfigureAwait(false);
+            return result;
         }
         #endregion
 
         /// <summary>
-        /// Attempts to resolve the name of a given key by type (Agent, Group, Parce, etc)
+        /// Attempts to resolve the name of a given key by type (Agent, Group, Parcel, etc)
         /// </summary>
         /// <param name="id">UUID of object to resolve</param>
         /// <param name="type">Type of object</param>
-        /// <returns>Revoled name</returns>
+        /// <returns>Resolved name</returns>
         private string Resolve(UUID id, ResolveType type)
         {
             switch (type)
@@ -681,26 +642,12 @@ namespace Radegast
         private string GetLinkNameRegionUri(Match match)
         {
             string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
+            
+            int? x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : (int?)null;
+            int? y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : (int?)null;
+            int? z = match.Groups["local_z"].Success ? int.Parse(match.Groups["local_z"].Value) : (int?)null;
 
-            string coordinateString = "";
-            if (match.Groups["local_x"].Success)
-            {
-                coordinateString += " (" + match.Groups["local_x"].Value;
-            }
-            if (match.Groups["local_y"].Success)
-            {
-                coordinateString += "," + match.Groups["local_y"].Value;
-            }
-            if (match.Groups["local_z"].Success)
-            {
-                coordinateString += "," + match.Groups["local_z"].Value;
-            }
-            if (coordinateString != "")
-            {
-                coordinateString += ")";
-            }
-
-            return string.Format("{0}{1}", name, coordinateString);
+            return name + Utilities.FormatCoordinates(x, y, z);
         }
 
         private ParsedUriInfo GetLinkNameAgent(Match match)

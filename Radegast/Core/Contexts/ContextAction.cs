@@ -17,7 +17,6 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -107,12 +106,8 @@ namespace Radegast
         {
             try
             {
-                if (instance.MainForm.InvokeRequired)
-                {
-                    instance.MainForm.Invoke(func);
-                    return;
-                }
-                func();
+                // ThreadingHelper expects an Action; wrap MethodInvoker
+                ThreadingHelper.SafeInvokeSync(instance.MainForm, new Action(func), instance.MonoRuntime);
             }
             catch (Exception e)
             {

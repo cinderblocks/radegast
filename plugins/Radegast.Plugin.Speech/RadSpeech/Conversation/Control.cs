@@ -566,7 +566,7 @@ namespace RadegastSpeech.Conversation
         {
             if (c == null)
             {
-                Logger.Log("Trying to start non-existant conversation", Helpers.LogLevel.Warning);
+                Logger.Warn("Trying to start non-existent conversation");
                 return;
             }
             // Avoid multiple starts.
@@ -581,9 +581,9 @@ namespace RadegastSpeech.Conversation
 
         internal void SelectConversation(string name)
         {
-            if (conversations.ContainsKey(name))
+            if (conversations.TryGetValue(name, out var conversation))
             {
-                SelectConversation(conversations[name]);
+                SelectConversation(conversation);
             }
             else
             {

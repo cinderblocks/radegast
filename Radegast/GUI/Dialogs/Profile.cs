@@ -27,7 +27,6 @@ using System.Windows.Forms;
 using OpenMetaverse;
 using OpenMetaverse.Messages.Linden;
 
-
 namespace Radegast
 {
     public partial class frmProfile : RadegastForm
@@ -141,10 +140,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (!Instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Self_MuteListUpdated(sender, e)));
-                }
+                ThreadingHelper.SafeInvoke(this, new Action(() => Self_MuteListUpdated(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -178,7 +174,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Avatars_AvatarGroupsReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Avatars_AvatarGroupsReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -205,7 +201,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Avatars_AvatarInterestsReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Avatars_AvatarInterestsReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -240,7 +236,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Avatars_AvatarNotesReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Avatars_AvatarNotesReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
             rtbNotes.Text = e.Notes;
@@ -252,7 +248,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Avatars_AvatarPicksReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Avatars_AvatarPicksReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
             gotPicks = true;
@@ -325,7 +321,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Avatars_PickInfoReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Avatars_PickInfoReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -384,7 +380,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Parcels_ParcelInfoReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Parcels_ParcelInfoReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
 
@@ -407,14 +403,7 @@ namespace Radegast
 
         private void NetComClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new MethodInvoker(Close));
-            }
-            else
-            {
-                Close();
-            }
+            ThreadingHelper.SafeInvoke(this, new Action(Close), Instance.MonoRuntime);
         }
 
         private void Avatars_AvatarProfileReply(bool success, AgentProfileMessage profile)
@@ -447,7 +436,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(() => Avatars_AvatarPropertiesReply(sender, e)));
+                ThreadingHelper.SafeInvokeSync(this, new Action(() => Avatars_AvatarPropertiesReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
             AvatarProperties = e.Properties;
@@ -508,9 +497,7 @@ namespace Radegast
                 rlPicPanel.Hide();
             }
 
-            BeginInvoke(
-                new OnSetProfileProperties(SetProfileProperties),
-                new object[] { AvatarProperties });
+            ThreadingHelper.SafeInvoke(this, new Action(() => SetProfileProperties(AvatarProperties)), Instance.MonoRuntime);
         }
 
         //called on GUI thread
@@ -785,7 +772,7 @@ namespace Radegast
                         Instance.State.Parcel.Desc
                         );
 
-                    Invoke(new MethodInvoker(ClearPicks));
+                    ThreadingHelper.SafeInvoke(this, new Action(ClearPicks), Instance.MonoRuntime);
                     Client.Avatars.RequestAvatarPicks(AgentID);
                 });
         }

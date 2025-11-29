@@ -42,6 +42,7 @@ using System.Text;
 using System.Windows.Forms;
 using Radegast;
 using OpenMetaverse;
+using Radegast.Threading;
 #endregion
 
 namespace DemoTab
@@ -179,7 +180,7 @@ namespace DemoTab
             // Boilerplate, make sure to be on the GUI thread
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Self_ChatFromSimulator(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Self_ChatFromSimulator(sender, e)), instance.MonoRuntime);
                 return;
             }
 

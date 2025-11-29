@@ -90,22 +90,19 @@ namespace Radegast
 
         private void Directory_DirPeopleReply(object sender, DirPeopleReplyEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Directory_DirPeopleReply(sender, e)));
-                return;
-            }
+                if (console.QueryID != e.QueryID) return;
 
-            if (console.QueryID != e.QueryID) return;
+                totalResults += e.MatchedPeople.Count;
+                lblResultCount.Text = totalResults + " people found";
 
-            totalResults += e.MatchedPeople.Count;
-            lblResultCount.Text = totalResults + " people found";
+                txtPersonName.Enabled = true;
+                btnFind.Enabled = true;
 
-            txtPersonName.Enabled = true;
-            btnFind.Enabled = true;
-
-            btnNext.Enabled = (totalResults > 100);
-            btnPrevious.Enabled = (startResult > 0);
+                btnNext.Enabled = (totalResults > 100);
+                btnPrevious.Enabled = (startResult > 0);
+            }, instance.MonoRuntime);
         }
 
         private void txtPersonName_TextChanged(object sender, EventArgs e)
@@ -194,45 +191,40 @@ namespace Radegast
         {
             if (e.QueryID != placeSearch) return;
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Directory_DirPlacesReply(sender, e)));
-                return;
-            }
+                lvwPlaces.BeginUpdate();
 
-            lvwPlaces.BeginUpdate();
+                if (e.MatchedParcels.Count == 0)
+                    lvwPlaces.Items.Clear();
 
-            if (e.MatchedParcels.Count == 0)
-                lvwPlaces.Items.Clear();
-
-            foreach (DirectoryManager.DirectoryParcel parcel in e.MatchedParcels)
-            {
-                if (parcel.ID == UUID.Zero) continue;
-
-                ListViewItem item = new ListViewItem
+                foreach (DirectoryManager.DirectoryParcel parcel in e.MatchedParcels)
                 {
-                    Name = parcel.ID.ToString(),
-                    Text = parcel.Name,
-                    Tag = parcel
-                };
-                item.SubItems.Add(new ListViewItem.ListViewSubItem(item, parcel.Dwell.ToString(CultureInfo.InvariantCulture)));
-                lvwPlaces.Items.Add(item);
-            }
-            lvwPlaces.Sort();
-            lvwPlaces.EndUpdate();
+                    if (parcel.ID == UUID.Zero) continue;
 
-            placeMatches += e.MatchedParcels.Count;
+                    ListViewItem item = new ListViewItem
+                    {
+                        Name = parcel.ID.ToString(),
+                        Text = parcel.Name,
+                        Tag = parcel
+                    };
+                    item.SubItems.Add(new ListViewItem.ListViewSubItem(item, parcel.Dwell.ToString(CultureInfo.InvariantCulture)));
+                    lvwPlaces.Items.Add(item);
+                }
+                lvwPlaces.Sort();
+                lvwPlaces.EndUpdate();
 
-            btnNextPlace.Enabled = placeMatches > 100;
-            btnPrevPlace.Enabled = placeStart != 0;
+                placeMatches += e.MatchedParcels.Count;
 
-            if (e.MatchedParcels.Count > 0 && e.MatchedParcels[e.MatchedParcels.Count - 1].ID == UUID.Zero)
-                placeMatches -= 1;
+                btnNextPlace.Enabled = placeMatches > 100;
+                btnPrevPlace.Enabled = placeStart != 0;
 
-            lblNrPlaces.Visible = true;
-            lblNrPlaces.Text = string.Format("{0} places found", placeMatches > 100 ? "More than " + (placeStart + 100) : (placeStart + placeMatches).ToString());
+                if (e.MatchedParcels.Count > 0 && e.MatchedParcels[e.MatchedParcels.Count - 1].ID == UUID.Zero)
+                    placeMatches -= 1;
 
-
+                lblNrPlaces.Visible = true;
+                lblNrPlaces.Text = string.Format("{0} places found", placeMatches > 100 ? "More than " + (placeStart + 100) : (placeStart + placeMatches).ToString());
+            }, instance.MonoRuntime);
         }
 
         private void txtSearchPlace_KeyDown(object sender, KeyEventArgs e)
@@ -381,41 +373,38 @@ namespace Radegast
         {
             if (e.QueryID != groupSearch) return;
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Directory_DirGroupsReply(sender, e)));
-                return;
-            }
+                lvwGroups.BeginUpdate();
 
-            lvwGroups.BeginUpdate();
+                if (e.MatchedGroups.Count == 0)
+                    lvwGroups.Items.Clear();
 
-            if (e.MatchedGroups.Count == 0)
-                lvwGroups.Items.Clear();
-
-            foreach (DirectoryManager.GroupSearchData group in e.MatchedGroups)
-            {
-                if (group.GroupID == UUID.Zero) continue;
-
-                ListViewItem item = new ListViewItem
+                foreach (DirectoryManager.GroupSearchData group in e.MatchedGroups)
                 {
-                    Name = @group.GroupID.ToString(), Text = @group.GroupName, Tag = @group
-                };
-                item.SubItems.Add(new ListViewItem.ListViewSubItem(item, group.Members.ToString()));
+                    if (group.GroupID == UUID.Zero) continue;
 
-                lvwGroups.Items.Add(item);
-            }
-            lvwGroups.Sort();
-            lvwGroups.EndUpdate();
+                    ListViewItem item = new ListViewItem
+                    {
+                        Name = @group.GroupID.ToString(), Text = @group.GroupName, Tag = @group
+                    };
+                    item.SubItems.Add(new ListViewItem.ListViewSubItem(item, group.Members.ToString()));
 
-            groupMatches += e.MatchedGroups.Count;
-            btnNextGroup.Enabled = groupMatches > 100;
-            btnPrevGroup.Enabled = placeStart != 0;
+                    lvwGroups.Items.Add(item);
+                }
+                lvwGroups.Sort();
+                lvwGroups.EndUpdate();
 
-            if (e.MatchedGroups.Count > 0 && e.MatchedGroups[e.MatchedGroups.Count - 1].GroupID == UUID.Zero)
-                groupMatches -= 1;
+                groupMatches += e.MatchedGroups.Count;
+                btnNextGroup.Enabled = groupMatches > 100;
+                btnPrevGroup.Enabled = placeStart != 0;
 
-            lblNrGroups.Visible = true;
-            lblNrGroups.Text = string.Format("{0} groups found", groupMatches > 100 ? "More than " + (groupStart + 100) : (groupStart + groupMatches).ToString());
+                if (e.MatchedGroups.Count > 0 && e.MatchedGroups[e.MatchedGroups.Count - 1].GroupID == UUID.Zero)
+                    groupMatches -= 1;
+
+                lblNrGroups.Visible = true;
+                lblNrGroups.Text = string.Format("{0} groups found", groupMatches > 100 ? "More than " + (groupStart + 100) : (groupStart + groupMatches).ToString());
+            }, instance.MonoRuntime);
         }
 
         private void btnSearchGroup_Click(object sender, EventArgs e)
@@ -573,37 +562,34 @@ namespace Radegast
         {
             if (e.QueryID != eventSearch) return;
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Directory_DirEventsReply(sender, e)));
-                return;
-            }
+                lvwEvents.BeginUpdate();
 
-            lvwEvents.BeginUpdate();
+                foreach (var evt in e.MatchedEvents)
+                {
+                    if (evt.ID == 0) continue;
 
-            foreach (var evt in e.MatchedEvents)
-            {
-                if (evt.ID == 0) continue;
+                    ListViewItem item = new ListViewItem {Name = "evt" + evt.ID, Text = evt.Name, Tag = evt};
+                    item.SubItems.Add(new ListViewItem.ListViewSubItem(item, evt.Date));
 
-                ListViewItem item = new ListViewItem {Name = "evt" + evt.ID, Text = evt.Name, Tag = evt};
-                item.SubItems.Add(new ListViewItem.ListViewSubItem(item, evt.Date));
+                    lvwEvents.Items.Add(item);
+                }
 
-                lvwEvents.Items.Add(item);
-            }
+                lvwEvents.Sort();
+                lvwEvents.EndUpdate();
 
-            lvwEvents.Sort();
-            lvwEvents.EndUpdate();
+                eventMatches += e.MatchedEvents.Count;
+                btnNextEvent.Enabled = eventMatches > eventsPerPage;
+                btnPrevEvent.Enabled = eventStart != 0;
 
-            eventMatches += e.MatchedEvents.Count;
-            btnNextEvent.Enabled = eventMatches > eventsPerPage;
-            btnPrevEvent.Enabled = eventStart != 0;
+                if (e.MatchedEvents.Count > 0 && e.MatchedEvents[e.MatchedEvents.Count - 1].ID == 0)
+                    eventMatches -= 1;
 
-            if (e.MatchedEvents.Count > 0 && e.MatchedEvents[e.MatchedEvents.Count - 1].ID == 0)
-                eventMatches -= 1;
-
-            lblNrEvents.Visible = true;
-            lblNrEvents.Text =
-                $"{(eventMatches > eventsPerPage ? "More than " + (eventStart + eventsPerPage) : (eventStart + eventMatches).ToString())} events found";
+                lblNrEvents.Visible = true;
+                lblNrEvents.Text =
+                    $"{(eventMatches > eventsPerPage ? "More than " + (eventStart + eventsPerPage) : (eventStart + eventMatches).ToString())} events found";
+            }, instance.MonoRuntime);
         }
 
 
@@ -708,51 +694,39 @@ namespace Radegast
 
         private void Directory_EventInfoReply(object sender, EventInfoReplyEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Directory_EventInfoReply(sender, e)));
-                return;
-            }
+                var evt = e.MatchedEvent;
+                pnlEventDetail.Visible = true;
+                pnlEventDetail.Tag = evt;
+                btnTeleport.Enabled = btnShowOnMap.Enabled = true;
 
-            var evt = e.MatchedEvent;
-            pnlEventDetail.Visible = true;
-            pnlEventDetail.Tag = evt;
-            btnTeleport.Enabled = btnShowOnMap.Enabled = true;
-
-            txtEventName.Text = evt.Name;
-            txtEventType.Text = evt.Category.ToString();
-            txtEventMaturity.Text = evt.Flags.ToString();
-            txtEventDate.Text = Utils.UnixTimeToDateTime(evt.DateUTC).ToString("r");
-            txtEventDuration.Text = string.Format("{0}:{1:00}", evt.Duration / 60u, evt.Duration % 60u);
-            txtEventOrganizer.Text = instance.Names.Get(evt.Creator, string.Empty);
-            txtEventOrganizer.Tag = evt.Creator;
-            txtEventLocation.Text = string.Format("{0} ({1}, {2}, {3})", evt.SimName, Math.Round(evt.GlobalPos.X % 256), Math.Round(evt.GlobalPos.Y % 256), Math.Round(evt.GlobalPos.Z));
-            txtEventDescription.Text = evt.Desc.Replace("\n", Environment.NewLine);
+                txtEventName.Text = evt.Name;
+                txtEventType.Text = evt.Category.ToString();
+                txtEventMaturity.Text = evt.Flags.ToString();
+                txtEventDate.Text = Utils.UnixTimeToDateTime(evt.DateUTC).ToString("r");
+                txtEventDuration.Text = string.Format("{0}:{1:00}", evt.Duration / 60u, evt.Duration % 60u);
+                txtEventOrganizer.Text = instance.Names.Get(evt.Creator, string.Empty);
+                txtEventOrganizer.Tag = evt.Creator;
+                txtEventLocation.Text = string.Format("{0} ({1}, {2}, {3})", evt.SimName, Math.Round(evt.GlobalPos.X % 256), Math.Round(evt.GlobalPos.Y % 256), Math.Round(evt.GlobalPos.Z));
+                txtEventDescription.Text = evt.Desc.Replace("\n", Environment.NewLine);
+            }, instance.MonoRuntime);
         }
 
         private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Names_NameUpdated(sender, e)));
-                return;
-            }
-
-            if (!(txtEventOrganizer.Tag is UUID))
-            {
-                return;
-            }
-
-            UUID organizer = (UUID)txtEventOrganizer.Tag;
-
-            foreach (var name in e.Names)
-            {
-                if (name.Key == organizer)
+                if (!(txtEventOrganizer.Tag is UUID organizer))
                 {
-                    txtEventOrganizer.Text = name.Value;
-                    break;
+                    return;
                 }
-            }
+
+                if (e.Names.TryGetValue(organizer, out var name))
+                {
+                    txtEventOrganizer.Text = name;
+                }
+            }, instance.MonoRuntime);
         }
 
         private void btnTeleport_Click(object sender, EventArgs e)

@@ -73,31 +73,29 @@ namespace Radegast
 
         private void UpdateDisplay()
         {
-            if (InvokeRequired) {
-                Invoke(new MethodInvoker(UpdateDisplay));
-                return;
-            }
-            lastPrimName.Text = selectedPrim.Properties.Name;
-            lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
+            ThreadingHelper.SafeInvoke(this, () =>
+            {
+                lastPrimName.Text = selectedPrim.Properties.Name;
+                lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
+            }, instance.MonoRuntime);
         }
 
         private void UpdateLLUUID()
         {
-            if (InvokeRequired) {
-                Invoke(new MethodInvoker(UpdateLLUUID));
-                return;
-            }
-            lastPrimLLUUID.Text = selectedID.ToString();
-            lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
-            sitBitn.Enabled = true;
-            objInfoBtn.Enabled = selectedPrim.ParentID != 0;
-            touchBtn.Enabled = true;
-            payBtn.Enabled = (selectedPrim.Flags & PrimFlags.Money) != 0;
-            saveBtn.Enabled = true;
-            if (selectedPrim.Textures != null) {
-                texturesBtn.Enabled = true;
-            }
-            btnPoint.Enabled = true;
+            ThreadingHelper.SafeInvoke(this, () =>
+            {
+                lastPrimLLUUID.Text = selectedID.ToString();
+                lastPrimLocalID.Text = selectedPrim.LocalID.ToString();
+                sitBitn.Enabled = true;
+                objInfoBtn.Enabled = selectedPrim.ParentID != 0;
+                touchBtn.Enabled = true;
+                payBtn.Enabled = (selectedPrim.Flags & PrimFlags.Money) != 0;
+                saveBtn.Enabled = true;
+                if (selectedPrim.Textures != null) {
+                    texturesBtn.Enabled = true;
+                }
+                btnPoint.Enabled = true;
+            }, instance.MonoRuntime);
         }
 
         private void Avatars_ViewerEffectPointAt(object sender, ViewerEffectPointAtEventArgs e)

@@ -86,7 +86,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => Assets_OnAssetReceived(transfer, asset)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnAssetReceived(transfer, asset)), instance.MonoRuntime);
                 return;
             }
 
@@ -170,8 +170,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => Inventory_OnInventoryItemCopied(item)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Inventory_OnInventoryItemCopied(item)), instance.MonoRuntime);
                 return;
             }
 
@@ -333,8 +332,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => UpdateStatus(status)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => UpdateStatus(status)), instance.MonoRuntime);
                 return;
             }
             instance.ShowNotificationInChat($"Notecard status: {status}", ChatBufferTextStyle.Invisible);

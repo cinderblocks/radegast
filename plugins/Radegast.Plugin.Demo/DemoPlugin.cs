@@ -35,6 +35,7 @@ using System.Threading;
 using System.Windows.Forms;
 using Radegast;
 using OpenMetaverse;
+using Radegast.Threading;
 
 namespace Radegast.Plugin.Demo
 {
@@ -119,7 +120,7 @@ namespace Radegast.Plugin.Demo
             // In this case the IM we sent back as a reply is also displayed in the corresponding IM tab
             if (Instance.MainForm.InvokeRequired)
             {
-                Instance.MainForm.BeginInvoke(new MethodInvoker(() => Self_IM(sender, e)));
+                ThreadingHelper.SafeInvoke(Instance.MainForm, new Action(() => Self_IM(sender, e)), Instance.MonoRuntime);
                 return;
             }
 

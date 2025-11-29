@@ -69,88 +69,64 @@ namespace Radegast
 
         private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Netcom_ClientDisconnected(sender, e)));
-                }
-                return;
-            }
-            
-            uploadCts?.Cancel();
-            Running = false;
+                uploadCts?.Cancel();
+                Running = false;
 
-            UpdateButtons();
+                UpdateButtons();
+            }, instance.MonoRuntime);
         }
 
         private void Netcom_ClientConnected(object sender, EventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Netcom_ClientConnected(sender, e)));
-                }
-                return;
-            }
-
-            UpdateButtons();
+                UpdateButtons();
+            }, instance.MonoRuntime);
         }
 
         private void Msg(string msg)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Msg(msg)));
-                }
-                return;
-            }
-
-            txtUploadLog.AppendText(msg + "\n");
+                txtUploadLog.AppendText(msg + "\n");
+            }, instance.MonoRuntime);
         }
 
         private void UpdateButtons()
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(UpdateButtons));
-                }
-                return;
-            }
+                UploadImages = cbUploadImages.Checked;
 
-            UploadImages = cbUploadImages.Checked;
-
-            if (client.Network.Connected)
-            {
-                if (Running)
+                if (client.Network.Connected)
                 {
-                    btnBrowse.Enabled = false;
-                    btnStart.Enabled = false;
+                    if (Running)
+                    {
+                        btnBrowse.Enabled = false;
+                        btnStart.Enabled = false;
+                    }
+                    else
+                    {
+                        btnBrowse.Enabled = true;
+                        lock (FileNames)
+                        {
+                            btnStart.Enabled = FileNames.Count > 0;
+                        }
+                    }
                 }
                 else
                 {
                     btnBrowse.Enabled = true;
-                    lock (FileNames)
-                    {
-                        btnStart.Enabled = FileNames.Count > 0;
-                    }
+                    btnStart.Enabled = false;
                 }
-            }
-            else
-            {
-                btnBrowse.Enabled = true;
-                btnStart.Enabled = false;
-            }
 
-            lock (FileNames)
-            {
-                lblStatus.Text = $"{FileNames.Count} files remaining";
-            }
+                lock (FileNames)
+                {
+                    lblStatus.Text = $"{FileNames.Count} files remaining";
+                }
+            }, instance.MonoRuntime);
         }
 
         private void btnBrowse_Click(object sender, EventArgs e)

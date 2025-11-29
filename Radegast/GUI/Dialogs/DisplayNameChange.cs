@@ -21,9 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 using OpenMetaverse;
-
 
 namespace Radegast
 {
@@ -64,10 +62,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                if (IsHandleCreated || !Instance.MonoRuntime)
-                {
-                    BeginInvoke(new MethodInvoker(() => UpdateStatus(msg)));
-                }
+                ThreadingHelper.SafeInvoke(this, new Action(() => UpdateStatus(msg)), Instance.MonoRuntime);
                 return;
             }
 

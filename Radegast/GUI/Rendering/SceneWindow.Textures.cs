@@ -34,11 +34,9 @@ using System;
 using System.Drawing;
 using System.Reflection;
 using System.Threading;
-using System.Windows.Forms;
 using CoreJ2K;
 using CoreJ2K.Util;
 using OpenTK.Graphics;
-using OpenTK.Graphics.OpenGL;
 using OpenTK.Platform;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
@@ -300,11 +298,11 @@ namespace Radegast.Rendering
                     Logger.Warn($"Texture thread GL upload failed, falling back to UI thread: {ex.Message}", ex, Client);
                     if (instance.MainForm.IsHandleCreated)
                     {
-                        instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                        ThreadingHelper.SafeInvoke(instance.MainForm, new Action(() =>
                         {
                             item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
                             try { bitmap.Dispose(); } catch { }
-                        }));
+                        }), instance.MonoRuntime);
                     }
                     else
                     {
@@ -320,11 +318,11 @@ namespace Radegast.Rendering
             {
                 if (instance.MainForm.IsHandleCreated)
                 {
-                    instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                    ThreadingHelper.SafeInvoke(instance.MainForm, new Action(() =>
                     {
                         item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
                         try { bitmap.Dispose(); } catch { }
-                    }));
+                    }), instance.MonoRuntime);
                 }
                 else
                 {
