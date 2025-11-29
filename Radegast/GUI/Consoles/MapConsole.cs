@@ -197,7 +197,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed setting map position controls: ", Helpers.LogLevel.Warning, instance.Client, ex);
+                Logger.Warn("Failed setting map position controls", ex, instance.Client);
             }
 
             gotoRegion(region, x, y);
@@ -350,7 +350,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed setting map position controls: ", Helpers.LogLevel.Warning, instance.Client, ex);
+                    Logger.Warn("Failed setting map position controls", ex, instance.Client);
                 }
 
                 if (m.Groups.Count > 5 && m.Groups[6].Value != string.Empty)
@@ -455,8 +455,7 @@ namespace Radegast
                         else
                         {
                             // Timeout
-                            Logger.Log($"Map Console timed out waiting for region handle for '{regionName}'", 
-                                Helpers.LogLevel.Warning, instance.Client);
+                            Logger.Warn($"Map Console timed out waiting for region handle for '{regionName}'", instance.Client);
                             try
                             {
                                 if (InvokeRequired)
@@ -470,7 +469,7 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"Exception while requesting map region {regionName}: {ex}", Helpers.LogLevel.Error, instance.Client);
+                        Logger.Error($"Exception while requesting map region {regionName}", ex, instance.Client);
                     }
                     finally
                     {

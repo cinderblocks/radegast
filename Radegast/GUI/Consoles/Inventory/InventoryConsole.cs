@@ -87,7 +87,7 @@ namespace Radegast
             UpdateStatus("Reading cache");
             ThreadPool.QueueUserWorkItem(sync =>
             {
-                Logger.Log($"Reading inventory cache from {instance.InventoryCacheFileName}", Helpers.LogLevel.Debug, Client);
+                Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
                 Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
                 Init();
             });
@@ -187,7 +187,7 @@ namespace Radegast
                         var finished = await Task.WhenAny(inventoryUpdateTask, Task.Delay(5000)).ConfigureAwait(false);
                         if (finished != inventoryUpdateTask)
                         {
-                            Logger.Log("inventoryUpdateTask did not terminate within timeout after disposal.", Helpers.LogLevel.Warning, Client);
+                            Logger.Warn("inventoryUpdateTask did not terminate within timeout after disposal.", Client);
                         }
                         else
                         {
@@ -198,7 +198,7 @@ namespace Radegast
                     catch (OperationCanceledException) { }
                     catch (Exception ex)
                     {
-                        Logger.Log("Error while waiting for inventory update task: " + ex.Message, Helpers.LogLevel.Error, ex);
+                        Logger.Error("Error while waiting for inventory update task: " + ex.Message, ex);
                     }
                 }
             }
@@ -288,7 +288,7 @@ namespace Radegast
                 {
                     // Queue full, drop this update and log once
                     Interlocked.Decrement(ref itemsToAddCount);
-                    Logger.Log("ItemsToAdd queue full, dropping inventory add event.", Helpers.LogLevel.Warning, Client);
+                    Logger.Warn("ItemsToAdd queue full, dropping inventory add event.", Client);
                 }
             }
             else
@@ -367,7 +367,7 @@ namespace Radegast
                         // Queue full, remove dedupe entry and drop
                         Interlocked.Decrement(ref itemsToUpdateCount);
                         ItemsToUpdateSet.TryRemove(e.NewObject.UUID, out _);
-                        Logger.Log("ItemsToUpdate queue full, dropping inventory update event.", Helpers.LogLevel.Warning, Client);
+                        Logger.Warn("ItemsToUpdate queue full, dropping inventory update event.", Client);
                     }
                 }
             }
@@ -704,7 +704,7 @@ namespace Radegast
          {
              if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
              {
-                 Logger.Log("Could not traverse inventory. Event Queue is not running.", Helpers.LogLevel.Warning, Client);
+                 Logger.Warn("Could not traverse inventory. Event Queue is not running.", Client);
                  return;
              }
 
@@ -720,7 +720,7 @@ namespace Radegast
              }
              catch (OperationCanceledException)
              {
-                 Logger.Log("Inventory traversal cancelled.", Helpers.LogLevel.Info, Client);
+                 Logger.Info("Inventory traversal cancelled.", Client);
                  TreeUpdateTimer.Stop();
                  TreeUpdateInProgress = false;
                  UpdateStatus("Reading cache");
@@ -728,7 +728,7 @@ namespace Radegast
              }
              catch (Exception ex)
              {
-                 Logger.Log("Error during inventory traversal: " + ex.Message, Helpers.LogLevel.Error, ex);
+                 Logger.Error("Error during inventory traversal: " + ex.Message, ex);
              }
 
              TreeUpdateTimer.Stop();
@@ -740,12 +740,7 @@ namespace Radegast
              UpdateStatus("OK");
              instance.ShowNotificationInChat("Inventory update completed.");
 
-             if ((Client.Network.LoginResponseData.FirstLogin) && !string.IsNullOrEmpty(Client.Network.LoginResponseData.InitialOutfit))
-             {
-                 Client.Self.SetAgentAccess("A");
-                 var initOutfit = new InitialOutfit(instance);
-                 initOutfit.SetInitialOutfit(Client.Network.LoginResponseData.InitialOutfit);
-             }
+             // Initial outfit handling moved to login response handler to avoid race with inventory traversal
 
              // Updated labels on clothes that we are wearing
              UpdateWornLabels();
@@ -764,7 +759,7 @@ namespace Radegast
                  }
              }
 
-             Logger.Log("Finished updating inventory folders, saving cache...", Helpers.LogLevel.Debug, Client);
+             Logger.Debug("Finished updating inventory folders, saving cache...", Client);
 
              ThreadPool.QueueUserWorkItem(state => Inventory.SaveToDisk(instance.InventoryCacheFileName));
 
@@ -1577,11 +1572,11 @@ namespace Radegast
                 }
                 catch (TaskCanceledException ex)
                 {
-                    Logger.LogInstance.Error("Timed out running inventory console background task", ex);
+                    Logger.Error("Timed out running inventory console background task", ex);
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogInstance.Error("Exception while running inventory console background task", ex);
+                    Logger.Error("Exception while running inventory console background task", ex);
                 }
 
                 if (uiCallback != null)
@@ -1622,7 +1617,7 @@ namespace Radegast
                         catch (OperationCanceledException) { }
                         catch (Exception ex)
                         {
-                            Logger.Log("Error fetching folder: " + ex.Message, Helpers.LogLevel.Error, Client);
+                            Logger.Error($"Error fetching folder: {ex.Message}", Client);
                         }
                         break;
 
@@ -2267,7 +2262,7 @@ namespace Radegast
                      if (invTree.SelectedNode.Tag is InventoryFolder folder)
                      {
                         // Start async fetch but don't block UI thread
-                        FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
+                        _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
                      }
 
                      break;

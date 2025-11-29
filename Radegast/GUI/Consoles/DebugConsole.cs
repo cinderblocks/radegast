@@ -21,7 +21,7 @@
 using System;
 using System.Drawing;
 using System.Windows.Forms;
-using log4net.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Radegast
 {
@@ -57,18 +57,21 @@ namespace Radegast
                 return;
             }
 
-            rtbLog.SelectionColor = Color.FromKnownColor(KnownColor.WindowText);
-            rtbLog.AppendText(string.Format("{0:HH:mm:ss} [", e.LogEntry.TimeStamp));
+            var entry = e.Entry;
 
-            if (e.LogEntry.Level == Level.Error)
+            rtbLog.SelectionColor = Color.FromKnownColor(KnownColor.WindowText);
+            rtbLog.AppendText(string.Format("{0:HH:mm:ss} [", entry.TimeStamp));
+
+            // Choose color based on Microsoft.Extensions.Logging.LogLevel
+            if (entry.Level == LogLevel.Error || entry.Level == LogLevel.Critical)
             {
                 rtbLog.SelectionColor = Color.Red;
             }
-            else if (e.LogEntry.Level == Level.Warn)
+            else if (entry.Level == LogLevel.Warning)
             {
                 rtbLog.SelectionColor = Color.Yellow;
             }
-            else if (e.LogEntry.Level == Level.Info)
+            else if (entry.Level == LogLevel.Information)
             {
                 rtbLog.SelectionColor = Color.Green;
             }
@@ -77,9 +80,9 @@ namespace Radegast
                 rtbLog.SelectionColor = Color.Gray;
             }
 
-            rtbLog.AppendText(e.LogEntry.Level.Name);
+            rtbLog.AppendText(entry.Level.ToString());
             rtbLog.SelectionColor = Color.FromKnownColor(KnownColor.WindowText);
-            rtbLog.AppendText(string.Format("]: - {0}{1}", e.LogEntry.MessageObject, Environment.NewLine));
+            rtbLog.AppendText($"]: - {entry.Message}{Environment.NewLine}");
         }
 
         private void rtbLog_LinkClicked(object sender, LinkClickedEventArgs e)

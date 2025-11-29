@@ -1068,7 +1068,7 @@ namespace Radegast.Rendering
             mSize = input.UnpackInt();
             offset += 34;
 
-            Logger.Log(string.Format("Found header for {0} type {1} length {2} at {3}", mFileID, mAssetType, mSize, mLocation), Helpers.LogLevel.Info);
+            Logger.Info($"Found header for {mFileID} type {mAssetType} length {mSize} at {mLocation}");
 
             return offset;
         }

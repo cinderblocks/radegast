@@ -76,7 +76,7 @@ namespace Radegast
             }
             else
             {
-                Logger.Log("Wrong format of the item offered", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Wrong format of the item offered", client);
             }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);

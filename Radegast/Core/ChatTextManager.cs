@@ -262,11 +262,11 @@ namespace Radegast
                     }
                     catch (TaskCanceledException ex)
                     {
-                        Logger.LogInstance.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
+                        Logger.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogInstance.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
+                        Logger.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                 });
 

@@ -84,7 +84,7 @@ namespace Radegast
             catch (Exception ex)
             {
                 Console.WriteLine("" + ex);
-                Logger.Log("Error executing notification callback", Helpers.LogLevel.Warning, ex);
+                Logger.Warn("Error executing notification callback", ex);
             }
         }
 
@@ -98,7 +98,7 @@ namespace Radegast
             catch (Exception ex)
             {
                 Console.WriteLine("" + ex);
-                Logger.Log("Error executing notification displayed", Helpers.LogLevel.Warning, ex);
+                Logger.Warn("Error executing notification displayed", ex);
             }
         }
 
@@ -247,8 +247,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Error executing OnNotificationClosed " + Text,
-                                             Helpers.LogLevel.Warning, ex);
+                    Logger.Warn($"Error executing OnNotificationClosed {Text}", ex);
                 }
                 if (!CanClose) Dispose();
             }
@@ -268,7 +267,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Error executing OnNotificationClicked", Helpers.LogLevel.Warning, ex);
+                Logger.Warn("Error executing OnNotificationClicked", ex);
             }
             if (CanClose)
             {

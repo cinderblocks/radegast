@@ -105,6 +105,7 @@ namespace Radegast
         }
 
         public IMSessionManager IMSessions { get; private set; }
+        private InitialOutfitHandler _initialOutfitHandler;
 
         #region Events
 
@@ -197,6 +198,9 @@ namespace Radegast
             IMSessions.SessionClosed += IMSessions_SessionClosed;
             IMSessions.TypingStarted += IMSessions_TypingStarted;
             IMSessions.TypingStopped += IMSessions_TypingStopped;
+
+            // Initialize core handlers that rely on client/login lifecycle
+            _initialOutfitHandler = new InitialOutfitHandler(this);
         }
 
         private void IMSessions_SessionOpened(object sender, IMSessionEventArgs e)
@@ -280,7 +284,7 @@ namespace Radegast
         public virtual void Reconnect()
         {
             ShowNotificationInChat("Attempting to reconnect...", ChatBufferTextStyle.StatusDarkBlue);
-            Logger.Log("Attempting to reconnect", Helpers.LogLevel.Info, Client);
+            Logger.Info("Attempting to reconnect", Client);
             GridClient oldClient = Client;
             Client = new GridClient();
             UnregisterClientEvents(oldClient);
@@ -352,7 +356,7 @@ namespace Radegast
                 NetCom.Dispose();
                 NetCom = null;
             }
-            Logger.Log("RadegastInstance finished cleaning up.", Helpers.LogLevel.Debug);
+            Logger.Debug("RadegastInstance finished cleaning up.");
         }
 
         private void NetCom_ClientConnected(object sender, EventArgs e)
@@ -373,7 +377,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed to create client directory", Helpers.LogLevel.Warning, ex);
+                Logger.Warn("Failed to create client directory", ex);
             }
         }
 
@@ -486,10 +490,9 @@ namespace Radegast
         public static void ThreadExceptionHandler(object sender, UnhandledExceptionEventArgs args)
         {
             Exception e = (Exception)args.ExceptionObject;
-            Logger.Log("Unhandled thread exception: "
+            Logger.Critical("Unhandled thread exception: "
                 + e.Message + Environment.NewLine
-                + e.StackTrace + Environment.NewLine,
-                Helpers.LogLevel.Error);
+                + e.StackTrace + Environment.NewLine);
         }
 
         #region World time
@@ -537,20 +540,20 @@ namespace Radegast
             // We have successfully obtained lock
             if (MarkerLock?.CanWrite == true)
             {
-                Logger.Log("No other instances detected, marker file already locked", Helpers.LogLevel.Debug);
+                Logger.Debug("No other instances detected, marker file already locked");
                 return MonoRuntime;
             }
 
             try
             {
                 MarkerLock = new FileStream(CrashMarkerFileName, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-                Logger.Log($"Successfully created and locked marker file {CrashMarkerFileName}", Helpers.LogLevel.Debug);
+                Logger.Debug($"Successfully created and locked marker file {CrashMarkerFileName}");
                 return MonoRuntime;
             }
             catch
             {
                 MarkerLock = null;
-                Logger.Log($"Another instance detected, marker file {CrashMarkerFileName} locked", Helpers.LogLevel.Debug);
+                Logger.Debug($"Another instance detected, marker file {CrashMarkerFileName} locked");
                 return true;
             }
         }
@@ -560,19 +563,19 @@ namespace Radegast
             // Crash marker file found and is not locked by us
             if (File.Exists(CrashMarkerFileName) && MarkerLock == null)
             {
-                Logger.Log($"Found crash marker file {CrashMarkerFileName}", Helpers.LogLevel.Debug);
+                Logger.Debug($"Found crash marker file {CrashMarkerFileName}");
                 return LastExecStatus.OtherCrash;
             }
             else
             {
-                Logger.Log($"No crash marker file {CrashMarkerFileName} found", Helpers.LogLevel.Debug);
+                Logger.Debug($"No crash marker file {CrashMarkerFileName} found");
                 return LastExecStatus.Normal;
             }
         }
 
         public void MarkStartExecution()
         {
-            Logger.Log($"Marking start of execution run, creating file: {CrashMarkerFileName}", Helpers.LogLevel.Debug);
+            Logger.Debug($"Marking start of execution run, creating file: {CrashMarkerFileName}");
             try
             {
                 File.Create(CrashMarkerFileName).Dispose();
@@ -582,7 +585,7 @@ namespace Radegast
 
         public void MarkEndExecution()
         {
-            Logger.Log($"Marking end of execution run, deleting file: {CrashMarkerFileName}", Helpers.LogLevel.Debug);
+            Logger.Debug($"Marking end of execution run, deleting file: {CrashMarkerFileName}");
             try
             {
                 if (MarkerLock != null)

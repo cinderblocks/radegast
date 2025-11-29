@@ -314,8 +314,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("ERROR in Radegast Command: " + type + " because " + ex.Message + " " + ex.StackTrace,
-                               Helpers.LogLevel.Debug);
+                    Logger.Debug($"ERROR in Radegast Command {type}: {ex.Message}", ex);
                     throw;
                 }
             }

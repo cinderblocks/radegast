@@ -26,6 +26,7 @@ using CommandLine;
 using CommandLine.Text;
 using System.Threading;
 using OpenMetaverse;
+using Microsoft.Extensions.Logging;
 
 namespace Radegast
 {
@@ -76,6 +77,8 @@ namespace Radegast
         /// <summary>BugSplat error reporting instance</summary>
         public static BugSplatDotNetStandard.BugSplat s_BugSplat;
 
+        public static ILoggerFactory LoggerFactory { get; private set; }
+
         private static void RunRadegast(CommandLineOptions args)
         {
             s_CommandLineOpts = args;
@@ -115,6 +118,14 @@ namespace Radegast
 
                 Environment.Exit(0);
             }
+
+            // Build out logger and set it for Radegast/LibreMetaverse
+            LoggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+            {
+                builder.SetMinimumLevel(LogLevel.Debug);
+                builder.AddProvider(new RadegastAppender());
+            });
+            Logger.SetLoggerFactory(LoggerFactory, "Radegast");
 
             // Create main Radegast instance
             var client = new GridClient();
@@ -177,11 +188,11 @@ namespace Radegast
             {
                 if (System.Diagnostics.Debugger.IsAttached){ throw; }
 
-                string errMsg = "Unhandled " + ex + ": " +
+                string errMsg = "Unhandled error" + ex + ": " +
                                 ex.Message + Environment.NewLine +
                                 ex.StackTrace + Environment.NewLine;
 
-                Logger.Log(errMsg, Helpers.LogLevel.Error);
+                Logger.Critical(errMsg, ex);
                 
                 s_BugSplat?.Post(ex);
 

@@ -102,7 +102,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Saving animation failed: " + ex.Message, Helpers.LogLevel.Debug);
+                    Logger.Warn("Saving animation failed", ex);
                 }
             }
         }
@@ -117,13 +117,13 @@ namespace Radegast
 
             if (transfer.Success)
             {
-                Logger.Log("Animation " + anim + " download success " + asset.AssetData.Length + " bytes.", Helpers.LogLevel.Debug);
+                Logger.Debug($"Animation {anim} download success; {asset.AssetData.Length} bytes.");
                 pnlSave.Visible = true;
                 animData = asset.AssetData;
             }
             else
             {
-                Logger.Log("Animation " + anim + " download failed.", Helpers.LogLevel.Debug);
+                Logger.Debug($"Animation {anim} download failed.");
                 Visible = false;
                 Dispose();
             }
@@ -165,15 +165,15 @@ namespace Radegast
             if (!success)
             {
                 lblStatus.Text = "Failed.";
-                Logger.Log("Failed creating asset", Helpers.LogLevel.Debug);
+                Logger.Debug("Failed creating asset");
                 return;
             }
             else
             {
-                Logger.Log("Created inventory item " + itemID, Helpers.LogLevel.Info);
+                Logger.Debug($"Created inventory item {itemID}");
 
-                lblStatus.Text = "Sending to " + friend.Name;
-                Logger.Log("Sending item to " + friend.Name, Helpers.LogLevel.Info);
+                lblStatus.Text = $"Sending to {friend.Name}";
+                Logger.Info($"Sending item to {friend.Name}");
 
                 instance.Client.Inventory.GiveItem(itemID, boxAnimName.Text, AssetType.Animation, friend.UUID, false);
                 lblStatus.Text = "Sent";

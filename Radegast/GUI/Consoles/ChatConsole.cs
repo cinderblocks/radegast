@@ -427,7 +427,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Grid_OnCoarseLocationUpdate: " + ex, Helpers.LogLevel.Error, client);
+                    Logger.Error("Location update exception in ChatConsole", ex, client);
                 }
                 finally
                 {

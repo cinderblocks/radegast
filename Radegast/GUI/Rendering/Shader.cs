@@ -35,6 +35,12 @@ namespace Radegast.Rendering
 
             try
             {
+                if (!File.Exists(fileName))
+                {
+                    Logger.DebugLog($"Shader file not found: {fileName}");
+                    return false;
+                }
+
                 ShaderType type;
 
                 string code = File.ReadAllText(fileName);
@@ -47,7 +53,10 @@ namespace Radegast.Rendering
                     type = ShaderType.FragmentShader;
                 }
                 else
+                {
+                    Logger.DebugLog($"Unknown shader type for file: {fileName}");
                     return false;
+                }
 
                 ID = GL.CreateShader(type);
                 GL.ShaderSource(ID, code);
@@ -57,15 +66,16 @@ namespace Radegast.Rendering
                 GL.GetShader(ID, ShaderParameter.CompileStatus, out res);
                 if (res != 1)
                 {
-                    Logger.DebugLog("Compilation failed: " + info);
+                    Logger.DebugLog($"Shader compilation failed for {fileName}: {info}");
                     ID = -1;
                     return false;
                 }
-                Logger.DebugLog(string.Format("{0} {1} compiled successfully", type, fileName));
+                Logger.DebugLog($"{type} {Path.GetFileName(fileName)} compiled successfully");
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.DebugLog($"Error loading shader {fileName}: {ex.Message}");
                 return false;
             }
         }
@@ -93,7 +103,16 @@ namespace Radegast.Rendering
             for (int i = 0; i < shaderNames.Length; i++)
             {
                 Shader s = new Shader();
-                if (!s.Load(Path.Combine("shader_data", shaderNames[i])))
+                
+                // Check if the path is already absolute or contains directory separators
+                string shaderPath = shaderNames[i];
+                if (!Path.IsPathRooted(shaderPath) && !shaderPath.Contains(Path.DirectorySeparatorChar.ToString()))
+                {
+                    // Only add shader_data prefix if it's a simple filename
+                    shaderPath = Path.Combine("shader_data", shaderNames[i]);
+                }
+                
+                if (!s.Load(shaderPath))
                     return false;
                 shaders[i] = s;
             }
