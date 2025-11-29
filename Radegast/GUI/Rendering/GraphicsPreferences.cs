@@ -79,6 +79,34 @@ namespace Radegast.Rendering
             cbShiny.Checked = Instance.GlobalSettings["scene_viewer_shiny"];
             cbVBO.Checked = Instance.GlobalSettings["rendering_use_vbo"];
 
+            // Initialize lighting controls
+            if (!Instance.GlobalSettings.ContainsKey("scene_ambient_light"))
+            {
+                Instance.GlobalSettings["scene_ambient_light"] = RenderSettings.AmbientLight;
+            }
+            if (!Instance.GlobalSettings.ContainsKey("scene_diffuse_light"))
+            {
+                Instance.GlobalSettings["scene_diffuse_light"] = RenderSettings.DiffuseLight;
+            }
+            if (!Instance.GlobalSettings.ContainsKey("scene_specular_light"))
+            {
+                Instance.GlobalSettings["scene_specular_light"] = RenderSettings.SpecularLight;
+            }
+
+            tbAmbient.Value = (int)(Instance.GlobalSettings["scene_ambient_light"].AsReal() * 100);
+            lblAmbient.Text = string.Format("Ambient: {0:0.00}", Instance.GlobalSettings["scene_ambient_light"].AsReal());
+            
+            tbDiffuse.Value = (int)(Instance.GlobalSettings["scene_diffuse_light"].AsReal() * 100);
+            lblDiffuse.Text = string.Format("Diffuse: {0:0.00}", Instance.GlobalSettings["scene_diffuse_light"].AsReal());
+            
+            tbSpecular.Value = (int)(Instance.GlobalSettings["scene_specular_light"].AsReal() * 100);
+            lblSpecular.Text = string.Format("Specular: {0:0.00}", Instance.GlobalSettings["scene_specular_light"].AsReal());
+
+            // Apply saved lighting settings
+            RenderSettings.AmbientLight = (float)Instance.GlobalSettings["scene_ambient_light"].AsReal();
+            RenderSettings.DiffuseLight = (float)Instance.GlobalSettings["scene_diffuse_light"].AsReal();
+            RenderSettings.SpecularLight = (float)Instance.GlobalSettings["scene_specular_light"].AsReal();
+
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
@@ -160,6 +188,42 @@ namespace Radegast.Rendering
             {
                 RenderSettings.UseVBO = cbVBO.Checked &&
                     (RenderSettings.ARBQuerySupported || RenderSettings.CoreQuerySupported);
+            }
+        }
+
+        private void tbAmbient_Scroll(object sender, EventArgs e)
+        {
+            float ambient = (float)tbAmbient.Value / 100f;
+            lblAmbient.Text = string.Format("Ambient: {0:0.00}", ambient);
+            Instance.GlobalSettings["scene_ambient_light"] = ambient;
+            RenderSettings.AmbientLight = ambient;
+            if (Window != null)
+            {
+                Window.UpdateLighting();
+            }
+        }
+
+        private void tbDiffuse_Scroll(object sender, EventArgs e)
+        {
+            float diffuse = (float)tbDiffuse.Value / 100f;
+            lblDiffuse.Text = string.Format("Diffuse: {0:0.00}", diffuse);
+            Instance.GlobalSettings["scene_diffuse_light"] = diffuse;
+            RenderSettings.DiffuseLight = diffuse;
+            if (Window != null)
+            {
+                Window.UpdateLighting();
+            }
+        }
+
+        private void tbSpecular_Scroll(object sender, EventArgs e)
+        {
+            float specular = (float)tbSpecular.Value / 100f;
+            lblSpecular.Text = string.Format("Specular: {0:0.00}", specular);
+            Instance.GlobalSettings["scene_specular_light"] = specular;
+            RenderSettings.SpecularLight = specular;
+            if (Window != null)
+            {
+                Window.UpdateLighting();
             }
         }
     }

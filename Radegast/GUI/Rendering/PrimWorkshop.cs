@@ -65,8 +65,8 @@ namespace Radegast.Rendering
     {
         #region Constants - Specific to PrimWorkshop
         // Lighting
-        private const float LIGHT_AMBIENT = 0.5f;
-        private const float LIGHT_DIFFUSE = 0.3f;
+        private const float LIGHT_AMBIENT = 0.7f;
+        private const float LIGHT_DIFFUSE = 0.8f;
         private const float LIGHT_SPECULAR = 0.8f;
         private const float LIGHT_ALPHA = 1.0f;
 

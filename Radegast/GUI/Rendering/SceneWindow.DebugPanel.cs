@@ -47,18 +47,21 @@ namespace Radegast.Rendering
         private void hsAmbient_Scroll(object sender, ScrollEventArgs e)
         {
             ambient = (float)hsAmbient.Value / 100f;
+            RenderSettings.AmbientLight = ambient;
             SetSun();
         }
 
         private void hsDiffuse_Scroll(object sender, ScrollEventArgs e)
         {
             diffuse = (float)hsDiffuse.Value / 100f;
+            RenderSettings.DiffuseLight = diffuse;
             SetSun();
         }
 
         private void hsSpecular_Scroll(object sender, ScrollEventArgs e)
         {
             specular = (float)hsSpecular.Value / 100f;
+            RenderSettings.SpecularLight = specular;
             SetSun();
         }
 

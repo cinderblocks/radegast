@@ -158,9 +158,9 @@ namespace Radegast.Rendering
         private float minLODFactor = 0.0001f;
 
         private readonly float[] sunPos = new float[] { 128f, 128f, 5000f, 1f };
-        private float ambient = 0.26f;
-        private float diffuse = 0.27f;
-        private float specular = 0.20f;
+        private float ambient = RenderSettings.AmbientLight;
+        private float diffuse = RenderSettings.DiffuseLight;
+        private float specular = RenderSettings.SpecularLight;
         private OpenTK.Vector4 ambientColor;
         private OpenTK.Vector4 diffuseColor;
         private OpenTK.Vector4 specularColor;
@@ -755,6 +755,16 @@ namespace Radegast.Rendering
             GL.Light(LightName.Light0, LightParameter.Position, sunPos);
         }
 
+        /// <summary>
+        /// Update lighting from RenderSettings
+        /// </summary>
+        public void UpdateLighting()
+        {
+            ambient = RenderSettings.AmbientLight;
+            diffuse = RenderSettings.DiffuseLight;
+            specular = RenderSettings.SpecularLight;
+            SetSun();
+        }
         private bool glControlLoaded = false;
 
         private void glControl_Load(object sender, EventArgs e)

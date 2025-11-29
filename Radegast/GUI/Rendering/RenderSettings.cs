@@ -74,6 +74,23 @@ namespace Radegast.Rendering
         /// </summary>
         public static bool EnableShiny = false;
 
+        #region Lighting
+        /// <summary>
+        /// Ambient light level (0.0 to 1.0)
+        /// </summary>
+        public static float AmbientLight = 0.70f;
+
+        /// <summary>
+        /// Diffuse light level (0.0 to 1.0)
+        /// </summary>
+        public static float DiffuseLight = 0.80f;
+
+        /// <summary>
+        /// Specular light level (0.0 to 1.0)
+        /// </summary>
+        public static float SpecularLight = 0.50f;
+        #endregion Lighting
+
         #region Water
         public static bool WaterReflections = false;
         #endregion Water
