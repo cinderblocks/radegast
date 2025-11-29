@@ -178,8 +178,7 @@ namespace Radegast.Commands
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("ERROR in Radegast Command: " + type + " because " + ex.Message + " " + ex.StackTrace,
-                               Helpers.LogLevel.Debug);
+                    Logger.Debug($"ERROR in Radegast Command: {type} because {ex.Message}", ex);
                     throw;
                 }
                 return false;
@@ -200,7 +199,7 @@ namespace Radegast.Commands
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log("ERROR in Radegast ICommandInterpreter: " + type + " because " + ex.Message + " " + ex.StackTrace, Helpers.LogLevel.Debug);
+                        Logger.Debug($"ERROR in Radegast ICommandInterpreter: {type} because {ex.Message}", ex);
                         throw;
                     }
                 }

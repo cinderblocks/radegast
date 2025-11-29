@@ -275,7 +275,7 @@ namespace Radegast.Core.RLV
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000));
                 if (completedTask != tcs.Task)
                 {
-                    Logger.Log("RLV Commands_SetGroup: Timed out while waiting for GroupRoleDataReply", Helpers.LogLevel.Error);
+                    Logger.Error("RLV Commands_SetGroup: Timed out while waiting for GroupRoleDataReply");
                     return (false, UUID.Zero);
                 }
             }

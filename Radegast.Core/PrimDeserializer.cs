@@ -168,7 +168,7 @@ namespace Radegast
 
                         if (!primDone.WaitOne(5000, false))
                         {
-                            Logger.Log($"Warning: Failed to link {linkQueue.Count} prims", Helpers.LogLevel.Warning);
+                            Logger.Warn($"Warning: Failed to link {linkQueue.Count} prims");
                         }
 
                         Client.Objects.SetPermissions(Client.Network.CurrentSim, primIDs,
@@ -188,7 +188,7 @@ namespace Radegast
                 else
                 {
                     // Skip linksets with a missing root prim
-                    Logger.Log("WARNING: Skipping a linkset with a missing root prim", Helpers.LogLevel.Warning);
+                    Logger.Warn($"Skipping {linkset} linkset with a missing root prim");
                 }
 
                 // Reset everything for the next linkset

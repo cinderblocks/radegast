@@ -107,7 +107,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log($"Error loading grid information: {ex.Message}", Helpers.LogLevel.Warning);
+                Logger.Warn($"Error loading grid information: {ex.Message}", ex);
             }
         }
 

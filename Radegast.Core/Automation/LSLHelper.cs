@@ -238,7 +238,7 @@ namespace Radegast.Automation
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed processing automation IM: " + ex.ToString(), Helpers.LogLevel.Warning);
+                    Logger.Warn("Failed processing automation IM", ex);
                 }
             });
         }

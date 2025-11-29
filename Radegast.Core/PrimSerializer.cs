@@ -109,7 +109,7 @@ namespace Radegast
                 bool success = AllPropertiesReceived.WaitOne(2000 + msPerRequest * localids.Length, false);
                 if (PrimsWaiting.Count > 0)
                 {
-                    Logger.Log("Failed to retrieve object properties for " + PrimsWaiting.Count + " prims out of " + localids.Length, Helpers.LogLevel.Warning, Client);
+                    Logger.Warn($"Failed to retrieve object properties for {PrimsWaiting.Count} prims out of {localids.Length}", Client);
 
                 }
                 Client.Objects.DeselectObjects(Client.Network.CurrentSim, localids);

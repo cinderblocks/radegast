@@ -251,7 +251,7 @@ namespace Radegast
                                 tcs.TrySetResult((null, null));
                             }
                         }
-                        catch (Exception ex)
+                        catch (Exception)
                         {
                             tcs.TrySetResult((null, null));
                         }
@@ -420,10 +420,8 @@ namespace Radegast
                 {
                     try
                     {
-                        if (state == TextureRequestState.Finished && assetTexture != null)
-                        {
-                            try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
-                        }
+                        if (state != TextureRequestState.Finished || assetTexture == null) { return; }
+                        try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
                     }
                     finally
                     {
@@ -431,21 +429,21 @@ namespace Radegast
                     }
                 });
 
-                var completed = Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).GetAwaiter().GetResult();
-                if (completed == tcs.Task)
+                if (Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).GetAwaiter().GetResult() != tcs.Task)
                 {
-                    var res = tcs.Task.GetAwaiter().GetResult();
-                    if (res != null)
-                    {
-                        texture = res;
-                        return true;
-                    }
+                    return false;
+                }
+                var res = tcs.Task.GetAwaiter().GetResult();
+                if (res != null)
+                {
+                    texture = res;
+                    return true;
                 }
                 return false;
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
-                Logger.Log(e.Message, Helpers.LogLevel.Error, Client, e);
+                Logger.Error(ex.Message, ex, Client);
                 return false;
             }
         }

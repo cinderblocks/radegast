@@ -798,7 +798,7 @@ namespace Radegast
             if (!IsWalking) { return; }
 
             IsWalking = false;
-            Logger.Log("Finished walking.", Helpers.LogLevel.Debug, Client);
+            Logger.Debug("Finished walking.", Client);
             walkTimer.Dispose();
             walkTimer = null;
             Client.Self.AutoPilotCancel();
@@ -1082,7 +1082,7 @@ namespace Radegast
             {
                 if (Client.Self.Movement.SitOnGround || Client.Self.SittingOn != 0) { return true; }
                 if (Sitting) {
-                    Logger.Log("out of sync sitting", Helpers.LogLevel.Debug);
+                    Logger.Debug("out of sync sitting");
                     Sitting = false;
                 }
                 return false;

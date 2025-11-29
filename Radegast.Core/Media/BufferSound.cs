@@ -71,8 +71,7 @@ namespace Radegast.Media
             volumeSetting = vol;
             loopSound = loop;
 
-            Logger.Log($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}",
-                Helpers.LogLevel.Debug);
+            Logger.Debug($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}");
 
             // Set flags to determine how it will be played.
             mode = MODE.DEFAULT |
@@ -243,14 +242,13 @@ namespace Radegast.Media
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log("Error playing sound: ", Helpers.LogLevel.Error, ex);
+                        Logger.Error("Error playing sound", ex);
                     }
                 });
             }
             else
             {
-                Logger.Log("Failed to download sound: " + transfer.Status,
-                                        Helpers.LogLevel.Error);
+                Logger.Error($"Failed to download sound: {transfer.Status}");
             }
         }
 

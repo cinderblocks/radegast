@@ -62,7 +62,7 @@ namespace Radegast
                 {
                     ret = folder.UUID;
                     try { tcs.TrySetResult(folder.UUID); } catch { }
-                    Logger.Log("Created folder " + folder.Name, Helpers.LogLevel.Info);
+                    Logger.Info($"Created folder {folder.Name}");
                 }
             };
 
@@ -126,11 +126,11 @@ namespace Radegast
                     var completed = Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).GetAwaiter().GetResult();
                     if (completed == tcs.Task && tcs.Task.GetAwaiter().GetResult())
                     {
-                        Logger.Log("Copied item " + item.Name, Helpers.LogLevel.Info);
+                        Logger.Info($"Copied item {item.Name}");
                     }
                     else
                     {
-                        Logger.Log("Failed to copy item " + item.Name, Helpers.LogLevel.Warning);
+                        Logger.Warn($"Failed to copy item {item.Name}");
                     }
                 }
                 else if (item is InventoryFolder inventoryFolder)
@@ -151,7 +151,7 @@ namespace Radegast
 
         private void PerformInit(string initialOutfitName)
         {
-            Logger.Log("Starting initial outfit thread (first login)", Helpers.LogLevel.Debug);
+            Logger.Debug("Starting initial outfit thread (first login)");
             var outfitFolder = FindNodeByName(Store.LibraryRootNode, initialOutfitName);
 
             if (outfitFolder == null)
@@ -169,7 +169,7 @@ namespace Radegast
                 .Cast<InventoryItem>().ToList();
 
             Instance.COF.ReplaceOutfit(newClothingFolder).Wait();
-            Logger.Log("Initial outfit thread (first login) exiting", Helpers.LogLevel.Debug);
+            Logger.Debug("Initial outfit thread (first login) exiting");
         }
     }
 }

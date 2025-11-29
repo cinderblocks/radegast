@@ -101,8 +101,8 @@ namespace Radegast
                 {
                     if (!lease.IsAcquired)
                     {
-                        Logger.Log("Unable to require rate limit lease in name manager.", Helpers.LogLevel.Warning, Client);
-                        await Task.Delay(1000, cancellationToken);
+                        Logger.Warn("Unable to require rate limit lease in name manager.", Client);
+                        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                         continue;
                     }
 
@@ -186,7 +186,7 @@ namespace Radegast
                     }
                     else
                     {
-                        Logger.Log("Failed fetching display names", Helpers.LogLevel.Warning, Client);
+                        Logger.Warn("Failed fetching display names", Client);
                     }
                 }, cancellationToken);
             }
@@ -220,7 +220,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed to load avatar name cache: " + ex.Message, Helpers.LogLevel.Warning, Client);
+                    Logger.Warn("Failed to load avatar name cache", ex, Client);
                 }
             });
         }
@@ -261,7 +261,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed to save avatar name cache: ", Helpers.LogLevel.Error, Client, ex);
+                Logger.Error("Failed to save avatar name cache", ex, Client);
             }
             finally
             {
@@ -281,7 +281,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Error cleaning name cache.", Helpers.LogLevel.Error, ex);
+                Logger.Error("Error cleaning name cache.", ex);
             }
         }
 
@@ -533,7 +533,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failure in event handler: " + ex.Message, Helpers.LogLevel.Warning, Client, ex);
+                Logger.Warn("Failure in event handler", ex, Client);
             }
         }
 
@@ -546,7 +546,7 @@ namespace Radegast
 
             if (!backlog.Writer.TryWrite(agentID))
             {
-                Logger.Log("Failed to queue avatar name resolving.", Helpers.LogLevel.Warning);
+                Logger.Warn("Failed to queue avatar name resolving.");
             }
         }
 

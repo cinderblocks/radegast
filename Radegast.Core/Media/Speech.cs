@@ -161,7 +161,7 @@ namespace Radegast.Media
                             ref position,
                             ref ZeroVector));
 
-                        Logger.Log($"Speech at <{position.x:0.0},{position.y:0.0},{position.z:0.0}>", Helpers.LogLevel.Debug);
+                        Logger.Debug($"Speech at <{position.x:0.0},{position.y:0.0},{position.z:0.0}>");
                     }
 
                     // SET a handler for when it finishes.
@@ -176,7 +176,7 @@ namespace Radegast.Media
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Error playing speech: ", Helpers.LogLevel.Error, ex);
+                    Logger.Warn("Error playing speech", ex);
                     try { tcs.TrySetResult(0); } catch { }
                 }
             });

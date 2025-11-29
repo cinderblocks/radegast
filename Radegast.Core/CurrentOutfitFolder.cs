@@ -575,34 +575,34 @@ namespace Radegast
             );
             if (newOutfit == null)
             {
-                Logger.Log($"Failed to request contents of replacement outfit folder. {generalErrorMessage}", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Failed to request contents of replacement outfit folder. {generalErrorMessage}", client);
                 return false;
             }
 
             if (!client.Inventory.Store.TryGetNodeFor(newOutfitFolderId, out var newOutfitFolderNode))
             {
-                Logger.Log($"Failed to get node for replacement outfit folder. {generalErrorMessage}", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Failed to get node for replacement outfit folder. {generalErrorMessage}", client);
                 return false;
             }
 
             var isOutfitInTrash = await instance.COF.IsObjectDescendentOf(newOutfitFolderNode.Data, trashFolderId, cancellationToken);
             if (isOutfitInTrash)
             {
-                Logger.Log($"Cannot wear an outfit that is currently in the trash.", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Cannot wear an outfit that is currently in the trash.", client);
                 return false;
             }
 
             var isOutfitInInventory = await instance.COF.IsObjectDescendentOf(newOutfitFolderNode.Data, rootFolderId, cancellationToken);
             if (!isOutfitInInventory)
             {
-                Logger.Log($"Cannot wear an outfit that is not currently in your inventory.", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Cannot wear an outfit that is not currently in your inventory.", client);
                 return false;
             }
 
             var currentOutfitFolder = await client.Appearance.GetCurrentOutfitFolder(cancellationToken);
             if (currentOutfitFolder == null)
             {
-                Logger.Log($"Failed to find current outfit folder. {generalErrorMessage}", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Failed to find current outfit folder. {generalErrorMessage}", client);
                 return false;
             }
 
@@ -616,7 +616,7 @@ namespace Radegast
             );
             if (currentOutfitContents == null)
             {
-                Logger.Log($"Failed to request contents of current outfit folder. {generalErrorMessage}", Helpers.LogLevel.Warning, client);
+                Logger.Warn($"Failed to request contents of current outfit folder. {generalErrorMessage}", client);
                 return false;
             }
 
@@ -813,7 +813,7 @@ namespace Radegast
                 !bodypartsToWear.ContainsKey(WearableType.Eyes) ||
                 !bodypartsToWear.ContainsKey(WearableType.Hair))
             {
-                Logger.Log("New outfit must contain a Shape, Skin, Eyes, and Hair", Helpers.LogLevel.Error, client);
+                Logger.Error("New outfit must contain a Shape, Skin, Eyes, and Hair", client);
                 return false;
             }
 
@@ -868,7 +868,7 @@ namespace Radegast
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(10000, cancellationToken));
                 if (completedTask != tcs.Task)
                 {
-                    Logger.Log("Timed out while waiting for AppearanceSet confirmation. Are you changing outfits too quickly?", Helpers.LogLevel.Error, client);
+                    Logger.Error("Timed out while waiting for AppearanceSet confirmation. Are you changing outfits too quickly?", client);
                     return false;
                 }
             }
@@ -904,7 +904,7 @@ namespace Radegast
 
             if (COF == null)
             {
-                Logger.Log("Can't add to outfit link; COF hasn't been initialized.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Can't add to outfit link; COF hasn't been initialized.", client);
                 return;
             }
 
@@ -1126,7 +1126,7 @@ namespace Radegast
         {
             if (COF == null)
             {
-                Logger.Log("Can't remove from outfit; COF hasn't been initialized.", Helpers.LogLevel.Warning, client);
+                Logger.Warn("Can't remove from outfit; COF hasn't been initialized.", client);
                 return;
             }
 

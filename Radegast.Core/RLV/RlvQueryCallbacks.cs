@@ -74,7 +74,7 @@ namespace Radegast.Core.RLV
                 var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(1000, cancellationToken));
                 if (completedTask != tcs.Task)
                 {
-                    Logger.Log("Timed out while waiting for Group Name Reply", Helpers.LogLevel.Error, instance.Client);
+                    Logger.Error("Timed out while waiting for Group Name Reply", instance.Client);
                     return (false, string.Empty);
                 }
 
