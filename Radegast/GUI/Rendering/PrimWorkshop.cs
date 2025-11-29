@@ -63,14 +63,7 @@ namespace Radegast.Rendering
 
     public partial class frmPrimWorkshop : RadegastForm
     {
-        #region Constants
-        // OpenGL Configuration
-        private const int GL_DEPTH_BITS = 24;
-        private const int GL_STENCIL_BITS = 8;
-        private const int GL_NO_SAMPLES = 0;
-        private const int GL_MAX_AA_SAMPLES = 4;
-        private const int GL_AA_STEP = 2;
-
+        #region Constants - Specific to PrimWorkshop
         // Lighting
         private const float LIGHT_AMBIENT = 0.5f;
         private const float LIGHT_DIFFUSE = 0.3f;
@@ -82,7 +75,6 @@ namespace Radegast.Rendering
         private const float BACKGROUND_SKY_G = 0.58f;
         private const float BACKGROUND_SKY_B = 0.93f;
         private const float BACKGROUND_ALPHA = 1.0f;
-        private const float PICKING_BACKGROUND_COLOR = 1f;
 
         // Camera & View
         private const float CAMERA_FOV = 50f;
@@ -109,17 +101,6 @@ namespace Radegast.Rendering
         private const float TEXT_FONT_SIZE = 10f;
         private const int ALPHA_CHANNEL_MAX = 255;
 
-        // Shininess Materials
-        private const float SHININESS_HIGH = 94f;
-        private const float SHININESS_MEDIUM = 64f;
-        private const float SHININESS_LOW = 24f;
-        private const float SHININESS_NONE = 0f;
-
-        // Alpha Thresholds
-        private const float ALPHA_TEST_THRESHOLD = 0.5f;
-        private const float ALPHA_PASS_THRESHOLD = 0.99f;
-        private const float ALPHA_TRANSPARENT_THRESHOLD = 0.01f;
-
         // Thread Configuration
         private const int THREAD_JOIN_TIMEOUT_SECONDS = 2;
         private const int TEXTURE_THREAD_SLEEP_MS = 10;
@@ -127,14 +108,6 @@ namespace Radegast.Rendering
         // Asset Loading
         private const int MESH_REQUEST_TIMEOUT_MS = 20000;
         private const int TEXTURE_REQUEST_TIMEOUT_MS = 30000;
-
-        // Vertex Data Layout
-        private const int VERTEX_COMPONENTS = 3;  // X, Y, Z
-        private const int TEXCOORD_COMPONENTS = 2; // U, V
-        private const int NORMAL_COMPONENTS = 3;   // X, Y, Z
-
-        // Picking
-        private const byte PICKING_ALPHA_CHANNEL = 255;
         #endregion Constants
 
         #region Public fields
@@ -168,6 +141,11 @@ namespace Radegast.Rendering
         /// Render in wireframe mode
         /// </summary>
         public bool Wireframe = false;
+
+        /// <summary>
+        /// Render with shiny materials
+        /// </summary>
+        public bool RenderShiny = true;
 
         /// <summary>
         /// List of prims in the scene
@@ -426,18 +404,18 @@ namespace Radegast.Rendering
                 {
                     GLMode = new OpenTK.Graphics.GraphicsMode(
                         OpenTK.DisplayDevice.Default.BitsPerPixel, 
-                        GL_DEPTH_BITS, 
-                        GL_STENCIL_BITS, 
-                        GL_NO_SAMPLES);
+                        RenderingConstants.GL_DEPTH_BITS, 
+                        RenderingConstants.GL_STENCIL_BITS, 
+                        RenderingConstants.GL_NO_SAMPLES);
                 }
                 else
                 {
-                    for (int aa = GL_NO_SAMPLES; aa <= GL_MAX_AA_SAMPLES; aa += GL_AA_STEP)
+                    for (int aa = RenderingConstants.GL_NO_SAMPLES; aa <= RenderingConstants.GL_MAX_AA_SAMPLES; aa += RenderingConstants.GL_AA_STEP)
                     {
                         var testMode = new OpenTK.Graphics.GraphicsMode(
                             OpenTK.DisplayDevice.Default.BitsPerPixel, 
-                            GL_DEPTH_BITS, 
-                            GL_STENCIL_BITS, 
+                            RenderingConstants.GL_DEPTH_BITS, 
+                            RenderingConstants.GL_STENCIL_BITS, 
                             aa);
                         if (testMode.Samples == aa)
                         {
@@ -495,74 +473,14 @@ namespace Radegast.Rendering
         {
             try
             {
-                GL.ShadeModel(ShadingModel.Smooth);
-                GL.ClearColor(0f, 0f, 0f, 0f);
+                // Initialize OpenGL using shared helper
+                GLInitializer.InitializeGL(LIGHT_AMBIENT, LIGHT_DIFFUSE, LIGHT_SPECULAR, LIGHT_ALPHA, lightPos);
 
-                GL.Enable(EnableCap.Lighting);
-                GL.Enable(EnableCap.Light0);
-                GL.Light(LightName.Light0, LightParameter.Ambient, new float[] { LIGHT_AMBIENT, LIGHT_AMBIENT, LIGHT_AMBIENT, LIGHT_ALPHA });
-                GL.Light(LightName.Light0, LightParameter.Diffuse, new float[] { LIGHT_DIFFUSE, LIGHT_DIFFUSE, LIGHT_DIFFUSE, LIGHT_ALPHA });
-                GL.Light(LightName.Light0, LightParameter.Specular, new float[] { LIGHT_SPECULAR, LIGHT_SPECULAR, LIGHT_SPECULAR, LIGHT_ALPHA });
-                GL.Light(LightName.Light0, LightParameter.Position, lightPos);
-
-                GL.ClearDepth(1.0d);
-                GL.Enable(EnableCap.DepthTest);
-                GL.Enable(EnableCap.ColorMaterial);
-                GL.Enable(EnableCap.CullFace);
-                GL.CullFace(CullFaceMode.Back);
-                GL.ColorMaterial(MaterialFace.Front, ColorMaterialParameter.AmbientAndDiffuse);
-                GL.ColorMaterial(MaterialFace.Front, ColorMaterialParameter.Specular);
-
-                GL.DepthMask(true);
-                GL.DepthFunc(DepthFunction.Lequal);
-                GL.Hint(HintTarget.PerspectiveCorrectionHint, HintMode.Nicest);
-                GL.MatrixMode(MatrixMode.Projection);
-
-                GL.Enable(EnableCap.Blend);
-                GL.AlphaFunc(AlphaFunction.Greater, ALPHA_TEST_THRESHOLD);
-                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-
-                #region Compatibility checks
                 OpenTK.Graphics.IGraphicsContextInternal context = glControl.Context as OpenTK.Graphics.IGraphicsContextInternal;
                 string glExtensions = GL.GetString(StringName.Extensions);
 
-                // VBO
-                RenderSettings.ARBVBOPresent = context.GetAddress("glGenBuffersARB") != IntPtr.Zero;
-                RenderSettings.CoreVBOPresent = context.GetAddress("glGenBuffers") != IntPtr.Zero;
-                RenderSettings.UseVBO = (RenderSettings.ARBVBOPresent || RenderSettings.CoreVBOPresent)
-                    && instance.GlobalSettings["rendering_use_vbo"];
-
-                // Occlusion Query
-                RenderSettings.ARBQuerySupported = context.GetAddress("glGetQueryObjectivARB") != IntPtr.Zero;
-                RenderSettings.CoreQuerySupported = context.GetAddress("glGetQueryObjectiv") != IntPtr.Zero;
-                RenderSettings.OcclusionCullingEnabled = (RenderSettings.CoreQuerySupported || RenderSettings.ARBQuerySupported)
-                    && instance.GlobalSettings["rendering_occlusion_culling_enabled2"];
-
-                // Mipmap
-                RenderSettings.HasMipmap = context.GetAddress("glGenerateMipmap") != IntPtr.Zero;
-
-                // Shader support
-                RenderSettings.HasShaders = glExtensions.Contains("vertex_shader") && glExtensions.Contains("fragment_shader");
-
-                // Multi texture
-                RenderSettings.HasMultiTexturing = context.GetAddress("glMultiTexCoord2f") != IntPtr.Zero;
-                RenderSettings.WaterReflections = instance.GlobalSettings["water_reflections"];
-
-                if (!RenderSettings.HasMultiTexturing || !RenderSettings.HasShaders)
-                {
-                    RenderSettings.WaterReflections = false;
-                }
-
-                // Do textures have to have dimensions that are powers of two
-                RenderSettings.TextureNonPowerOfTwoSupported = glExtensions.Contains("texture_non_power_of_two");
-
-                // Occlusion culling
-                RenderSettings.OcclusionCullingEnabled = Instance.GlobalSettings["rendering_occlusion_culling_enabled2"]
-                    && (RenderSettings.ARBQuerySupported || RenderSettings.CoreQuerySupported);
-
-                // Shiny
-                RenderSettings.EnableShiny = Instance.GlobalSettings["scene_viewer_shiny"];
-                #endregion Compatibility checks
+                // Detect all GL capabilities using shared helper
+                GLCapabilityDetector.DetectCapabilities(context, glExtensions, instance.GlobalSettings);
 
                 // Initialize shader manager if shaders are supported
                 InitializeShaders();
@@ -968,34 +886,34 @@ namespace Radegast.Rendering
                     {
                         data.PickingID = primNr;
                         var primNrBytes = Utils.Int16ToBytes((short)primNr);
-                        var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)j, PICKING_ALPHA_CHANNEL };
+                        var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)j, RenderingConstants.PICKING_ALPHA_CHANNEL };
 
                         GL.Color4(faceColor);
                     }
                     else
                     {
-                        bool belongToAlphaPass = (teFace.RGBA.A < ALPHA_PASS_THRESHOLD) || data.TextureInfo.HasAlpha;
+                        bool belongToAlphaPass = (teFace.RGBA.A < RenderingConstants.ALPHA_PASS_THRESHOLD) || data.TextureInfo.HasAlpha;
 
                         if (belongToAlphaPass && pass != RenderPass.Alpha) continue;
                         if (!belongToAlphaPass && pass == RenderPass.Alpha) continue;
 
                         // Don't render transparent faces
-                        if (teFace.RGBA.A <= ALPHA_TRANSPARENT_THRESHOLD) continue;
+                        if (teFace.RGBA.A <= RenderingConstants.ALPHA_TRANSPARENT_THRESHOLD) continue;
 
                         switch (teFace.Shiny)
                         {
                             case Shininess.High:
-                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, SHININESS_HIGH);
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, RenderShiny ? RenderingConstants.SHININESS_HIGH : RenderingConstants.SHININESS_NONE);
                                 break;
                             case Shininess.Medium:
-                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, SHININESS_MEDIUM);
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, RenderShiny ? RenderingConstants.SHININESS_MEDIUM : RenderingConstants.SHININESS_NONE);
                                 break;
                             case Shininess.Low:
-                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, SHININESS_LOW);
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, RenderShiny ? RenderingConstants.SHININESS_LOW : RenderingConstants.SHININESS_NONE);
                                 break;
                             case Shininess.None:
                             default:
-                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, SHININESS_NONE);
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, RenderingConstants.SHININESS_NONE);
                                 break;
                         }
 
@@ -1018,8 +936,8 @@ namespace Radegast.Rendering
                         GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
                     }
 
-                    GL.TexCoordPointer(TEXCOORD_COMPONENTS, TexCoordPointerType.Float, 0, data.TexCoords);
-                    GL.VertexPointer(VERTEX_COMPONENTS, VertexPointerType.Float, 0, data.Vertices);
+                    GL.TexCoordPointer(RenderingConstants.TEXCOORD_COMPONENTS, TexCoordPointerType.Float, 0, data.TexCoords);
+                    GL.VertexPointer(RenderingConstants.VERTEX_COMPONENTS, VertexPointerType.Float, 0, data.Vertices);
                     GL.NormalPointer(NormalPointerType.Float, 0, data.Normals);
                     GL.DrawElements(PrimitiveType.Triangles, data.Indices.Length, DrawElementsType.UnsignedShort, data.Indices);
 
@@ -1035,7 +953,7 @@ namespace Radegast.Rendering
             glControl.MakeCurrent();
             if (picking)
             {
-                GL.ClearColor(PICKING_BACKGROUND_COLOR, PICKING_BACKGROUND_COLOR, PICKING_BACKGROUND_COLOR, PICKING_BACKGROUND_COLOR);
+                GL.ClearColor(RenderingConstants.PICKING_BACKGROUND_COLOR, RenderingConstants.PICKING_BACKGROUND_COLOR, RenderingConstants.PICKING_BACKGROUND_COLOR, RenderingConstants.PICKING_BACKGROUND_COLOR);
             }
             else
             {
@@ -1112,26 +1030,8 @@ namespace Radegast.Rendering
 
             if (disposed) return false;
 
-            // Save old attributes
-            GL.PushAttrib(AttribMask.AllAttribBits);
-
-            // Disable some attributes to make the objects flat / solid color when they are drawn
-            GL.Disable(EnableCap.Fog);
-            GL.Disable(EnableCap.Texture2D);
-            GL.Disable(EnableCap.Dither);
-            GL.Disable(EnableCap.Lighting);
-            GL.Disable(EnableCap.LineStipple);
-            GL.Disable(EnableCap.PolygonStipple);
-            GL.Disable(EnableCap.CullFace);
-            GL.Disable(EnableCap.Blend);
-            GL.Disable(EnableCap.AlphaTest);
-
-            Render(true);
-
-            byte[] color = new byte[4];
-            GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, color);
-
-            GL.PopAttrib();
+            // Use PickingHelper to handle GL state
+            byte[] color = PickingHelper.ExecutePicking(x, y, glControl.Height, () => Render(true));
 
             int primID = Utils.BytesToUInt16(color, 0);
             faceID = color[2];
@@ -1222,20 +1122,20 @@ namespace Radegast.Rendering
                 Face face = mesh.Faces[j];
                 FaceData data = new FaceData
                 {
-                    Vertices = new float[face.Vertices.Count * VERTEX_COMPONENTS], 
-                    Normals = new float[face.Vertices.Count * NORMAL_COMPONENTS]
+                    Vertices = new float[face.Vertices.Count * RenderingConstants.VERTEX_COMPONENTS], 
+                    Normals = new float[face.Vertices.Count * RenderingConstants.NORMAL_COMPONENTS]
                 };
 
                 // Vertices for this face
                 for (int k = 0; k < face.Vertices.Count; k++)
                 {
-                    data.Vertices[k * VERTEX_COMPONENTS + 0] = face.Vertices[k].Position.X;
-                    data.Vertices[k * VERTEX_COMPONENTS + 1] = face.Vertices[k].Position.Y;
-                    data.Vertices[k * VERTEX_COMPONENTS + 2] = face.Vertices[k].Position.Z;
+                    data.Vertices[k * RenderingConstants.VERTEX_COMPONENTS + 0] = face.Vertices[k].Position.X;
+                    data.Vertices[k * RenderingConstants.VERTEX_COMPONENTS + 1] = face.Vertices[k].Position.Y;
+                    data.Vertices[k * RenderingConstants.VERTEX_COMPONENTS + 2] = face.Vertices[k].Position.Z;
 
-                    data.Normals[k * NORMAL_COMPONENTS + 0] = face.Vertices[k].Normal.X;
-                    data.Normals[k * NORMAL_COMPONENTS + 1] = face.Vertices[k].Normal.Y;
-                    data.Normals[k * NORMAL_COMPONENTS + 2] = face.Vertices[k].Normal.Z;
+                    data.Normals[k * RenderingConstants.NORMAL_COMPONENTS + 0] = face.Vertices[k].Normal.X;
+                    data.Normals[k * RenderingConstants.NORMAL_COMPONENTS + 1] = face.Vertices[k].Normal.Y;
+                    data.Normals[k * RenderingConstants.NORMAL_COMPONENTS + 2] = face.Vertices[k].Normal.Z;
                 }
 
                 // Indices for this face
@@ -1246,11 +1146,11 @@ namespace Radegast.Rendering
                 renderer.TransformTexCoords(face.Vertices, face.Center, teFace, prim.Scale);
 
                 // Texcoords for this face
-                data.TexCoords = new float[face.Vertices.Count * TEXCOORD_COMPONENTS];
+                data.TexCoords = new float[face.Vertices.Count * RenderingConstants.TEXCOORD_COMPONENTS];
                 for (int k = 0; k < face.Vertices.Count; k++)
                 {
-                    data.TexCoords[k * TEXCOORD_COMPONENTS + 0] = face.Vertices[k].TexCoord.X;
-                    data.TexCoords[k * TEXCOORD_COMPONENTS + 1] = face.Vertices[k].TexCoord.Y;
+                    data.TexCoords[k * RenderingConstants.TEXCOORD_COMPONENTS + 0] = face.Vertices[k].TexCoord.X;
+                    data.TexCoords[k * RenderingConstants.TEXCOORD_COMPONENTS + 1] = face.Vertices[k].TexCoord.Y;
                 }
 
                 // Set the UserData for this face to our FaceData struct
@@ -1308,6 +1208,7 @@ namespace Radegast.Rendering
                         finally
                         {
                             gotImage.Set();                            
+
                         }
                     }
                 );
@@ -1387,7 +1288,7 @@ namespace Radegast.Rendering
             }
             catch (Exception ex)
             {
-                Logger.Warn($"Failed to initialize shader system: {ex.Message}");
+                Logger.Warn($"Failed to initialize shader system: {ex.Message}", ex);
                 shadersAvailable = false;
 
                 if (shaderManager != null)
@@ -1414,6 +1315,12 @@ namespace Radegast.Rendering
         private void ChkWireFrame_CheckedChanged(object sender, EventArgs e)
         {
             Wireframe = chkWireFrame.Checked;
+            SafeInvalidate();
+        }
+
+        private void ChkShiny_CheckedChanged(object sender, EventArgs e)
+        {
+            RenderShiny = chkShiny.Checked;
             SafeInvalidate();
         }
 
@@ -1533,280 +1440,4 @@ namespace Radegast.Rendering
         }
         #endregion Context menu
     }
-
-    #region Shader Management
-
-    /// <summary>
-    /// Manages shader programs for the object viewer
-    /// </summary>
-    public class ShaderManager : IDisposable
-    {
-        private readonly Dictionary<string, ShaderProgram> programs = new Dictionary<string, ShaderProgram>();
-        private string activeShader = null;
-        private bool disposed = false;
-
-        /// <summary>
-        /// Initialize and load all available shaders
-        /// </summary>
-        public bool Initialize()
-        {
-            if (!RenderSettings.HasShaders)
-            {
-                Logger.Debug("Shaders not supported, skipping shader initialization");
-                return false;
-            }
-
-            try
-            {
-                // Get the shader directory path
-                string shaderDir = GetShaderDirectory();
-                if (!System.IO.Directory.Exists(shaderDir))
-                {
-                    Logger.Warn($"Shader directory not found: {shaderDir}");
-                    return false;
-                }
-
-                Logger.Debug($"Shader directory: {shaderDir}");
-
-                // Try to load basic shiny shader if enabled
-                if (RenderSettings.EnableShiny)
-                {
-                    LoadShader("shiny", "shiny.vert", "shiny.frag");
-                }
-
-                Logger.Info($"Shader manager initialized with {programs.Count} shader(s)");
-                return programs.Count > 0;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Failed to initialize shaders: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Get the shader directory path
-        /// </summary>
-        private static string GetShaderDirectory()
-        {
-            // Try application base directory first
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            string shaderDir = System.IO.Path.Combine(baseDir, "shader_data");
-            
-            if (System.IO.Directory.Exists(shaderDir))
-            {
-                return shaderDir;
-            }
-
-            // Try current directory as fallback
-            shaderDir = System.IO.Path.Combine(Environment.CurrentDirectory, "shader_data");
-            if (System.IO.Directory.Exists(shaderDir))
-            {
-                return shaderDir;
-            }
-
-            // Try parent directory (for when running from bin\Debug or bin\Release)
-            string parentDir = System.IO.Directory.GetParent(baseDir)?.FullName;
-            if (parentDir != null)
-            {
-                shaderDir = System.IO.Path.Combine(parentDir, "shader_data");
-                if (System.IO.Directory.Exists(shaderDir))
-                {
-                    return shaderDir;
-                }
-
-                // Try going up one more level
-                string grandParentDir = System.IO.Directory.GetParent(parentDir)?.FullName;
-                if (grandParentDir != null)
-                {
-                    shaderDir = System.IO.Path.Combine(grandParentDir, "shader_data");
-                    if (System.IO.Directory.Exists(shaderDir))
-                    {
-                        return shaderDir;
-                    }
-                }
-            }
-
-            // Return the expected path even if it doesn't exist
-            return System.IO.Path.Combine(baseDir, "shader_data");
-        }
-
-        /// <summary>
-        /// Load a shader program
-        /// </summary>
-        private bool LoadShader(string name, params string[] shaderFiles)
-        {
-            if (!RenderSettings.HasShaders) return false;
-
-            try
-            {
-                string shaderDir = GetShaderDirectory();
-                
-                // Check if all shader files exist
-                foreach (var shaderFile in shaderFiles)
-                {
-                    string fullPath = System.IO.Path.Combine(shaderDir, shaderFile);
-                    if (!System.IO.File.Exists(fullPath))
-                    {
-                        Logger.Debug($"Shader file not found: {fullPath}");
-                        return false;
-                    }
-                }
-
-                var program = new ShaderProgram();
-                
-                // Pass full paths to the shader program
-                var fullPaths = shaderFiles.Select(f => System.IO.Path.Combine(shaderDir, f)).ToArray();
-                
-                if (program.Load(fullPaths))
-                {
-                    programs[name] = program;
-                    Logger.Debug($"Loaded shader program: {name}");
-                    return true;
-                }
-                else
-                {
-                    program.Dispose();
-                    Logger.Debug($"Failed to load shader program: {name}");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"Error loading shader {name}: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Start using a specific shader program
-        /// </summary>
-        public bool StartShader(string name)
-        {
-            if (!RenderSettings.HasShaders || disposed) return false;
-
-            if (programs.TryGetValue(name, out var program))
-            {
-                try
-                {
-                    program.Start();
-                    activeShader = name;
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Debug($"Error starting shader {name}: {ex.Message}");
-                    return false;
-                }
-            }
-
-            return false;
-        }
-
-        /// <summary>
-        /// Stop using shaders and return to fixed-function pipeline
-        /// </summary>
-        public void StopShader()
-        {
-            if (!RenderSettings.HasShaders || disposed) return;
-
-            try
-            {
-                ShaderProgram.Stop();
-                activeShader = null;
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug($"Error stopping shader: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Get a shader program by name
-        /// </summary>
-        public ShaderProgram GetProgram(string name)
-        {
-            return programs.TryGetValue(name, out var program) ? program : null;
-        }
-
-        /// <summary>
-        /// Check if a shader is currently active
-        /// </summary>
-        public bool IsShaderActive => !string.IsNullOrEmpty(activeShader);
-
-        /// <summary>
-        /// Get the name of the currently active shader
-        /// </summary>
-        public string ActiveShaderName => activeShader;
-
-        /// <summary>
-        /// Check if shaders are available
-        /// </summary>
-        public bool HasShaders => RenderSettings.HasShaders && programs.Count > 0;
-
-        /// <summary>
-        /// Set a uniform value for the active shader
-        /// </summary>
-        public bool SetUniform(string name, float value)
-        {
-            if (!IsShaderActive || !programs.TryGetValue(activeShader, out var program))
-                return false;
-
-            try
-            {
-                program.SetUniform1(name, value);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug($"Error setting uniform {name}: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Set a uniform value for the active shader
-        /// </summary>
-        public bool SetUniform(string name, int value)
-        {
-            if (!IsShaderActive || !programs.TryGetValue(activeShader, out var program))
-                return false;
-
-            try
-            {
-                program.SetUniform1(name, value);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Debug($"Error setting uniform {name}: {ex.Message}");
-                return false;
-            }
-        }
-
-        public void Dispose()
-        {
-            if (disposed) return;
-
-            disposed = true;
-
-            StopShader();
-
-            foreach (var program in programs.Values)
-            {
-                try
-                {
-                    program?.Dispose();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Debug($"Error disposing shader program: {ex.Message}");
-                }
-            }
-
-            programs.Clear();
-        }
-    }
-
-    #endregion Shader Management
 }

@@ -69,6 +69,7 @@ namespace Radegast.Rendering
             this.btnResetView = new System.Windows.Forms.Button();
             this.cbAA = new System.Windows.Forms.CheckBox();
             this.chkWireFrame = new System.Windows.Forms.CheckBox();
+            this.chkShiny = new System.Windows.Forms.CheckBox();
             this.label1 = new System.Windows.Forms.Label();
             this.ctxObjects = new System.Windows.Forms.ContextMenuStrip(this.components);
             this.touchToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
@@ -127,6 +128,7 @@ namespace Radegast.Rendering
             this.gbZoom.Controls.Add(this.btnResetView);
             this.gbZoom.Controls.Add(this.cbAA);
             this.gbZoom.Controls.Add(this.chkWireFrame);
+            this.gbZoom.Controls.Add(this.chkShiny);
             this.gbZoom.Controls.Add(this.label1);
             this.gbZoom.Controls.Add(this.scrollZoom);
             this.gbZoom.Controls.Add(this.scrollYaw);
@@ -162,7 +164,7 @@ namespace Radegast.Rendering
             // cbAA
             // 
             this.cbAA.AutoSize = true;
-            this.cbAA.Location = new System.Drawing.Point(89, 32);
+            this.cbAA.Location = new System.Drawing.Point(219, 32);
             this.cbAA.Name = "cbAA";
             this.cbAA.Size = new System.Drawing.Size(82, 17);
             this.cbAA.TabIndex = 21;
@@ -179,6 +181,19 @@ namespace Radegast.Rendering
             this.chkWireFrame.Text = "Wireframe";
             this.chkWireFrame.UseVisualStyleBackColor = true;
             this.chkWireFrame.CheckedChanged += new System.EventHandler(this.ChkWireFrame_CheckedChanged);
+            // 
+            // chkShiny
+            // 
+            this.chkShiny.AutoSize = true;
+            this.chkShiny.Checked = true;
+            this.chkShiny.CheckState = System.Windows.Forms.CheckState.Checked;
+            this.chkShiny.Location = new System.Drawing.Point(89, 31);
+            this.chkShiny.Name = "chkShiny";
+            this.chkShiny.Size = new System.Drawing.Size(53, 17);
+            this.chkShiny.TabIndex = 24;
+            this.chkShiny.Text = "Shiny";
+            this.chkShiny.UseVisualStyleBackColor = true;
+            this.chkShiny.CheckedChanged += new System.EventHandler(this.ChkShiny_CheckedChanged);
             // 
             // label1
             // 
@@ -269,6 +284,7 @@ namespace Radegast.Rendering
         public System.Windows.Forms.ContextMenuStrip ctxObjects;
         public System.Windows.Forms.CheckBox cbAA;
         public System.Windows.Forms.CheckBox chkWireFrame;
+        public System.Windows.Forms.CheckBox chkShiny;
         public System.Windows.Forms.Label label1;
         public System.Windows.Forms.Button btnResetView;
         public System.Windows.Forms.Label label2;
@@ -278,7 +294,6 @@ namespace Radegast.Rendering
         public System.Windows.Forms.ToolStripMenuItem takeToolStripMenuItem;
         public System.Windows.Forms.ToolStripMenuItem returnToolStripMenuItem;
         public System.Windows.Forms.ToolStripMenuItem deleteToolStripMenuItem;
-
     }
 }
 

@@ -164,6 +164,8 @@ namespace Radegast.Rendering
         private OpenTK.Vector4 ambientColor;
         private OpenTK.Vector4 diffuseColor;
         private OpenTK.Vector4 specularColor;
+        private ShaderManager shaderManager;
+        private bool shadersAvailable = false;
         private float drawDistance;
         private float drawDistanceSquared;
 
@@ -390,6 +392,13 @@ namespace Radegast.Rendering
                     textureContext = null;
                 }
                 sharedWindowInfo = null;
+            }
+            catch { }
+
+            try
+            {
+                shaderManager?.Dispose();
+                shaderManager = null;
             }
             catch { }
 
@@ -754,78 +763,20 @@ namespace Radegast.Rendering
 
             try
             {
-                GL.ShadeModel(ShadingModel.Smooth);
-
-                GL.Enable(EnableCap.Lighting);
-                GL.Enable(EnableCap.Light0);
+                // Initialize OpenGL using shared helper
+                GLInitializer.InitializeGL(ambient, diffuse, specular, 1.0f, sunPos);
                 SetSun();
 
-                GL.ClearDepth(1.0d);
-                GL.Enable(EnableCap.DepthTest);
-                GL.Enable(EnableCap.CullFace);
-                GL.CullFace(CullFaceMode.Back);
-
-                // GL.Color() tracks objects ambient and diffuse color
-                GL.Enable(EnableCap.ColorMaterial);
-                GL.ColorMaterial(MaterialFace.Front, ColorMaterialParameter.AmbientAndDiffuse);
-
-                GL.DepthMask(true);
-                GL.DepthFunc(DepthFunction.Lequal);
-                GL.Hint(HintTarget.PerspectiveCorrectionHint, HintMode.Nicest);
-                GL.MatrixMode(MatrixMode.Projection);
-
-                GL.AlphaFunc(AlphaFunction.Greater, 0.5f);
-                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-
-                // Compatibility checks
+                // Compatibility checks using shared detector
                 var context = glControl.Context as OpenTK.Graphics.IGraphicsContextInternal;
                 var glExtensions = GL.GetString(StringName.Extensions);
-
-                // VBO
-                RenderSettings.ARBVBOPresent = context.GetAddress("glGenBuffersARB") != IntPtr.Zero;
-                RenderSettings.CoreVBOPresent = context.GetAddress("glGenBuffers") != IntPtr.Zero;
-                RenderSettings.UseVBO = (RenderSettings.ARBVBOPresent || RenderSettings.CoreVBOPresent)
-                    && instance.GlobalSettings["rendering_use_vbo"];
-
-                // Occlusion Query
-                RenderSettings.ARBQuerySupported = context.GetAddress("glGetQueryObjectivARB") != IntPtr.Zero;
-                RenderSettings.CoreQuerySupported = context.GetAddress("glGetQueryObjectiv") != IntPtr.Zero;
-                RenderSettings.OcclusionCullingEnabled = (RenderSettings.CoreQuerySupported || RenderSettings.ARBQuerySupported)
-                    && instance.GlobalSettings["rendering_occlusion_culling_enabled2"];
-
-                // Mipmap
-                RenderSettings.HasMipmap = context.GetAddress("glGenerateMipmap") != IntPtr.Zero;
-
-                // Shader support
-                RenderSettings.HasShaders = glExtensions.Contains("vertex_shader") && glExtensions.Contains("fragment_shader");
-
-                // Multi texture
-                RenderSettings.HasMultiTexturing = context.GetAddress("glMultiTexCoord2f") != IntPtr.Zero;
-                RenderSettings.WaterReflections = instance.GlobalSettings["water_reflections"];
-
-                if (!RenderSettings.HasMultiTexturing || !RenderSettings.HasShaders)
-                {
-                    RenderSettings.WaterReflections = false;
-                }
-
-                // Do textures have to have dimensions that are powers of two
-                RenderSettings.TextureNonPowerOfTwoSupported = glExtensions.Contains("texture_non_power_of_two");
-
-                // Occlusion culling
-                RenderSettings.OcclusionCullingEnabled = Instance.GlobalSettings["rendering_occlusion_culling_enabled2"]
-                    && (RenderSettings.ARBQuerySupported || RenderSettings.CoreQuerySupported);
-
-                // Shiny
-                RenderSettings.EnableShiny = Instance.GlobalSettings["scene_viewer_shiny"];
+                GLCapabilityDetector.DetectCapabilities(context, glExtensions, instance.GlobalSettings);
 
                 RenderingEnabled = true;
                 // Call the resizing function which sets up the GL drawing window
                 // and will also invalidate the GL control
                 glControl_Resize(null, null);
                 RenderingEnabled = false;
-
-                // glControl.Context.MakeCurrent(null);
-                TextureThreadContextReady.Reset();
                 // Attempt to create a shared worker GraphicsContext for OpenTK 3.3.3
                 try
                 {
@@ -959,34 +910,42 @@ namespace Radegast.Rendering
             }
         }
 
-        private readonly ShaderProgram shinyProgram = new ShaderProgram();
-
         private void InitShaders()
         {
-            if (!RenderSettings.HasShaders) { return; }
+            if (!RenderSettings.HasShaders)
+            {
+                shadersAvailable = false;
+                return;
+            }
 
-            shinyProgram.Load("shiny.vert", "shiny.frag");
-            shinyProgram.SetUniform1("colorMap", 0);
-            // Set default lighting uniforms if present
-            shinyProgram.Start();
             try
             {
-                var uLight = shinyProgram.Uni("lightDir");
-                if (uLight != -1)
-                {
-                    // approximate light direction from sun position
-                    GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
-                }
+                shaderManager = new ShaderManager();
+                shadersAvailable = shaderManager.Initialize();
 
-                var ua = shinyProgram.Uni("ambientColor");
-                if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                var ud = shinyProgram.Uni("diffuseColor");
-                if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                var us = shinyProgram.Uni("specularColor");
-                if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+                if (!shadersAvailable)
+                {
+                    Logger.Debug("Shader system available but no shaders loaded");
+                }
+                else
+                {
+                    Logger.Debug("Shader system initialized successfully");
+                    var prog = shaderManager.GetProgram("shiny");
+                    // Bind default texture unit for colorMap uniform if present
+                    prog?.SetUniform1("colorMap", 0);
+                }
             }
-            catch { }
-            finally { ShaderProgram.Stop(); }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Failed to initialize shader system: {ex.Message}", ex);
+                shadersAvailable = false;
+
+                if (shaderManager != null)
+                {
+                    shaderManager.Dispose();
+                    shaderManager = null;
+                }
+            }
         }
 
         // Return attribute location from current shiny program
@@ -995,7 +954,8 @@ namespace Radegast.Rendering
             if (!RenderSettings.HasShaders) return -1;
             try
             {
-                return shinyProgram?.Attr(name) ?? -1;
+                var prog = shaderManager?.GetProgram("shiny");
+                return prog?.Attr(name) ?? -1;
             }
             catch { return -1; }
         }
@@ -1007,16 +967,17 @@ namespace Radegast.Rendering
 
             try
             {
-                var uMVP = shinyProgram.Uni("uMVP");
-                var uModelView = shinyProgram.Uni("uModelView");
-                var uNormal = shinyProgram.Uni("uNormalMatrix");
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uMVP = prog.Uni("uMVP");
+                var uModelView = prog.Uni("uModelView");
+                var uNormal = prog.Uni("uNormalMatrix");
 
                 if (uMVP == -1 && uModelView == -1 && uNormal == -1) return;
 
-                OpenTK.Matrix4 proj;
-                OpenTK.Matrix4 mv;
-                GL.GetFloat(GetPName.ProjectionMatrix, out proj);
-                GL.GetFloat(GetPName.ModelviewMatrix, out mv);
+                GL.GetFloat(GetPName.ProjectionMatrix, out OpenTK.Matrix4 proj);
+                GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
 
                 if (uMVP != -1)
                 {
@@ -1121,24 +1082,13 @@ namespace Radegast.Rendering
         // Switch to ortho display mode for drawing hud
         public void GLHUDBegin()
         {
-            GL.Disable(EnableCap.DepthTest);
-            GL.Disable(EnableCap.Lighting);
-            GL.MatrixMode(MatrixMode.Projection);
-            GL.PushMatrix();
-            GL.LoadIdentity();
-            GL.Ortho(0, glControl?.Width ?? 0, 0, glControl?.Height ?? 0, -5, 1);
-            GL.MatrixMode(MatrixMode.Modelview);
-            GL.LoadIdentity();
+            HUDRenderer.BeginHUD(glControl?.Width ?? 0, glControl?.Height ?? 0);
         }
 
         // Switch back to frustum display mode
         public void GLHUDEnd()
         {
-            GL.Enable(EnableCap.DepthTest);
-            GL.Enable(EnableCap.Lighting);
-            GL.MatrixMode(MatrixMode.Projection);
-            GL.PopMatrix();
-            GL.MatrixMode(MatrixMode.Modelview);
+            HUDRenderer.EndHUD();
         }
 
         private void GenericTaskRunner()
@@ -1223,20 +1173,20 @@ namespace Radegast.Rendering
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 InitAvatarData();
-                AvatarDataInitialzied();
+                AvatarDataInitialized();
             });
         }
 
         #region Private methods (the meat)
 
-        private void AvatarDataInitialzied()
+        private void AvatarDataInitialized()
         {
             if (IsDisposed) return;
 
             // Ensure that this is done on the main thread
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(AvatarDataInitialzied));
+                Invoke(new MethodInvoker(AvatarDataInitialized));
                 return;
             }
 
@@ -1384,7 +1334,7 @@ namespace Radegast.Rendering
                     rot = parentRot;
 
                     // Move by pelvis offset
-                    // FIXME 2 dictionay lookups via string key in render loop!
+                    // FIXME 2 dictionary lookups via string key in render loop!
                     // pos -= (parentav.glavatar.skel.mBones["mPelvis"].animation_offset * parentav.RenderRotation) + parentav.glavatar.skel.getOffset("mPelvis") * rot;
                     //pos -= parentav.glavatar.skel.getOffset("mPelvis") * rot;
                     //rot = parentav.glavatar.skel.getRotation("mPelvis") * rot;
@@ -1834,22 +1784,27 @@ namespace Radegast.Rendering
                 CheckKeyboard(lastFrameTime);
 
                 // If programmable shaders are available and enabled, start the shiny shader
-                var useShaders = RenderSettings.HasShaders && RenderSettings.EnableShiny;
+                var useShaders = RenderSettings.HasShaders && RenderSettings.EnableShiny && shaderManager?.HasShaders == true;
                 if (useShaders)
                 {
-                    StartShiny();
+                    // Start shader via ShaderManager
+                    shaderManager.StartShader("shiny");
                     // Update dynamic uniforms each frame
                     try
                     {
-                        var uLight = shinyProgram.Uni("lightDir");
-                        if (uLight != -1) GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                        var prog = shaderManager.GetProgram("shiny");
+                        if (prog != null)
+                        {
+                            var uLight = prog.Uni("lightDir");
+                            if (uLight != -1) GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
 
-                        var ua = shinyProgram.Uni("ambientColor");
-                        if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                        var ud = shinyProgram.Uni("diffuseColor");
-                        if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                        var us = shinyProgram.Uni("specularColor");
-                        if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+                            var ua = prog.Uni("ambientColor");
+                            if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                            var ud = prog.Uni("diffuseColor");
+                            if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                            var us = prog.Uni("specularColor");
+                            if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+                        }
                     }
                     catch { }
                 }
@@ -1866,8 +1821,8 @@ namespace Radegast.Rendering
 
                 if (useShaders)
                 {
-                    // Stop using the shader program and restore fixed-function pipeline
-                    ShaderProgram.Stop();
+                    // Stop using shader via ShaderManager
+                    shaderManager?.StopShader();
                 }
 
                 GLHUDBegin();
@@ -1890,29 +1845,12 @@ namespace Radegast.Rendering
 
         public bool TryPick(int x, int y, out object picked, out int faceID, out Vector3 worldPos)
         {
-            // Save old attributes
-            GL.PushAttrib(AttribMask.AllAttribBits);
-
-            // Disable some attributes to make the objects flat / solid color when they are drawn
-            GL.Disable(EnableCap.Fog);
-            GL.Disable(EnableCap.Texture2D);
-            GL.Disable(EnableCap.Dither);
-            GL.Disable(EnableCap.Lighting);
-            GL.Disable(EnableCap.LineStipple);
-            GL.Disable(EnableCap.PolygonStipple);
-            GL.Disable(EnableCap.CullFace);
-            GL.Disable(EnableCap.Blend);
-            GL.Disable(EnableCap.AlphaTest);
-
-            Render(true);
-
-            var color = new byte[4];
-            GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, color);
-            var depth = 0f;
-            GL.ReadPixels(x, glControl.Height - y, 1, 1, PixelFormat.DepthComponent, PixelType.Float, ref depth);
+            // Use PickingHelper to handle GL state
+            byte[] color = PickingHelper.ExecutePicking(x, y, glControl.Height, () => Render(true));
+            
+            var depth = PickingHelper.ReadPixelDepth(x, y, glControl.Height);
             GLU.UnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
             worldPos = RHelp.OMVVector3(worldPosTK);
-            GL.PopAttrib();
 
             int primID = Utils.BytesToUInt16(color, 0);
             faceID = color[2];
@@ -1973,7 +1911,7 @@ namespace Radegast.Rendering
         {
             if (RenderSettings.EnableShiny)
             {
-                shinyProgram.Start();
+                shaderManager?.StartShader("shiny");
             }
         }
 

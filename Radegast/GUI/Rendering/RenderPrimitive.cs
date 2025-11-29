@@ -136,6 +136,31 @@ namespace Radegast.Rendering
 
             return true;
         }
+
+        // Helper helpers for binding/unbinding VAO and buffers for draw time
+        public bool UsesVao => Vao != -1;
+
+        public void BindVao()
+        {
+            if (Vao != -1) Compat.BindVertexArray(Vao);
+        }
+
+        public void UnbindVao()
+        {
+            if (Vao != -1) Compat.BindVertexArray(0);
+        }
+
+        public void BindBuffers()
+        {
+            Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
+            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
+        }
+
+        public void UnbindBuffers()
+        {
+            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+        }
     }
 
     /// <summary>
@@ -669,37 +694,59 @@ namespace Radegast.Rendering
                             // If shader attrs present, we need to (temporarily) bind shader attribs mapped to buffer
                             if (useAttribs)
                             {
-                                Compat.BindVertexArray(data.Vao);
+                                // If the shader attribute locations match the generic layout captured when VAO was created
+                                // (pos=0, norm=1, tex=2), we can safely bind the VAO and draw. If they differ, we must
+                                // fall back to binding the buffers and setting the attribute pointers while a buffer is bound
+                                // to avoid creating attribute pointers that reference client memory (which can crash on draw).
+                                bool shaderAttrMatchesGeneric = (posLoc == 0 && normLoc == 1 && texLoc == 2);
 
-                                // Set attribute pointers for shader attribute locations (these modify VAO state)
-                                GL.EnableVertexAttribArray(posLoc);
-                                GL.EnableVertexAttribArray(normLoc);
-                                GL.EnableVertexAttribArray(texLoc);
+                                if (shaderAttrMatchesGeneric)
+                                {
+                                    data.BindVao();
+                                    GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                                    data.UnbindVao();
+                                }
+                                else
+                                {
+                                    // Fall back to binding buffers and setting attrib pointers to the shader locations
+                                    data.BindBuffers();
 
-                                GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
-                                GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
-                                GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
+                                    GL.EnableVertexAttribArray(posLoc);
+                                    GL.EnableVertexAttribArray(normLoc);
+                                    GL.EnableVertexAttribArray(texLoc);
 
-                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                                    GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
+                                    GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
+                                    GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
 
-                                GL.DisableVertexAttribArray(posLoc);
-                                GL.DisableVertexAttribArray(normLoc);
-                                GL.DisableVertexAttribArray(texLoc);
+                                    GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
 
-                                Compat.BindVertexArray(0);
+                                    GL.DisableVertexAttribArray(posLoc);
+                                    GL.DisableVertexAttribArray(normLoc);
+                                    GL.DisableVertexAttribArray(texLoc);
+
+                                    // Leave buffer unbinding to the common cleanup below
+                                }
                             }
                             else
                             {
-                                Compat.BindVertexArray(data.Vao);
+                                // No shader attributes in use (fixed-function). VAO captured generic vertex attrib state
+                                // which does not provide fixed-function texture coordinate pointers. Bind buffers and
+                                // set legacy pointers so GL.TexCoordPointer/NormalPointer/VertexPointer are used.
+                                data.BindBuffers();
+                                GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
+                                GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)24);
+                                GL.VertexPointer(3, VertexPointerType.Float, FaceData.VertexSize, (IntPtr)0);
+
                                 GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
-                                Compat.BindVertexArray(0);
+
+                                // Buffer unbinding handled below
                             }
                         }
                         else
                         {
                             // VAO not available, bind buffers and set pointers as before
-                            Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
-                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
+                            data.BindBuffers();
 
                             if (useAttribs)
                             {
@@ -729,8 +776,7 @@ namespace Radegast.Rendering
                         }
                     }
                     // Unbind any bound array/element buffers if VAO path wasn't used
-                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    data.UnbindBuffers();
 
                 }
 
