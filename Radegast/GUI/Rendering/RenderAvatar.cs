@@ -42,9 +42,6 @@ namespace Radegast.Rendering
         public int id;
         public int group;
 
-        public GLMesh jointmesh;
-        public int jointmeshindex;
-
         public attachment_point(XmlNode node)
         {
             if (node.Attributes == null) { return; }
@@ -719,7 +716,7 @@ namespace Radegast.Rendering
 
                 GLMesh mesh = null;
                 lock (_defaultmeshes)
-                    mesh = (_defaultmeshes.ContainsKey(type) ? _defaultmeshes[type] : new GLMesh(type));
+                    mesh = (_defaultmeshes.TryGetValue(type, out var defaultMesh) ? defaultMesh : new GLMesh(type));
 
                 // Set up the texture elements for each mesh
                 // And hack the eyeball position
@@ -847,13 +844,13 @@ namespace Radegast.Rendering
             }
 
             // Driver type
-            // A driver drives multiple slave visual paramaters
+            // A driver drives multiple slave visual parameters
             if (vpx.pType == VisualParamEx.ParamType.TYPE_DRIVER)
             {
                 foreach (VisualParamEx.driven child in vpx.ChildParams)
                 {
 
-                    /***** BEGIN UNGRACEFULL CODE STEALING ******/
+                    /***** BEGIN UNGRACEFUL CODE STEALING ******/
 
                     //	driven    ________
                     //	^        /|       |\       ^
@@ -969,7 +966,7 @@ namespace Radegast.Rendering
                     {
                         if (x >= VisualParamEx.TweakableParams.Count)
                         {
-                            //Logger.Log("Two many visual paramaters in Avatar appearance", Helpers.LogLevel.Warning);
+                            //Logger.Log("Too many visual parameters in Avatar appearance", Helpers.LogLevel.Warning);
                             break;
                         }
 
