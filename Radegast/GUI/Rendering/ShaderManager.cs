@@ -67,10 +67,30 @@ namespace Radegast.Rendering
 
                 Logger.Debug($"Shader directory: {shaderDir}");
 
-                // Try to load basic shiny shader if enabled
-                if (RenderSettings.EnableShiny)
+                // Discover and load shader programs by grouping files with the same base name
+                var shaderFiles = System.IO.Directory.GetFiles(shaderDir)
+                    .Where(f => f.EndsWith(".vert", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".frag", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".geom", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".comp", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".tesc", StringComparison.OrdinalIgnoreCase)
+                             || f.EndsWith(".tese", StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+
+                var groups = shaderFiles
+                    .GroupBy(f => System.IO.Path.GetFileNameWithoutExtension(f).ToLowerInvariant())
+                    .ToList();
+
+                foreach (var g in groups)
                 {
-                    LoadShader("shiny", "shiny.vert", "shiny.frag");
+                    var baseName = g.Key;
+                    var files = g.ToArray();
+                    // Use just the filenames relative to shaderDir when calling LoadShader
+                    var relativeNames = files.Select(f => System.IO.Path.GetFileName(f)).ToArray();
+                    if (!LoadShader(baseName, relativeNames))
+                    {
+                        Logger.Debug($"Failed to load shader program: {baseName}");
+                    }
                 }
 
                 Logger.Info($"Shader manager initialized with {programs.Count} shader(s)");
