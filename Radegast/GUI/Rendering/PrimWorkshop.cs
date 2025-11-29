@@ -76,7 +76,7 @@ namespace Radegast.Rendering
         /// <summary>
         /// List of prims in the scene
         /// </summary>
-        private readonly Dictionary<uint, FacetedMesh> Prims = new Dictionary<uint, FacetedMesh>();
+        private readonly ConcurrentDictionary<uint, FacetedMesh> Prims = new ConcurrentDictionary<uint, FacetedMesh>();
 
         /// <summary>
         /// Local ID of the root prim
@@ -91,7 +91,7 @@ namespace Radegast.Rendering
 
         #region Private fields
 
-        private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
+        private readonly ConcurrentDictionary<UUID, TextureInfo> TexturesPtrMap = new ConcurrentDictionary<UUID, TextureInfo>();
         private readonly RadegastInstance instance;
         private readonly MeshmerizerR renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
@@ -101,6 +101,9 @@ namespace Radegast.Rendering
         private OpenTK.Matrix4 ModelMatrix;
         private OpenTK.Matrix4 ProjectionMatrix;
         private readonly int[] Viewport = new int[4];
+        private bool disposed = false;
+        private Thread textureThread;
+        private volatile bool textureThreadRunning = false;
 
         #endregion Private fields
 
@@ -130,17 +133,110 @@ namespace Radegast.Rendering
 
         private void FrmPrimWorkshop_Disposed(object sender, EventArgs e)
         {
+            PerformCustomDisposal();
+        }
+
+        private void PerformCustomDisposal()
+        {
+            if (disposed) return;
+
+            disposed = true;
+            RenderingEnabled = false;
+
+            DisposeThreads();
+            DisposeUIComponents();
+            DisposePrims();
+            DisposeGLControl();
+            UnregisterEventHandlers();
+        }
+
+        private void DisposeThreads()
+        {
+            textureThreadRunning = false;
+
+            // Clear pending textures
+            while (PendingTextures.TryDequeue(out _)) { }
+
+            // Wait for texture thread to exit
+            if (textureThread != null && textureThread.IsAlive)
+            {
+                try
+                {
+                    if (!textureThread.Join(TimeSpan.FromSeconds(2)))
+                    {
+                        Logger.Debug("Texture thread did not exit in time", Client);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error waiting for texture thread: {ex.Message}", Client);
+                }
+                textureThread = null;
+            }
+        }
+
+        private void DisposeUIComponents()
+        {
             if (textRendering != null)
             {
-                textRendering.Dispose();
+                try
+                {
+                    textRendering.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error disposing textRendering: {ex.Message}", Client);
+                }
                 textRendering = null;
             }
+        }
 
-            glControl?.Dispose();
-            glControl = null;
-            Client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
-            Client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
-            Client.Objects.ObjectDataBlockUpdate -= Objects_ObjectDataBlockUpdate;
+        private void DisposePrims()
+        {
+            // Clear the prims dictionary
+            Prims.Clear();
+        }
+
+        private void DisposeGLControl()
+        {
+            if (glControl != null)
+            {
+                try
+                {
+                    glControl.Paint -= glControl_Paint;
+                    glControl.Resize -= glControl_Resize;
+                    glControl.MouseDown -= glControl_MouseDown;
+                    glControl.MouseUp -= glControl_MouseUp;
+                    glControl.MouseMove -= glControl_MouseMove;
+                    glControl.MouseWheel -= glControl_MouseWheel;
+                    glControl.Load -= glControl_Load;
+                    glControl.Disposed -= glControl_Disposed;
+
+                    if (!glControl.IsDisposed)
+                    {
+                        glControl.Dispose();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error disposing glControl: {ex.Message}", Client);
+                }
+                glControl = null;
+            }
+        }
+
+        private void UnregisterEventHandlers()
+        {
+            try
+            {
+                Client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
+                Client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
+                Client.Objects.ObjectDataBlockUpdate -= Objects_ObjectDataBlockUpdate;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Error unregistering event handlers: {ex.Message}", Client);
+            }
         }
         #endregion Construction and disposal
 
@@ -148,6 +244,7 @@ namespace Radegast.Rendering
 
         private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
+            if (disposed) return;
             if (Prims.ContainsKey(e.Prim.LocalID))
             {
                 UpdatePrimBlocking(e.Prim);
@@ -156,6 +253,7 @@ namespace Radegast.Rendering
 
         private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
         {
+            if (disposed) return;
             if (Prims.ContainsKey(e.Prim.LocalID) || Prims.ContainsKey(e.Prim.ParentID))
             {
                 UpdatePrimBlocking(e.Prim);
@@ -164,6 +262,7 @@ namespace Radegast.Rendering
 
         private void Objects_ObjectDataBlockUpdate(object sender, ObjectDataBlockUpdateEventArgs e)
         {
+            if (disposed) return;
             if (Prims.ContainsKey(e.Prim.LocalID))
             {
                 UpdatePrimBlocking(e.Prim);
@@ -239,11 +338,8 @@ namespace Radegast.Rendering
 
         private void glControl_Disposed(object sender, EventArgs e)
         {
-            TextureThreadRunning = false;
-            while (!PendingTextures.IsEmpty)
-            {
-                PendingTextures.TryDequeue(out _);
-            }
+            textureThreadRunning = false;
+            while (PendingTextures.TryDequeue(out _)) { }
         }
 
         private void glControl_Load(object sender, EventArgs e)
@@ -510,17 +606,22 @@ namespace Radegast.Rendering
 
         #region Texture thread
 
-        private bool TextureThreadRunning = true;
-
         private void TextureThread()
         {
             Logger.DebugLog("Started Texture Thread");
 
-            while (TextureThreadRunning)
-            {
-                TextureLoadItem item = null;
+            textureThreadRunning = true;
 
-                if (!PendingTextures.TryDequeue(out item)) continue;
+            while (textureThreadRunning)
+            {
+                if (!PendingTextures.TryDequeue(out var item))
+                {
+                    Thread.Sleep(10);
+                    continue;
+                }
+
+                if (disposed || Disposing || IsDisposed)
+                    break;
 
                 if (TexturesPtrMap.ContainsKey(item.TeFace.TextureID))
                 {
@@ -530,32 +631,54 @@ namespace Radegast.Rendering
 
                 if (LoadTexture(item.TeFace.TextureID, ref item.Data.TextureInfo.Texture, false))
                 {
-                    Bitmap bitmap = item.Data.TextureInfo.Texture.ToBitmap();
-
-                    bool hasAlpha;
-                    hasAlpha = bitmap.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb;
-                    
-                    item.Data.TextureInfo.HasAlpha = hasAlpha;
-
-                    bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
-
-                    var loadOnMainThread = new MethodInvoker(() =>
+                    Bitmap bitmap = null;
+                    try
                     {
-                        item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, hasAlpha, RenderSettings.HasMipmap);
-                        TexturesPtrMap[item.TeFace.TextureID] = item.Data.TextureInfo;
-                        bitmap.Dispose();
-                        item.Data.TextureInfo.Texture = null;
-                        SafeInvalidate();
-                    });
+                        bitmap = item.Data.TextureInfo.Texture.ToBitmap();
 
-                    if (Disposing || IsDisposed)
-                    {
-                        break;
+                        bool hasAlpha = bitmap.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb;
+                        
+                        item.Data.TextureInfo.HasAlpha = hasAlpha;
+
+                        bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+
+                        var loadOnMainThread = new MethodInvoker(() =>
+                        {
+                            try
+                            {
+                                if (!disposed && !Disposing && !IsDisposed)
+                                {
+                                    item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, hasAlpha, RenderSettings.HasMipmap);
+                                    TexturesPtrMap[item.TeFace.TextureID] = item.Data.TextureInfo;
+                                    item.Data.TextureInfo.Texture = null;
+                                    SafeInvalidate();
+                                }
+                            }
+                            finally
+                            {
+                                bitmap?.Dispose();
+                            }
+                        });
+
+                        if (disposed || Disposing || IsDisposed)
+                        {
+                            bitmap?.Dispose();
+                            break;
+                        }
+
+                        if (!instance.MonoRuntime || IsHandleCreated)
+                        {
+                            BeginInvoke(loadOnMainThread);
+                        }
+                        else
+                        {
+                            bitmap?.Dispose();
+                        }
                     }
-
-                    if (!instance.MonoRuntime || IsHandleCreated)
+                    catch (Exception ex)
                     {
-                        BeginInvoke(loadOnMainThread);
+                        Logger.Debug($"Error processing texture: {ex.Message}", Client);
+                        bitmap?.Dispose();
                     }
                 }
             }
@@ -598,160 +721,156 @@ namespace Radegast.Rendering
 
         private void RenderText()
         {
-            lock (Prims)
+            if (disposed) return;
+
+            int primNr = 0;
+            foreach (FacetedMesh mesh in Prims.Values)
             {
-                int primNr = 0;
-                foreach (FacetedMesh mesh in Prims.Values)
+                primNr++;
+                Primitive prim = mesh.Prim;
+                if (string.IsNullOrEmpty(prim.Text)) continue;
+
+                string text = System.Text.RegularExpressions.Regex.Replace(prim.Text, "(\r?\n)+", "\n");
+                OpenTK.Vector3 screenPos = OpenTK.Vector3.Zero;
+                OpenTK.Vector3 primPos = OpenTK.Vector3.Zero;
+
+                // Is it child prim
+                if (Prims.TryGetValue(prim.ParentID, out var parent))
                 {
-                    primNr++;
-                    Primitive prim = mesh.Prim;
-                    if (string.IsNullOrEmpty(prim.Text)) continue;
-
-                    string text = System.Text.RegularExpressions.Regex.Replace(prim.Text, "(\r?\n)+", "\n");
-                    OpenTK.Vector3 screenPos = OpenTK.Vector3.Zero;
-                    OpenTK.Vector3 primPos = OpenTK.Vector3.Zero;
-
-                    // Is it child prim
-                    FacetedMesh parent = null;
-                    if (Prims.TryGetValue(prim.ParentID, out parent))
-                    {
-                        var newPrimPos = prim.Position * Matrix4.CreateFromQuaternion(parent.Prim.Rotation);
-                        primPos = new OpenTK.Vector3(newPrimPos.X, newPrimPos.Y, newPrimPos.Z);
-                    }
-
-                    primPos.Z += prim.Scale.Z * 0.8f;
-                    if (!GLU.Project(primPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
-                    screenPos.Y = glControl.Height - screenPos.Y;
-
-                    textRendering.Begin();
-
-                    Color color = Color.FromArgb((int)(prim.TextColor.A * 255), (int)(prim.TextColor.R * 255), (int)(prim.TextColor.G * 255), (int)(prim.TextColor.B * 255));
-                    TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
-
-                    using (Font f = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Regular))
-                    {
-                        var size = TextRendering.Measure(text, f, flags);
-                        screenPos.X -= size.Width / 2;
-                        screenPos.Y -= size.Height;
-
-                        // Shadow
-                        if (color != Color.Black)
-                        {
-                            textRendering.Print(text, f, Color.Black, new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width, size.Height), flags);
-                        }
-                        textRendering.Print(text, f, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
-                    }
-                    textRendering.End();
+                    var newPrimPos = prim.Position * Matrix4.CreateFromQuaternion(parent.Prim.Rotation);
+                    primPos = new OpenTK.Vector3(newPrimPos.X, newPrimPos.Y, newPrimPos.Z);
                 }
+
+                primPos.Z += prim.Scale.Z * 0.8f;
+                if (!GLU.Project(primPos, ModelMatrix, ProjectionMatrix, Viewport, out screenPos)) continue;
+                screenPos.Y = glControl.Height - screenPos.Y;
+
+                textRendering.Begin();
+
+                Color color = Color.FromArgb((int)(prim.TextColor.A * 255), (int)(prim.TextColor.R * 255), (int)(prim.TextColor.G * 255), (int)(prim.TextColor.B * 255));
+                TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
+
+                using (Font f = new Font(FontFamily.GenericSansSerif, 10, FontStyle.Regular))
+                {
+                    var size = TextRendering.Measure(text, f, flags);
+                    screenPos.X -= size.Width / 2;
+                    screenPos.Y -= size.Height;
+
+                    // Shadow
+                    if (color != Color.Black)
+                    {
+                        textRendering.Print(text, f, Color.Black, new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width, size.Height), flags);
+                    }
+                    textRendering.Print(text, f, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
+                }
+                textRendering.End();
             }
         }
 
         private void RenderObjects(RenderPass pass)
         {
-            lock (Prims)
+            if (disposed) return;
+
+            int primNr = 0;
+            foreach (FacetedMesh mesh in Prims.Values)
             {
-                int primNr = 0;
-                foreach (FacetedMesh mesh in Prims.Values)
+                primNr++;
+                Primitive prim = mesh.Prim;
+                // Individual prim matrix
+                GL.PushMatrix();
+
+                if (prim.ParentID == RootPrimLocalID)
                 {
-                    primNr++;
-                    Primitive prim = mesh.Prim;
-                    // Individual prim matrix
-                    GL.PushMatrix();
-
-                    if (prim.ParentID == RootPrimLocalID)
+                    if (Prims.TryGetValue(prim.ParentID, out var parent))
                     {
-                        FacetedMesh parent = null;
-                        if (Prims.TryGetValue(prim.ParentID, out parent))
-                        {
-                            // Apply prim translation and rotation relative to the root prim
-                            GL.MultMatrix(Math3D.CreateRotationMatrix(parent.Prim.Rotation));
-                            //GL.MultMatrixf(Math3D.CreateTranslationMatrix(parent.Prim.Position));
-                        }
-
-                        // Prim roation relative to root
-                        GL.MultMatrix(Math3D.CreateTranslationMatrix(prim.Position));
+                        // Apply prim translation and rotation relative to the root prim
+                        GL.MultMatrix(Math3D.CreateRotationMatrix(parent.Prim.Rotation));
+                        //GL.MultMatrixf(Math3D.CreateTranslationMatrix(parent.Prim.Position));
                     }
 
-                    // Prim roation
-                    GL.MultMatrix(Math3D.CreateRotationMatrix(prim.Rotation));
+                    // Prim roation relative to root
+                    GL.MultMatrix(Math3D.CreateTranslationMatrix(prim.Position));
+                }
 
-                    // Prim scaling
-                    GL.Scale(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
+                // Prim roation
+                GL.MultMatrix(Math3D.CreateRotationMatrix(prim.Rotation));
 
-                    // Draw the prim faces
-                    for (int j = 0; j < mesh.Faces.Count; j++)
+                // Prim scaling
+                GL.Scale(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
+
+                // Draw the prim faces
+                for (int j = 0; j < mesh.Faces.Count; j++)
+                {
+                    Primitive.TextureEntryFace teFace = mesh.Prim.Textures.FaceTextures[j];
+                    Face face = mesh.Faces[j];
+                    FaceData data = (FaceData)face.UserData;
+
+                    if (teFace == null)
+                        teFace = mesh.Prim.Textures.DefaultTexture;
+
+                    if (pass == RenderPass.Picking)
                     {
-                        Primitive.TextureEntryFace teFace = mesh.Prim.Textures.FaceTextures[j];
-                        Face face = mesh.Faces[j];
-                        FaceData data = (FaceData)face.UserData;
+                        data.PickingID = primNr;
+                        var primNrBytes = Utils.Int16ToBytes((short)primNr);
+                        var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)j, 255 };
 
-                        if (teFace == null)
-                            teFace = mesh.Prim.Textures.DefaultTexture;
+                        GL.Color4(faceColor);
+                    }
+                    else
+                    {
+                        bool belongToAlphaPass = (teFace.RGBA.A < 0.99) || data.TextureInfo.HasAlpha;
 
-                        if (pass == RenderPass.Picking)
+                        if (belongToAlphaPass && pass != RenderPass.Alpha) continue;
+                        if (!belongToAlphaPass && pass == RenderPass.Alpha) continue;
+
+                        // Don't render transparent faces
+                        if (teFace.RGBA.A <= 0.01f) continue;
+
+                        switch (teFace.Shiny)
                         {
-                            data.PickingID = primNr;
-                            var primNrBytes = Utils.Int16ToBytes((short)primNr);
-                            var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)j, 255 };
+                            case Shininess.High:
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 94f);
+                                break;
+                            case Shininess.Medium:
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 64f);
+                                break;
+                            case Shininess.Low:
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 24f);
+                                break;
+                            case Shininess.None:
+                            default:
+                                GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 0f);
+                                break;
+                        }
 
-                            GL.Color4(faceColor);
+                        var faceColor = new float[] { teFace.RGBA.R, teFace.RGBA.G, teFace.RGBA.B, teFace.RGBA.A };
+
+                        GL.Color4(faceColor);
+                        GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
+                        GL.Material(MaterialFace.Front, MaterialParameter.Specular, faceColor);
+
+                        if (data.TextureInfo.TexturePointer != 0)
+                        {
+                            GL.Enable(EnableCap.Texture2D);
                         }
                         else
                         {
-                            bool belongToAlphaPass = (teFace.RGBA.A < 0.99) || data.TextureInfo.HasAlpha;
-
-                            if (belongToAlphaPass && pass != RenderPass.Alpha) continue;
-                            if (!belongToAlphaPass && pass == RenderPass.Alpha) continue;
-
-                            // Don't render transparent faces
-                            if (teFace.RGBA.A <= 0.01f) continue;
-
-                            switch (teFace.Shiny)
-                            {
-                                case Shininess.High:
-                                    GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 94f);
-                                    break;
-                                case Shininess.Medium:
-                                    GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 64f);
-                                    break;
-                                case Shininess.Low:
-                                    GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 24f);
-                                    break;
-                                case Shininess.None:
-                                default:
-                                    GL.Material(MaterialFace.Front, MaterialParameter.Shininess, 0f);
-                                    break;
-                            }
-
-                            var faceColor = new float[] { teFace.RGBA.R, teFace.RGBA.G, teFace.RGBA.B, teFace.RGBA.A };
-
-                            GL.Color4(faceColor);
-                            GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
-                            GL.Material(MaterialFace.Front, MaterialParameter.Specular, faceColor);
-
-                            if (data.TextureInfo.TexturePointer != 0)
-                            {
-                                GL.Enable(EnableCap.Texture2D);
-                            }
-                            else
-                            {
-                                GL.Disable(EnableCap.Texture2D);
-                            }
-
-                            // Bind the texture
-                            GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
+                            GL.Disable(EnableCap.Texture2D);
                         }
 
-                        GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, data.TexCoords);
-                        GL.VertexPointer(3, VertexPointerType.Float, 0, data.Vertices);
-                        GL.NormalPointer(NormalPointerType.Float, 0, data.Normals);
-                        GL.DrawElements(PrimitiveType.Triangles, data.Indices.Length, DrawElementsType.UnsignedShort, data.Indices);
-
+                        // Bind the texture
+                        GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
                     }
 
-                    // Pop the prim matrix
-                    GL.PopMatrix();
+                    GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, data.TexCoords);
+                    GL.VertexPointer(3, VertexPointerType.Float, 0, data.Vertices);
+                    GL.NormalPointer(NormalPointerType.Float, 0, data.Normals);
+                    GL.DrawElements(PrimitiveType.Triangles, data.Indices.Length, DrawElementsType.UnsignedShort, data.Indices);
+
                 }
+
+                // Pop the prim matrix
+                GL.PopMatrix();
             }
         }
 
@@ -839,6 +958,11 @@ namespace Radegast.Rendering
 
         private bool TryPick(int x, int y, out FacetedMesh picked, out int faceID)
         {
+            picked = null;
+            faceID = 0;
+
+            if (disposed) return false;
+
             // Save old attributes
             GL.PushAttrib(AttribMask.AllAttribBits);
 
@@ -863,23 +987,18 @@ namespace Radegast.Rendering
             int primID = Utils.BytesToUInt16(color, 0);
             faceID = color[2];
 
-            picked = null;
-
-            lock (Prims)
+            foreach (var mesh in Prims.Values)
             {
-                foreach (var mesh in Prims.Values)
+                foreach (var face in mesh.Faces)
                 {
-                    foreach (var face in mesh.Faces)
+                    if (((FaceData)face.UserData).PickingID == primID)
                     {
-                        if (((FaceData)face.UserData).PickingID == primID)
-                        {
-                            picked = mesh;
-                            break;
-                        }
+                        picked = mesh;
+                        break;
                     }
-
-                    if (picked != null) break;
                 }
+
+                if (picked != null) break;
             }
 
             return picked != null;
@@ -888,16 +1007,14 @@ namespace Radegast.Rendering
 
         private void UpdatePrimBlocking(Primitive prim)
         {
+            if (disposed) return;
 
             FacetedMesh mesh = null;
             FacetedMesh existingMesh = null;
 
-            lock (Prims)
+            if (Prims.TryGetValue(prim.LocalID, out var existing))
             {
-                if (Prims.TryGetValue(prim.LocalID, out var existing))
-                {
-                    existingMesh = existing;
-                }
+                existingMesh = existing;
             }
 
             if (prim.Textures == null)
@@ -941,10 +1058,13 @@ namespace Radegast.Rendering
                     mesh = renderer.GenerateFacetedMesh(prim, DetailLevel.Highest);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Debug($"Error generating mesh: {ex.Message}", Client);
                 return;
             }
+
+            if (mesh == null) return;
 
             // Create a FaceData struct for each face that stores the 3D data
             // in a OpenGL friendly format
@@ -1013,10 +1133,7 @@ namespace Radegast.Rendering
 
             }
 
-            lock (Prims)
-            {
-                Prims[prim.LocalID] = mesh;
-            }
+            Prims[prim.LocalID] = mesh;
             SafeInvalidate();
         }
 
@@ -1062,18 +1179,36 @@ namespace Radegast.Rendering
 
         private void SafeInvalidate()
         {
-            if (glControl == null || !RenderingEnabled) return;
+            if (disposed || glControl == null || !RenderingEnabled) return;
 
             if (InvokeRequired)
             {
                 if (!instance.MonoRuntime || IsHandleCreated)
                 {
-                    BeginInvoke(new MethodInvoker(SafeInvalidate));
+                    try
+                    {
+                        BeginInvoke(new MethodInvoker(SafeInvalidate));
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // Control already disposed
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // Handle already destroyed
+                    }
                 }
                 return;
             }
 
-            glControl.Invalidate();
+            try
+            {
+                glControl?.Invalidate();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Control already disposed
+            }
         }
         #endregion Private methods (the meat)
 
@@ -1112,7 +1247,14 @@ namespace Radegast.Rendering
 
             if (dialog.ShowDialog() == DialogResult.OK)
             {
-                if (!MeshToOBJ.MeshesToOBJ(Prims, dialog.FileName))
+                // Convert ConcurrentDictionary to Dictionary for MeshToOBJ
+                var primsDict = new Dictionary<uint, FacetedMesh>();
+                foreach (var kvp in Prims)
+                {
+                    primsDict[kvp.Key] = kvp.Value;
+                }
+
+                if (!MeshToOBJ.MeshesToOBJ(primsDict, dialog.FileName))
                 {
                     MessageBox.Show("Failed to save file " + dialog.FileName +
                         ". Ensure that you have permission to write to that file and it is currently not in use");
