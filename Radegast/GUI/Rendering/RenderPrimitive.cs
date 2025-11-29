@@ -623,6 +623,10 @@ namespace Radegast.Rendering
                     Vertex[] verts = face.Vertices.ToArray();
                     ushort[] indices = face.Indices.ToArray();
 
+                    // Guard against empty geometry which would cause verts[0] access to throw
+                    if (verts == null || verts.Length == 0 || indices == null || indices.Length == 0)
+                        continue;
+
                     unsafe
                     {
                         fixed (float* normalPtr = &verts[0].Normal.X)
@@ -637,6 +641,10 @@ namespace Radegast.Rendering
                 }
                 else
                 {
+                    // Skip faces with no geometry to avoid VBO creation/draw errors
+                    if (face.Vertices == null || face.Vertices.Count == 0 || face.Indices == null || face.Indices.Count == 0)
+                        continue;
+
                     if (data.CheckVBO(face))
                     {
                         // If shaders active and attribute locations available, use glVertexAttribPointer path

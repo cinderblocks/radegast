@@ -2043,11 +2043,16 @@ namespace Radegast.Rendering
                         prim.PrimData.PathSkew == 0 &&
                         prim.PrimData.PathShearX == 0 &&
                         prim.PrimData.PathShearY == 0 &&
-                        prim.PrimData.PathRevolutions == 1 &&
+                        prim.PrimData.PathRevolutions == 1.0f &&
                         prim.PrimData.PathRadiusOffset == 0)
-                        detailLevel = DetailLevel.Low;//Its a box or something else that can use lower meshing
+                        detailLevel = DetailLevel.Low;// a box or something else that can use lower meshing
                 }
                 var mesh = renderer.GenerateFacetedMesh(prim, detailLevel);
+                // Remove any degenerate faces with no verts or no indices
+                if (mesh?.Faces != null)
+                {
+                    mesh.Faces = mesh.Faces.FindAll(f => f.Vertices != null && f.Vertices.Count > 0 && f.Indices != null && f.Indices.Count > 0);
+                }
                 rprim.Faces = mesh.Faces;
                 CalculateBoundingBox(rprim);
                 rprim.Meshing = false;
@@ -2115,6 +2120,11 @@ namespace Radegast.Rendering
 
                 if (mesh != null)
                 {
+                    // Remove degenerate faces produced by mesh generation
+                    if (mesh.Faces != null)
+                    {
+                        mesh.Faces = mesh.Faces.FindAll(f => f.Vertices != null && f.Vertices.Count > 0 && f.Indices != null && f.Indices.Count > 0);
+                    }
                     rprim.Faces = mesh.Faces;
                     CalculateBoundingBox(rprim);
                     rprim.Meshing = false;
