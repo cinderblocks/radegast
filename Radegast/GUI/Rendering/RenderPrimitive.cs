@@ -610,13 +610,14 @@ namespace Radegast.Rendering
                             break;
                     }
 
-                    if (shiny > 0f)
+                    // Attachments should never use shaders to avoid geometry corruption
+                    if (shiny > 0f && !Attached)
                     {
                         scene.StartShiny();
                     }
                     else
                     {
-                        // Ensure shader is stopped for non-shiny faces
+                        // Ensure shader is stopped for non-shiny faces or all attachment faces
                         scene.StopShiny();
                     }
                     GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shiny);
@@ -701,12 +702,13 @@ namespace Radegast.Rendering
                     {
                         // Determine if we should use shader attribute path:
                         // Only use it if shiny shader is ACTUALLY ACTIVE (shiny > 0 for this face means StartShiny was called above)
+                        // NEVER use shader path for attachments to avoid geometry corruption
                         var sw = scene as SceneWindow;
                         var useAttribs = false;
                         int posLoc = -1, normLoc = -1, texLoc = -1;
                         
-                        // Only try shader path if this face has shiny (meaning shader was started above)
-                        if (pass != RenderPass.Picking && teFace.Shiny != Shininess.None && RenderSettings.HasShaders && RenderSettings.EnableShiny && sw != null)
+                        // Only try shader path if this face has shiny AND is not an attachment
+                        if (!Attached && pass != RenderPass.Picking && teFace.Shiny != Shininess.None && RenderSettings.HasShaders && RenderSettings.EnableShiny && sw != null)
                         {
                             try
                             {
