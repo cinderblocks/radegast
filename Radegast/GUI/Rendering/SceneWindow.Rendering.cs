@@ -538,48 +538,58 @@ namespace Radegast.Rendering
                                         mesh.PrepareVBO();
                                     }
 
-                                    if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed && RenderSettings.HasShaders && RenderSettings.EnableShiny)
+                                    if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed)
                                     {
-                                        var posLoc = GetShaderAttr("aPosition");
-                                        var normLoc = GetShaderAttr("aNormal");
-                                        var texLoc = GetShaderAttr("aTexCoord");
-                                        if (posLoc != -1 && normLoc != -1 && texLoc != -1)
+                                        // Update VBO with animated vertex data each frame
+                                        try
                                         {
-                                            // Bind VAO if available to reduce state changes
-                                            if (mesh.Vao != -1)
+                                            var numVerts = mesh.RenderData.Vertices.Length / 3;
+                                            var interleaved = new float[numVerts * 8];
+                                            for (int i = 0, vi = 0; i < numVerts; i++)
                                             {
-                                                Compat.BindVertexArray(mesh.Vao);
+                                                // Animated position from RenderData.Vertices (updated by applyjointweights)
+                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3];
+                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 1];
+                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 2];
+                                                // Animated normal from MorphRenderData.Normals
+                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3];
+                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 1];
+                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 2];
+                                                // Texture coords (static)
+                                                interleaved[vi++] = mesh.RenderData.TexCoords[i * 2];
+                                                interleaved[vi++] = mesh.RenderData.TexCoords[i * 2 + 1];
                                             }
 
                                             Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
-                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
-
-                                            GL.EnableVertexAttribArray(posLoc);
-                                            GL.EnableVertexAttribArray(normLoc);
-                                            GL.EnableVertexAttribArray(texLoc);
-
-                                            int stride = 8 * sizeof(float);
-                                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, stride, 0);
-                                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, stride, 3 * sizeof(float));
-                                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, stride, 6 * sizeof(float));
-
-                                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
-
-                                            GL.DisableVertexAttribArray(posLoc);
-                                            GL.DisableVertexAttribArray(normLoc);
-                                            GL.DisableVertexAttribArray(texLoc);
-
-                                            // Unbind buffers
+                                            Compat.BufferData(BufferTarget.ArrayBuffer, (IntPtr)(interleaved.Length * sizeof(float)), interleaved, BufferUsageHint.StreamDraw);
                                             Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-
-                                            if (mesh.Vao != -1)
-                                            {
-                                                Compat.BindVertexArray(0);
-                                            }
-
-                                            usedAttribs = true;
                                         }
+                                        catch
+                                        {
+                                            // If VBO update fails, fall back to non-VBO rendering
+                                            mesh.VBOFailed = true;
+                                        }
+                                    }
+
+                                    if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed)
+                                    {
+                                        // Avatars don't have shiny property, so we should NOT use shader attributes
+                                        // Always use fixed-function VBO path for avatars to ensure proper lighting
+                                        
+                                        // Fixed-function VBO path with interleaved data
+                                        Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
+
+                                        GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), IntPtr.Zero);
+                                        GL.NormalPointer(NormalPointerType.Float, 8 * sizeof(float), (IntPtr)(3 * sizeof(float)));
+                                        GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), (IntPtr)(6 * sizeof(float)));
+
+                                        GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                        Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+
+                                        usedAttribs = true;
                                     }
                                 }
                                 catch { usedAttribs = false; }
@@ -587,6 +597,7 @@ namespace Radegast.Rendering
 
                             if (!usedAttribs)
                             {
+                                // Fallback to client-side arrays
                                 GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, mesh.RenderData.TexCoords);
                                 GL.VertexPointer(3, VertexPointerType.Float, 0, mesh.RenderData.Vertices);
                                 GL.NormalPointer(NormalPointerType.Float, 0, mesh.MorphRenderData.Normals);

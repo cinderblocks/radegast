@@ -1784,31 +1784,11 @@ namespace Radegast.Rendering
                 CheckKeyboard(lastFrameTime);
 
                 // If programmable shaders are available and enabled, start the shiny shader
-                var useShaders = RenderSettings.HasShaders && RenderSettings.EnableShiny && shaderManager?.HasShaders == true;
-                if (useShaders)
-                {
-                    // Start shader via ShaderManager
-                    shaderManager.StartShader("shiny");
-                    // Update dynamic uniforms each frame
-                    try
-                    {
-                        var prog = shaderManager.GetProgram("shiny");
-                        if (prog != null)
-                        {
-                            var uLight = prog.Uni("lightDir");
-                            if (uLight != -1) GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
-
-                            var ua = prog.Uni("ambientColor");
-                            if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                            var ud = prog.Uni("diffuseColor");
-                            if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                            var us = prog.Uni("specularColor");
-                            if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
-                        }
-                    }
-                    catch { }
-                }
-
+                // Note: Do not bind shiny shader globally here. Shaders are enabled per-face
+                // by RenderPrimitive when needed (scene.StartShiny()). Binding the shader
+                // globally causes it to be active during fixed-function draws where attribute
+                // pointers are not set, resulting in incorrect rendering. Per-face binding
+                // ensures attributes are set or shader is not used where not supported.
                 terrain.Render(RenderPass.Simple, 0, this, lastFrameTime);
 
                 // Alpha mask elements, no blending, alpha test for A > 0.5
@@ -1818,12 +1798,6 @@ namespace Radegast.Rendering
                 RenderObjects(RenderPass.Invisible);
                 RenderAvatars(RenderPass.Simple);
                 GL.Disable(EnableCap.AlphaTest);
-
-                if (useShaders)
-                {
-                    // Stop using shader via ShaderManager
-                    shaderManager?.StopShader();
-                }
 
                 GLHUDBegin();
                 RenderText(RenderPass.Simple);
@@ -1911,7 +1885,97 @@ namespace Radegast.Rendering
         {
             if (RenderSettings.EnableShiny)
             {
-                shaderManager?.StartShader("shiny");
+                if (shaderManager == null) return;
+                if (!shaderManager.StartShader("shiny")) return;
+
+                try
+                {
+                    var prog = shaderManager.GetProgram("shiny");
+                    if (prog == null) return;
+
+                    // Compute light direction in eye space by transforming sunPos with current modelview
+                    var uLight = prog.Uni("lightDir");
+                    if (uLight != -1)
+                    {
+                        try
+                        {
+                            // Get current modelview matrix
+                            GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+                            // Transform sun direction into eye space using w=0 to avoid translation
+                            var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
+                            var trans = OpenTK.Vector4.Transform(sunDir, mv);
+                            var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
+                            GL.Uniform3(uLight, ld);
+                        }
+                        catch
+                        {
+                            // fallback to sending raw sunPos if transform fails
+                            GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                        }
+                    }
+
+                    // Ensure colorMap sampler is bound to texture unit 0 for this program
+                    var uColorMap = prog.Uni("colorMap");
+                    if (uColorMap != -1)
+                    {
+                        try { GL.Uniform1(uColorMap, 0); } catch { }
+                    }
+
+                    var ua = prog.Uni("ambientColor");
+                    if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                    var ud = prog.Uni("diffuseColor");
+                    if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                    var us = prog.Uni("specularColor");
+                    if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+
+                    // Update matrix uniforms for current modelview/projection
+                    UpdateShaderMatrices();
+
+                    // Also explicitly compute and upload normal matrix here to ensure shaders that
+                    // expect it immediately after StartShader get the correct value.
+                    try
+                    {
+                        GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv2);
+                        var normal = new OpenTK.Matrix3(
+                            mv2.M11, mv2.M12, mv2.M13,
+                            mv2.M21, mv2.M22, mv2.M23,
+                            mv2.M31, mv2.M32, mv2.M33);
+                        normal = normal.Inverted();
+                        normal = new OpenTK.Matrix3(
+                            normal.M11, normal.M21, normal.M31,
+                            normal.M12, normal.M22, normal.M32,
+                            normal.M13, normal.M23, normal.M33);
+
+                        var uNormalExplicit = prog.Uni("uNormalMatrix");
+                        if (uNormalExplicit != -1)
+                        {
+                            GL.UniformMatrix3(uNormalExplicit, false, ref normal);
+                        }
+
+                        var uNormalAlt = prog.Uni("normalMatrix");
+                        if (uNormalAlt != -1)
+                        {
+                            GL.UniformMatrix3(uNormalAlt, false, ref normal);
+                        }
+                    }
+                    catch { }
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
+        /// Stop the shiny shader and return to fixed-function pipeline
+        /// </summary>
+        public void StopShiny()
+        {
+            if (RenderSettings.EnableShiny && shaderManager != null)
+            {
+                try
+                {
+                    shaderManager.StopShader();
+                }
+                catch { }
             }
         }
 
