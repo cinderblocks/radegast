@@ -26,6 +26,7 @@ using System.IO;
 using System.Threading;
 using OpenMetaverse;
 using System.Threading.Tasks;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -58,11 +59,7 @@ namespace Radegast
 
         private void MeshUploadConsole_Disposed(object sender, EventArgs e)
         {
-            if (uploadCts != null)
-            {
-                uploadCts.Cancel();
-                uploadCts.Dispose();
-            }
+            DisposalHelper.SafeCancelAndDispose(uploadCts, (m, ex) => { });
 
             Running = false;
         }
@@ -71,7 +68,7 @@ namespace Radegast
         {
             ThreadingHelper.SafeInvoke(this, () =>
             {
-                uploadCts?.Cancel();
+                DisposalHelper.SafeCancelAndDispose(uploadCts, (m, ex) => { });
                 Running = false;
 
                 UpdateButtons();
@@ -133,7 +130,7 @@ namespace Radegast
         {
             var o = new OpenFileDialog
             {
-                Filter = "Collada files (*.dae)|*.dae|All files (*.*)|*.*", 
+                Filter = "Collada files (*.dae)|*.dae|All files (*.*)|*.*",
                 Multiselect = true
             };
             var res = o.ShowDialog();
@@ -200,12 +197,12 @@ namespace Radegast
 
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims, 
+                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims,
                         Path.GetFileNameWithoutExtension(filename), "Radegast " + DateTime.Now.ToString(CultureInfo.InvariantCulture))
-                        {
-                            IncludePhysicsStub = true,
-                            UseModelAsPhysics = false
-                        };
+                    {
+                        IncludePhysicsStub = true,
+                        UseModelAsPhysics = false
+                    };
 
                     await uploader.Upload((res =>
                     {
@@ -213,7 +210,7 @@ namespace Radegast
 
                     }), cancellationToken);
                 }
-            } 
+            }
             catch (OperationCanceledException)
             {
                 Msg("Upload cancelled.");

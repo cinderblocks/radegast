@@ -33,6 +33,7 @@ using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
 using Targa = OpenMetaverse.Imaging.Targa;
 using System.Threading;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -428,8 +429,8 @@ namespace Radegast
             {
                 if (disposing)
                 {
-                    try { _cts.Cancel(); } catch { }
-                    _cts.Dispose();
+                    // Safely cancel and dispose the CTS
+                    DisposalHelper.SafeCancelAndDispose(_cts, (m, ex) => { });
                 }
                 base.Dispose(disposing);
             }

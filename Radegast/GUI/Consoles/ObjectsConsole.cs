@@ -28,6 +28,7 @@ using System.Windows.Forms;
 using System.Threading;
 using OpenMetaverse;
 using System.Threading.Tasks;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -128,20 +129,11 @@ namespace Radegast
 
         private void frmObjects_Disposed(object sender, EventArgs e)
         {
-            try
-            {
-                contentsDownloadCancelToken.Cancel();
-                contentsDownloadCancelToken.Dispose();
-            } catch (ObjectDisposedException) { }
+            DisposalHelper.SafeCancelAndDispose(contentsDownloadCancelToken, (m, ex) => Logger.Debug(m, ex));
 
-            try
-            {
-                uiUpdateTimer.Stop();
-                uiUpdateTimer.Dispose();
-            }
-            catch (ObjectDisposedException) { }
+            DisposalHelper.SafeDispose(uiUpdateTimer, "UI update timer", (m, ex) => Logger.Debug(m, ex));
+            DisposalHelper.SafeDispose(propRequester, "PropertiesQueue", (m, ex) => Logger.Debug(m, ex));
 
-            propRequester.Dispose();
             instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
             instance.State.SitStateChanged -= State_SitStateChanged;
             client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
@@ -1632,10 +1624,12 @@ namespace Radegast
         {
             if (qTimer != null)
             {
-                qTimer.Elapsed -= qTimer_Elapsed;
-                qTimer.Enabled = false;
+                Helpers.SafeAction(() => qTimer.Elapsed -= qTimer_Elapsed, "Unsubscribe PropertiesQueue timer", (m, ex) => Logger.Debug(m, ex));
+                try { qTimer.Enabled = false; } catch { }
+                DisposalHelper.SafeDispose(qTimer, "PropertiesQueue timer", (m, ex) => Logger.Debug(m, ex));
                 qTimer = null;
             }
+
             props = null;
             instance = null;
         }
