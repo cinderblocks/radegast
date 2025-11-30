@@ -23,7 +23,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
-
+using LibreMetaverse;
 using OpenMetaverse;
 using Radegast.Automation;
 using Radegast.Core;

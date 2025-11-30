@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using LibreMetaverse;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using OpenMetaverse.Assets;

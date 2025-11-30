@@ -28,6 +28,7 @@ using System.Threading;
 using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using LibreMetaverse;
 using OpenMetaverse.StructuredData;
 
 namespace Radegast

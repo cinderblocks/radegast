@@ -24,6 +24,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
+using LibreMetaverse;
 using OpenMetaverse;
 
 namespace Radegast
