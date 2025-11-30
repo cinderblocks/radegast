@@ -47,7 +47,7 @@ using OpenMetaverse.Rendering;
 using OpenMetaverse.Assets;
 using OpenMetaverse.Packets;
 using SkiaSharp;
-using static Radegast.DisposalHelper;
+using static LibreMetaverse.DisposalHelper;
 
 #endregion Usings
 

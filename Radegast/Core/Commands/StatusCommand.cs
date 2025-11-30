@@ -22,6 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading;
+using LibreMetaverse;
 using OpenMetaverse;
 
 namespace Radegast.Commands
@@ -65,7 +66,7 @@ namespace Radegast.Commands
                         }
                         else
                         {
-                            var gotName = Radegast.EventSubscriptionHelper.WaitForEvent<ObjectPropertiesFamilyEventArgs, bool>(
+                            var gotName = EventSubscriptionHelper.WaitForEvent<ObjectPropertiesFamilyEventArgs, bool>(
                                 h => { Client.Objects.ObjectPropertiesFamily += h; Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, seat.ID); },
                                 h => Client.Objects.ObjectPropertiesFamily -= h,
                                 e => e?.Properties?.ObjectID == seat.ID,

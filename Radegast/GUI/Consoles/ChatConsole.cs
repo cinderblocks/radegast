@@ -26,6 +26,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Drawing.Text;
+using LibreMetaverse;
 using OpenMetaverse;
 
 namespace Radegast
