@@ -190,10 +190,6 @@ namespace Radegast
         private bool IsBodyPart(InventoryItem item)
         {
             var realItem = instance.COF.ResolveInventoryLink(item);
-            if (realItem == null)
-            {
-                return false;
-            }
 
             if (!(realItem is InventoryWearable wearable))
             {
@@ -226,7 +222,7 @@ namespace Radegast
 
             if (!client.Inventory.Store.TryGetNodeFor(COF.UUID, out var cofNode))
             {
-                Logger.Warn($"Failed to find COF node in inventory store", client);
+                Logger.Warn("Failed to find COF node in inventory store", client);
                 return new List<InventoryItem>();
             }
 
@@ -301,7 +297,7 @@ namespace Radegast
                     {
                         if (success)
                         {
-                            client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID);
+                            client.Inventory.RequestFetchInventory(newItem.UUID, newItem.OwnerID, cancellationToken);
                         }
                     },
                     cancellationToken
