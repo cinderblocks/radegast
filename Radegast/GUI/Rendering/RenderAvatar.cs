@@ -1805,7 +1805,7 @@ namespace Radegast.Rendering
             lock (mBones) mBones.Add(b.name, b);
             mIndexedBones.Add(boneaddindex++, b);
 
-            Logger.Debug($"Found bone {b.name}");
+            Logger.Trace($"Found bone {b.name}");
 
             foreach (XmlNode childbone in bone.ChildNodes)
             {
