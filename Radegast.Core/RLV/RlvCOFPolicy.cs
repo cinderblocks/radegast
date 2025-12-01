@@ -20,19 +20,20 @@
 
 using LibreMetaverse.RLV;
 using OpenMetaverse;
+using OpenMetaverse.Appearance;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 namespace Radegast.Core.RLV
 {
-    internal class RlvCOFPolicy : ICOFPolicy
+    internal class RlvCOFPolicy : ICurrentOutfitPolicy
     {
         private readonly RlvService rlvService;
         private readonly RadegastInstance instance;
         private readonly RlvQueryCallbacks queryCallbacks;
 
-        public RlvCOFPolicy(LibreMetaverse.RLV.RlvService rlvService, RadegastInstance instance, RlvQueryCallbacks queryCallbacks)
+        public RlvCOFPolicy(RlvService rlvService, RadegastInstance instance, RlvQueryCallbacks queryCallbacks)
         {
             this.rlvService = rlvService;
             this.instance = instance;
@@ -67,8 +68,8 @@ namespace Radegast.Core.RLV
             }
 
             return item is InventoryWearable wearable
-                ? rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, null, (LibreMetaverse.RLV.RlvWearableType)wearable.WearableType)
-                : item is InventoryObject obj && rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, (LibreMetaverse.RLV.RlvAttachmentPoint)obj.AttachPoint, null);
+                ? rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, null, (RlvWearableType)wearable.WearableType)
+                : item is InventoryObject obj && rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, (RlvAttachmentPoint)obj.AttachPoint, null);
         }
 
         public bool CanDetach(InventoryItem item)

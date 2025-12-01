@@ -75,7 +75,7 @@ namespace Radegast
         public GridManager GridManger { get; private set; }
 
         /// <summary>Current Outfit Folder (appearance) manager</summary>
-        public CurrentOutfitFolder COF { get; private set; }
+        public OutfitManager COF { get; private set; }
 
         /// <summary>Gesture manager</summary>
         public GestureManager GestureManager { get; private set; }
@@ -181,7 +181,7 @@ namespace Radegast
             InitializeClient(Client);
 
             // COF must be created before RLV
-            COF = new CurrentOutfitFolder(this);
+            COF = new OutfitManager(this);
 
             RLV = new RlvManager(this);
 

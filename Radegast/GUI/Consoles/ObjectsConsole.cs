@@ -1117,7 +1117,7 @@ namespace Radegast
 
         private void btnDetach_Click(object sender, EventArgs e)
         {
-            var toDetach = CurrentOutfitFolder.GetAttachmentItemID(CurrentPrim);
+            var toDetach = OutfitManager.GetAttachmentItemID(CurrentPrim);
             if (toDetach == UUID.Zero)
             {
                 return;

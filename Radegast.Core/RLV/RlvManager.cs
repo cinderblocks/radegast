@@ -90,8 +90,8 @@ namespace Radegast.Core.RLV
 
         private System.Timers.Timer cleanupTimer;
 
-        public LibreMetaverse.RLV.RlvPermissionsService Permissions => rlvService.Permissions;
-        public LibreMetaverse.RLV.RlvRestrictionManager Restrictions => rlvService.Restrictions;
+        public RlvPermissionsService Permissions => rlvService.Permissions;
+        public RlvRestrictionManager Restrictions => rlvService.Restrictions;
 
         public RlvManager(RadegastInstance instance)
         {
@@ -398,8 +398,7 @@ namespace Radegast.Core.RLV
             foreach (var primId in rlvTrackedPrimIds)
             {
                 var itemExistsInWorld = instance.Client.Network.CurrentSim.ObjectsPrimitives
-                    .Where(n => n.Value.ID.Guid == primId)
-                    .Any();
+                    .Any(n => n.Value.ID.Guid == primId);
                 if (itemExistsInWorld)
                 {
                     continue;

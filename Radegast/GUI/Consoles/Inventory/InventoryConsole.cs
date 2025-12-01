@@ -1436,7 +1436,7 @@ namespace Radegast
                         //TODO: add RLV support
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID
-                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
+                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
@@ -1800,7 +1800,7 @@ namespace Radegast
                     case "touch":
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID
-                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
+                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
