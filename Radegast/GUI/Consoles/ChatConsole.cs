@@ -564,7 +564,9 @@ namespace Radegast
                 }
                 #endregion
 
-                var processedMessage = instance.GestureManager.PreProcessChatMessage(msg).Trim();
+                // Use the new TryPreProcessChatMessage API (works with legacy PreProcessChatMessage too)
+                instance.GestureManager.TryPreProcessChatMessage(msg, out var processedMessage, out var _);
+                processedMessage = processedMessage?.Trim();
                 if (!string.IsNullOrEmpty(processedMessage))
                 {
                     NetCom.ChatOut(processedMessage, type, ch);

@@ -20,10 +20,10 @@
 
 using LibreMetaverse.RLV;
 using OpenMetaverse;
-using OpenMetaverse.Appearance;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using LibreMetaverse.Appearance;
 
 namespace Radegast.Core.RLV
 {
