@@ -110,7 +110,8 @@ namespace RadegastSpeech.Talk
             /// <param name="b"></param>
             public Tuple(string a, string b)
             {
-                pattern = new Regex(a, RegexOptions.IgnoreCase);
+                // Compile substitution patterns to reduce runtime allocations
+                pattern = new Regex(a, RegexOptions.IgnoreCase | RegexOptions.Compiled);
                 replace = b;
             }
 

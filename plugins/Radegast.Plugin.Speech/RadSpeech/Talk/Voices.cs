@@ -113,7 +113,7 @@ namespace RadegastSpeech.Talk
             // TODO use regex
             voicePattern = new Regex(
                     @"'([^\']+)'(\s([a-z]+))*",
-                    RegexOptions.IgnorePatternWhitespace | RegexOptions.IgnoreCase);
+                    RegexOptions.IgnorePatternWhitespace | RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
 
        }

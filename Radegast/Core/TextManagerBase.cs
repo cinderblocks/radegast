@@ -27,6 +27,14 @@ namespace Radegast
             {":thumbsup:", "👍"}
         };
 
+        private static readonly Regex HtmlTagRegex = new Regex("<.*?>", RegexOptions.Compiled);
+        private static readonly Regex ControlCharsRegex = new Regex("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", RegexOptions.Compiled);
+        private static readonly Regex WwwRegex = new Regex("^www\\.", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex BoldRegex = new Regex(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
+        private static readonly Regex ItalicRegex = new Regex(@"\*(.+?)\*", RegexOptions.Compiled);
+        private static readonly Regex MentionRegex = new Regex(@"@([\w\-\.]+)", RegexOptions.Compiled);
+        private static readonly Regex EmojiRegex = new Regex(@":smile:|:laugh:|:sad:|:wink:|:heart:|:thumbsup:", RegexOptions.Compiled);
+
         protected TextManagerBase(RadegastInstanceForms instance, ITextPrinter textPrinter)
         {
             TextPrinter = textPrinter;
@@ -185,11 +193,9 @@ namespace Radegast
         {
             if (string.IsNullOrEmpty(input)) return input;
 
-            // Strip basic HTML tags
-            string noHtml = Regex.Replace(input, "<.*?>", string.Empty);
-
-            // Remove non-printable control chars except CR/LF/TAB
-            noHtml = Regex.Replace(noHtml, "[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", string.Empty);
+            // Strip basic HTML tags and remove control chars using precompiled regexes
+            string noHtml = HtmlTagRegex.Replace(input, string.Empty);
+            noHtml = ControlCharsRegex.Replace(noHtml, string.Empty);
 
             // Trim and limit length to avoid extremely long crafted payloads
             noHtml = noHtml.Trim();
@@ -225,7 +231,7 @@ namespace Radegast
             }
 
             // Support links that start with www. by prepending http://
-            if (Regex.IsMatch(trimmed, "^www\\.", RegexOptions.IgnoreCase))
+            if (WwwRegex.IsMatch(trimmed))
             {
                 var candidate = "http://" + trimmed;
                 if (Uri.TryCreate(candidate, UriKind.Absolute, out var u2))
@@ -243,16 +249,12 @@ namespace Radegast
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            // Replace emoji shortcodes
-            foreach (var kv in EmojiMap)
-            {
-                text = text.Replace(kv.Key, kv.Value);
-            }
+            // Replace emoji shortcodes using a single regex pass to avoid multiple allocations
+            text = EmojiRegex.Replace(text, m => EmojiMap.TryGetValue(m.Value, out var v) ? v : m.Value);
 
             // Handle bold (**text**)
-            var boldRegex = new Regex(@"\*\*(.+?)\*\*");
             int pos = 0;
-            foreach (Match m in boldRegex.Matches(text))
+            foreach (Match m in BoldRegex.Matches(text))
             {
                 if (m.Index > pos)
                 {
@@ -266,9 +268,8 @@ namespace Radegast
             {
                 var remainder = text.Substring(pos);
                 // Handle italic inside remainder
-                var italicRegex = new Regex(@"\*(.+?)\*");
                 int p2 = 0;
-                foreach (Match mi in italicRegex.Matches(remainder))
+                foreach (Match mi in ItalicRegex.Matches(remainder))
                 {
                     if (mi.Index > p2)
                     {
@@ -310,9 +311,8 @@ namespace Radegast
         {
             if (string.IsNullOrEmpty(text)) return;
 
-            var mentionRegex = new Regex(@"@([\w\-\.]+)", RegexOptions.Compiled);
             int pos = 0;
-            foreach (Match m in mentionRegex.Matches(text))
+            foreach (Match m in MentionRegex.Matches(text))
             {
                 if (m.Index > pos)
                 {

@@ -67,7 +67,7 @@ namespace Radegast
         private readonly RadegastInstance instance;
 
         private static readonly Regex MapLinkRegex = new Regex(@"^((https?://(slurl\.com|maps\.secondlife\.com)/secondlife/)(?<region>[^ /]+)(/(?<coords>\d+)){0,3})",
-            RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase
+            RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase | RegexOptions.Compiled
         );
 
         public class MapLinkInfo
@@ -144,11 +144,11 @@ namespace Radegast
         }
 
         // Regular expression created by following the majority of http://wiki.secondlife.com/wiki/Viewer_URI_Name_Space (excluding support for secondlife:///app/login).
-        //  This is a nasty one and should really only be used on single links to minimize processing time.
-        private readonly Regex patternUri = new Regex(
-            @"(?<startingbrace>\[)?(" +
-                @"(?<regionuri>secondlife://(?<region_name>[^\]/ ]+)(/(?<local_x>[0-9]+))?(/(?<local_y>[0-9]+))?(/(?<local_z>[0-9]+))?)|" +
-                @"(?<appuri>secondlife:///app/(" +
+        // This is a complex expression - compile it once to avoid repeated overhead.
+        private static readonly Regex patternUri = new Regex(
+             @"(?<startingbrace>\[)?(" +
+                 @"(?<regionuri>secondlife://(?<region_name>[^\]/ ]+)(/(?<local_x>[0-9]+))?(/(?<local_y>[0-9]+))?(/(?<local_z>[0-9]+))?)|" +
+                 @"(?<appuri>secondlife:///app/(" +
                     @"(?<appcommand>agent)/(?<agent_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/(?<action>[a-z]+)|" +
                     @"(?<appcommand>apperance)/show|" +
                     @"(?<appcommand>balance)/request|" +
@@ -181,8 +181,7 @@ namespace Radegast
                     @"(?<appcommand>voicecallavatar)/(?<agent_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})|" +
                     @"(?<appcommand>wear_folder)/?folder_id=(?<inventory_folder_uuid>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})|" +
                     @"(?<appcommand>worldmap)/(?<region_name>[^\]/ ]+)(/(?<local_x>[0-9]+))?(/(?<local_y>[0-9]+))?(/(?<local_z>[0-9]+))?)))" +
-            @"( (?<endingbrace>[^\]]*)\])?", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture);
-
+            @"( (?<endingbrace>[^\]]*)\])?", RegexOptions.IgnoreCase | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
 
         public SlUriParser(RadegastInstance instance)
         {
