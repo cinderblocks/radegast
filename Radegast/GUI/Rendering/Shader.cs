@@ -158,7 +158,8 @@ namespace Radegast.Rendering
 
         public int Uni(string var)
         {
-            if (!RenderSettings.HasShaders) return -1;
+            // Avoid querying uniforms on an invalid program ID which can cause GL errors
+            if (!RenderSettings.HasShaders || ID < 1) return -1;
 
             return GL.GetUniformLocation(ID, var);
         }

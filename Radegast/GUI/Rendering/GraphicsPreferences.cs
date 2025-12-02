@@ -1,6 +1,7 @@
 ﻿// 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
+// Copyright (c) 2025, Sjofn LLC.
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without
@@ -30,6 +31,7 @@
 //
 
 using System;
+using System.Drawing;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -69,7 +71,7 @@ namespace Radegast.Rendering
             cbAA.Checked = instance.GlobalSettings["use_multi_sampling"];
             tbDrawDistance.Value = Utils.Clamp(Instance.GlobalSettings["draw_distance"].AsInteger(),
                 tbDrawDistance.Minimum, tbDrawDistance.Maximum);
-            lblDrawDistance.Text = string.Format("Draw distance: {0}", tbDrawDistance.Value);
+            lblDrawDistance.Text = $"Draw distance: {tbDrawDistance.Value}";
             cbWaterReflections.Enabled = RenderSettings.HasMultiTexturing && RenderSettings.HasShaders;
             if (cbWaterReflections.Enabled)
             {
@@ -94,20 +96,73 @@ namespace Radegast.Rendering
             }
 
             tbAmbient.Value = (int)(Instance.GlobalSettings["scene_ambient_light"].AsReal() * 100);
-            lblAmbient.Text = string.Format("Ambient: {0:0.00}", Instance.GlobalSettings["scene_ambient_light"].AsReal());
+            lblAmbient.Text = $"Ambient: {Instance.GlobalSettings["scene_ambient_light"].AsReal():0.00}";
             
             tbDiffuse.Value = (int)(Instance.GlobalSettings["scene_diffuse_light"].AsReal() * 100);
-            lblDiffuse.Text = string.Format("Diffuse: {0:0.00}", Instance.GlobalSettings["scene_diffuse_light"].AsReal());
+            lblDiffuse.Text = $"Diffuse: {Instance.GlobalSettings["scene_diffuse_light"].AsReal():0.00}";
             
             tbSpecular.Value = (int)(Instance.GlobalSettings["scene_specular_light"].AsReal() * 100);
-            lblSpecular.Text = string.Format("Specular: {0:0.00}", Instance.GlobalSettings["scene_specular_light"].AsReal());
+            lblSpecular.Text = $"Specular: {Instance.GlobalSettings["scene_specular_light"].AsReal():0.00}";
 
             // Apply saved lighting settings
             RenderSettings.AmbientLight = (float)Instance.GlobalSettings["scene_ambient_light"].AsReal();
             RenderSettings.DiffuseLight = (float)Instance.GlobalSettings["scene_diffuse_light"].AsReal();
             RenderSettings.SpecularLight = (float)Instance.GlobalSettings["scene_specular_light"].AsReal();
 
+            // Initialize fallback water animation settings in global settings if missing
+            if (!instance.GlobalSettings.ContainsKey("fallback_water_animation_enabled"))
+                instance.GlobalSettings["fallback_water_animation_enabled"] = RenderSettings.FallbackWaterAnimationEnabled;
+            if (!instance.GlobalSettings.ContainsKey("fallback_water_animation_speed"))
+                instance.GlobalSettings["fallback_water_animation_speed"] = RenderSettings.FallbackWaterAnimationSpeed;
+            if (!instance.GlobalSettings.ContainsKey("fallback_water_animation_amplitude"))
+                instance.GlobalSettings["fallback_water_animation_amplitude"] = RenderSettings.FallbackWaterAnimationAmplitude;
+            if (!instance.GlobalSettings.ContainsKey("fallback_water_base_alpha"))
+                instance.GlobalSettings["fallback_water_base_alpha"] = RenderSettings.FallbackWaterBaseAlpha;
+
+            // Apply saved values to runtime RenderSettings
+            RenderSettings.FallbackWaterAnimationEnabled = instance.GlobalSettings["fallback_water_animation_enabled"];
+            RenderSettings.FallbackWaterAnimationSpeed = (float)instance.GlobalSettings["fallback_water_animation_speed"];
+            RenderSettings.FallbackWaterAnimationAmplitude = (float)instance.GlobalSettings["fallback_water_animation_amplitude"];
+            RenderSettings.FallbackWaterBaseAlpha = (float)instance.GlobalSettings["fallback_water_base_alpha"];
+
+            // Wire designer controls for fallback animation
+            cbFallbackAnim.Checked = RenderSettings.FallbackWaterAnimationEnabled;
+            cbFallbackAnim.CheckedChanged += cbFallbackAnim_CheckedChanged;
+
+            nudFallbackSpeed.Value = (decimal)RenderSettings.FallbackWaterAnimationSpeed;
+            nudFallbackSpeed.ValueChanged += nudFallbackSpeed_ValueChanged;
+
+            nudFallbackAmp.Value = (decimal)RenderSettings.FallbackWaterAnimationAmplitude;
+            nudFallbackAmp.ValueChanged += nudFallbackAmp_ValueChanged;
+
+            nudFallbackBaseAlpha.Value = (decimal)RenderSettings.FallbackWaterBaseAlpha;
+            nudFallbackBaseAlpha.ValueChanged += nudFallbackBaseAlpha_ValueChanged;
+
             GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private void cbFallbackAnim_CheckedChanged(object sender, EventArgs e)
+        {
+            Instance.GlobalSettings["fallback_water_animation_enabled"] = cbFallbackAnim.Checked;
+            RenderSettings.FallbackWaterAnimationEnabled = cbFallbackAnim.Checked;
+        }
+
+        private void nudFallbackSpeed_ValueChanged(object sender, EventArgs e)
+        {
+            Instance.GlobalSettings["fallback_water_animation_speed"] = (float)nudFallbackSpeed.Value;
+            RenderSettings.FallbackWaterAnimationSpeed = (float)nudFallbackSpeed.Value;
+        }
+
+        private void nudFallbackAmp_ValueChanged(object sender, EventArgs e)
+        {
+            Instance.GlobalSettings["fallback_water_animation_amplitude"] = (float)nudFallbackAmp.Value;
+            RenderSettings.FallbackWaterAnimationAmplitude = (float)nudFallbackAmp.Value;
+        }
+
+        private void nudFallbackBaseAlpha_ValueChanged(object sender, EventArgs e)
+        {
+            Instance.GlobalSettings["fallback_water_base_alpha"] = (float)nudFallbackBaseAlpha.Value;
+            RenderSettings.FallbackWaterBaseAlpha = (float)nudFallbackBaseAlpha.Value;
         }
 
         private void GraphicsPreferences_Disposed(object sender, EventArgs e)
@@ -131,7 +186,7 @@ namespace Radegast.Rendering
 
         private void tbDrawDistance_Scroll(object sender, EventArgs e)
         {
-            lblDrawDistance.Text = string.Format("Draw distance: {0}", tbDrawDistance.Value);
+            lblDrawDistance.Text = $"Draw distance: {tbDrawDistance.Value}";
             Instance.GlobalSettings["draw_distance"] = tbDrawDistance.Value;
 
             if (Client != null)
@@ -194,7 +249,7 @@ namespace Radegast.Rendering
         private void tbAmbient_Scroll(object sender, EventArgs e)
         {
             float ambient = (float)tbAmbient.Value / 100f;
-            lblAmbient.Text = string.Format("Ambient: {0:0.00}", ambient);
+            lblAmbient.Text = $"Ambient: {ambient:0.00}";
             Instance.GlobalSettings["scene_ambient_light"] = ambient;
             RenderSettings.AmbientLight = ambient;
             if (Window != null)
@@ -206,7 +261,7 @@ namespace Radegast.Rendering
         private void tbDiffuse_Scroll(object sender, EventArgs e)
         {
             float diffuse = (float)tbDiffuse.Value / 100f;
-            lblDiffuse.Text = string.Format("Diffuse: {0:0.00}", diffuse);
+            lblDiffuse.Text = $"Diffuse: {diffuse:0.00}";
             Instance.GlobalSettings["scene_diffuse_light"] = diffuse;
             RenderSettings.DiffuseLight = diffuse;
             if (Window != null)
@@ -218,7 +273,7 @@ namespace Radegast.Rendering
         private void tbSpecular_Scroll(object sender, EventArgs e)
         {
             float specular = (float)tbSpecular.Value / 100f;
-            lblSpecular.Text = string.Format("Specular: {0:0.00}", specular);
+            lblSpecular.Text = $"Specular: {specular:0.00}";
             Instance.GlobalSettings["scene_specular_light"] = specular;
             RenderSettings.SpecularLight = specular;
             if (Window != null)

@@ -75,54 +75,117 @@ namespace Radegast.Rendering
         private float move = 0f;
         private const float kNormalMapScale = 0.25f;
         private float normalUV;
+        // CPU-side animation time accumulator for fallback water animation
+        private float cpuWaveAnim = 0f;
 
-        private void DrawWaterQuad(float x, float y, float z)
-        {
-            normalUV = waterUV * kNormalMapScale;
-            normalMove += waterFlow * kNormalMapScale * lastFrameTime;
-            move += waterFlow * lastFrameTime;
+        // cpuAnimate: when true use CPU-side per-vertex color modulation for a simple animated effect
+        private void DrawWaterQuad(float x, float y, float z, bool cpuAnimate)
+         {
+             normalUV = waterUV * kNormalMapScale;
+             normalMove += waterFlow * kNormalMapScale * lastFrameTime;
+             move += waterFlow * lastFrameTime;
 
-            if (RenderSettings.HasMultiTexturing)
-            {
-                GL.MultiTexCoord2(TextureUnit.Texture0, 0f, waterUV);
-                GL.MultiTexCoord2(TextureUnit.Texture1, 0f, waterUV - move);
-                GL.MultiTexCoord2(TextureUnit.Texture2, 0f, normalUV + normalMove);
-                GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
-            }
-            GL.Vertex3(x, y, z);
+             if (RenderSettings.HasMultiTexturing)
+             {
+                 GL.MultiTexCoord2(TextureUnit.Texture0, 0f, waterUV);
+                 GL.MultiTexCoord2(TextureUnit.Texture1, 0f, waterUV - move);
+                 GL.MultiTexCoord2(TextureUnit.Texture2, 0f, normalUV + normalMove);
+                 GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
+             }
+             if (cpuAnimate)
+             {
+                 // compute subtle alpha modulation per corner based on position and animation time
+                 // values chosen to be small so the effect is subtle
+                 float baseAlpha = RenderSettings.FallbackWaterBaseAlpha;
+                 float amp = RenderSettings.FallbackWaterAnimationAmplitude;
+                 // scale position into a wave coordinate
+                 float waveScale = 0.02f;
+                 float phase = cpuWaveAnim;
 
-            if (RenderSettings.HasMultiTexturing)
-            {
-                GL.MultiTexCoord2(TextureUnit.Texture0, waterUV, waterUV);
-                GL.MultiTexCoord2(TextureUnit.Texture1, waterUV, waterUV - move);
-                GL.MultiTexCoord2(TextureUnit.Texture2, normalUV, normalUV + normalMove);
-                GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
-            }
-            GL.Vertex3(x + 256f, y, z);
+                 float a1 = baseAlpha + amp * (float)System.Math.Sin((x + y) * waveScale + phase);
+                 GL.Color4(0.05f, 0.20f, 0.45f, a1);
+                 GL.Vertex3(x, y, z);
+             }
+             else
+             {
+                 GL.Color4(0.05f, 0.20f, 0.45f, 0.75f);
+                 GL.Vertex3(x, y, z);
+             }
 
-            if (RenderSettings.HasMultiTexturing)
-            {
-                GL.MultiTexCoord2(TextureUnit.Texture0, waterUV, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture1, waterUV, 0f - move);
-                GL.MultiTexCoord2(TextureUnit.Texture2, normalUV, 0f + normalMove);
-                GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
-            }
-            GL.Vertex3(x + 256f, y + 256f, z);
+             if (RenderSettings.HasMultiTexturing)
+             {
+                 GL.MultiTexCoord2(TextureUnit.Texture0, waterUV, waterUV);
+                 GL.MultiTexCoord2(TextureUnit.Texture1, waterUV, waterUV - move);
+                 GL.MultiTexCoord2(TextureUnit.Texture2, normalUV, normalUV + normalMove);
+                 GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
+             }
+             if (cpuAnimate)
+             {
+                 float baseAlpha = RenderSettings.FallbackWaterBaseAlpha;
+                 float amp = RenderSettings.FallbackWaterAnimationAmplitude;
+                 float waveScale = 0.02f;
+                 float phase = cpuWaveAnim + 0.5f;
+                 float a2 = baseAlpha + amp * (float)System.Math.Sin((x + 256f + y) * waveScale + phase);
+                 GL.Color4(0.05f, 0.20f, 0.45f, a2);
+                 GL.Vertex3(x + 256f, y, z);
+             }
+             else
+             {
+                 GL.Color4(0.05f, 0.20f, 0.45f, 0.75f);
+                 GL.Vertex3(x + 256f, y, z);
+             }
 
-            if (RenderSettings.HasMultiTexturing)
-            {
-                GL.MultiTexCoord2(TextureUnit.Texture0, 0f, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture1, 0f, 0f - move);
-                GL.MultiTexCoord2(TextureUnit.Texture2, 0f, 0f + normalMove);
-                GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
-                GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
-            }
-            GL.Vertex3(x, y + 256f, z);
+             if (RenderSettings.HasMultiTexturing)
+             {
+                 GL.MultiTexCoord2(TextureUnit.Texture0, waterUV, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture1, waterUV, 0f - move);
+                 GL.MultiTexCoord2(TextureUnit.Texture2, normalUV, 0f + normalMove);
+                 GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
+             }
+             if (cpuAnimate)
+             {
+                 float baseAlpha = RenderSettings.FallbackWaterBaseAlpha;
+                 float amp = RenderSettings.FallbackWaterAnimationAmplitude;
+                 float waveScale = 0.02f;
+                 float phase = cpuWaveAnim + 1.0f;
+                 float a3 = baseAlpha + amp * (float)System.Math.Sin((x + 256f + y + 256f) * waveScale + phase);
+                 GL.Color4(0.05f, 0.20f, 0.45f, a3);
+                 GL.Vertex3(x + 256f, y + 256f, z);
+             }
+             else
+             {
+                 GL.Color4(0.05f, 0.20f, 0.45f, 0.75f);
+                 GL.Vertex3(x + 256f, y + 256f, z);
+             }
 
-        }
+             if (RenderSettings.HasMultiTexturing)
+             {
+                 GL.MultiTexCoord2(TextureUnit.Texture0, 0f, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture1, 0f, 0f - move);
+                 GL.MultiTexCoord2(TextureUnit.Texture2, 0f, 0f + normalMove);
+                 GL.MultiTexCoord2(TextureUnit.Texture3, 0f, 0f);
+                 GL.MultiTexCoord2(TextureUnit.Texture4, 0f, 0f);
+             }
+             if (cpuAnimate)
+             {
+                 float baseAlpha = RenderSettings.FallbackWaterBaseAlpha;
+                 float amp = RenderSettings.FallbackWaterAnimationAmplitude;
+                 float waveScale = 0.02f;
+                 float phase = cpuWaveAnim + 1.5f;
+                 float a4 = baseAlpha + amp * (float)System.Math.Sin((x + y + 256f) * waveScale + phase);
+                 GL.Color4(0.05f, 0.20f, 0.45f, a4);
+                 GL.Vertex3(x, y + 256f, z);
+             }
+             else
+             {
+                 GL.Color4(0.05f, 0.20f, 0.45f, 0.75f);
+                 GL.Vertex3(x, y + 256f, z);
+             }
+
+         }
 
         public void CreateReflectionTexture(float waterHeight, int textureSize)
         {
@@ -179,10 +242,12 @@ namespace Radegast.Rendering
         public void RenderWater()
         {
             float z = Client.Network.CurrentSim.WaterHeight;
-            GL.Color4(0.09f, 0.28f, 0.63f, 0.84f);
 
-            if (RenderSettings.WaterReflections)
+            bool useShader = RenderSettings.WaterReflections && RenderSettings.HasShaders && waterProgram.ID > 0;
+
+            if (useShader)
             {
+                GL.Color4(0.09f, 0.28f, 0.63f, 0.84f);
                 waterProgram.Start();
 
                 // Reflection texture unit
@@ -217,21 +282,46 @@ namespace Radegast.Rendering
                 GL.Uniform1(waterProgram.Uni("depthMap"), 4);
 
 
-                int lightPos = GL.GetUniformLocation(waterProgram.ID, "lightPos");
-                GL.Uniform4(lightPos, 0f, 0f, z + 100, 1f); // For now sun reflection in the water comes from the south west sim corner
-                int cameraPos = GL.GetUniformLocation(waterProgram.ID, "cameraPos");
-                GL.Uniform4(cameraPos, Camera.RenderPosition.X, Camera.RenderPosition.Y, Camera.RenderPosition.Z, 1f);
-                int waterColor = GL.GetUniformLocation(waterProgram.ID, "waterColor");
-                GL.Uniform4(waterColor, 0.09f, 0.28f, 0.63f, 0.84f);
+                int lightPos = waterProgram.Uni("lightPos");
+                if (lightPos != -1)
+                    GL.Uniform4(lightPos, 0f, 0f, z + 100, 1f); // For now sun reflection in the water comes from the south west sim corner
+                int cameraPos = waterProgram.Uni("cameraPos");
+                if (cameraPos != -1)
+                    GL.Uniform4(cameraPos, Camera.RenderPosition.X, Camera.RenderPosition.Y, Camera.RenderPosition.Z, 1f);
+                int waterColor = waterProgram.Uni("waterColor");
+                if (waterColor != -1)
+                    GL.Uniform4(waterColor, 0.09f, 0.28f, 0.63f, 0.84f);
+            }
+            else
+            {
+                // Fallback flat-colored water rendering (fixed-function pipeline)
+                // Ensure no textures are bound and blending is enabled for transparency
+                for (TextureUnit tu = TextureUnit.Texture0; tu <= TextureUnit.Texture4; tu++)
+                {
+                    GL.ActiveTexture(tu);
+                    GL.BindTexture(TextureTarget.Texture2D, 0);
+                    GL.Disable(EnableCap.Texture2D);
+                }
+
+                // Set up proper blending for water transparency
+                GL.Enable(EnableCap.Blend);
+                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                
+                // Disable lighting to use vertex colors directly
+                GL.Disable(EnableCap.Lighting);
             }
 
+            // advance CPU-side animation clock using configurable speed
+            cpuWaveAnim += lastFrameTime * RenderSettings.FallbackWaterAnimationSpeed; // speed multiplier for visible motion
+
             GL.Begin(PrimitiveType.Quads);
+            bool cpuAnimate = !useShader && RenderSettings.FallbackWaterAnimationEnabled;
             for (float x = -256f * 2; x <= 256 * 2; x += 256f)
                 for (float y = -256f * 2; y <= 256 * 2; y += 256f)
-                    DrawWaterQuad(x, y, z);
+                    DrawWaterQuad(x, y, z, cpuAnimate);
             GL.End();
 
-            if (RenderSettings.WaterReflections)
+            if (useShader)
             {
                 GL.ActiveTexture(TextureUnit.Texture4);
                 GL.Disable(EnableCap.Texture2D);
@@ -250,6 +340,17 @@ namespace Radegast.Rendering
 
                 ShaderProgram.Stop();
             }
+            else
+            {
+                // Restore fixed-function state
+                GL.Disable(EnableCap.Blend);
+                GL.Enable(EnableCap.Lighting);
+            }
+
+            // Restore OpenGL state for subsequent rendering
+            GL.ActiveTexture(TextureUnit.Texture0);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.Color4(1f, 1f, 1f, 1f);
         }
 
     }

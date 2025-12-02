@@ -93,6 +93,14 @@ namespace Radegast.Rendering
 
         #region Water
         public static bool WaterReflections = false;
+        // Fallback CPU-side water animation when shaders are unavailable
+        public static bool FallbackWaterAnimationEnabled = true;
+        // Speed multiplier for the CPU fallback animation (higher -> faster)
+        public static float FallbackWaterAnimationSpeed = 1.5f;
+        // Amplitude of the alpha modulation used by the CPU fallback (0 = no modulation)
+        public static float FallbackWaterAnimationAmplitude = 0.12f;
+        // Base alpha used by the CPU fallback
+        public static float FallbackWaterBaseAlpha = 0.84f;
         #endregion Water
     }
 }

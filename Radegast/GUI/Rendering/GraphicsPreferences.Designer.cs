@@ -42,10 +42,20 @@
             this.tbDiffuse = new System.Windows.Forms.TrackBar();
             this.lblSpecular = new System.Windows.Forms.Label();
             this.tbSpecular = new System.Windows.Forms.TrackBar();
+            this.cbFallbackAnim = new System.Windows.Forms.CheckBox();
+            this.lblFallbackSpeed = new System.Windows.Forms.Label();
+            this.nudFallbackSpeed = new System.Windows.Forms.NumericUpDown();
+            this.lblFallbackAmp = new System.Windows.Forms.Label();
+            this.nudFallbackAmp = new System.Windows.Forms.NumericUpDown();
+            this.lblFallbackBaseAlpha = new System.Windows.Forms.Label();
+            this.nudFallbackBaseAlpha = new System.Windows.Forms.NumericUpDown();
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbSpecular)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackSpeed)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackAmp)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).BeginInit();
             this.SuspendLayout();
             // 
             // cbAA
@@ -73,7 +83,7 @@
             // lblDrawDistance
             // 
             this.lblDrawDistance.AutoSize = true;
-            this.lblDrawDistance.Location = new System.Drawing.Point(187, 138);
+            this.lblDrawDistance.Location = new System.Drawing.Point(187, 110);
             this.lblDrawDistance.Name = "lblDrawDistance";
             this.lblDrawDistance.Size = new System.Drawing.Size(93, 13);
             this.lblDrawDistance.TabIndex = 21;
@@ -82,7 +92,7 @@
             // 
             // tbDrawDistance
             // 
-            this.tbDrawDistance.Location = new System.Drawing.Point(3, 115);
+            this.tbDrawDistance.Location = new System.Drawing.Point(3, 93);
             this.tbDrawDistance.Maximum = 256;
             this.tbDrawDistance.Minimum = 32;
             this.tbDrawDistance.Name = "tbDrawDistance";
@@ -139,18 +149,17 @@
             // lblAmbient
             // 
             this.lblAmbient.AutoSize = true;
-            this.lblAmbient.Location = new System.Drawing.Point(187, 179);
+            this.lblAmbient.Location = new System.Drawing.Point(187, 222);
             this.lblAmbient.Name = "lblAmbient";
-            this.lblAmbient.Size = new System.Drawing.Size(78, 13);
+            this.lblAmbient.Size = new System.Drawing.Size(72, 13);
             this.lblAmbient.TabIndex = 24;
             this.lblAmbient.Text = "Ambient: 0.70";
             this.lblAmbient.TextAlign = System.Drawing.ContentAlignment.TopRight;
             // 
             // tbAmbient
             // 
-            this.tbAmbient.Location = new System.Drawing.Point(3, 166);
+            this.tbAmbient.Location = new System.Drawing.Point(3, 209);
             this.tbAmbient.Maximum = 100;
-            this.tbAmbient.Minimum = 0;
             this.tbAmbient.Name = "tbAmbient";
             this.tbAmbient.Size = new System.Drawing.Size(277, 45);
             this.tbAmbient.TabIndex = 23;
@@ -161,18 +170,17 @@
             // lblDiffuse
             // 
             this.lblDiffuse.AutoSize = true;
-            this.lblDiffuse.Location = new System.Drawing.Point(187, 220);
+            this.lblDiffuse.Location = new System.Drawing.Point(187, 263);
             this.lblDiffuse.Name = "lblDiffuse";
-            this.lblDiffuse.Size = new System.Drawing.Size(73, 13);
+            this.lblDiffuse.Size = new System.Drawing.Size(67, 13);
             this.lblDiffuse.TabIndex = 26;
             this.lblDiffuse.Text = "Diffuse: 0.80";
             this.lblDiffuse.TextAlign = System.Drawing.ContentAlignment.TopRight;
             // 
             // tbDiffuse
             // 
-            this.tbDiffuse.Location = new System.Drawing.Point(3, 207);
+            this.tbDiffuse.Location = new System.Drawing.Point(3, 250);
             this.tbDiffuse.Maximum = 100;
-            this.tbDiffuse.Minimum = 0;
             this.tbDiffuse.Name = "tbDiffuse";
             this.tbDiffuse.Size = new System.Drawing.Size(277, 45);
             this.tbDiffuse.TabIndex = 25;
@@ -183,24 +191,118 @@
             // lblSpecular
             // 
             this.lblSpecular.AutoSize = true;
-            this.lblSpecular.Location = new System.Drawing.Point(187, 261);
+            this.lblSpecular.Location = new System.Drawing.Point(187, 304);
             this.lblSpecular.Name = "lblSpecular";
-            this.lblSpecular.Size = new System.Drawing.Size(80, 13);
+            this.lblSpecular.Size = new System.Drawing.Size(76, 13);
             this.lblSpecular.TabIndex = 28;
             this.lblSpecular.Text = "Specular: 0.50";
             this.lblSpecular.TextAlign = System.Drawing.ContentAlignment.TopRight;
             // 
             // tbSpecular
             // 
-            this.tbSpecular.Location = new System.Drawing.Point(3, 248);
+            this.tbSpecular.Location = new System.Drawing.Point(3, 291);
             this.tbSpecular.Maximum = 100;
-            this.tbSpecular.Minimum = 0;
             this.tbSpecular.Name = "tbSpecular";
             this.tbSpecular.Size = new System.Drawing.Size(277, 45);
             this.tbSpecular.TabIndex = 27;
             this.tbSpecular.TickStyle = System.Windows.Forms.TickStyle.None;
             this.tbSpecular.Value = 50;
             this.tbSpecular.Scroll += new System.EventHandler(this.tbSpecular_Scroll);
+            // 
+            // cbFallbackAnim
+            // 
+            this.cbFallbackAnim.AutoSize = true;
+            this.cbFallbackAnim.Location = new System.Drawing.Point(169, 49);
+            this.cbFallbackAnim.Name = "cbFallbackAnim";
+            this.cbFallbackAnim.Size = new System.Drawing.Size(103, 17);
+            this.cbFallbackAnim.TabIndex = 7;
+            this.cbFallbackAnim.Text = "Water animation";
+            this.cbFallbackAnim.UseVisualStyleBackColor = true;
+            this.cbFallbackAnim.CheckedChanged += new System.EventHandler(this.cbFallbackAnim_CheckedChanged);
+            // 
+            // lblFallbackSpeed
+            // 
+            this.lblFallbackSpeed.AutoSize = true;
+            this.lblFallbackSpeed.Location = new System.Drawing.Point(3, 142);
+            this.lblFallbackSpeed.Name = "lblFallbackSpeed";
+            this.lblFallbackSpeed.Size = new System.Drawing.Size(82, 13);
+            this.lblFallbackSpeed.TabIndex = 8;
+            this.lblFallbackSpeed.Text = "Fallback speed:";
+            // 
+            // nudFallbackSpeed
+            // 
+            this.nudFallbackSpeed.DecimalPlaces = 2;
+            this.nudFallbackSpeed.Increment = new decimal(new int[] {
+            1,
+            0,
+            0,
+            131072});
+            this.nudFallbackSpeed.Location = new System.Drawing.Point(140, 138);
+            this.nudFallbackSpeed.Maximum = new decimal(new int[] {
+            10,
+            0,
+            0,
+            0});
+            this.nudFallbackSpeed.Name = "nudFallbackSpeed";
+            this.nudFallbackSpeed.Size = new System.Drawing.Size(70, 20);
+            this.nudFallbackSpeed.TabIndex = 9;
+            this.nudFallbackSpeed.ValueChanged += new System.EventHandler(this.nudFallbackSpeed_ValueChanged);
+            // 
+            // lblFallbackAmp
+            // 
+            this.lblFallbackAmp.AutoSize = true;
+            this.lblFallbackAmp.Location = new System.Drawing.Point(3, 168);
+            this.lblFallbackAmp.Name = "lblFallbackAmp";
+            this.lblFallbackAmp.Size = new System.Drawing.Size(98, 13);
+            this.lblFallbackAmp.TabIndex = 10;
+            this.lblFallbackAmp.Text = "Fallback amplitude:";
+            // 
+            // nudFallbackAmp
+            // 
+            this.nudFallbackAmp.DecimalPlaces = 2;
+            this.nudFallbackAmp.Increment = new decimal(new int[] {
+            1,
+            0,
+            0,
+            131072});
+            this.nudFallbackAmp.Location = new System.Drawing.Point(140, 164);
+            this.nudFallbackAmp.Maximum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.nudFallbackAmp.Name = "nudFallbackAmp";
+            this.nudFallbackAmp.Size = new System.Drawing.Size(70, 20);
+            this.nudFallbackAmp.TabIndex = 11;
+            this.nudFallbackAmp.ValueChanged += new System.EventHandler(this.nudFallbackAmp_ValueChanged);
+            // 
+            // lblFallbackBaseAlpha
+            // 
+            this.lblFallbackBaseAlpha.AutoSize = true;
+            this.lblFallbackBaseAlpha.Location = new System.Drawing.Point(3, 194);
+            this.lblFallbackBaseAlpha.Name = "lblFallbackBaseAlpha";
+            this.lblFallbackBaseAlpha.Size = new System.Drawing.Size(105, 13);
+            this.lblFallbackBaseAlpha.TabIndex = 12;
+            this.lblFallbackBaseAlpha.Text = "Fallback base alpha:";
+            // 
+            // nudFallbackBaseAlpha
+            // 
+            this.nudFallbackBaseAlpha.DecimalPlaces = 2;
+            this.nudFallbackBaseAlpha.Increment = new decimal(new int[] {
+            1,
+            0,
+            0,
+            131072});
+            this.nudFallbackBaseAlpha.Location = new System.Drawing.Point(140, 190);
+            this.nudFallbackBaseAlpha.Maximum = new decimal(new int[] {
+            1,
+            0,
+            0,
+            0});
+            this.nudFallbackBaseAlpha.Name = "nudFallbackBaseAlpha";
+            this.nudFallbackBaseAlpha.Size = new System.Drawing.Size(70, 20);
+            this.nudFallbackBaseAlpha.TabIndex = 13;
+            this.nudFallbackBaseAlpha.ValueChanged += new System.EventHandler(this.nudFallbackBaseAlpha_ValueChanged);
             // 
             // GraphicsPreferences
             // 
@@ -212,6 +314,13 @@
             this.Controls.Add(this.tbDiffuse);
             this.Controls.Add(this.lblAmbient);
             this.Controls.Add(this.tbAmbient);
+            this.Controls.Add(this.nudFallbackBaseAlpha);
+            this.Controls.Add(this.lblFallbackBaseAlpha);
+            this.Controls.Add(this.nudFallbackAmp);
+            this.Controls.Add(this.lblFallbackAmp);
+            this.Controls.Add(this.nudFallbackSpeed);
+            this.Controls.Add(this.lblFallbackSpeed);
+            this.Controls.Add(this.cbFallbackAnim);
             this.Controls.Add(this.cbVBO);
             this.Controls.Add(this.cbShiny);
             this.Controls.Add(this.cbOcclusionCulling);
@@ -221,11 +330,14 @@
             this.Controls.Add(this.cbAA);
             this.Controls.Add(this.chkWireFrame);
             this.Name = "GraphicsPreferences";
-            this.Size = new System.Drawing.Size(283, 295);
+            this.Size = new System.Drawing.Size(283, 340);
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbSpecular)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackSpeed)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackAmp)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -247,5 +359,12 @@
         public System.Windows.Forms.TrackBar tbDiffuse;
         public System.Windows.Forms.Label lblSpecular;
         public System.Windows.Forms.TrackBar tbSpecular;
+        private System.Windows.Forms.CheckBox cbFallbackAnim;
+        private System.Windows.Forms.Label lblFallbackSpeed;
+        private System.Windows.Forms.NumericUpDown nudFallbackSpeed;
+        private System.Windows.Forms.Label lblFallbackAmp;
+        private System.Windows.Forms.NumericUpDown nudFallbackAmp;
+        private System.Windows.Forms.Label lblFallbackBaseAlpha;
+        private System.Windows.Forms.NumericUpDown nudFallbackBaseAlpha;
     }
 }

@@ -1267,7 +1267,7 @@ namespace Radegast.Rendering
             {
                 b = new BinBVHAnimationReader(asset.AssetData);
                 mAnimationCache[asset.AssetID] = b;
-                Logger.Debug($"Adding new decoded animation known animations {asset.AssetID}");
+                Logger.Trace($"Adding new decoded animation known animations {asset.AssetID}");
             }
 
             if (!av.glavatar.skel.mAnimationsWrapper.TryGetValue(animKey, out var anim))

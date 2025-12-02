@@ -1760,6 +1760,9 @@ namespace Radegast.Rendering
                 RenderAvatars(RenderPass.Simple);
                 GL.Disable(EnableCap.AlphaTest);
 
+                // Render water after opaque objects but before alpha blended objects
+                RenderWater();
+
                 GLHUDBegin();
                 RenderText(RenderPass.Simple);
                 RenderStats();

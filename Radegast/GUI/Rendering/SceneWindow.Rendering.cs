@@ -292,7 +292,7 @@ namespace Radegast.Rendering
                     continue;
                 }
 
-                Logger.Debug($"Requesting new animation asset {anim.AnimationID}");
+                Logger.Trace($"Requesting new animation asset {anim.AnimationID}");
 
                 Client.Assets.RequestAsset(anim.AnimationID, AssetType.Animation, false, SourceType.Asset, tid, AnimReceivedCallback);
             }
