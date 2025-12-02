@@ -52,6 +52,9 @@ namespace Radegast
         private GridClient client => instance.Client;
         private UUID imageID;
 
+        // Synchronization context captured from UI thread to reliably marshal UI updates
+        private SynchronizationContext uiContext;
+
         private byte[] j2kdata;
         private Image image;
         private readonly bool allowSave = false;
@@ -111,6 +114,9 @@ namespace Radegast
             this.instance = instance;
             imageID = image;
 
+            // Capture the UI synchronization context so we can marshal to the UI safely
+            uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+
             // Apply settings from globals (with validation) and subscribe for live changes
             ApplySettingsFromGlobals();
             try
@@ -167,9 +173,9 @@ namespace Radegast
                 // Apply settings on UI thread to keep behavior consistent
                 try
                 {
-                    if (this.InvokeRequired)
+                    if (SynchronizationContext.Current != uiContext && uiContext != null)
                     {
-                        ThreadingHelper.SafeInvoke(this, new Action(() => ApplySettingsFromGlobals()), instance.MonoRuntime);
+                        uiContext.Post(_ => ApplySettingsFromGlobals(), null);
                     }
                     else
                     {
@@ -277,10 +283,9 @@ namespace Radegast
                 return;
             }
 
-            if (InvokeRequired)
+            if (SynchronizationContext.Current != uiContext && uiContext != null)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_ImageReceiveProgress(sender, e)), instance.MonoRuntime);
+                uiContext.Post(_ => Assets_ImageReceiveProgress(sender, e), null);
                 return;
             }
 
@@ -299,10 +304,9 @@ namespace Radegast
 
         private void DisplayPartialImage(AssetTexture assetTexture)
         {
-            if (InvokeRequired)
+            if (SynchronizationContext.Current != uiContext && uiContext != null)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                    ThreadingHelper.SafeInvoke(this, new Action(() => DisplayPartialImage(assetTexture)), instance.MonoRuntime);
+                uiContext.Post(_ => DisplayPartialImage(assetTexture), null);
                 return;
             }
 
@@ -396,10 +400,9 @@ namespace Radegast
                 return;
             }
 
-            if (InvokeRequired)
+            if (SynchronizationContext.Current != uiContext && uiContext != null)
             {
-                if (IsHandleCreated || !instance.MonoRuntime)
-                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnImageReceived(assetTexture)), instance.MonoRuntime);
+                uiContext.Post(_ => Assets_OnImageReceived(assetTexture), null);
                 return;
             }
 
