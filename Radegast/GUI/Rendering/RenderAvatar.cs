@@ -1007,6 +1007,9 @@ namespace Radegast.Rendering
         public UUID mAnimation;
         public bool mPotentialyDead = false;
 
+        // Strongly-typed per-joint state to avoid boxing and races with binBVHJoint.Tag
+        public skeleton.binBVHJointState[] JointStates;
+
         public enum animstate
         {
             STATE_WAITINGASSET,
@@ -1276,8 +1279,8 @@ namespace Radegast.Rendering
                 return;
             }
 
-            // This sets the anim in the wrapper class;
-            anim.anim = b;
+            // Build a strongly-typed per-joint state array BEFORE publishing the animation reference
+            var states = new binBVHJointState[b.joints.Length];
 
             int pos = 0;
             foreach (binBVHJoint joint in b.joints)
@@ -1338,9 +1341,16 @@ namespace Radegast.Rendering
 
                 }
 
+                states[pos] = state; // store in typed array
+
+                // Also keep compatibility with external Tag usage
                 b.joints[pos].Tag = state;
                 pos++;
             }
+
+            // Publish the per-animation joint states and animation reference only after initialization
+            anim.JointStates = states;
+            anim.anim = b;
 
             av.glavatar.skel.mAnimationsWrapper[animKey].playstate = animationwrapper.animstate.STATE_EASEIN;
             recalcpriorities(av);
@@ -1367,13 +1377,34 @@ namespace Radegast.Rendering
                     foreach (binBVHJoint joint in ar.anim.joints)
                     {
                         if (ar.anim == null)
+                        {
+                            jpos++;
                             continue;
+                        }
 
-                        //warning struct copy non reference
-                        binBVHJointState state = (binBVHJointState)ar.anim.joints[jpos].Tag;
+                        binBVHJointState state;
+                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                        {
+                            state = ar.JointStates[jpos];
+                        }
+                        else
+                        {
+                            // Fallback to legacy Tag for compatibility
+                            object tagobj = ar.anim.joints[jpos].Tag;
+                            if (tagobj == null)
+                            {
+                                Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in recalcpriorities.");
+                                jpos++;
+                                continue;
+                            }
+                            state = (binBVHJointState)tagobj;
+                        }
 
                         if (ar.playstate == animationwrapper.animstate.STATE_STOP || ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
+                        {
+                            jpos++;
                             continue;
+                        }
 
                         //FIX ME need to consider ease out here on priorities somehow
 
@@ -1384,7 +1415,10 @@ namespace Radegast.Rendering
                         if (av.glavatar.skel.mPriority.TryGetValue(joint.Name, out prio))
                         {
                             if (prio > (ar.anim.Priority))
+                            {
+                                jpos++;
                                 continue;
+                            }
                         }
 
                         av.glavatar.skel.mPriority[joint.Name] = ar.anim.Priority;
@@ -1469,11 +1503,29 @@ namespace Radegast.Rendering
                     foreach (binBVHJoint joint in ar.anim.joints)
                     {
                         bool easeoutset = false;
-                        //warning struct copy non reference
-                        binBVHJointState state = (binBVHJointState)ar.anim.joints[jpos].Tag;
+
+                        binBVHJointState state;
+                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                        {
+                            state = ar.JointStates[jpos];
+                        }
+                        else
+                        {
+                            object tagobj = ar.anim.joints[jpos].Tag;
+                            if (tagobj == null)
+                            {
+                                Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in animate.");
+                                jpos++;
+                                continue;
+                            }
+                            state = (binBVHJointState)tagobj;
+                        }
 
                         if (ar.playstate == animationwrapper.animstate.STATE_STOP)
+                        {
+                            jpos++;
                             continue;
+                        }
 
                         int prio = 0;
                         //Quick hack to stack animations in the correct order
@@ -1677,6 +1729,11 @@ namespace Radegast.Rendering
                         }
 
                         //warning struct copy non reference
+                        // Store back into both typed array and legacy Tag for compatibility
+                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                        {
+                            ar.JointStates[jpos] = state;
+                        }
                         ar.anim.joints[jpos].Tag = state;
 
                         jpos++;
