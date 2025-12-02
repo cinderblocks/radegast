@@ -151,8 +151,7 @@ namespace Radegast.Core.RLV
             }
 
             var group = instance.Groups.Values
-                .Where(n => string.Equals(n.Name, groupName, StringComparison.InvariantCultureIgnoreCase))
-                .FirstOrDefault();
+                .FirstOrDefault(n => string.Equals(n.Name, groupName, StringComparison.InvariantCultureIgnoreCase));
 
             if (group.ID == UUID.Zero)
             {
