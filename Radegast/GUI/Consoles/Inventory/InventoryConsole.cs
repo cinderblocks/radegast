@@ -48,14 +48,14 @@ namespace Radegast
         private System.Threading.Timer _EditTimer;
         private TreeNode _EditNode;
         private System.Timers.Timer TreeUpdateTimer;
-        private readonly ConcurrentQueue<InventoryBase> ItemsToAdd = new ConcurrentQueue<InventoryBase>();
-        private readonly ConcurrentQueue<InventoryBase> ItemsToUpdate = new ConcurrentQueue<InventoryBase>();
+        private BlockingCollection<InventoryBase> ItemsToAdd;
+        private BlockingCollection<InventoryBase> ItemsToUpdate;
+        private Task queueProcessorTask;
+        private CancellationTokenSource queueProcessorCts;
         private readonly ConcurrentDictionary<UUID, byte> ItemsToUpdateSet = new ConcurrentDictionary<UUID, byte>();
         // Queue bounds to prevent runaway memory growth
         private const int MAX_QUEUE_SIZE = 20000; // maximum items allowed in each queue
         private const int MAX_BATCH_PROCESS = 400; // items processed per timer tick
-        private int itemsToAddCount = 0;
-        private int itemsToUpdateCount = 0;
         private bool TreeUpdateInProgress = false;
         private readonly ConcurrentDictionary<UUID, TreeNode> UUID2NodeCache = new ConcurrentDictionary<UUID, TreeNode>();
         private bool appearanceWasBusy;
@@ -78,6 +78,12 @@ namespace Radegast
                 SynchronizingObject = invTree
             };
             TreeUpdateTimer.Elapsed += TreeUpdateTimerTick;
+
+            // Initialize bounded queues and start background consumer
+            ItemsToAdd = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
+            ItemsToUpdate = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
+            queueProcessorCts = new CancellationTokenSource();
+            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorCts.Token), queueProcessorCts.Token);
 
             this.instance = instance;
             Inventory = Client.Inventory.Store;
@@ -150,7 +156,18 @@ namespace Radegast
             // Start traversal asynchronously on a thread-pool thread and pass the cancellation token
             inventoryUpdateTask = Task.Run(() => StartTraverseNodes(inventoryUpdateCancelToken.Token), inventoryUpdateCancelToken.Token);
 
-            invRootNode.Expand();
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    // Marshal Expand to UI thread to avoid cross-thread control access
+                    RunOnUi(() =>
+                    {
+                        try { invRootNode.Expand(); } catch { }
+                    });
+                }
+                catch { }
+            }
 
             invTree.AfterExpand += TreeView_AfterExpand;
             invTree.NodeMouseClick += invTree_MouseClick;
@@ -165,6 +182,44 @@ namespace Radegast
 
             Client.Appearance.AppearanceSet += Appearance_AppearanceSet;
             Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
+        }
+
+        /// <summary>
+        /// Helper to run an action on the UI thread (begin-invoke when required).
+        /// Centralizes InvokeRequired/BeginInvoke pattern to reduce repeated code.
+        /// </summary>
+        private void RunOnUi(Action action)
+        {
+            if (action == null) return;
+
+            try
+            {
+                if (this.IsHandleCreated && this.InvokeRequired)
+                {
+                    this.BeginInvoke(action);
+                }
+                else
+                {
+                    action();
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Control may be disposing or not created; fallback to main form if available
+                try
+                {
+                    if (instance?.MainForm != null && instance.MainForm.IsHandleCreated && instance.MainForm.InvokeRequired)
+                    {
+                        instance.MainForm.BeginInvoke(action);
+                    }
+                    else
+                    {
+                        action();
+                    }
+                }
+                catch { }
+            }
+            catch { }
         }
 
         private async void InventoryConsole_Disposed(object sender, EventArgs e)
@@ -204,23 +259,57 @@ namespace Radegast
             }
             catch (Exception) { }
 
-            // Stop timers and unsubscribe events
-            if (TreeUpdateTimer != null)
-            {
-                try { TreeUpdateTimer.Stop(); TreeUpdateTimer.Dispose(); } catch { }
-                TreeUpdateTimer = null;
-            }
-
+            // Stop timers and unsubscribe events that touch controls on the UI thread
             try
             {
-                Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded;
-                Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
-                Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
+                RunOnUi(() =>
+                {
+                    try
+                    {
+                        if (TreeUpdateTimer != null)
+                        {
+                            try { TreeUpdateTimer.Stop(); TreeUpdateTimer.Dispose(); } catch { }
+                            TreeUpdateTimer = null;
+                        }
+                    }
+                    catch { }
 
-                Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
-                Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
+                    try
+                    {
+                        Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded;
+                        Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
+                        Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
+
+                        Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
+                        Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
+                    }
+                    catch (Exception) { }
+                });
             }
-            catch (Exception) { }
+            catch { }
+
+            // Shutdown and dispose bounded queues and background processor
+            try { queueProcessorCts?.Cancel(); } catch { }
+            if (queueProcessorTask != null)
+            {
+                try
+                {
+                    var finished = await Task.WhenAny(queueProcessorTask, Task.Delay(2000)).ConfigureAwait(false);
+                    if (finished != queueProcessorTask)
+                    {
+                        Logger.Warn("queueProcessorTask did not terminate within timeout after disposal.", Client);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error while waiting for queue processor task: " + ex.Message, ex);
+                }
+            }
+            try { ItemsToAdd?.CompleteAdding(); } catch { }
+            try { ItemsToUpdate?.CompleteAdding(); } catch { }
+            try { ItemsToAdd?.Dispose(); } catch { }
+            try { ItemsToUpdate?.Dispose(); } catch { }
+            try { queueProcessorCts?.Dispose(); } catch { }
         }
         #endregion
 
@@ -248,7 +337,7 @@ namespace Radegast
 
             for (int i = 0; i < prim.NameValues.Length; ++i)
             {
-                if (prim.NameValues[i].Name != "AttachItemID") { continue ;}
+                if (prim.NameValues[i].Name != "AttachItemID") { continue; }
 
                 var inventoryID = new UUID(prim.NameValues[i].Value.ToString());
 
@@ -278,16 +367,9 @@ namespace Radegast
 
             if (TreeUpdateInProgress)
             {
-                // Enqueue with bounds check
-                int newCount = Interlocked.Increment(ref itemsToAddCount);
-                if (newCount <= MAX_QUEUE_SIZE)
+                // Try to add to bounded queue; wait briefly before giving up
+                if (!ItemsToAdd.TryAdd(e.Obj, 100)) // wait up to 100ms
                 {
-                    ItemsToAdd.Enqueue(e.Obj);
-                }
-                else
-                {
-                    // Queue full, drop this update and log once
-                    Interlocked.Decrement(ref itemsToAddCount);
                     Logger.Warn("ItemsToAdd queue full, dropping inventory add event.", Client);
                 }
             }
@@ -301,10 +383,10 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(delegate()
-                    {
-                        Exec_OnInventoryObjectAdded(obj);
-                    }
+                Invoke(new MethodInvoker(delegate ()
+                {
+                    Exec_OnInventoryObjectAdded(obj);
+                }
                 ));
                 return;
             }
@@ -357,15 +439,10 @@ namespace Radegast
                 // Deduplicate updates by UUID and enforce bounds
                 if (ItemsToUpdateSet.TryAdd(e.NewObject.UUID, 0))
                 {
-                    int newCount = Interlocked.Increment(ref itemsToUpdateCount);
-                    if (newCount <= MAX_QUEUE_SIZE)
-                    {
-                        ItemsToUpdate.Enqueue(e.NewObject);
-                    }
-                    else
+                    // wait briefly for space before dropping the event
+                    if (!ItemsToUpdate.TryAdd(e.NewObject, 100)) // wait up to 100ms
                     {
                         // Queue full, remove dedupe entry and drop
-                        Interlocked.Decrement(ref itemsToUpdateCount);
                         ItemsToUpdateSet.TryRemove(e.NewObject.UUID, out _);
                         Logger.Warn("ItemsToUpdate queue full, dropping inventory update event.", Client);
                     }
@@ -582,7 +659,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(delegate() { UpdateStatus(text); }));
+                Invoke(new MethodInvoker(delegate () { UpdateStatus(text); }));
                 return;
             }
 
@@ -596,17 +673,14 @@ namespace Radegast
 
         private void UpdateNodeLabel(UUID itemID)
         {
-            if (instance.MainForm.InvokeRequired)
+            RunOnUi(() =>
             {
-                instance.MainForm.BeginInvoke(new MethodInvoker(() => UpdateNodeLabel(itemID)));
-                return;
-            }
-
-            TreeNode node = FindNodeForItem(itemID);
-            if (node != null)
-            {
-                node.Text = ItemLabel((InventoryBase)node.Tag, false);
-            }
+                TreeNode node = FindNodeForItem(itemID);
+                if (node != null)
+                {
+                    node.Text = ItemLabel((InventoryBase)node.Tag, false);
+                }
+            });
         }
 
         private void AddFolderFromStore(TreeNode parent, InventoryFolder f)
@@ -659,119 +733,123 @@ namespace Radegast
         }
 
         private async Task FetchQueuedFolders(CancellationToken token)
-         {
-             Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
+        {
+            Client.Inventory.FolderUpdated += Inventory_FolderUpdated;
 
-             try
-             {
-                 QueuedFoldersNeedingUpdate.Clear();
-                 TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+            try
+            {
+                QueuedFoldersNeedingUpdate.Clear();
+                TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
 
-                 while (!QueuedFoldersNeedingUpdate.IsEmpty)
-                 {
-                     token.ThrowIfCancellationRequested();
-                     var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
-                     // Update UI with current progress: number of items cached and folders remaining
-                     try
-                     {
-                         UpdateStatus($"Loading... {UUID2NodeCache.Count} items, {folderKeys.Count} folders remaining");
-                     }
-                     catch { }
-                     var tasks = folderKeys
-                         .Select(folderKey => Client.Inventory.RequestFolderContents(
-                             folderKey,
-                             Client.Self.AgentID,
-                             true,
-                             true,
-                             InventorySortOrder.ByDate,
-                             token
-                         ));
+                while (!QueuedFoldersNeedingUpdate.IsEmpty)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var folderKeys = QueuedFoldersNeedingUpdate.Keys.ToList();
+                    // Update UI with current progress: number of items cached and folders remaining
+                    try
+                    {
+                        UpdateStatus($"Loading... {UUID2NodeCache.Count} items, {folderKeys.Count} folders remaining");
+                    }
+                    catch { }
+                    var tasks = folderKeys
+                        .Select(folderKey => Client.Inventory.RequestFolderContents(
+                            folderKey,
+                            Client.Self.AgentID,
+                            true,
+                            true,
+                            InventorySortOrder.ByDate,
+                            token
+                        ));
 
-                     await Task.WhenAll(tasks).ConfigureAwait(false);
-                     TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
-                 }
-             }
-             finally
-             {
-                 Client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
-             }
-         }
+                    await Task.WhenAll(tasks).ConfigureAwait(false);
+                    TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+                }
+            }
+            finally
+            {
+                Client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
+            }
+        }
 
         /// <summary>
         /// Inventory traversal that accepts a cancellation token for explicit control.
         /// </summary>
         private async Task StartTraverseNodes(CancellationToken token)
-         {
-             if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
-             {
-                 Logger.Warn("Could not traverse inventory. Event Queue is not running.", Client);
-                 return;
-             }
+        {
+            if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
+            {
+                Logger.Warn("Could not traverse inventory. Event Queue is not running.", Client);
+                return;
+            }
 
-             UpdateStatus("Loading...");
-             TreeUpdateInProgress = true;
-             TreeUpdateTimer.Start();
+            UpdateStatus("Loading...");
+            TreeUpdateInProgress = true;
+            TreeUpdateTimer.Start();
 
-             instance.GestureManager.BeginMonitoring();
+            instance.GestureManager.BeginMonitoring();
 
-             try
-             {
+            try
+            {
                 await FetchQueuedFolders(token).ConfigureAwait(false);
-             }
-             catch (OperationCanceledException)
-             {
-                 Logger.Info("Inventory traversal cancelled.", Client);
-                 TreeUpdateTimer.Stop();
-                 TreeUpdateInProgress = false;
-                 UpdateStatus("Reading cache");
-                 return;
-             }
-             catch (Exception ex)
-             {
-                 Logger.Error("Error during inventory traversal: " + ex.Message, ex);
-             }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Info("Inventory traversal cancelled.", Client);
+                TreeUpdateTimer.Stop();
+                TreeUpdateInProgress = false;
+                UpdateStatus("Reading cache");
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("Error during inventory traversal: " + ex.Message, ex);
+            }
 
-             TreeUpdateTimer.Stop();
-             if (IsHandleCreated)
-             {
-                 Invoke(new MethodInvoker(() => TreeUpdateTimerTick(null, null)));
-             }
-             TreeUpdateInProgress = false;
-             UpdateStatus("OK");
-             instance.ShowNotificationInChat("Inventory update completed.");
+            TreeUpdateTimer.Stop();
+            RunOnUi(() => TreeUpdateTimerTick(null, null));
+            TreeUpdateInProgress = false;
+            UpdateStatus("OK");
+            instance.ShowNotificationInChat("Inventory update completed.");
 
-             // Initial outfit handling moved to login response handler to avoid race with inventory traversal
+            // Initial outfit handling moved to login response handler to avoid race with inventory traversal
 
-             // Updated labels on clothes that we are wearing
-             UpdateWornLabels();
+            // Updated labels on clothes that we are wearing
+            UpdateWornLabels();
 
-             // Update attachments now that we are done
-             foreach (var attachment in Client.Appearance.GetAttachments())
-             {
-                 if (Inventory.Contains(attachment))
-                 {
-                     UpdateNodeLabel(attachment.UUID);
-                 }
-                 else
-                 {
-                     Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID, token);
-                     return;
-                 }
-             }
+            // Update attachments now that we are done
+            foreach (var attachment in Client.Appearance.GetAttachments())
+            {
+                if (Inventory.Contains(attachment))
+                {
+                    UpdateNodeLabel(attachment.UUID);
+                }
+                else
+                {
+                    Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID, token);
+                    return;
+                }
+            }
 
-             Logger.Debug("Finished updating inventory folders, saving cache...", Client);
+            Logger.Debug("Finished updating inventory folders, saving cache...", Client);
 
-             ThreadPool.QueueUserWorkItem(state => Inventory.SaveToDisk(instance.InventoryCacheFileName));
+            ThreadPool.QueueUserWorkItem(state => Inventory.SaveToDisk(instance.InventoryCacheFileName));
 
-             if (!instance.MonoRuntime || IsHandleCreated)
-                 Invoke(new MethodInvoker(() =>
-                 {
-                     invTree.Sort();
-                 }
-             ));
-         }
+            RunOnUi(() =>
+            {
+                if (!instance.MonoRuntime || IsHandleCreated)
+                {
+                    invTree.Sort();
+                }
+            });
+        }
 
         public void ReloadInventory()
+        {
+            // Fire-and-forget async reload to avoid blocking the UI thread
+            _ = ReloadInventoryAsync();
+        }
+
+        private async Task ReloadInventoryAsync()
         {
             if (TreeUpdateInProgress)
             {
@@ -792,10 +870,44 @@ namespace Radegast
             invRootNode = AddDir(null, Inventory.RootFolder);
             Inventory.RootNode.NeedsUpdate = true;
 
+            // Reset queues to clear pending items and stop old processor
+            try { queueProcessorCts?.Cancel(); } catch { }
+            try
+            {
+                if (queueProcessorTask != null)
+                {
+                    await Task.WhenAny(queueProcessorTask, Task.Delay(2000)).ConfigureAwait(false);
+                }
+            }
+            catch { }
+
+            try { ItemsToAdd?.CompleteAdding(); } catch { }
+            try { ItemsToUpdate?.CompleteAdding(); } catch { }
+            try { ItemsToAdd?.Dispose(); } catch { }
+            try { ItemsToUpdate?.Dispose(); } catch { }
+            ItemsToAdd = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
+            ItemsToUpdate = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
+            ItemsToUpdateSet.Clear();
+
+            // restart queue processor
+            queueProcessorCts = new CancellationTokenSource();
+            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorCts.Token), queueProcessorCts.Token);
+
             // Start traversal on thread-pool and keep reference so we can cancel later
             inventoryUpdateTask = Task.Run(() => StartTraverseNodes(inventoryUpdateCancelToken.Token), inventoryUpdateCancelToken.Token);
 
-            invRootNode.Expand();
+            if (IsHandleCreated)
+            {
+                try
+                {
+                    // Marshal Expand to UI thread to avoid cross-thread control access
+                    RunOnUi(() =>
+                    {
+                        try { invRootNode.Expand(); } catch { }
+                    });
+                }
+                catch { }
+            }
         }
 
         private void reloadInventoryToolStripMenuItem_Click(object sender, EventArgs e)
@@ -805,43 +917,102 @@ namespace Radegast
 
         private void TreeUpdateTimerTick(object sender, EventArgs e)
         {
-            int processed = 0;
-            if (ItemsToAdd.TryDequeue(out var addItem))
+            // Status update only; actual queue processing occurs on background consumer
+            // Keep UI alive and show progress
+            UpdateStatus($"Loading... {UUID2NodeCache.Count} items");
+        }
+
+        private async Task QueueProcessor(CancellationToken token)
+        {
+            try
             {
-                invTree.BeginUpdate();
-                do
+                while (!token.IsCancellationRequested)
                 {
-                    InventoryBase item = addItem;
-                    TreeNode node = FindNodeForItem(item.ParentUUID);
-                    if (node != null)
+                    var adds = new List<InventoryBase>();
+                    var updates = new List<InventoryBase>();
+
+                    // Drain up to MAX_BATCH_PROCESS items with a short wait
+                    InventoryBase item;
+                    while (adds.Count < MAX_BATCH_PROCESS && ItemsToAdd.TryTake(out item, 200, token))
                     {
-                        AddBase(node, item);
+                        adds.Add(item);
                     }
 
-                    Interlocked.Decrement(ref itemsToAddCount);
-                    processed++;
-                    if (processed >= MAX_BATCH_PROCESS) break;
-                } while (ItemsToAdd.TryDequeue(out addItem));
-                invTree.EndUpdate();
-            }
+                    while (updates.Count < MAX_BATCH_PROCESS && ItemsToUpdate.TryTake(out item, 200, token))
+                    {
+                        updates.Add(item);
+                    }
 
-            processed = 0;
-            if (ItemsToUpdate.TryDequeue(out var updItem))
+                    if (adds.Count > 0)
+                    {
+                        // Batch application on UI thread
+                        try
+                        {
+                            RunOnUi(() =>
+                            {
+                                try
+                                {
+                                    invTree.BeginUpdate();
+                                    foreach (var a in adds)
+                                    {
+                                        TreeNode node = FindNodeForItem(a.ParentUUID);
+                                        if (node != null)
+                                        {
+                                            AddBase(node, a);
+                                        }
+                                    }
+                                }
+                                finally
+                                {
+                                    invTree.EndUpdate();
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Error applying inventory adds: " + ex.Message, ex);
+                        }
+                    }
+
+                    if (updates.Count > 0)
+                    {
+                        try
+                        {
+                            RunOnUi(() =>
+                            {
+                                try
+                                {
+                                    invTree.BeginUpdate();
+                                    foreach (var u in updates)
+                                    {
+                                        try { Exec_OnInventoryObjectUpdated(u, u); } catch { }
+                                        try { ItemsToUpdateSet.TryRemove(u.UUID, out _); } catch { }
+                                    }
+                                }
+                                finally
+                                {
+                                    invTree.EndUpdate();
+                                }
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Error applying inventory updates: " + ex.Message, ex);
+                        }
+                    }
+
+                    // If nothing processed, delay a bit to avoid busy loop
+                    if (adds.Count == 0 && updates.Count == 0)
+                    {
+                        await Task.Delay(200, token).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
             {
-                invTree.BeginUpdate();
-                do
-                {
-                    InventoryBase item = updItem;
-                    Exec_OnInventoryObjectUpdated(item, item);
-                    try { ItemsToUpdateSet.TryRemove(item.UUID, out _); } catch { }
-                    Interlocked.Decrement(ref itemsToUpdateCount);
-                    processed++;
-                    if (processed >= MAX_BATCH_PROCESS) break;
-                } while (ItemsToUpdate.TryDequeue(out updItem));
-                invTree.EndUpdate();
+                Logger.Error("Queue processor exception: " + ex.Message, ex);
             }
-
-            UpdateStatus($"Loading... {UUID2NodeCache.Count} items");
         }
 
         #endregion
@@ -1023,15 +1194,15 @@ namespace Radegast
                     break;
 
                 case AssetType.Object:
-                    RunBackgroundTask(async (cancellationToken) =>
+                    RunBackgroundTask(async (cancellationtoken) =>
                     {
                         if (IsAttached(item))
                         {
-                            await instance.COF.Detach(item, cancellationToken);
+                            await instance.COF.Detach(item, cancellationtoken);
                         }
                         else
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationtoken);
                         }
                         UpdateLabelsFor(item);
                     }, UpdateWornLabels);
@@ -1039,18 +1210,18 @@ namespace Radegast
 
                 case AssetType.Bodypart:
                 case AssetType.Clothing:
-                    RunBackgroundTask(async (cancellationToken) =>
+                    RunBackgroundTask(async (cancellationtoken) =>
                     {
                         if (IsWorn(item))
                         {
                             if (item.AssetType == AssetType.Clothing)
                             {
-                                await instance.COF.RemoveFromOutfit(item, cancellationToken);
+                                await instance.COF.RemoveFromOutfit(item, cancellationtoken);
                             }
                         }
                         else
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationToken);
+                            await instance.COF.AddToOutfit(item, true, cancellationtoken);
                         }
                     }, UpdateWornLabels);
                     break;
@@ -1090,7 +1261,8 @@ namespace Radegast
         public InventoryItem AttachmentAt(AttachmentPoint point)
         {
             return (from attachment in Client.Appearance.GetAttachmentsByAttachmentPoint()
-                where attachment.Key == point select attachment.Value.First()).FirstOrDefault();
+                    where attachment.Key == point
+                    select attachment.Value.First()).FirstOrDefault();
         }
 
         /// <summary>
@@ -1200,40 +1372,40 @@ namespace Radegast
                     if (folder.PreferredType >= FolderType.EnsembleStart &&
                         folder.PreferredType <= FolderType.EnsembleEnd)
                     {
-                        ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) {Name = "fix_type"};
+                        ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) { Name = "fix_type" };
                         ctxInv.Items.Add(ctxItem);
                         ctxInv.Items.Add(new ToolStripSeparator());
                     }
 
-                    ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) {Name = "new_folder"};
+                    ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) { Name = "new_folder" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) {Name = "new_notecard"};
+                    ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) { Name = "new_notecard" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) {Name = "new_script"};
+                    ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) { Name = "new_script" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) {Name = "refresh"};
+                    ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) { Name = "refresh" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) {Name = "backup"};
+                    ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) { Name = "backup" };
                     ctxInv.Items.Add(ctxItem);
 
                     ctxInv.Items.Add(new ToolStripSeparator());
 
-                    ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) {Name = "expand"};
+                    ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) { Name = "expand" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) {Name = "expand_all"};
+                    ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) { Name = "expand_all" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) {Name = "collapse"};
+                    ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) { Name = "collapse" };
                     ctxInv.Items.Add(ctxItem);
 
                     if (folder.PreferredType == FolderType.Trash)
                     {
-                        ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) {Name = "empty_trash"};
+                        ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) { Name = "empty_trash" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
@@ -1249,21 +1421,21 @@ namespace Radegast
                     if (folder.PreferredType == FolderType.None ||
                         folder.PreferredType == FolderType.Outfit)
                     {
-                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) {Name = "rename_folder"};
+                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_folder" };
                         ctxInv.Items.Add(ctxItem);
 
                         ctxInv.Items.Add(new ToolStripSeparator());
 
-                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) {Name = "cut_folder"};
+                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_folder" };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) {Name = "copy_folder"};
+                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_folder" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
                     if (instance.InventoryClipboard != null)
                     {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) {Name = "paste_folder"};
+                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_folder" };
                         ctxInv.Items.Add(ctxItem);
 
                         if (instance.InventoryClipboard.Item is InventoryItem)
@@ -1279,7 +1451,7 @@ namespace Radegast
                     if (folder.PreferredType == FolderType.None ||
                         folder.PreferredType == FolderType.Outfit)
                     {
-                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) {Name = "delete_folder"};
+                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_folder" };
                         ctxInv.Items.Add(ctxItem);
 
                         ctxInv.Items.Add(new ToolStripSeparator());
@@ -1312,7 +1484,7 @@ namespace Radegast
                     }
 
                     instance.ContextActionManager.AddContributions(ctxInv, folder);
-                #endregion Folder context menu
+                    #endregion Folder context menu
                 }
                 else if (node.Tag is InventoryItem tag)
                 {
@@ -1325,37 +1497,37 @@ namespace Radegast
 
                     if (item.InventoryType == InventoryType.LSL)
                     {
-                        ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) {Name = "edit_script"};
+                        ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) { Name = "edit_script" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
                     if (item.AssetType == AssetType.Texture)
                     {
-                        ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) {Name = "view_image"};
+                        ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) { Name = "view_image" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
                     if (item.InventoryType == InventoryType.Landmark)
                     {
-                        ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) {Name = "lm_teleport"};
+                        ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) { Name = "lm_teleport" };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) {Name = "lm_info"};
+                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "lm_info" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
                     if (item.InventoryType == InventoryType.Notecard)
                     {
-                        ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) {Name = "notecard_open"};
+                        ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) { Name = "notecard_open" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
                     if (item.InventoryType == InventoryType.Gesture)
                     {
-                        ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) {Name = "gesture_play"};
+                        ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "gesture_play" };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) {Name = "gesture_info"};
+                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "gesture_info" };
                         ctxInv.Items.Add(ctxItem);
 
                         if (instance.Client.Self.ActiveGestures.ContainsKey(item.UUID))
@@ -1380,36 +1552,36 @@ namespace Radegast
                     {
                         if (!Client.Self.SignaledAnimations.ContainsKey(item.AssetUUID))
                         {
-                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) {Name = "animation_play"};
+                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "animation_play" };
                             ctxInv.Items.Add(ctxItem);
                         }
                         else
                         {
-                            ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) {Name = "animation_stop"};
+                            ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) { Name = "animation_stop" };
                             ctxInv.Items.Add(ctxItem);
                         }
                     }
 
                     if (item.InventoryType == InventoryType.Object)
                     {
-                        ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) {Name = "rez_inworld"};
+                        ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) { Name = "rez_inworld" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) {Name = "rename_item"};
+                    ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_item" };
                     ctxInv.Items.Add(ctxItem);
 
                     ctxInv.Items.Add(new ToolStripSeparator());
 
-                    ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) {Name = "cut_item"};
+                    ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_item" };
                     ctxInv.Items.Add(ctxItem);
 
-                    ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) {Name = "copy_item"};
+                    ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_item" };
                     ctxInv.Items.Add(ctxItem);
 
                     if (instance.InventoryClipboard != null)
                     {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) {Name = "paste_item"};
+                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_item" };
                         ctxInv.Items.Add(ctxItem);
 
                         if (instance.InventoryClipboard.Item is InventoryItem)
@@ -1422,7 +1594,7 @@ namespace Radegast
                         }
                     }
 
-                    ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) {Name = "delete_item"};
+                    ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_item" };
 
                     if (IsAttached(item) || IsWorn(item))
                     {
@@ -1510,7 +1682,7 @@ namespace Radegast
                         };
                         ctxInv.Items.Add(ctxItem);
 
-                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) {Name = "wear_attachment"};
+                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wear_attachment" };
                         ctxInv.Items.Add(ctxItem);
                     }
 
@@ -1581,7 +1753,7 @@ namespace Radegast
 
                 if (uiCallback != null)
                 {
-                    BeginInvoke(new Action(() => uiCallback()));
+                    RunOnUi(() => uiCallback());
                 }
             });
         }
@@ -1689,7 +1861,7 @@ namespace Radegast
                             return;
                         }
 
-                        Client.Inventory.MoveFolder(folder.UUID, trash);
+                        await Client.Inventory.MoveFolderAsync(folder.UUID, trash);
                         break;
 
                     case "empty_trash":
@@ -1697,7 +1869,7 @@ namespace Radegast
                             DialogResult res = MessageBox.Show("Are you sure you want to empty your trash?", "Confirmation", MessageBoxButtons.OKCancel);
                             if (res == DialogResult.OK)
                             {
-                                Client.Inventory.EmptyTrash();
+                                await Client.Inventory.EmptyTrashAsync();
                             }
                         }
                         break;
@@ -1707,7 +1879,7 @@ namespace Radegast
                             DialogResult res = MessageBox.Show("Are you sure you want to empty your lost and found folder?", "Confirmation", MessageBoxButtons.OKCancel);
                             if (res == DialogResult.OK)
                             {
-                                Client.Inventory.EmptyLostAndFound();
+                                await Client.Inventory.EmptyLostAndFoundAsync();
                             }
                         }
                         break;
@@ -1726,7 +1898,7 @@ namespace Radegast
                     case "outfit_add":
                         var addToOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async  (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
                             await instance.COF.AddToOutfit(addToOutfit, false, cancellationToken);
                         }, UpdateWornLabels);
@@ -1751,7 +1923,7 @@ namespace Radegast
                 if (cmd != "copy_item" && cmd != "cut_item" && cmd != "delete_item")
                 {
                     item = instance.COF.ResolveInventoryLink(item);
-                    if(item == null)
+                    if (item == null)
                     {
                         return;
                     }
@@ -1814,34 +1986,34 @@ namespace Radegast
                         break;
 
                     case "detach":
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.Detach(item, cancellationToken);
+                            await instance.COF.Detach(item, cancellationtoken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment":
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
 
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.Attach(item, pt, true, cancellationToken);
+                            await instance.COF.Attach(item, pt, true, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
 
@@ -1856,9 +2028,9 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(item, cancellationToken);
+                            await instance.COF.RemoveFromOutfit(item, cancellationtoken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
@@ -1866,17 +2038,17 @@ namespace Radegast
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationToken);
+                            await instance.COF.AddToOutfit(item, true, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.AddToOutfit(item, false, cancellationToken);
+                            await instance.COF.AddToOutfit(item, false, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
 
@@ -1951,52 +2123,46 @@ namespace Radegast
 
         private void NotecardCreated(bool success, InventoryItem item)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(() => NotecardCreated(success, item)));
-                return;
-            }
+                if (!success)
+                {
+                    instance.ShowNotificationInChat("Creation of notecard failed");
+                    return;
+                }
 
-            if (!success)
-            {
-                instance.ShowNotificationInChat("Creation of notecard failed");
-                return;
-            }
-
-            instance.ShowNotificationInChat("New notecard created, enter notecard name and press enter", ChatBufferTextStyle.Invisible);
-            var node = FindNodeForItem(item.ParentUUID);
-            node?.Expand();
-            node = FindNodeForItem(item.UUID);
-            if (node != null)
-            {
-                invTree.SelectedNode = node;
-                node.BeginEdit();
-            }
+                instance.ShowNotificationInChat("New notecard created, enter notecard name and press enter", ChatBufferTextStyle.Invisible);
+                var node = FindNodeForItem(item.ParentUUID);
+                node?.Expand();
+                node = FindNodeForItem(item.UUID);
+                if (node != null)
+                {
+                    invTree.SelectedNode = node;
+                    node.BeginEdit();
+                }
+            });
         }
 
         private void ScriptCreated(bool success, InventoryItem item)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(() => ScriptCreated(success, item)));
-                return;
-            }
+                if (!success)
+                {
+                    instance.ShowNotificationInChat("Creation of script failed");
+                    return;
+                }
 
-            if (!success)
-            {
-                instance.ShowNotificationInChat("Creation of script failed");
-                return;
-            }
-
-            instance.ShowNotificationInChat("New script created, enter script name and press enter", ChatBufferTextStyle.Invisible);
-            var node = FindNodeForItem(item.ParentUUID);
-            node?.Expand();
-            node = FindNodeForItem(item.UUID);
-            if (node != null)
-            {
-                invTree.SelectedNode = node;
-                node.BeginEdit();
-            }
+                instance.ShowNotificationInChat("New script created, enter script name and press enter", ChatBufferTextStyle.Invisible);
+                var node = FindNodeForItem(item.ParentUUID);
+                node?.Expand();
+                node = FindNodeForItem(item.UUID);
+                if (node != null)
+                {
+                    invTree.SelectedNode = node;
+                    node.BeginEdit();
+                }
+            });
         }
 
         private void PerformClipboardOperation(InventoryFolder dest)
@@ -2008,38 +2174,38 @@ namespace Radegast
             switch (instance.InventoryClipboard.Operation)
             {
                 case ClipboardOperation.Cut:
-                {
-                    switch (instance.InventoryClipboard.Item)
                     {
-                        case InventoryItem _:
-                            Client.Inventory.MoveItem(instance.InventoryClipboard.Item.UUID, dest.UUID, instance.InventoryClipboard.Item.Name);
-                            break;
-                        case InventoryFolder _:
+                        switch (instance.InventoryClipboard.Item)
                         {
-                            if (instance.InventoryClipboard.Item.UUID != dest.UUID)
-                            {
-                                Client.Inventory.MoveFolder(instance.InventoryClipboard.Item.UUID, dest.UUID);
-                            }
+                            case InventoryItem _:
+                                Client.Inventory.MoveItem(instance.InventoryClipboard.Item.UUID, dest.UUID, instance.InventoryClipboard.Item.Name);
+                                break;
+                            case InventoryFolder _:
+                                {
+                                    if (instance.InventoryClipboard.Item.UUID != dest.UUID)
+                                    {
+                                        Client.Inventory.MoveFolder(instance.InventoryClipboard.Item.UUID, dest.UUID);
+                                    }
 
-                            break;
+                                    break;
+                                }
                         }
-                    }
 
-                    instance.InventoryClipboard = null;
-                    break;
-                }
+                        instance.InventoryClipboard = null;
+                        break;
+                    }
 
                 case ClipboardOperation.Copy when instance.InventoryClipboard.Item is InventoryItem:
                     Client.Inventory.RequestCopyItem(instance.InventoryClipboard.Item.UUID, dest.UUID, instance.InventoryClipboard.Item.Name, instance.InventoryClipboard.Item.OwnerID, target =>
-                        {
-                        }
+                    {
+                    }
                     );
                     break;
                 case ClipboardOperation.Copy:
-                {
-                    if (instance.InventoryClipboard.Item is InventoryFolder)
                     {
-                        ThreadPool.QueueUserWorkItem(state =>
+                        if (instance.InventoryClipboard.Item is InventoryFolder)
+                        {
+                            ThreadPool.QueueUserWorkItem(state =>
                             {
                                 UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, instance.InventoryClipboard.Item.Name, FolderType.None);
                                 Thread.Sleep(500);
@@ -2065,11 +2231,11 @@ namespace Radegast
                                 //    Client.Inventory.RequestCopyItems(items, folders, names, oldOwner, (InventoryBase target) => { });
                                 //}
                             }
-                        );
-                    }
+                            );
+                        }
 
-                    break;
-                }
+                        break;
+                    }
             }
         }
 
@@ -2182,11 +2348,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate()
-                    {
-                        OnLabelEditTimer(sender);
-                    }
-                ));
+                RunOnUi(() => OnLabelEditTimer(sender));
                 return;
             }
 
@@ -2258,36 +2420,36 @@ namespace Radegast
                     invTree.SelectedNode.BeginEdit();
                     break;
                 case Keys.F5 when invTree.SelectedNode != null:
-                 {
-                     if (invTree.SelectedNode.Tag is InventoryFolder folder)
-                     {
-                        // Start async fetch but don't block UI thread
-                        _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
-                     }
+                    {
+                        if (invTree.SelectedNode.Tag is InventoryFolder folder)
+                        {
+                            // Start async fetch but don't block UI thread
+                            _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
+                        }
 
-                     break;
-                 }
+                        break;
+                    }
                 case Keys.Delete when invTree.SelectedNode != null:
-                {
-                    var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
-                    if (trash == Inventory.RootFolder.UUID)
                     {
-                        trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                        Thread.Sleep(2000);
-                    }
+                        var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
+                        if (trash == Inventory.RootFolder.UUID)
+                        {
+                            trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                            Thread.Sleep(2000);
+                        }
 
-                    switch (invTree.SelectedNode.Tag)
-                    {
-                        case InventoryItem item:
-                            Client.Inventory.MoveItem(item.UUID, trash);
-                            break;
-                        case InventoryFolder folder:
-                            Client.Inventory.MoveFolder(folder.UUID, trash);
-                            break;
-                    }
+                        switch (invTree.SelectedNode.Tag)
+                        {
+                            case InventoryItem item:
+                                Client.Inventory.MoveItem(item.UUID, trash);
+                                break;
+                            case InventoryFolder folder:
+                                Client.Inventory.MoveFolder(folder.UUID, trash);
+                                break;
+                        }
 
-                    break;
-                }
+                        break;
+                    }
                 case Keys.Apps when invTree.SelectedNode != null:
                     ctxInv.Show();
                     break;
@@ -2382,6 +2544,7 @@ namespace Radegast
             }
 
             e.Effect = DragDropEffects.Move;
+
 
         }
         #endregion
@@ -2562,7 +2725,7 @@ namespace Radegast
                     desc += $" - {inventoryItem.Description}";
                 }
 
-                ListViewItem item = new ListViewItem(desc) {Tag = searchRes[e.ItemIndex]};
+                ListViewItem item = new ListViewItem(desc) { Tag = searchRes[e.ItemIndex] };
                 e.Item = item;
                 searchItemCache[e.ItemIndex] = item;
             }
