@@ -56,10 +56,13 @@ namespace Radegast
         public readonly Dictionary<UUID, ulong> agentSimHandle = new Dictionary<UUID, ulong>();
         public ChatInputBox ChatInputText => cbxInput;
 
-        public ChatConsole(RadegastInstanceForms instance)
-        {
-            InitializeComponent();
-            Disposed += ChatConsole_Disposed;
+        // Cached bold font reused for marking self in the list to avoid creating many Font instances
+        private Font cachedBoldFont;
+ 
+         public ChatConsole(RadegastInstanceForms instance)
+         {
+             InitializeComponent();
+             Disposed += ChatConsole_Disposed;
 
             ctxAnim.Visible = false;
             ctxTextures.Visible = false;
@@ -165,7 +168,14 @@ namespace Radegast
             UnregisterClientEvents(client);
             ChatManager.Dispose();
             ChatManager = null;
-        }
+
+            // Dispose cached font if we created one
+            try
+            {
+                cachedBoldFont?.Dispose();
+            }
+            catch { }
+         }
 
         public static Font ChangeFontSize(Font font, float fontSize)
         {
@@ -286,47 +296,59 @@ namespace Radegast
 
         private void UpdateRadar(CoarseLocationUpdateEventArgs e)
         {
-            if (client.Network.CurrentSim == null /*|| client.Network.CurrentSim.Handle != sim.Handle*/)
-            {
-                return;
-            }
+            if (client.Network.CurrentSim == null) return;
 
             ThreadingHelper.SafeInvoke(this, () =>
             {
-                // *TODO: later on we can set this with something from the GUI
-                const double MAX_DISTANCE = 362.0; // one sim a corner to corner distance
+                const double MAX_DISTANCE = 362.0; // one sim corner-to-corner
                 lock (agentSimHandle)
                     try
                     {
                         lvwObjects.BeginUpdate();
+
                         var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
-                            ? PositionHelper.ToGlobalPosition(e.Simulator.Handle, position) 
+                            ? PositionHelper.ToGlobalPosition(e.Simulator.Handle, position)
                             : client.Self.GlobalPosition;
 
-                        // CoarseLocationUpdate gives us height of 0 when actual height is
-                        // between 1024-4096m.
                         if (agentPosition.Z < 0.1)
                         {
                             agentPosition.Z = client.Self.GlobalPosition.Z;
                         }
 
-                        var existing = new List<UUID>();
+                        var existing = new HashSet<UUID>();
                         var removed = new List<UUID>(e.RemovedEntries);
 
+                        var globalPositions = new Dictionary<UUID, Vector3d>(e.Simulator.AvatarPositions.Count);
+                        foreach (var kv in e.Simulator.AvatarPositions)
+                        {
+                            globalPositions[kv.Key] = PositionHelper.ToGlobalPosition(e.Simulator.Handle, kv.Value);
+                        }
+
+                        var avatarsById = new Dictionary<UUID, Avatar>(e.Simulator.ObjectsAvatars.Count);
+                        foreach (var kv in e.Simulator.ObjectsAvatars)
+                        {
+                            if (kv.Value != null && kv.Value.ID != UUID.Zero)
+                            {
+                                avatarsById[kv.Value.ID] = kv.Value;
+                            }
+                        }
+
+                        // Add any new avatars
                         foreach (var avatarPos in e.Simulator.AvatarPositions)
                         {
                             existing.Add(avatarPos.Key);
-                            if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString()))
-                            {
-                                continue;
-                            }
+                            if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString())) continue;
+
                             var name = instance.Names.Get(avatarPos.Key);
                             var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
                             if (avatarPos.Key == client.Self.AgentID)
                             {
-                                // Stops our name saying "Loading..."
+                                if (cachedBoldFont == null)
+                                {
+                                    try { cachedBoldFont = new Font(item.Font, FontStyle.Bold); } catch { cachedBoldFont = item.Font; }
+                                }
                                 item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
-                                item.Font = new Font(item.Font, FontStyle.Bold);
+                                item.Font = cachedBoldFont;
                             }
                             item.Tag = avatarPos.Key;
                             agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
@@ -335,56 +357,48 @@ namespace Radegast
                         foreach (ListViewItem item in lvwObjects.Items)
                         {
                             if (item == null) continue;
-                            var key = (UUID)item.Tag;
+                            if (!(item.Tag is UUID key)) continue;
 
-                            if (agentSimHandle[key] != e.Simulator.Handle)
-                            {
-                                // not for this sim
-                                continue;
-                            }
+                            if (agentSimHandle.TryGetValue(key, out var handle) && handle != e.Simulator.Handle) continue;
 
                             if (key == client.Self.AgentID)
                             {
                                 if (instance.Names.Mode != NameMode.Standard)
-                                    item.Text = instance.Names.Get(key);
+                                {
+                                    var newName = instance.Names.Get(key);
+                                    if (item.Text != newName) item.Text = newName;
+                                }
                                 continue;
                             }
 
-                            //the AvatarPositions is checked once more because it changes wildly on its own
-                            //even though the !existing should have been adequate
                             if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
                             {
-                                // not here anymore
                                 removed.Add(key);
                                 continue;
                             }
 
-                            var kvp = e.Simulator.ObjectsAvatars.FirstOrDefault(
-                                av => av.Value.ID == key);
-                            var foundAvi = kvp.Value;
+                            avatarsById.TryGetValue(key, out var foundAvi);
 
-                            // CoarseLocationUpdate gives us height of 0 when actual height is
-                            // between 1024-4096m on OpenSim grids. 1020 on SL
                             var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
-                            if (unknownAltitude) 
+
+                            Vector3d globalPos = globalPositions.TryGetValue(key, out var gp) ? gp : PositionHelper.ToGlobalPosition(e.Simulator.Handle, pos);
+
+                            if (unknownAltitude)
                             {
                                 if (foundAvi != null)
                                 {
                                     if (foundAvi.ParentID == 0)
                                     {
-                                        pos.Z = foundAvi.Position.Z;
+                                        globalPos.Z = foundAvi.Position.Z;
                                     }
-                                    else
+                                    else if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
                                     {
-                                        if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
-                                        {
-                                            pos.Z = primitive.Position.Z;
-                                        }
+                                        globalPos.Z = primitive.Position.Z;
                                     }
                                 }
                             }
 
-                            var d = (int)Vector3d.Distance(PositionHelper.ToGlobalPosition(e.Simulator.Handle, pos), agentPosition);
+                            var d = (int)Vector3d.Distance(globalPos, agentPosition);
 
                             if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
                             {
@@ -392,18 +406,12 @@ namespace Radegast
                                 continue;
                             }
 
-                            if (unknownAltitude)
-                            {
-                                item.Text = instance.Names.Get(key) + " (?m)";
-                            }
-                            else
-                            {
-                                item.Text = instance.Names.Get(key) + $" ({d}m)";
-                            }
+                            string newText = unknownAltitude ? instance.Names.Get(key) + " (?m)" : instance.Names.Get(key) + $" ({d}m)";
+                            if (foundAvi != null) newText += "*";
 
-                            if (foundAvi != null)
+                            if (item.Text != newText)
                             {
-                                item.Text += "*";
+                                item.Text = newText;
                             }
                         }
 
