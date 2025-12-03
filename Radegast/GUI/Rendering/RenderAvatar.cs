@@ -29,6 +29,7 @@ using OpenMetaverse;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse.Rendering;
 using Path = System.IO.Path;
+using System.Collections.Concurrent;
 
 namespace Radegast.Rendering
 {
@@ -1052,8 +1053,7 @@ namespace Radegast.Rendering
         public static Dictionary<int, string> mLowerMeshMapping = new Dictionary<int, string>();
         public static Dictionary<int, string> mHeadMeshMapping = new Dictionary<int, string>();
 
-        // public List<BinBVHAnimationReader> mAnimations = new List<BinBVHAnimationReader>();
-        public Dictionary<UUID, animationwrapper> mAnimationsWrapper = new Dictionary<UUID, animationwrapper>();
+        public ConcurrentDictionary<UUID, animationwrapper> mAnimationsWrapper = new ConcurrentDictionary<UUID, animationwrapper>();
 
         public static Dictionary<UUID, RenderAvatar> mAnimationTransactions = new Dictionary<UUID, RenderAvatar>();
 
@@ -1145,19 +1145,17 @@ namespace Radegast.Rendering
 
         public void processAnimation(UUID mAnimID)
         {
-            if (mAnimationsWrapper.ContainsKey(mAnimID))
+            if (mAnimationsWrapper.TryGetValue(mAnimID, out var existing))
             {
-                // Its an existing animation, we may need to do a seq update but we don't yet
-                // support that
-                mAnimationsWrapper[mAnimID].playstate = animationwrapper.animstate.STATE_WAITINGASSET;
-                mAnimationsWrapper[mAnimID].mPotentialyDead = false;
+                // Existing animation: update state
+                existing.playstate = animationwrapper.animstate.STATE_WAITINGASSET;
+                existing.mPotentialyDead = false;
             }
             else
             {
-                // Its a new animation do the decode dance
-                animationwrapper aw = new animationwrapper(mAnimID);
-                mAnimationsWrapper.Add(mAnimID, aw);
-
+                // New animation: add wrapper
+                var aw = new animationwrapper(mAnimID);
+                mAnimationsWrapper.TryAdd(mAnimID, aw);
             }
         }
 
@@ -1216,40 +1214,34 @@ namespace Radegast.Rendering
 
         public void flushanimations()
         {
-            lock (mAnimationsWrapper)
+            List<UUID> kills = new List<UUID>();
+            // Iterate snapshot of values and mark potential deaths
+            foreach (animationwrapper ar in mAnimationsWrapper.Values)
             {
-                List<UUID> kills = new List<UUID>();
-                foreach (animationwrapper ar in mAnimationsWrapper.Values)
+                if (ar.playstate == animationwrapper.animstate.STATE_STOP)
                 {
-                    if (ar.playstate == animationwrapper.animstate.STATE_STOP)
-                    {
-                        kills.Add(ar.mAnimation);
-                    }
-
-                    ar.mPotentialyDead = true;
+                    kills.Add(ar.mAnimation);
                 }
 
-                foreach (UUID key in kills)
-                {
-                    mAnimationsWrapper.Remove(key);
-                    //Logger.Log(string.Format("Removing dead animation {0} from av", key), Helpers.LogLevel.Info);
-                }
+                ar.mPotentialyDead = true;
+            }
+
+            foreach (UUID key in kills)
+            {
+                mAnimationsWrapper.TryRemove(key, out _);
+                //Logger.Log(string.Format("Removing dead animation {0} from av", key), Helpers.LogLevel.Info);
             }
         }
 
         public void flushanimationsfinal()
         {
-            lock (mAnimationsWrapper)
+            foreach (animationwrapper ar in mAnimationsWrapper.Values)
             {
-                foreach (animationwrapper ar in mAnimationsWrapper.Values)
+                if (ar.mPotentialyDead)
                 {
-                    if (ar.mPotentialyDead)
-                    {
-                        // Logger.Log(string.Format("Animation {0} is being marked for easeout (dead)",ar.mAnimation.ToString()),Helpers.LogLevel.Info);
-                        // Should we just stop dead? i think not it may get jerky
-                        ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
-                        ar.mRunTime = 0; //fix me nasty hack
-                    }
+                    // Should we just stop dead? i think not it may get jerky
+                    ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
+                    ar.mRunTime = 0; //fix me nasty hack
                 }
             }
 
@@ -1352,7 +1344,8 @@ namespace Radegast.Rendering
             anim.JointStates = states;
             anim.anim = b;
 
-            av.glavatar.skel.mAnimationsWrapper[animKey].playstate = animationwrapper.animstate.STATE_EASEIN;
+            // Update wrapper state and recalculate priorities
+            anim.playstate = animationwrapper.animstate.STATE_EASEIN;
             recalcpriorities(av);
 
         }
@@ -1360,74 +1353,70 @@ namespace Radegast.Rendering
         public static void recalcpriorities(RenderAvatar av)
         {
 
-            lock (av.glavatar.skel.mAnimationsWrapper)
+            //pre calculate all joint priorities here
+            av.glavatar.skel.mPriority.Clear();
+
+            // Iterate a snapshot to avoid concurrent modification exceptions
+            foreach (var kvp in av.glavatar.skel.mAnimationsWrapper.ToArray())
             {
-                //av.glavatar.skel.mAnimationsWrapper.Add(new animationwrapper(b));
+                int jpos = 0;
+                animationwrapper ar = kvp.Value;
+                if (ar.anim == null)
+                    continue;
 
-                //pre calculate all joint priorities here
-                av.glavatar.skel.mPriority.Clear();
-
-                foreach (var kvp in av.glavatar.skel.mAnimationsWrapper)
+                foreach (binBVHJoint joint in ar.anim.joints)
                 {
-                    int jpos = 0;
-                    animationwrapper ar = kvp.Value;
                     if (ar.anim == null)
-                        continue;
-
-                    foreach (binBVHJoint joint in ar.anim.joints)
                     {
-                        if (ar.anim == null)
-                        {
-                            jpos++;
-                            continue;
-                        }
-
-                        binBVHJointState state;
-                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
-                        {
-                            state = ar.JointStates[jpos];
-                        }
-                        else
-                        {
-                            // Fallback to legacy Tag for compatibility
-                            object tagobj = ar.anim.joints[jpos].Tag;
-                            if (tagobj == null)
-                            {
-                                Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in recalcpriorities.");
-                                jpos++;
-                                continue;
-                            }
-                            state = (binBVHJointState)tagobj;
-                        }
-
-                        if (ar.playstate == animationwrapper.animstate.STATE_STOP || ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
-                        {
-                            jpos++;
-                            continue;
-                        }
-
-                        //FIX ME need to consider ease out here on priorities somehow
-
-
-                        int prio = 0;
-                        //Quick hack to stack animations in the correct order
-                        //TODO we need to do this per joint as they all have their own priorities as well ;-)
-                        if (av.glavatar.skel.mPriority.TryGetValue(joint.Name, out prio))
-                        {
-                            if (prio > (ar.anim.Priority))
-                            {
-                                jpos++;
-                                continue;
-                            }
-                        }
-
-                        av.glavatar.skel.mPriority[joint.Name] = ar.anim.Priority;
-
                         jpos++;
-
-                        //av.glavatar.skel.mAnimationsWrapper[kvp.Key].playstate = animationwrapper.animstate.STATE_EASEIN;
-
+                        continue;
                     }
+
+                    binBVHJointState state;
+                    if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                    {
+                        state = ar.JointStates[jpos];
+                    }
+                    else
+                    {
+                        // Fallback to legacy Tag for compatibility
+                        object tagobj = ar.anim.joints[jpos].Tag;
+                        if (tagobj == null)
+                        {
+                            Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in recalcpriorities.");
+                            jpos++;
+                            continue;
+                        }
+                        state = (binBVHJointState)tagobj;
+                    }
+
+                    if (ar.playstate == animationwrapper.animstate.STATE_STOP || ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
+                    {
+                        jpos++;
+                        continue;
+                    }
+
+                    //FIX ME need to consider ease out here on priorities somehow
+
+
+                    int prio = 0;
+                    //Quick hack to stack animations in the correct order
+                    //TODO we need to do this per joint as they all have their own priorities as well ;-)
+                    if (av.glavatar.skel.mPriority.TryGetValue(joint.Name, out prio))
+                    {
+                        if (prio > (ar.anim.Priority))
+                        {
+                            jpos++;
+                            continue;
+                        }
+                    }
+
+                    av.glavatar.skel.mPriority[joint.Name] = ar.anim.Priority;
+
+                    jpos++;
+
+                    //av.glavatar.skel.mAnimationsWrapper[kvp.Key].playstate = animationwrapper.animstate.STATE_EASEIN;
+
                 }
             }
 
@@ -1436,146 +1425,145 @@ namespace Radegast.Rendering
         public void animate(float lastframetime)
         {
 
-            lock (mAnimationsWrapper)
+            // Work on a snapshot of wrappers to avoid locking during iteration
+            jointdeforms.Clear();
+            var wrappers = mAnimationsWrapper.Values.ToArray();
+
+            foreach (animationwrapper ar in wrappers)
             {
 
-                jointdeforms.Clear();
+                if (ar.playstate == animationwrapper.animstate.STATE_WAITINGASSET)
+                    continue;
 
-                foreach (animationwrapper ar in mAnimationsWrapper.Values)
+                if (ar.anim == null)
+                    continue;
+
+                ar.mRunTime += lastframetime;
+
+                // EASE FACTORS
+                // Caclulate ease factors now they are common to all joints in a given animation
+                float factor = 1.0f;
+
+                if (ar.playstate == animationwrapper.animstate.STATE_EASEIN)
+                {
+                    if (ar.mRunTime >= ar.anim.EaseInTime)
+                    {
+                        ar.playstate = animationwrapper.animstate.STATE_PLAY;
+                        //Console.WriteLine(String.Format("{0} Now in STATE_PLAY", ar.mAnimation));
+                    }
+                    else
+                    {
+                        factor = 1.0f - ((ar.anim.EaseInTime - ar.mRunTime) / ar.anim.EaseInTime);
+                    }
+
+                    //Console.WriteLine(String.Format("EASE IN {0} {1}",factor.ToString(),ar.mAnimation));
+                }
+
+                if (ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
                 {
 
-                    if (ar.playstate == animationwrapper.animstate.STATE_WAITINGASSET)
-                        continue;
-
-                    if (ar.anim == null)
-                        continue;
-
-                    ar.mRunTime += lastframetime;
-
-                    // EASE FACTORS
-                    // Caclulate ease factors now they are common to all joints in a given animation
-                    float factor = 1.0f;
-
-                    if (ar.playstate == animationwrapper.animstate.STATE_EASEIN)
+                    if (ar.mRunTime >= ar.anim.EaseOutTime)
                     {
-                        if (ar.mRunTime >= ar.anim.EaseInTime)
-                        {
-                            ar.playstate = animationwrapper.animstate.STATE_PLAY;
-                            //Console.WriteLine(String.Format("{0} Now in STATE_PLAY", ar.mAnimation));
-                        }
-                        else
-                        {
-                            factor = 1.0f - ((ar.anim.EaseInTime - ar.mRunTime) / ar.anim.EaseInTime);
-                        }
+                        ar.stopanim();
+                        factor = 0;
+                        //Console.WriteLine(String.Format("{0} Now in STATE_STOP", ar.mAnimation));
 
-                        //Console.WriteLine(String.Format("EASE IN {0} {1}",factor.ToString(),ar.mAnimation));
+                    }
+                    else
+                    {
+                        factor = 1.0f - (ar.mRunTime / ar.anim.EaseOutTime);
+
                     }
 
-                    if (ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
+                    //Console.WriteLine(String.Format("EASE OUT {0} {1}", factor.ToString(), ar.mAnimation));
+                }
+
+                // we should not need this, this implies bad math above
+
+
+                factor = Utils.Clamp(factor, 0.0f, 1.0f);
+                //factor = 1.0f;
+
+                //END EASE FACTORS
+
+
+                int jpos = 0;
+                foreach (binBVHJoint joint in ar.anim.joints)
+                {
+                    bool easeoutset = false;
+
+                    binBVHJointState state;
+                    if (ar.JointStates != null && jpos < ar.JointStates.Length)
                     {
-
-                        if (ar.mRunTime >= ar.anim.EaseOutTime)
-                        {
-                            ar.stopanim();
-                            factor = 0;
-                            //Console.WriteLine(String.Format("{0} Now in STATE_STOP", ar.mAnimation));
-
-                        }
-                        else
-                        {
-                            factor = 1.0f - (ar.mRunTime / ar.anim.EaseOutTime);
-
-                        }
-
-                        //Console.WriteLine(String.Format("EASE OUT {0} {1}", factor.ToString(), ar.mAnimation));
+                        state = ar.JointStates[jpos];
                     }
-
-                    // we should not need this, this implies bad math above
-
-
-                    factor = Utils.Clamp(factor, 0.0f, 1.0f);
-                    //factor = 1.0f;
-
-                    //END EASE FACTORS
-
-
-                    int jpos = 0;
-                    foreach (binBVHJoint joint in ar.anim.joints)
+                    else
                     {
-                        bool easeoutset = false;
-
-                        binBVHJointState state;
-                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                        object tagobj = ar.anim.joints[jpos].Tag;
+                        if (tagobj == null)
                         {
-                            state = ar.JointStates[jpos];
-                        }
-                        else
-                        {
-                            object tagobj = ar.anim.joints[jpos].Tag;
-                            if (tagobj == null)
-                            {
-                                Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in animate.");
-                                jpos++;
-                                continue;
-                            }
-                            state = (binBVHJointState)tagobj;
-                        }
-
-                        if (ar.playstate == animationwrapper.animstate.STATE_STOP)
-                        {
+                            Logger.Warn($"Missing joint state for animation {ar.mAnimation} joint {joint.Name}; skipping joint in animate.");
                             jpos++;
                             continue;
                         }
+                        state = (binBVHJointState)tagobj;
+                    }
 
-                        int prio = 0;
-                        //Quick hack to stack animations in the correct order
-                        //TODO we need to do this per joint as they all have their own priorities as well ;-(
-                        if (mPriority.TryGetValue(joint.Name, out prio))
+                    if (ar.playstate == animationwrapper.animstate.STATE_STOP)
+                    {
+                        jpos++;
+                        continue;
+                    }
+
+                    int prio = 0;
+                    //Quick hack to stack animations in the correct order
+                    //TODO we need to do this per joint as they all have their own priorities as well ;-(
+                    if (mPriority.TryGetValue(joint.Name, out prio))
+                    {
+                        //if (prio > (ar.anim.Priority))
+                        //continue;
+                    }
+
+                    Vector3 poslerp = Vector3.Zero;
+                    Quaternion rotlerp = Quaternion.Identity;
+
+                    // Position
+                    if (ar.anim.joints[jpos].positionkeys.Length >= 2 && joint.Name == "mPelvis")
+                    {
+
+                        //Console.WriteLine("Animate time " + state.currenttime_pos.ToString());
+
+                        state.currenttime_pos += lastframetime;
+
+                        float currentime = state.currenttime_pos;
+                        bool overrun = false;
+
+                        if (state.currenttime_pos > ar.anim.OutPoint)
                         {
-                            //if (prio > (ar.anim.Priority))
-                            //continue;
+                            //overrun state
+                            int itterations = (int)(state.currenttime_pos / ar.anim.OutPoint) + 1;
+                            state.currenttime_pos = currentime = ar.anim.InPoint + ((ar.anim.OutPoint - ar.anim.InPoint) - (((ar.anim.OutPoint - ar.anim.InPoint) * itterations) - state.currenttime_pos));
+                            overrun = true;
                         }
 
-                        Vector3 poslerp = Vector3.Zero;
-                        Quaternion rotlerp = Quaternion.Identity;
+                        binBVHJointKey pos_next = ar.anim.joints[jpos].positionkeys[state.nextkeyframe_pos];
+                        binBVHJointKey pos_last = ar.anim.joints[jpos].positionkeys[state.lastkeyframe_pos];
 
-                        // Position
-                        if (ar.anim.joints[jpos].positionkeys.Length >= 2 && joint.Name == "mPelvis")
+                        // if the current time > than next key frame time we move keyframes
+                        if (currentime >= pos_next.time || overrun)
                         {
 
-                            //Console.WriteLine("Animate time " + state.currenttime_pos.ToString());
+                            //Console.WriteLine("bump");
+                            state.lastkeyframe_pos++;
+                            state.nextkeyframe_pos++;
 
-                            state.currenttime_pos += lastframetime;
-
-                            float currentime = state.currenttime_pos;
-                            bool overrun = false;
-
-                            if (state.currenttime_pos > ar.anim.OutPoint)
+                            if (ar.anim.Loop)
                             {
-                                //overrun state
-                                int itterations = (int)(state.currenttime_pos / ar.anim.OutPoint) + 1;
-                                state.currenttime_pos = currentime = ar.anim.InPoint + ((ar.anim.OutPoint - ar.anim.InPoint) - (((ar.anim.OutPoint - ar.anim.InPoint) * itterations) - state.currenttime_pos));
-                                overrun = true;
-                            }
+                                if (state.nextkeyframe_pos > state.pos_loopoutframe)
+                                    state.nextkeyframe_pos = state.pos_loopinframe;
 
-                            binBVHJointKey pos_next = ar.anim.joints[jpos].positionkeys[state.nextkeyframe_pos];
-                            binBVHJointKey pos_last = ar.anim.joints[jpos].positionkeys[state.lastkeyframe_pos];
-
-                            // if the current time > than next key frame time we move keyframes
-                            if (currentime >= pos_next.time || overrun)
-                            {
-
-                                //Console.WriteLine("bump");
-                                state.lastkeyframe_pos++;
-                                state.nextkeyframe_pos++;
-
-                                if (ar.anim.Loop)
-                                {
-                                    if (state.nextkeyframe_pos > state.pos_loopoutframe)
-                                        state.nextkeyframe_pos = state.pos_loopinframe;
-
-                                    if (state.lastkeyframe_pos > state.pos_loopoutframe)
-                                        state.lastkeyframe_pos = state.pos_loopinframe;
+                                if (state.lastkeyframe_pos > state.pos_loopoutframe)
+                                    state.lastkeyframe_pos = state.pos_loopinframe;
 
 
                                     if (state.nextkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
@@ -1584,160 +1572,159 @@ namespace Radegast.Rendering
                                     if (state.lastkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
                                         state.lastkeyframe_pos = state.pos_loopinframe;
 
-                                }
-                                else
-                                {
-                                    if (state.nextkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
-                                        state.nextkeyframe_pos = ar.anim.joints[jpos].positionkeys.Length - 1;
-
-                                    if (state.lastkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
-                                    {
-                                        state.lastkeyframe_pos = ar.anim.joints[jpos].positionkeys.Length - 1;
-
-                                        ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
-                                        //animation over
-                                    }
-                                }
-                            }
-
-                            //if (pos_next.time == pos_last.time)
-                            //{
-                            //    ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
-                            //}
-
-                            // update the pointers incase they have been moved
-                            pos_next = ar.anim.joints[jpos].positionkeys[state.nextkeyframe_pos];
-                            pos_last = ar.anim.joints[jpos].positionkeys[state.lastkeyframe_pos];
-
-                            // TODO the lerp/delta is faulty
-                            // it is not going to handle loop points when we wrap around as last will be > next
-                            // it also fails when currenttime < last_time which occurs as keyframe[0] is not exactly at
-                            // t(0).
-                            float delta = (state.currenttime_pos - pos_last.time) / (pos_next.time - pos_last.time);
-
-                            delta = Utils.Clamp(delta, 0f, 1f);
-                            poslerp = Vector3.Lerp(pos_last.key_element, pos_next.key_element, delta) * factor;
-
-                            //Console.WriteLine(string.Format("Time {0} {1} {2} {3} {4}", state.currenttime_pos, delta, poslerp.ToString(), state.lastkeyframe_pos, state.nextkeyframe_pos));
-
-                        }
-
-                        // end of position
-
-                        //rotation
-
-                        if (ar.anim.joints[jpos].rotationkeys.Length >= 2)
-                        {
-
-                            state.currenttime_rot += lastframetime;
-
-                            float currentime = state.currenttime_rot;
-                            bool overrun = false;
-
-                            if (state.currenttime_rot > ar.anim.OutPoint)
-                            {
-                                //overrun state
-                                int itterations = (int)(state.currenttime_rot / ar.anim.OutPoint) + 1;
-                                state.currenttime_rot = currentime = ar.anim.InPoint + ((ar.anim.OutPoint - ar.anim.InPoint) - (((ar.anim.OutPoint - ar.anim.InPoint) * itterations) - state.currenttime_rot));
-                                overrun = true;
-                            }
-
-                            binBVHJointKey rot_next = ar.anim.joints[jpos].rotationkeys[state.nextkeyframe_rot];
-                            binBVHJointKey rot_last = ar.anim.joints[jpos].rotationkeys[state.lastkeyframe_rot];
-
-                            // if the current time > than next key frame time we move keyframes
-                            if (currentime >= rot_next.time || overrun)
-                            {
-
-                                state.lastkeyframe_rot++;
-                                state.nextkeyframe_rot++;
-
-                                if (ar.anim.Loop)
-                                {
-                                    if (state.nextkeyframe_rot > state.rot_loopoutframe)
-                                        state.nextkeyframe_rot = state.rot_loopinframe;
-
-                                    if (state.lastkeyframe_rot > state.rot_loopoutframe)
-                                        state.lastkeyframe_rot = state.rot_loopinframe;
-
-                                }
-                                else
-                                {
-                                    if (state.nextkeyframe_rot >= ar.anim.joints[jpos].rotationkeys.Length)
-                                        state.nextkeyframe_rot = ar.anim.joints[jpos].rotationkeys.Length - 1;
-
-                                    if (state.lastkeyframe_rot >= ar.anim.joints[jpos].rotationkeys.Length)
-                                    {
-                                        state.lastkeyframe_rot = ar.anim.joints[jpos].rotationkeys.Length - 1;
-
-                                        ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
-                                        //animation over
-                                    }
-                                }
-                            }
-
-                            // update the pointers incase they have been moved
-                            rot_next = ar.anim.joints[jpos].rotationkeys[state.nextkeyframe_rot];
-                            rot_last = ar.anim.joints[jpos].rotationkeys[state.lastkeyframe_rot];
-
-                            // TODO the lerp/delta is faulty
-                            // it is not going to handle loop points when we wrap around as last will be > next
-                            // it also fails when currenttime < last_time which occurs as keyframe[0] is not exactly at
-                            // t(0).
-                            float delta = state.currenttime_rot - rot_last.time / (rot_next.time - rot_last.time);
-                            delta = Utils.Clamp(delta, 0f, 1f);
-                            Vector3 rotlerpv = Vector3.Lerp(rot_last.key_element, rot_next.key_element, delta);
-                            // rotlerp = Quaternion.Slerp(Quaternion.Identity,new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z), factor);
-
-                            if (!easeoutset && ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
-                            {
-                                easeoutset = true;
-                                state.easeoutrot = new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z);
-                                state.easeoutfactor = factor;
                             }
                             else
                             {
-                                rotlerp = new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z);
+                                if (state.nextkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
+                                    state.nextkeyframe_pos = ar.anim.joints[jpos].positionkeys.Length - 1;
+
+                                if (state.lastkeyframe_pos >= ar.anim.joints[jpos].positionkeys.Length)
+                                {
+                                    state.lastkeyframe_pos = ar.anim.joints[jpos].positionkeys.Length - 1;
+
+                                    ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
+                                    //animation over
+                                }
                             }
                         }
 
-                        //end of rotation
+                        //if (pos_next.time == pos_last.time)
+                        //{
+                        //    ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
+                        //}
 
-                        joint jointstate = new joint();
+                        // update the pointers incase they have been moved
+                        pos_next = ar.anim.joints[jpos].positionkeys[state.nextkeyframe_pos];
+                        pos_last = ar.anim.joints[jpos].positionkeys[state.lastkeyframe_pos];
 
-                        if (jointdeforms.TryGetValue(ar.anim.joints[jpos].Name, out jointstate))
+                        // TODO the lerp/delta is faulty
+                        // it is not going to handle loop points when we wrap around as last will be > next
+                        // it also fails when currenttime < last_time which occurs as keyframe[0] is not exactly at
+                        // t(0).
+                        float delta = (state.currenttime_pos - pos_last.time) / (pos_next.time - pos_last.time);
+
+                        delta = Utils.Clamp(delta, 0f, 1f);
+                        poslerp = Vector3.Lerp(pos_last.key_element, pos_next.key_element, delta) * factor;
+
+                        //Console.WriteLine(string.Format("Time {0} {1} {2} {3} {4}", state.currenttime_pos, delta, poslerp.ToString(), state.lastkeyframe_pos, state.nextkeyframe_pos));
+
+                    }
+
+                    // end of position
+
+                    //rotation
+
+                    if (ar.anim.joints[jpos].rotationkeys.Length >= 2)
+                    {
+
+                        state.currenttime_rot += lastframetime;
+
+                        float currentime = state.currenttime_rot;
+                        bool overrun = false;
+
+                        if (state.currenttime_rot > ar.anim.OutPoint)
                         {
-                            jointstate.offset += (poslerp);
+                            //overrun state
+                            int itterations = (int)(state.currenttime_rot / ar.anim.OutPoint) + 1;
+                            state.currenttime_rot = currentime = ar.anim.InPoint + ((ar.anim.OutPoint - ar.anim.InPoint) - (((ar.anim.OutPoint - ar.anim.InPoint) * itterations) - state.currenttime_rot));
+                            overrun = true;
+                        }
 
-                            if (ar.playstate != animationwrapper.animstate.STATE_EASEOUT)
+                        binBVHJointKey rot_next = ar.anim.joints[jpos].rotationkeys[state.nextkeyframe_rot];
+                        binBVHJointKey rot_last = ar.anim.joints[jpos].rotationkeys[state.lastkeyframe_rot];
+
+                        // if the current time > than next key frame time we move keyframes
+                        if (currentime >= rot_next.time || overrun)
+                        {
+
+                            state.lastkeyframe_rot++;
+                            state.nextkeyframe_rot++;
+
+                            if (ar.anim.Loop)
                             {
-                                jointstate.rotation = easeoutset 
-                                    ? Quaternion.Slerp(jointstate.rotation, state.easeoutrot, state.easeoutfactor) 
-                                    : rotlerp;
-                            }
+                                if (state.nextkeyframe_rot > state.rot_loopoutframe)
+                                    state.nextkeyframe_rot = state.rot_loopinframe;
 
-                            //jointstate.rotation= Quaternion.Slerp(jointstate.rotation, rotlerp, 0.5f);
+                                if (state.lastkeyframe_rot > state.rot_loopoutframe)
+                                    state.lastkeyframe_rot = state.rot_loopinframe;
+
+                            }
+                            else
+                            {
+                                if (state.nextkeyframe_rot >= ar.anim.joints[jpos].rotationkeys.Length)
+                                    state.nextkeyframe_rot = ar.anim.joints[jpos].rotationkeys.Length - 1;
+
+                                if (state.lastkeyframe_rot >= ar.anim.joints[jpos].rotationkeys.Length)
+                                {
+                                    state.lastkeyframe_rot = ar.anim.joints[jpos].rotationkeys.Length - 1;
+
+                                    ar.playstate = animationwrapper.animstate.STATE_EASEOUT;
+                                    //animation over
+                                }
+                            }
+                        }
+
+                        // update the pointers incase they have been moved
+                        rot_next = ar.anim.joints[jpos].rotationkeys[state.nextkeyframe_rot];
+                        rot_last = ar.anim.joints[jpos].rotationkeys[state.lastkeyframe_rot];
+
+                        // TODO the lerp/delta is faulty
+                        // it is not going to handle loop points when we wrap around as last will be > next
+                        // it also fails when currenttime < last_time which occurs as keyframe[0] is not exactly at
+                        // t(0).
+                        float delta = state.currenttime_rot - rot_last.time / (rot_next.time - rot_last.time);
+                        delta = Utils.Clamp(delta, 0f, 1f);
+                        Vector3 rotlerpv = Vector3.Lerp(rot_last.key_element, rot_next.key_element, delta);
+                        // rotlerp = Quaternion.Slerp(Quaternion.Identity,new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z), factor);
+
+                        if (!easeoutset && ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
+                        {
+                            easeoutset = true;
+                            state.easeoutrot = new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z);
+                            state.easeoutfactor = factor;
                         }
                         else
                         {
-                            jointstate = new joint
-                            {
-                                rotation = rotlerp,
-                                offset = poslerp
-                            };
-                            jointdeforms.Add(ar.anim.joints[jpos].Name, jointstate);
+                            rotlerp = new Quaternion(rotlerpv.X, rotlerpv.Y, rotlerpv.Z);
                         }
-
-                        //warning struct copy non reference
-                        // Store back into both typed array and legacy Tag for compatibility
-                        if (ar.JointStates != null && jpos < ar.JointStates.Length)
-                        {
-                            ar.JointStates[jpos] = state;
-                        }
-                        ar.anim.joints[jpos].Tag = state;
-
-                        jpos++;
                     }
+
+                    //end of rotation
+
+                    joint jointstate = new joint();
+
+                    if (jointdeforms.TryGetValue(ar.anim.joints[jpos].Name, out jointstate))
+                    {
+                        jointstate.offset += (poslerp);
+
+                        if (ar.playstate != animationwrapper.animstate.STATE_EASEOUT)
+                        {
+                            jointstate.rotation = easeoutset 
+                                ? Quaternion.Slerp(jointstate.rotation, state.easeoutrot, state.easeoutfactor) 
+                                : rotlerp;
+                        }
+
+                        //jointstate.rotation= Quaternion.Slerp(jointstate.rotation, rotlerp, 0.5f);
+                    }
+                    else
+                    {
+                        jointstate = new joint
+                        {
+                            rotation = rotlerp,
+                            offset = poslerp
+                        };
+                        jointdeforms.Add(ar.anim.joints[jpos].Name, jointstate);
+                    }
+
+                    //warning struct copy non reference
+                    // Store back into both typed array and legacy Tag for compatibility
+                    if (ar.JointStates != null && jpos < ar.JointStates.Length)
+                    {
+                        ar.JointStates[jpos] = state;
+                    }
+                    ar.anim.joints[jpos].Tag = state;
+
+                    jpos++;
                 }
             }
 
