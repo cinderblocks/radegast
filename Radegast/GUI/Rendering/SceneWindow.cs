@@ -57,6 +57,7 @@ namespace Radegast.Rendering
     public partial class SceneWindow : RadegastTabControl
     {
         #region Public fields
+
         /// <summary>
         /// The OpenGL surface
         /// </summary>
@@ -111,6 +112,7 @@ namespace Radegast.Rendering
         /// Size of OpenGL window we're drawing on
         /// </summary>
         public int[] Viewport = new int[4];
+
         #endregion Public fields
 
         #region Private fields
@@ -124,7 +126,9 @@ namespace Radegast.Rendering
 
         private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
         private readonly MeshmerizerR renderer;
+
         private OpenTK.Graphics.GraphicsMode GLMode = null;
+
         // Worker context for background texture uploads
         private IGraphicsContext textureContext = null;
         private IWindowInfo sharedWindowInfo = null;
@@ -173,6 +177,7 @@ namespace Radegast.Rendering
         #endregion Private fields
 
         #region Construction and disposal
+
         public SceneWindow(RadegastInstanceForms instance)
             : base(instance)
         {
@@ -338,6 +343,7 @@ namespace Radegast.Rendering
 
                 SafeDispose(glControl, "GLControl", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             }
+
             glControl = null;
 
             // Ensure texture thread stopped and worker context disposed
@@ -391,9 +397,11 @@ namespace Radegast.Rendering
 #endif
             }
         }
+
         #endregion Construction and disposal
 
         #region Tab Events
+
         public void RegisterTabEvents()
         {
             RadegastTab.TabAttached += RadegastTab_TabAttached;
@@ -459,6 +467,7 @@ namespace Radegast.Rendering
                     img.Dispose();
                 sculptCache.Clear();
             }
+
             lock (Prims) Prims.Clear();
             lock (Avatars) Avatars.Clear();
             SetWaterPlanes();
@@ -604,6 +613,7 @@ namespace Radegast.Rendering
         #endregion Network messaage handlers
 
         #region glControl setup and disposal
+
         public void SetupGLControl()
         {
             // Crash fix for users with SDL2.dll in their path. OpenTK will attempt to use
@@ -716,6 +726,7 @@ namespace Radegast.Rendering
             specular = RenderSettings.SpecularLight;
             SetSun();
         }
+
         private bool glControlLoaded = false;
 
         private void glControl_Load(object sender, EventArgs e)
@@ -753,7 +764,8 @@ namespace Radegast.Rendering
 
                     if (winInfoObj == null)
                     {
-                        foreach (var fi in t.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic))
+                        foreach (var fi in t.GetFields(System.Reflection.BindingFlags.Instance |
+                                                       System.Reflection.BindingFlags.NonPublic))
                         {
                             if (typeof(IWindowInfo).IsAssignableFrom(fi.FieldType))
                             {
@@ -769,7 +781,8 @@ namespace Radegast.Rendering
                     {
                         // Use reflection to find a compatible GraphicsContext constructor and create the worker context that shares with the GLControl
                         var gcType = typeof(GraphicsContext);
-                        var ctors = gcType.GetConstructors(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                        var ctors = gcType.GetConstructors(System.Reflection.BindingFlags.Public |
+                                                           System.Reflection.BindingFlags.Instance);
                         object created = null;
                         foreach (var ctor in ctors)
                         {
@@ -791,14 +804,22 @@ namespace Radegast.Rendering
                                 else if (pType == typeof(int))
                                 {
                                     // supply major/minor or placeholder
-                                    if (intPadValue == 0) { args[i] = 3; intPadValue++; }
-                                    else { args[i] = 0; }
+                                    if (intPadValue == 0)
+                                    {
+                                        args[i] = 3;
+                                        intPadValue++;
+                                    }
+                                    else
+                                    {
+                                        args[i] = 0;
+                                    }
                                 }
                                 else if (pType.FullName.Contains("GraphicsContextFlags"))
                                 {
                                     args[i] = GraphicsContextFlags.Default;
                                 }
-                                else if (typeof(IGraphicsContext).IsAssignableFrom(pType) || pType.FullName.Contains("IGraphicsContext"))
+                                else if (typeof(IGraphicsContext).IsAssignableFrom(pType) ||
+                                         pType.FullName.Contains("IGraphicsContext"))
                                 {
                                     args[i] = glControl.Context;
                                 }
@@ -931,6 +952,10 @@ namespace Radegast.Rendering
                 var prog = shaderManager?.GetProgram("shiny");
                 if (prog == null) return;
 
+                // Verify a shader program is actually active before setting uniforms
+                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                if (activeProgram == 0 || activeProgram != prog.ID) return;
+
                 var uMVP = prog.Uni("uMVP");
                 var uModelView = prog.Uni("uModelView");
                 var uNormal = prog.Uni("uNormalMatrix");
@@ -942,7 +967,7 @@ namespace Radegast.Rendering
 
                 if (uMVP != -1)
                 {
-                    var mvp = proj * mv;
+                    var mvp = mv * proj;
                     GL.UniformMatrix4(uMVP, false, ref mvp);
                 }
 
@@ -957,22 +982,284 @@ namespace Radegast.Rendering
                         mv.M11, mv.M12, mv.M13,
                         mv.M21, mv.M22, mv.M23,
                         mv.M31, mv.M32, mv.M33);
-                    // inverse
-                    normal = normal.Inverted();
-                    // transpose
-                    normal = new OpenTK.Matrix3(
-                        normal.M11, normal.M21, normal.M31,
-                        normal.M12, normal.M22, normal.M32,
-                        normal.M13, normal.M23, normal.M33);
-                    GL.UniformMatrix3(uNormal, false, ref normal);
+
+                    // Compute inverse transpose for correct normal transformation
+                    try
+                    {
+                        normal = normal.Inverted();
+                        normal = new OpenTK.Matrix3(
+                            normal.M11, normal.M21, normal.M31,
+                            normal.M12, normal.M22, normal.M32,
+                            normal.M13, normal.M23, normal.M33);
+                        GL.UniformMatrix3(uNormal, false, ref normal);
+                    }
+                    catch
+                    {
+                        // If matrix is singular, use identity
+                        var identity = OpenTK.Matrix3.Identity;
+                        GL.UniformMatrix3(uNormal, false, ref identity);
+                    }
                 }
             }
             catch { }
         }
 
+        // Set material color uniform for shader
+        public void SetShaderMaterialColor(OpenMetaverse.Color4 color)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uMaterialColor = prog.Uni("materialColor");
+                if (uMaterialColor != -1)
+                {
+                    GL.Uniform4(uMaterialColor, color.R, color.G, color.B, color.A);
+                }
+            }
+            catch { }
+        }
+
+        // Set hasTexture uniform for shader
+        public void SetShaderHasTexture(bool hasTexture)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uHasTexture = prog.Uni("hasTexture");
+                if (uHasTexture != -1)
+                {
+                    GL.Uniform1(uHasTexture, hasTexture ? 1 : 0);
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Select shiny shader as the current shader
+        /// </summary>
+        public void StartShiny()
+        {
+            if (RenderSettings.EnableShiny)
+            {
+                if (shaderManager == null) return;
+                if (!shaderManager.StartShader("shiny")) return;
+
+                try
+                {
+                    var prog = shaderManager.GetProgram("shiny");
+                    if (prog == null) return;
+
+                    // Set light direction uniform
+                    var uLight = prog.Uni("lightDir");
+                    if (uLight != -1)
+                    {
+                        try
+                        {
+                            // Get current modelview matrix
+                            GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+                            // Transform sun direction into eye space using w=0 to avoid translation
+                            var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
+                            var trans = OpenTK.Vector4.Transform(sunDir, mv);
+                            var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
+                            GL.Uniform3(uLight, ld);
+                        }
+                        catch
+                        {
+                            // fallback to sending raw sunPos if transform fails
+                            GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                        }
+                    }
+
+                    // Set color uniforms
+                    var ua = prog.Uni("ambientColor");
+                    if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                    var ud = prog.Uni("diffuseColor");
+                    if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                    var us = prog.Uni("specularColor");
+                    if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+
+                    // Ensure colorMap sampler is bound to texture unit 0
+                    var uColorMap = prog.Uni("colorMap");
+                    if (uColorMap != -1)
+                    {
+                        GL.Uniform1(uColorMap, 0);
+                    }
+
+                    // Update matrix uniforms for current modelview/projection
+                    UpdateShaderMatrices();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// Start the avatar shader for avatar rendering
+        /// </summary>
+        public void StartAvatarShader()
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.AvatarRenderingEnabled) return;
+            if (shaderManager == null) return;
+            if (!shaderManager.StartShader("avatar")) return;
+
+            try
+            {
+                var prog = shaderManager.GetProgram("avatar");
+                if (prog == null) return;
+
+                // Set light direction uniform
+                var uLight = prog.Uni("lightDir");
+                if (uLight != -1)
+                {
+                    try
+                    {
+                        // Get current modelview matrix
+                        GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+                        // Transform sun direction into eye space using w=0 to avoid translation
+                        var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
+                        var trans = OpenTK.Vector4.Transform(sunDir, mv);
+                        var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
+                        GL.Uniform3(uLight, ld);
+                    }
+                    catch
+                    {
+                        // fallback to sending raw sunPos if transform fails
+                        GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                    }
+                }
+
+                // Set color uniforms
+                var ua = prog.Uni("ambientColor");
+                if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                var ud = prog.Uni("diffuseColor");
+                if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                var us = prog.Uni("specularColor");
+                if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+
+                // Ensure colorMap sampler is bound to texture unit 0
+                var uColorMap = prog.Uni("colorMap");
+                if (uColorMap != -1)
+                {
+                    GL.Uniform1(uColorMap, 0);
+                }
+
+                // Update matrix uniforms for current modelview/projection
+                UpdateAvatarShaderMatrices();
+            }
+            catch
+            {
+            }
+        }
+
+        /// <summary>
+        /// Update avatar shader matrix uniforms (call when modelview has been modified)
+        /// </summary>
+        public void UpdateAvatarShaderMatrices()
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.AvatarRenderingEnabled) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("avatar");
+                if (prog == null) return;
+
+                // Verify a shader program is actually active before setting uniforms
+                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                if (activeProgram == 0 || activeProgram != prog.ID) return;
+
+                var uMVP = prog.Uni("uMVP");
+                var uModelView = prog.Uni("uModelView");
+                var uNormal = prog.Uni("uNormalMatrix");
+
+                if (uMVP == -1 && uModelView == -1 && uNormal == -1) return;
+
+                GL.GetFloat(GetPName.ProjectionMatrix, out OpenTK.Matrix4 proj);
+                GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+
+                if (uMVP != -1)
+                {
+                    var mvp = mv * proj;
+                    GL.UniformMatrix4(uMVP, false, ref mvp);
+                }
+
+                if (uModelView != -1)
+                {
+                    GL.UniformMatrix4(uModelView, false, ref mv);
+                }
+
+                if (uNormal != -1)
+                {
+                    var normal = new OpenTK.Matrix3(
+                        mv.M11, mv.M12, mv.M13,
+                        mv.M21, mv.M22, mv.M23,
+                        mv.M31, mv.M32, mv.M33);
+
+                    // Compute inverse transpose for correct normal transformation
+                    try
+                    {
+                        normal = normal.Inverted();
+                        normal = new OpenTK.Matrix3(
+                            normal.M11, normal.M21, normal.M31,
+                            normal.M12, normal.M22, normal.M32,
+                            normal.M13, normal.M23, normal.M33);
+                        GL.UniformMatrix3(uNormal, false, ref normal);
+                    }
+                    catch
+                    {
+                        // If matrix is singular, use identity
+                        var identity = OpenTK.Matrix3.Identity;
+                        GL.UniformMatrix3(uNormal, false, ref identity);
+                    }
+                }
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Stop the avatar shader and return to fixed-function pipeline
+        /// </summary>
+        public void StopAvatarShader()
+        {
+            if (RenderSettings.HasShaders && shaderManager != null)
+            {
+                try
+                {
+                    shaderManager.StopShader();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        /// <summary>
+        /// Stop the shiny shader and return to fixed-function pipeline
+        /// </summary>
+        public void StopShiny()
+        {
+            if (RenderSettings.EnableShiny && shaderManager != null)
+            {
+                try
+                {
+                    shaderManager.StopShader();
+                }
+                catch { }
+            }
+        }
+
         #endregion glControl setup and disposal
 
         #region glControl paint and resize events
+
         private void MainRenderLoop()
         {
             if (!RenderingEnabled) return;
@@ -1038,6 +1325,7 @@ namespace Radegast.Rendering
             GL.MatrixMode(MatrixMode.Modelview);
             GL.PopMatrix();
         }
+
         #endregion glControl paint and resize events
 
         // Switch to ortho display mode for drawing hud
@@ -1103,8 +1391,9 @@ namespace Radegast.Rendering
 
                 if (RenderSettings.AvatarRenderingEnabled)
                 {
-                    var avis = (from a in Client.Network.CurrentSim.ObjectsAvatars 
-                            where a.Value != null select a.Value);
+                    var avis = (from a in Client.Network.CurrentSim.ObjectsAvatars
+                        where a.Value != null
+                        select a.Value);
                     foreach (var avatar in avis)
                     {
                         UpdatePrimBlocking(avatar);
@@ -1119,7 +1408,7 @@ namespace Radegast.Rendering
                                 where p.Value != null
                                 where p.Value.ParentID == attachment.LocalID
                                 select p.Value);
-                            foreach (var attachedChild in  attachedChildren)
+                            foreach (var attachedChild in attachedChildren)
                             {
                                 UpdatePrimBlocking(attachedChild);
                             }
@@ -1223,6 +1512,7 @@ namespace Radegast.Rendering
             {
                 return parent;
             }
+
             return Avatars.TryGetValue(localID, out var avi) ? avi : null;
         }
 
@@ -1494,6 +1784,7 @@ namespace Radegast.Rendering
                 GL.VertexPointer(3, VertexPointerType.Float, 0, RHelp.CubeVertices);
                 GL.DrawElements(PrimitiveType.Quads, RHelp.CubeIndices.Length, DrawElementsType.UnsignedShort, RHelp.CubeIndices);
             }
+
             GL.PopMatrix();
         }
 
@@ -1666,6 +1957,7 @@ namespace Radegast.Rendering
                         timeSinceReflection = 0f;
                     }
                 }
+
                 GL.ClearColor(0.39f, 0.58f, 0.93f, 1.0f);
             }
 
@@ -1763,6 +2055,12 @@ namespace Radegast.Rendering
                 // Render water after opaque objects but before alpha blended objects
                 RenderWater();
 
+                // Ensure all shaders are stopped before HUD rendering (text, UI elements)
+                if (RenderSettings.HasShaders && RenderSettings.EnableShiny)
+                {
+                    StopShiny();
+                }
+
                 GLHUDBegin();
                 RenderText(RenderPass.Simple);
                 RenderStats();
@@ -1785,7 +2083,7 @@ namespace Radegast.Rendering
         {
             // Use PickingHelper to handle GL state
             byte[] color = PickingHelper.ExecutePicking(x, y, glControl.Height, () => Render(true));
-            
+
             var depth = PickingHelper.ReadPixelDepth(x, y, glControl.Height);
             GLU.UnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
             worldPos = RHelp.OMVVector3(worldPosTK);
@@ -1840,107 +2138,6 @@ namespace Radegast.Rendering
             }
 
             return picked != null;
-        }
-
-        /// <summary>
-        /// Select shiny shader as the current shader
-        /// </summary>
-        public void StartShiny()
-        {
-            if (RenderSettings.EnableShiny)
-            {
-                if (shaderManager == null) return;
-                if (!shaderManager.StartShader("shiny")) return;
-
-                try
-                {
-                    var prog = shaderManager.GetProgram("shiny");
-                    if (prog == null) return;
-
-                    // Compute light direction in eye space by transforming sunPos with current modelview
-                    var uLight = prog.Uni("lightDir");
-                    if (uLight != -1)
-                    {
-                        try
-                        {
-                            // Get current modelview matrix
-                            GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
-                            // Transform sun direction into eye space using w=0 to avoid translation
-                            var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
-                            var trans = OpenTK.Vector4.Transform(sunDir, mv);
-                            var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
-                            GL.Uniform3(uLight, ld);
-                        }
-                        catch
-                        {
-                            // fallback to sending raw sunPos if transform fails
-                            GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
-                        }
-                    }
-
-                    // Ensure colorMap sampler is bound to texture unit 0 for this program
-                    var uColorMap = prog.Uni("colorMap");
-                    if (uColorMap != -1)
-                    {
-                        try { GL.Uniform1(uColorMap, 0); } catch { }
-                    }
-
-                    var ua = prog.Uni("ambientColor");
-                    if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                    var ud = prog.Uni("diffuseColor");
-                    if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                    var us = prog.Uni("specularColor");
-                    if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
-
-                    // Update matrix uniforms for current modelview/projection
-                    UpdateShaderMatrices();
-
-                    // Also explicitly compute and upload normal matrix here to ensure shaders that
-                    // expect it immediately after StartShader get the correct value.
-                    try
-                    {
-                        GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv2);
-                        var normal = new OpenTK.Matrix3(
-                            mv2.M11, mv2.M12, mv2.M13,
-                            mv2.M21, mv2.M22, mv2.M23,
-                            mv2.M31, mv2.M32, mv2.M33);
-                        normal = normal.Inverted();
-                        normal = new OpenTK.Matrix3(
-                            normal.M11, normal.M21, normal.M31,
-                            normal.M12, normal.M22, normal.M32,
-                            normal.M13, normal.M23, normal.M33);
-
-                        var uNormalExplicit = prog.Uni("uNormalMatrix");
-                        if (uNormalExplicit != -1)
-                        {
-                            GL.UniformMatrix3(uNormalExplicit, false, ref normal);
-                        }
-
-                        var uNormalAlt = prog.Uni("normalMatrix");
-                        if (uNormalAlt != -1)
-                        {
-                            GL.UniformMatrix3(uNormalAlt, false, ref normal);
-                        }
-                    }
-                    catch { }
-                }
-                catch { }
-            }
-        }
-
-        /// <summary>
-        /// Stop the shiny shader and return to fixed-function pipeline
-        /// </summary>
-        public void StopShiny()
-        {
-            if (RenderSettings.EnableShiny && shaderManager != null)
-            {
-                try
-                {
-                    shaderManager.StopShader();
-                }
-                catch { }
-            }
         }
 
         private void CalculateBoundingBox(RenderPrimitive rprim)

@@ -79,7 +79,6 @@ namespace Radegast.Rendering
             }
             cbOcclusionCulling.Checked = Instance.GlobalSettings["rendering_occlusion_culling_enabled2"];
             cbShiny.Checked = Instance.GlobalSettings["scene_viewer_shiny"];
-            cbVBO.Checked = Instance.GlobalSettings["rendering_use_vbo"];
 
             // Initialize lighting controls
             if (!Instance.GlobalSettings.ContainsKey("scene_ambient_light"))
@@ -233,16 +232,6 @@ namespace Radegast.Rendering
                 {
                     RenderSettings.EnableShiny = cbShiny.Checked;
                 }
-            }
-        }
-
-        private void cbVBO_CheckedChanged(object sender, EventArgs e)
-        {
-            Instance.GlobalSettings["rendering_use_vbo"] = cbVBO.Checked;
-            if (Window != null)
-            {
-                RenderSettings.UseVBO = cbVBO.Checked &&
-                    (RenderSettings.ARBQuerySupported || RenderSettings.CoreQuerySupported);
             }
         }
 

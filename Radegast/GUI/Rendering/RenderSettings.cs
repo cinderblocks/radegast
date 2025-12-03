@@ -25,7 +25,7 @@ namespace Radegast.Rendering
     public static class RenderSettings
     {
         #region VBO support
-        public static bool UseVBO;
+        public static bool UseVBO = true; // VBOs are always used when supported
         public static bool CoreVBOPresent;
         public static bool ARBVBOPresent;
         #endregion VBO support
@@ -38,7 +38,6 @@ namespace Radegast.Rendering
         #endregion Occlusion queries
 
         public static bool HasMultiTexturing;
-        public static bool UseFBO;
         public static bool HasMipmap;
         public static bool HasShaders;
         public static DetailLevel PrimRenderDetail = DetailLevel.High;

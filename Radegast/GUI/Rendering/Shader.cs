@@ -86,6 +86,7 @@ namespace Radegast.Rendering
 
             if (ID == -1) return;
             GL.DeleteShader(ID);
+            ID = -1;
         }
     }
 
@@ -103,7 +104,7 @@ namespace Radegast.Rendering
             for (int i = 0; i < shaderNames.Length; i++)
             {
                 Shader s = new Shader();
-                
+
                 // Check if the path is already absolute or contains directory separators
                 string shaderPath = shaderNames[i];
                 if (!Path.IsPathRooted(shaderPath) && !shaderPath.Contains(Path.DirectorySeparatorChar.ToString()))
@@ -111,9 +112,14 @@ namespace Radegast.Rendering
                     // Only add shader_data prefix if it's a simple filename
                     shaderPath = Path.Combine("shader_data", shaderNames[i]);
                 }
-                
+
                 if (!s.Load(shaderPath))
+                {
+                    // Dispose any previously created shaders and clear the array
+                    for (int j = 0; j < i; j++) shaders[j]?.Dispose();
+                    shaders = null;
                     return false;
+                }
                 shaders[i] = s;
             }
 
@@ -122,12 +128,33 @@ namespace Radegast.Rendering
             {
                 GL.AttachShader(ID, shader.ID);
             }
+
+            // Bind common attribute names to fixed generic locations before linking so VAOs and shaders agree
+            try
+            {
+                GL.BindAttribLocation(ID, 0, "aPosition");
+                GL.BindAttribLocation(ID, 1, "aNormal");
+                GL.BindAttribLocation(ID, 2, "aTexCoord");
+            }
+            catch { }
+
             GL.LinkProgram(ID);
             int res;
             GL.GetProgram(ID, GetProgramParameterName.LinkStatus, out res);
             if (res != 1)
             {
                 Logger.DebugLog("Linking shader program failed!");
+                // Cleanup shaders and delete program if created
+                if (shaders != null)
+                {
+                    for (int j = 0; j < shaders.Length; j++) shaders[j]?.Dispose();
+                    shaders = null;
+                }
+                if (ID != -1)
+                {
+                    GL.DeleteProgram(ID);
+                    ID = -1;
+                }
                 return false;
             }
 
@@ -149,7 +176,7 @@ namespace Radegast.Rendering
         public static void Stop()
         {
             if (!RenderSettings.HasShaders) return;
-            
+
             if (CurrentProgram != 0)
             {
                 GL.UseProgram(0);
@@ -211,7 +238,7 @@ namespace Radegast.Rendering
             {
                 foreach (var shader in shaders)
                 {
-                    shader.Dispose();
+                    shader?.Dispose();
                 }
             }
             shaders = null;

@@ -80,6 +80,7 @@ namespace Radegast.Rendering
                     VertexVBO = -1;
                     return false;
                 }
+                Compat.BindBuffer(BufferTarget.ArrayBuffer, 0); // Unbind after creation
             }
 
             if (IndexVBO == -1)
@@ -96,52 +97,7 @@ namespace Radegast.Rendering
                     IndexVBO = -1;
                     return false;
                 }
-            }
-
-            // If VAO not created, try to create and capture attribute state
-            if (Vao == -1)
-            {
-                try
-                {
-                    // Do not create VAOs when shaders are enabled. Some drivers capture
-                    // attribute bindings in VAOs that may not match shader attribute
-                    // locations, causing incorrect rendering when shaders are used.
-                    if (RenderSettings.HasShaders && RenderSettings.EnableShiny)
-                    {
-                        Vao = -1;
-                    }
-                    else
-                    {
-                        Compat.GenVertexArrays(out Vao);
-                        if (Vao != -1)
-                        {
-                            Compat.BindVertexArray(Vao);
-
-                            Compat.BindBuffer(BufferTarget.ArrayBuffer, VertexVBO);
-                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
-
-                            // Set generic attribute layout: pos (0), normal (1), texcoord (2)
-                            GL.EnableVertexAttribArray(0);
-                            GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, VertexSize, 0);
-                            GL.EnableVertexAttribArray(1);
-                            GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, VertexSize, 12);
-                            GL.EnableVertexAttribArray(2);
-                            GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, VertexSize, 24);
-
-                            // Unbind VAO
-                            Compat.BindVertexArray(0);
-                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-                        }
-                    }
-                }
-                catch
-                {
-                    // failed to create VAO, leave Vao = -1
-                    try { Compat.BindBuffer(BufferTarget.ArrayBuffer, 0); } catch { }
-                    try { Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0); } catch { }
-                    Vao = -1;
-                }
+                Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0); // Unbind after creation
             }
 
             return true;
@@ -499,13 +455,6 @@ namespace Radegast.Rendering
             // Don't render if not yet meshed
             if (!Meshed || Faces == null || Faces.Count == 0) return;
 
-            // For attachments, ensure shaders are stopped before we start rendering
-            // This prevents shader state bleed from previous objects
-            if (Attached && pass != RenderPass.Picking && RenderSettings.HasShaders && RenderSettings.EnableShiny)
-            {
-                scene.StopShiny();
-            }
-
             // Individual prim matrix
             GL.PushMatrix();
 
@@ -524,6 +473,9 @@ namespace Radegast.Rendering
 
             // Do we have animated texture on this face
             bool animatedTexture = false;
+
+            // Track whether we're currently in shader mode to minimize state changes
+            bool inShaderMode = false;
 
             // Initialise flags tracking what type of faces this prim has
             if (pass == RenderPass.Simple)
@@ -558,6 +510,7 @@ namespace Radegast.Rendering
                 if (data.TextureInfo.FullAlpha || RGBA.A <= 0.01f) continue;
 
                 bool switchedLightsOff = false;
+                float shiny = 0f;  // Declare here so it's available throughout the face rendering
 
                 if (pass == RenderPass.Picking)
                 {
@@ -594,7 +547,6 @@ namespace Radegast.Rendering
                         switchedLightsOff = true;
                     }
 
-                    float shiny = 0f;
                     switch (teFace.Shiny)
                     {
                         case Shininess.High:
@@ -610,14 +562,14 @@ namespace Radegast.Rendering
                             break;
                     }
 
-                    // Attachments should never use shaders to avoid geometry corruption
-                    if (shiny > 0f && !Attached)
+                    // Use shaders for shiny materials (both world prims and attachments)
+                    if (shiny > 0f)
                     {
                         scene.StartShiny();
                     }
                     else
                     {
-                        // Ensure shader is stopped for non-shiny faces or all attachment faces
+                        // Ensure shader is stopped for non-shiny faces
                         scene.StopShiny();
                     }
                     GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shiny);
@@ -650,7 +602,12 @@ namespace Radegast.Rendering
                     }
                     else
                     {
-                        // Is this face using texture animation
+                        GL.Enable(EnableCap.Texture2D);
+                        // Ensure texture unit 0 is active for shader sampling
+                        GL.ActiveTexture(TextureUnit.Texture0);
+                        GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
+                        
+                        // Check if this face uses texture animation
                         if ((Prim.TextureAnim.Flags & Primitive.TextureAnimMode.ANIM_ON) != 0
                             && (Prim.TextureAnim.Face == j || Prim.TextureAnim.Face == 255))
                         {
@@ -659,15 +616,13 @@ namespace Radegast.Rendering
                                 data.AnimInfo = new TextureAnimationInfo();
                             }
                             data.AnimInfo.PrimAnimInfo = Prim.TextureAnim;
-                            data.AnimInfo.Step(time);
                             animatedTexture = true;
                         }
-                        data.AnimInfo = null;
-
-                        GL.Enable(EnableCap.Texture2D);
-                        // Ensure texture unit 0 is active for shader sampling
-                        GL.ActiveTexture(TextureUnit.Texture0);
-                        GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
+                        else
+                        {
+                            data.AnimInfo = null;
+                            animatedTexture = false;
+                        }
                     }
                 }
 
@@ -680,6 +635,14 @@ namespace Radegast.Rendering
                     if (verts == null || verts.Length == 0 || indices == null || indices.Length == 0)
                         continue;
 
+                    // Apply texture animation for non-VBO path (fixed-function only)
+                    if (animatedTexture && data.AnimInfo != null)
+                    {
+                        GL.MatrixMode(MatrixMode.Texture);
+                        GL.PushMatrix();
+                        data.AnimInfo.Step(time);
+                    }
+
                     unsafe
                     {
                         fixed (float* normalPtr = &verts[0].Normal.X)
@@ -691,6 +654,14 @@ namespace Radegast.Rendering
                             GL.DrawElements(PrimitiveType.Triangles, indices.Length, DrawElementsType.UnsignedShort, indices);
                         }
                     }
+
+                    // Restore texture matrix if animation was applied
+                    if (animatedTexture && data.AnimInfo != null)
+                    {
+                        GL.MatrixMode(MatrixMode.Texture);
+                        GL.PopMatrix();
+                        GL.MatrixMode(MatrixMode.Modelview);
+                    }
                 }
                 else
                 {
@@ -700,64 +671,122 @@ namespace Radegast.Rendering
 
                     if (data.CheckVBO(face))
                     {
-                        // Determine if we should use shader attribute path:
-                        // Only use it if shiny shader is ACTUALLY ACTIVE (shiny > 0 for this face means StartShiny was called above)
-                        // NEVER use shader path for attachments to avoid geometry corruption
-                        var sw = scene as SceneWindow;
-                        var useAttribs = false;
-                        int posLoc = -1, normLoc = -1, texLoc = -1;
+                        // Determine if we should use shader attribute path
+                        bool wantShaderPath = pass != RenderPass.Picking && shiny > 0f && RenderSettings.HasShaders && RenderSettings.EnableShiny;
                         
-                        // Only try shader path if this face has shiny AND is not an attachment
-                        if (!Attached && pass != RenderPass.Picking && teFace.Shiny != Shininess.None && RenderSettings.HasShaders && RenderSettings.EnableShiny && sw != null)
+                        if (wantShaderPath)
                         {
-                            try
+                            var sw = scene as SceneWindow;
+                            if (sw != null)
                             {
-                                posLoc = sw.GetShaderAttr("aPosition");
-                                normLoc = sw.GetShaderAttr("aNormal");
-                                texLoc = sw.GetShaderAttr("aTexCoord");
-                                useAttribs = posLoc != -1 && normLoc != -1 && texLoc != -1;
+                                try
+                                {
+                                    var posLoc = sw.GetShaderAttr("aPosition");
+                                    var normLoc = sw.GetShaderAttr("aNormal");
+                                    var texLoc = sw.GetShaderAttr("aTexCoord");
+                                    
+                                    // If any required attribute is missing, the shader cannot be used.
+                                    // Ensure we stop the shader to avoid having a program bound while using fixed-function attributes.
+                                    if (posLoc == -1 || normLoc == -1 || texLoc == -1)
+                                    {
+                                        // Stop shader and fall back to fixed-function path
+                                        try { sw?.StopShiny(); } catch { }
+                                        wantShaderPath = false;
+                                    }
+                                    else
+                                    {
+                                        // Proceed only if all attribute locations are present
+                                        if (posLoc != -1 && normLoc != -1 && texLoc != -1)
+                                        {
+                                            // Verify shader program is active
+                                            GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                                            if (activeProgram != 0)
+                                            {
+                                                // --- Shader Path ---
+                                                // Switch to shader mode if not already in it
+                                                if (!inShaderMode)
+                                                {
+                                                    GL.DisableClientState(ArrayCap.VertexArray);
+                                                    GL.DisableClientState(ArrayCap.NormalArray);
+                                                    GL.DisableClientState(ArrayCap.TextureCoordArray);
+                                                    inShaderMode = true;
+                                                }
+                                                
+                                                // Pass face material color to shader
+                                                sw.SetShaderMaterialColor(RGBA);
+                                                sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
+
+                                                // Bind the vertex and index buffers
+                                                Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
+                                                Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
+
+                                                // Set up vertex attribute pointers
+                                                GL.EnableVertexAttribArray(posLoc);
+                                                GL.EnableVertexAttribArray(normLoc);
+                                                GL.EnableVertexAttribArray(texLoc);
+
+                                                GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
+                                                GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
+                                                GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
+
+                                                // Draw with the index buffer still bound
+                                                GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                                // Disable vertex attributes
+                                                GL.DisableVertexAttribArray(posLoc);
+                                                GL.DisableVertexAttribArray(normLoc);
+                                                GL.DisableVertexAttribArray(texLoc);
+
+                                                // Unbind buffers after drawing
+                                                Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                                                Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                                                
+                                                continue; // Skip fixed-function path
+                                            }
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    System.Diagnostics.Debug.WriteLine($"Shader rendering failed for prim {Prim.LocalID} face {j}: {ex.Message}");
+                                }
                             }
-                            catch { useAttribs = false; }
                         }
 
-                        if (useAttribs)
+                        // --- Fixed-Function Path ---
+                        // Switch back to fixed-function mode if we were in shader mode
+                        if (inShaderMode)
                         {
-                            // Shader path: use generic vertex attributes
-                            // Disable legacy client arrays to avoid conflicts
-                            var clientVertex = GL.IsEnabled(EnableCap.VertexArray);
-                            var clientNormal = GL.IsEnabled(EnableCap.NormalArray);
-                            var clientTex = GL.IsEnabled(EnableCap.TextureCoordArray);
-                            if (clientVertex) GL.DisableClientState(ArrayCap.VertexArray);
-                            if (clientNormal) GL.DisableClientState(ArrayCap.NormalArray);
-                            if (clientTex) GL.DisableClientState(ArrayCap.TextureCoordArray);
-
-                            data.BindBuffers();
-
-                            GL.EnableVertexAttribArray(posLoc);
-                            GL.EnableVertexAttribArray(normLoc);
-                            GL.EnableVertexAttribArray(texLoc);
-
-                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 0);
-                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, FaceData.VertexSize, 12);
-                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, FaceData.VertexSize, 24);
-
+                            GL.EnableClientState(ArrayCap.VertexArray);
+                            GL.EnableClientState(ArrayCap.NormalArray);
+                            GL.EnableClientState(ArrayCap.TextureCoordArray);
+                            inShaderMode = false;
+                        }
+                        
+                        if (shiny > 0f && pass != RenderPass.Picking)
+                        {
+                            scene.StopShiny();
+                        }
+                        
+                        // Apply texture animation for fixed-function VBO path
+                        if (animatedTexture && data.AnimInfo != null)
+                        {
+                            GL.MatrixMode(MatrixMode.Texture);
+                            GL.PushMatrix();
+                            data.AnimInfo.Step(time);
+                        }
+                        
+                        // Use VAO if available (non-shader path)
+                        if (data.UsesVao)
+                        {
+                            data.BindVao();
                             GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
-
-                            GL.DisableVertexAttribArray(posLoc);
-                            GL.DisableVertexAttribArray(normLoc);
-                            GL.DisableVertexAttribArray(texLoc);
-
-                            // Restore legacy client arrays
-                            if (clientVertex) GL.EnableClientState(ArrayCap.VertexArray);
-                            if (clientNormal) GL.EnableClientState(ArrayCap.NormalArray);
-                            if (clientTex) GL.EnableClientState(ArrayCap.TextureCoordArray);
-
-                            data.UnbindBuffers();
+                            data.UnbindVao();
                         }
                         else
                         {
-                            // Fixed-function path: use legacy vertex pointers
-                            data.BindBuffers();
+                            Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
+                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, data.IndexVBO);
                             
                             GL.NormalPointer(NormalPointerType.Float, FaceData.VertexSize, (IntPtr)12);
                             GL.TexCoordPointer(2, TexCoordPointerType.Float, FaceData.VertexSize, (IntPtr)24);
@@ -765,7 +794,16 @@ namespace Radegast.Rendering
 
                             GL.DrawElements(PrimitiveType.Triangles, face.Indices.Count, DrawElementsType.UnsignedShort, IntPtr.Zero);
 
-                            data.UnbindBuffers();
+                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                        }
+                        
+                        // Restore texture matrix if animation was applied
+                        if (animatedTexture && data.AnimInfo != null)
+                        {
+                            GL.MatrixMode(MatrixMode.Texture);
+                            GL.PopMatrix();
+                            GL.MatrixMode(MatrixMode.Modelview);
                         }
                     }
                 }
@@ -778,19 +816,18 @@ namespace Radegast.Rendering
 
             }
 
+            // Restore fixed-function state if we ended in shader mode
+            if (inShaderMode)
+            {
+                GL.EnableClientState(ArrayCap.VertexArray);
+                GL.EnableClientState(ArrayCap.NormalArray);
+                GL.EnableClientState(ArrayCap.TextureCoordArray);
+            }
+
             GL.BindTexture(TextureTarget.Texture2D, 0);
             RHelp.ResetMaterial();
 
-            // Reset texture coordinates if we modified them in texture animation
-            if (animatedTexture)
-            {
-                GL.MatrixMode(MatrixMode.Texture);
-                GL.LoadIdentity();
-                GL.MatrixMode(MatrixMode.Modelview);
-            }
-
             // Ensure shader is stopped at the end of rendering this prim
-            // to prevent it from affecting subsequent prims (especially attachments)
             if (pass != RenderPass.Picking && RenderSettings.HasShaders && RenderSettings.EnableShiny)
             {
                 scene.StopShiny();

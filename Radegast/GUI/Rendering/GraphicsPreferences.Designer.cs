@@ -35,7 +35,6 @@
             this.cbWaterReflections = new System.Windows.Forms.CheckBox();
             this.cbOcclusionCulling = new System.Windows.Forms.CheckBox();
             this.cbShiny = new System.Windows.Forms.CheckBox();
-            this.cbVBO = new System.Windows.Forms.CheckBox();
             this.lblAmbient = new System.Windows.Forms.Label();
             this.tbAmbient = new System.Windows.Forms.TrackBar();
             this.lblDiffuse = new System.Windows.Forms.Label();
@@ -61,7 +60,7 @@
             // cbAA
             // 
             this.cbAA.AutoSize = true;
-            this.cbAA.Location = new System.Drawing.Point(3, 26);
+            this.cbAA.Location = new System.Drawing.Point(3, 72);
             this.cbAA.Name = "cbAA";
             this.cbAA.Size = new System.Drawing.Size(160, 17);
             this.cbAA.TabIndex = 2;
@@ -127,24 +126,13 @@
             // cbShiny
             // 
             this.cbShiny.AutoSize = true;
-            this.cbShiny.Location = new System.Drawing.Point(3, 72);
+            this.cbShiny.Location = new System.Drawing.Point(3, 26);
             this.cbShiny.Name = "cbShiny";
             this.cbShiny.Size = new System.Drawing.Size(52, 17);
             this.cbShiny.TabIndex = 4;
             this.cbShiny.Text = "Shiny";
             this.cbShiny.UseVisualStyleBackColor = true;
             this.cbShiny.CheckedChanged += new System.EventHandler(this.cbShiny_CheckedChanged);
-            // 
-            // cbVBO
-            // 
-            this.cbVBO.AutoSize = true;
-            this.cbVBO.Location = new System.Drawing.Point(169, 26);
-            this.cbVBO.Name = "cbVBO";
-            this.cbVBO.Size = new System.Drawing.Size(70, 17);
-            this.cbVBO.TabIndex = 6;
-            this.cbVBO.Text = "Use VBO";
-            this.cbVBO.UseVisualStyleBackColor = true;
-            this.cbVBO.CheckedChanged += new System.EventHandler(this.cbVBO_CheckedChanged);
             // 
             // lblAmbient
             // 
@@ -321,7 +309,6 @@
             this.Controls.Add(this.nudFallbackSpeed);
             this.Controls.Add(this.lblFallbackSpeed);
             this.Controls.Add(this.cbFallbackAnim);
-            this.Controls.Add(this.cbVBO);
             this.Controls.Add(this.cbShiny);
             this.Controls.Add(this.cbOcclusionCulling);
             this.Controls.Add(this.cbWaterReflections);
@@ -352,8 +339,7 @@
         public System.Windows.Forms.CheckBox cbWaterReflections;
         private System.Windows.Forms.CheckBox cbOcclusionCulling;
         private System.Windows.Forms.CheckBox cbShiny;
-        private System.Windows.Forms.CheckBox cbVBO;
-        public System.Windows.Forms.Label lblAmbient;
+        private System.Windows.Forms.Label lblAmbient;
         public System.Windows.Forms.TrackBar tbAmbient;
         public System.Windows.Forms.Label lblDiffuse;
         public System.Windows.Forms.TrackBar tbDiffuse;

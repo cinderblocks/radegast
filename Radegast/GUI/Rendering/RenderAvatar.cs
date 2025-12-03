@@ -1441,7 +1441,7 @@ namespace Radegast.Rendering
                 ar.mRunTime += lastframetime;
 
                 // EASE FACTORS
-                // Caclulate ease factors now they are common to all joints in a given animation
+                // Calculate ease factors now they are common to all joints in a given animation
                 float factor = 1.0f;
 
                 if (ar.playstate == animationwrapper.animstate.STATE_EASEIN)
@@ -1449,14 +1449,11 @@ namespace Radegast.Rendering
                     if (ar.mRunTime >= ar.anim.EaseInTime)
                     {
                         ar.playstate = animationwrapper.animstate.STATE_PLAY;
-                        //Console.WriteLine(String.Format("{0} Now in STATE_PLAY", ar.mAnimation));
                     }
                     else
                     {
                         factor = 1.0f - ((ar.anim.EaseInTime - ar.mRunTime) / ar.anim.EaseInTime);
                     }
-
-                    //Console.WriteLine(String.Format("EASE IN {0} {1}",factor.ToString(),ar.mAnimation));
                 }
 
                 if (ar.playstate == animationwrapper.animstate.STATE_EASEOUT)
@@ -2393,6 +2390,11 @@ namespace Radegast.Rendering
         public Dictionary<UUID, Animation> animlist = new Dictionary<UUID, Animation>();
         public Dictionary<WearableType, AppearanceManager.WearableData> Wearables = new Dictionary<WearableType, AppearanceManager.WearableData>();
         public static readonly BoundingVolume AvatarBoundingVolume;
+        
+        // Track if avatar meshes have been properly set up for rendering
+        private bool renderDataReady = false;
+        // Track if we've computed size at least once
+        private bool sizeComputed = false;
 
         // Static constructor
         static RenderAvatar()
@@ -2406,6 +2408,9 @@ namespace Radegast.Rendering
         {
             BoundingVolume = AvatarBoundingVolume;
             Type = SceneObjectType.Avatar;
+            // Initialize with sensible defaults
+            Height = 2.0f;
+            PelvisToFoot = 1.0f;
         }
 
         public override Primitive BasePrim
@@ -2417,13 +2422,34 @@ namespace Radegast.Rendering
                 {
                     avatar = (Avatar)value;
                     AvatarBoundingVolume.CalcScaled(avatar.Scale);
+                    // Invalidate ready state when avatar changes
+                    renderDataReady = false;
                 }
             }
         }
 
+        public override void Initialize()
+        {
+            base.Initialize();
+            renderDataReady = false;
+            sizeComputed = false;
+        }
+
         public override void Step(float time)
         {
-            glavatar.skel.animate(time);
+            // Defensively check skeleton and animation system are ready
+            if (glavatar?.skel != null)
+            {
+                try
+                {
+                    glavatar.skel.animate(time);
+                }
+                catch (Exception ex)
+                {
+                    // Log but don't crash
+                    System.Diagnostics.Debug.WriteLine($"Avatar animation error: {ex.Message}");
+                }
+            }
             base.Step(time);
         }
 
@@ -2432,32 +2458,38 @@ namespace Radegast.Rendering
 
         public void UpdateSize()
         {
-            // Check if skeleton has all required bones loaded before calculating size
-            if (glavatar.skel.mBones.Count < 10)
+            // Check if skeleton and bones dictionary are ready
+            if (glavatar?.skel?.mBones == null || glavatar.skel.mBones.Count < 10)
             {
                 // Skeleton not fully loaded yet, use default values
-                Height = 2.0f;
-                PelvisToFoot = 1.0f;
+                if (!sizeComputed)
+                {
+                    Height = 2.0f;
+                    PelvisToFoot = 1.0f;
+                }
                 return;
             }
 
             float F_SQRT2 = 1.4142135623730950488016887242097f;
 
-            // Safely retrieve bones with defensive checks
-            if (!glavatar.skel.mBones.TryGetValue("mPelvis", out var pelvisBone) ||
-                !glavatar.skel.mBones.TryGetValue("mSkull", out var skullBone) ||
-                !glavatar.skel.mBones.TryGetValue("mNeck", out var neckBone) ||
-                !glavatar.skel.mBones.TryGetValue("mChest", out var chestBone) ||
-                !glavatar.skel.mBones.TryGetValue("mHead", out var headBone) ||
-                !glavatar.skel.mBones.TryGetValue("mTorso", out var torsoBone) ||
-                !glavatar.skel.mBones.TryGetValue("mHipLeft", out var hipBone) ||
-                !glavatar.skel.mBones.TryGetValue("mKneeLeft", out var kneeBone) ||
-                !glavatar.skel.mBones.TryGetValue("mAnkleLeft", out var ankleBone) ||
-                !glavatar.skel.mBones.TryGetValue("mFootLeft", out var footBone))
+            // Safely retrieve bones with defensive checks including null checks
+            if (!glavatar.skel.mBones.TryGetValue("mPelvis", out var pelvisBone) || pelvisBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mSkull", out var skullBone) || skullBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mNeck", out var neckBone) || neckBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mChest", out var chestBone) || chestBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mHead", out var headBone) || headBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mTorso", out var torsoBone) || torsoBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mHipLeft", out var hipBone) || hipBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mKneeLeft", out var kneeBone) || kneeBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mAnkleLeft", out var ankleBone) || ankleBone == null ||
+                !glavatar.skel.mBones.TryGetValue("mFootLeft", out var footBone) || footBone == null)
             {
-                // One or more required bones are missing, use default values
-                Height = 2.0f;
-                PelvisToFoot = 1.0f;
+                // One or more required bones are missing or null, use default values
+                if (!sizeComputed)
+                {
+                    Height = 2.0f;
+                    PelvisToFoot = 1.0f;
+                }
                 return;
             }
 
@@ -2509,20 +2541,119 @@ namespace Radegast.Rendering
 
             Height = new_body_size.Z;
             PelvisToFoot = mPelvisToFoot;
+            
+            // Validate calculated values to prevent NaN/Infinity propagation
+            if (float.IsNaN(Height) || float.IsInfinity(Height) || Height <= 0f || Height > 10f)
+            {
+                Height = 2.0f;
+            }
+            if (float.IsNaN(PelvisToFoot) || float.IsInfinity(PelvisToFoot) || PelvisToFoot <= 0f)
+            {
+                PelvisToFoot = 1.0f;
+            }
+            
+            sizeComputed = true;
         }
 
         public Vector3 AdjustedPosition(Vector3 source)
         {
-            return new Vector3(source.X, source.Y, source.Z - Height + PelvisToFoot);
+            // Ensure Height and PelvisToFoot are valid before using them
+            if (float.IsNaN(Height) || float.IsNaN(PelvisToFoot) || Height == 0f)
+            {
+                UpdateSize(); // Try to recalculate
+            }
+            
+            float adjustment = Height - PelvisToFoot;
+            if (float.IsNaN(adjustment) || float.IsInfinity(adjustment))
+            {
+                return source; // Return unadjusted if calculation failed
+            }
+            
+            return new Vector3(source.X, source.Y, source.Z - adjustment);
+        }
+        
+        /// <summary>
+        /// Check if this avatar is ready to be rendered
+        /// </summary>
+        public bool IsRenderReady()
+        {
+            if (glavatar == null || glavatar._meshes == null || glavatar._meshes.Count == 0)
+                return false;
+            
+            // Check if at least one mesh has valid render data
+            foreach (var mesh in glavatar._meshes.Values)
+            {
+                if (mesh.RenderData.Vertices != null && mesh.RenderData.Vertices.Length > 0)
+                {
+                    renderDataReady = true;
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+        
+        /// <summary>
+        /// Mark avatar meshes as needing VBO recreation
+        /// </summary>
+        public void InvalidateVBOs()
+        {
+            if (glavatar?._meshes == null) return;
+            
+            foreach (var mesh in glavatar._meshes.Values)
+            {
+                // Mark VBOs as failed so they get recreated
+                mesh.VBOFailed = false;
+                mesh.VertexVBO = -1;
+                mesh.IndexVBO = -1;
+                mesh.Vao = -1;
+            }
+            
+            renderDataReady = false;
         }
 
         public override void Dispose()
         {
-            try
+            // Dispose data array first
+            if (data != null)
             {
-                glavatar?.Dispose();
+                for (int i = 0; i < data.Length; i++)
+                {
+                    if (data[i] != null)
+                    {
+                        try
+                        {
+                            data[i].Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"Error disposing avatar face data[{i}]: {ex.Message}");
+                        }
+                        data[i] = null;
+                    }
+                }
             }
-            catch { }
+            
+            // Dispose glavatar
+            if (glavatar != null)
+            {
+                try
+                {
+                    glavatar.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Error disposing glavatar: {ex.Message}");
+                }
+                finally
+                {
+                    glavatar = null;
+                }
+            }
+            
+            renderDataReady = false;
+            sizeComputed = false;
+            
             base.Dispose();
         }
     }
