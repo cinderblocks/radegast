@@ -20,10 +20,10 @@
 
 using System;
 using OpenTK.Graphics.OpenGL;
-using System.Drawing;
 using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
+using SkiaSharp;
 
 namespace Radegast.Rendering
 {
@@ -39,7 +39,7 @@ namespace Radegast.Rendering
         private ColorVertex[] terrainVertices;
         private int terrainTexture = -1;
         private bool fetchingTerrainTexture = false;
-        private Bitmap terrainImage = null;
+        private SKBitmap terrainImage = null;
         private int terrainVBO = -1;
         private int terrainIndexVBO = -1;
         private bool terrainVBOFailed = false;
