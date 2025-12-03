@@ -8,6 +8,9 @@ uniform vec4 specularColor;
 uniform int hasTexture; // 0 = no texture, 1 = has texture
 uniform float glow;
 uniform float glowStrength;
+uniform float shininessExp;
+uniform float specularStrength;
+uniform float gamma;
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -34,20 +37,19 @@ void main()
     float lambert = nDotL * 0.25 + 0.75; // Very soft: -1 maps to 0.5, +1 maps to 1.0
     
     // Strong ambient lighting for avatars
-    vec4 ambientContribution = ambientColor * tex * 2.0;
+    vec4 ambientContribution = ambientColor * tex * 2.5; // slightly stronger ambient
     vec4 diffuseContribution = diffuseColor * tex * lambert;
     
-    // Heavy ambient bias for soft, flattering lighting
-    vec4 color = mix(ambientContribution, diffuseContribution, 0.5);
+    vec4 color = ambientContribution + diffuseContribution;
     
-    // Very subtle specular for slight highlights
+    // Specular
     vec3 viewDir = safeNormalize(-vPos, vec3(0.0, 0.0, 1.0));
     vec3 halfVec = safeNormalize(ld + viewDir, ld);
-    float spec = pow(max(dot(n, halfVec), 0.0), 20.0);
-    color += specularColor * spec * 0.15;
+    float spec = pow(max(dot(n, halfVec), 0.0), max(1.0, shininessExp));
+    color += specularColor * spec * specularStrength * 0.6; // subtle specular for avatars
     
     // Guarantee minimum brightness
-    vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;
+    vec3 minBright = ambientColor.rgb * tex.rgb * 0.35;
     color.rgb = max(color.rgb, minBright);
 
     // Additive glow
@@ -62,6 +64,13 @@ void main()
         color = vec4(0.5 * ambientColor.rgb, tex.a);
     }
     color = clamp(color, 0.0, 1.0);
+
+    // Gamma correction
+    if (gamma > 0.0)
+    {
+        float invGamma = 1.0 / max(0.001, gamma);
+        color.rgb = pow(color.rgb, vec3(invGamma));
+    }
 
     gl_FragColor = color;
 }

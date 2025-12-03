@@ -9,6 +9,9 @@ uniform vec4 materialColor; // Per-face RGBA color
 uniform int hasTexture; // 0 = no texture, 1 = has texture
 uniform float glow;
 uniform float glowStrength;
+uniform float shininessExp; // specular exponent
+uniform float specularStrength; // specular multiplier
+uniform float gamma; // gamma correction value (>0 to enable)
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -45,14 +48,15 @@ void main()
     vec4 ambientContribution = ambientColor * tex * 2.0;
     vec4 diffuseContribution = diffuseColor * tex * lambert;
     
-    // Blend with ambient bias to prevent pure black
-    vec4 color = mix(ambientContribution, diffuseContribution, 0.5);
+    // Use additive combination to preserve brightness on shiny materials
+    vec4 color = ambientContribution + diffuseContribution;
     
-    // Very subtle specular
+    // Specular
     vec3 viewDir = safeNormalize(-vPos, vec3(0.0, 0.0, 1.0));
     vec3 halfVec = safeNormalize(ld + viewDir, ld);
-    float spec = pow(max(dot(n, halfVec), 0.0), 24.0);
-    color += specularColor * spec * 0.4;
+    float spec = pow(max(dot(n, halfVec), 0.0), max(1.0, shininessExp));
+    // Apply specular strength and specular color
+    color += specularColor * spec * specularStrength;
 
     // Ensure minimum brightness to prevent completely black surfaces
     vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;
@@ -72,6 +76,13 @@ void main()
         color = vec4(0.5 * ambientColor.rgb, tex.a);
     }
     color = clamp(color, 0.0, 1.0);
+
+    // Apply gamma correction if gamma > 0. Gamma encodes linear color to sRGB-like space
+    if (gamma > 0.0)
+    {
+        float invGamma = 1.0 / max(0.001, gamma);
+        color.rgb = pow(color.rgb, vec3(invGamma));
+    }
 
     gl_FragColor = color;
 }

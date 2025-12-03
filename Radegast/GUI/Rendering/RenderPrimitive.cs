@@ -716,6 +716,25 @@ namespace Radegast.Rendering
                                                 sw.SetShaderMaterialColor(RGBA);
                                                 sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
 
+                                                // Set shininess exponent and specular strength per face
+                                                try
+                                                {
+                                                    float exp = 24.0f;
+                                                    float specStr = 1.0f;
+                                                    switch (teFace.Shiny)
+                                                    {
+                                                        case Shininess.High:
+                                                            exp = 48.0f; specStr = 1.4f; break;
+                                                        case Shininess.Medium:
+                                                            exp = 24.0f; specStr = 1.0f; break;
+                                                        case Shininess.Low:
+                                                            exp = 12.0f; specStr = 0.6f; break;
+                                                    }
+                                                    sw.SetShaderShininessExp(exp);
+                                                    sw.SetShaderSpecularStrength(specStr);
+                                                }
+                                                catch { }
+
                                                 // Set per-face glow if available
                                                 try
                                                 {
@@ -750,6 +769,7 @@ namespace Radegast.Rendering
                                                 Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
                                                 Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
                                                 
+
                                                 continue; // Skip fixed-function path
                                             }
                                         }

@@ -108,6 +108,26 @@ namespace Radegast.Rendering
             RenderSettings.DiffuseLight = (float)Instance.GlobalSettings["scene_diffuse_light"].AsReal();
             RenderSettings.SpecularLight = (float)Instance.GlobalSettings["scene_specular_light"].AsReal();
 
+            // Initialize gamma setting
+            if (!Instance.GlobalSettings.ContainsKey("scene_gamma"))
+            {
+                Instance.GlobalSettings["scene_gamma"] = RenderSettings.Gamma;
+            }
+
+            // Gamma control slider (0.5 - 3.0 mapped to trackbar 50-300)
+            var tbGammaCtrl = FindTrackBar("tbGamma");
+            var lblGammaCtrl = FindLabel("lblGamma");
+            if (tbGammaCtrl != null)
+            {
+                tbGammaCtrl.Value = Utils.Clamp((int)(Instance.GlobalSettings["scene_gamma"].AsReal() * 100f), tbGammaCtrl.Minimum, tbGammaCtrl.Maximum);
+                tbGammaCtrl.Scroll += tbGamma_Scroll;
+            }
+            if (lblGammaCtrl != null)
+            {
+                lblGammaCtrl.Text = $"Gamma: {Instance.GlobalSettings["scene_gamma"].AsReal():0.00}";
+            }
+            RenderSettings.Gamma = (float)Instance.GlobalSettings["scene_gamma"].AsReal();
+
             // Initialize fallback water animation settings in global settings if missing
             if (!instance.GlobalSettings.ContainsKey("fallback_water_animation_enabled"))
                 instance.GlobalSettings["fallback_water_animation_enabled"] = RenderSettings.FallbackWaterAnimationEnabled;
@@ -269,6 +289,43 @@ namespace Radegast.Rendering
             {
                 Window.UpdateLighting();
             }
+        }
+
+        private void tbGamma_Scroll(object sender, EventArgs e)
+        {
+            var tb = sender as TrackBar ?? FindTrackBar("tbGamma");
+            var lbl = FindLabel("lblGamma");
+            if (tb == null) return;
+            float gamma = (float)tb.Value / 100f;
+            if (lbl != null) lbl.Text = $"Gamma: {gamma:0.00}";
+            Instance.GlobalSettings["scene_gamma"] = gamma;
+            RenderSettings.Gamma = gamma;
+            if (Window != null)
+            {
+                Window.SetShaderGamma(gamma);
+            }
+        }
+
+        // Helper to find a TrackBar by name in the control hierarchy
+        private TrackBar FindTrackBar(string name)
+        {
+            var ctrls = this.Controls.Find(name, true);
+            if (ctrls != null && ctrls.Length > 0)
+            {
+                return ctrls[0] as TrackBar;
+            }
+            return null;
+        }
+
+        // Helper to find a Label by name in the control hierarchy
+        private Label FindLabel(string name)
+        {
+            var ctrls = this.Controls.Find(name, true);
+            if (ctrls != null && ctrls.Length > 0)
+            {
+                return ctrls[0] as Label;
+            }
+            return null;
         }
     }
 }

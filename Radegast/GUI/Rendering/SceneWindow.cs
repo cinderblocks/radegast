@@ -1061,21 +1061,41 @@ namespace Radegast.Rendering
             catch { }
         }
 
-        // Set shader-wide glow strength (global multiplier)
-        public void SetShaderGlowStrength(float strength)
+        public void SetShaderShininessExp(float exp)
         {
             if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
-
             try
             {
                 var prog = shaderManager?.GetProgram("shiny");
                 if (prog == null) return;
+                var u = prog.Uni("shininessExp");
+                if (u != -1) GL.Uniform1(u, exp);
+            }
+            catch { }
+        }
 
-                var ugs = prog.Uni("glowStrength");
-                if (ugs != -1)
-                {
-                    GL.Uniform1(ugs, strength);
-                }
+        public void SetShaderSpecularStrength(float s)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+                var u = prog.Uni("specularStrength");
+                if (u != -1) GL.Uniform1(u, s);
+            }
+            catch { }
+        }
+
+        public void SetShaderGamma(float gamma)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+                var u = prog.Uni("gamma");
+                if (u != -1) GL.Uniform1(u, gamma);
             }
             catch { }
         }
@@ -1135,9 +1155,15 @@ namespace Radegast.Rendering
                     var ug = prog.Uni("glow");
                     if (ug != -1) GL.Uniform1(ug, 0.0f);
 
-                    // Set default glowStrength to 1.0
-                    var ugs = prog.Uni("glowStrength");
-                    if (ugs != -1) GL.Uniform1(ugs, 1.0f);
+                    // Set default shininess exponent and specular strength
+                    var ushexp = prog.Uni("shininessExp");
+                    if (ushexp != -1) GL.Uniform1(ushexp, 24.0f);
+                    var uspecstr = prog.Uni("specularStrength");
+                    if (uspecstr != -1) GL.Uniform1(uspecstr, 1.0f);
+
+                    // Set default gamma (1.0 = no correction, typical sRGB gamma ~2.2)
+                    var ugu = prog.Uni("gamma");
+                    if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
 
                     // Update matrix uniforms for current modelview/projection
                     UpdateShaderMatrices();
@@ -1201,6 +1227,10 @@ namespace Radegast.Rendering
                 // Set default glow to 0.0
                 var ug = prog.Uni("glow");
                 if (ug != -1) GL.Uniform1(ug, 0.0f);
+
+                // Set default gamma for avatar shader from RenderSettings
+                var ugAv = prog.Uni("gamma");
+                if (ugAv != -1) GL.Uniform1(ugAv, RenderSettings.Gamma);
 
                 // Update matrix uniforms for current modelview/projection
                 UpdateAvatarShaderMatrices();
