@@ -11,6 +11,7 @@ uniform float glowStrength;
 uniform float shininessExp;
 uniform float specularStrength;
 uniform float gamma;
+uniform float emissiveStrength;
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -55,7 +56,7 @@ void main()
     // Additive glow
     if (glow > 0.0)
     {
-        color.rgb += tex.rgb * glow * glowStrength;
+        color.rgb += tex.rgb * glow * glowStrength * emissiveStrength;
     }
 
     // NaN guard

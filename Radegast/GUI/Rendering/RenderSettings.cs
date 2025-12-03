@@ -93,6 +93,11 @@ namespace Radegast.Rendering
         /// Specular light level (0.0 to 1.0)
         /// </summary>
         public static float SpecularLight = 0.50f;
+
+        /// <summary>
+        /// Global emissive strength multiplier used by shaders for glowing faces
+        /// </summary>
+        public static float EmissiveStrength = 1.0f;
         #endregion Lighting
 
         #region Water

@@ -128,6 +128,25 @@ namespace Radegast.Rendering
             }
             RenderSettings.Gamma = (float)Instance.GlobalSettings["scene_gamma"].AsReal();
 
+            // Initialize emissive strength setting
+            if (!Instance.GlobalSettings.ContainsKey("scene_emissive_strength"))
+            {
+                Instance.GlobalSettings["scene_emissive_strength"] = RenderSettings.EmissiveStrength;
+            }
+
+            var tbEmissiveCtrl = FindTrackBar("tbEmissive");
+            var lblEmissiveCtrl = FindLabel("lblEmissive");
+            if (tbEmissiveCtrl != null)
+            {
+                tbEmissiveCtrl.Value = Utils.Clamp((int)(Instance.GlobalSettings["scene_emissive_strength"].AsReal() * 100f), tbEmissiveCtrl.Minimum, tbEmissiveCtrl.Maximum);
+                tbEmissiveCtrl.Scroll += tbEmissive_Scroll;
+            }
+            if (lblEmissiveCtrl != null)
+            {
+                lblEmissiveCtrl.Text = $"Emissive: {Instance.GlobalSettings["scene_emissive_strength"].AsReal():0.00}";
+            }
+            RenderSettings.EmissiveStrength = (float)Instance.GlobalSettings["scene_emissive_strength"].AsReal();
+
             // Initialize fallback water animation settings in global settings if missing
             if (!instance.GlobalSettings.ContainsKey("fallback_water_animation_enabled"))
                 instance.GlobalSettings["fallback_water_animation_enabled"] = RenderSettings.FallbackWaterAnimationEnabled;
@@ -303,6 +322,21 @@ namespace Radegast.Rendering
             if (Window != null)
             {
                 Window.SetShaderGamma(gamma);
+            }
+        }
+
+        private void tbEmissive_Scroll(object sender, EventArgs e)
+        {
+            var tb = sender as TrackBar ?? FindTrackBar("tbEmissive");
+            var lbl = FindLabel("lblEmissive");
+            if (tb == null) return;
+            float v = (float)tb.Value / 100f;
+            if (lbl != null) lbl.Text = $"Emissive: {v:0.00}";
+            Instance.GlobalSettings["scene_emissive_strength"] = v;
+            RenderSettings.EmissiveStrength = v;
+            if (Window != null)
+            {
+                Window.SetShaderEmissiveStrength(v);
             }
         }
 

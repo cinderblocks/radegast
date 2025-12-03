@@ -50,14 +50,17 @@
             this.nudFallbackBaseAlpha = new System.Windows.Forms.NumericUpDown();
             this.tbGamma = new System.Windows.Forms.TrackBar();
             this.lblGamma = new System.Windows.Forms.Label();
+            this.tbEmissive = new System.Windows.Forms.TrackBar();
+            this.lblEmissive = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbSpecular)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbEmissive)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackSpeed)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackAmp)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).BeginInit();
             this.SuspendLayout();
             // 
             // cbAA
@@ -317,12 +320,36 @@
             this.lblGamma.Text = "Gamma: 1.00";
             this.lblGamma.TextAlign = System.Drawing.ContentAlignment.TopRight;
             // 
+            // tbEmissive
+            // 
+            this.tbEmissive.Location = new System.Drawing.Point(3, 155);
+            this.tbEmissive.Maximum = 300;
+            this.tbEmissive.Minimum = 0;
+            this.tbEmissive.Name = "tbEmissive";
+            this.tbEmissive.Size = new System.Drawing.Size(277, 45);
+            this.tbEmissive.TabIndex = 23;
+            this.tbEmissive.TickStyle = System.Windows.Forms.TickStyle.None;
+            this.tbEmissive.Value = 100;
+            this.tbEmissive.Scroll += new System.EventHandler(this.tbEmissive_Scroll);
+            // 
+            // lblEmissive
+            // 
+            this.lblEmissive.AutoSize = true;
+            this.lblEmissive.Location = new System.Drawing.Point(187, 178);
+            this.lblEmissive.Name = "lblEmissive";
+            this.lblEmissive.Size = new System.Drawing.Size(83, 13);
+            this.lblEmissive.TabIndex = 24;
+            this.lblEmissive.Text = "Emissive: 1.00";
+            this.lblEmissive.TextAlign = System.Drawing.ContentAlignment.TopRight;
+            // 
             // GraphicsPreferences
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.lblSpecular);
             this.Controls.Add(this.tbSpecular);
+            this.Controls.Add(this.lblEmissive);
+            this.Controls.Add(this.tbEmissive);
             this.Controls.Add(this.lblGamma);
             this.Controls.Add(this.tbGamma);
             this.Controls.Add(this.lblDiffuse);
@@ -349,10 +376,11 @@
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbSpecular)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbEmissive)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackSpeed)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackAmp)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).EndInit();
-            ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -375,6 +403,8 @@
         public System.Windows.Forms.TrackBar tbSpecular;
         public System.Windows.Forms.Label lblGamma;
         public System.Windows.Forms.TrackBar tbGamma;
+        public System.Windows.Forms.Label lblEmissive;
+        public System.Windows.Forms.TrackBar tbEmissive;
         private System.Windows.Forms.CheckBox cbFallbackAnim;
         private System.Windows.Forms.Label lblFallbackSpeed;
         private System.Windows.Forms.NumericUpDown nudFallbackSpeed;

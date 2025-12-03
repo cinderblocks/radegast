@@ -1087,22 +1087,67 @@ namespace Radegast.Rendering
             catch { }
         }
 
-        public void SetShaderGamma(float gamma)
+        public void SetShaderEmissiveStrength(float s)
         {
             if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
             try
             {
                 var prog = shaderManager?.GetProgram("shiny");
                 if (prog == null) return;
-                var u = prog.Uni("gamma");
-                if (u != -1) GL.Uniform1(u, gamma);
+                var u = prog.Uni("emissiveStrength");
+                if (u != -1) GL.Uniform1(u, s);
             }
             catch { }
         }
 
-        /// <summary>
-        /// Select shiny shader as the current shader
-        /// </summary>
+        // Set gamma uniform on active shaders (shiny and avatar)
+        public void SetShaderGamma(float gamma)
+        {
+            if (!RenderSettings.HasShaders) return;
+            try
+            {
+                var shiny = shaderManager?.GetProgram("shiny");
+                if (shiny != null)
+                {
+                    var ug = shiny.Uni("gamma");
+                    if (ug != -1) GL.Uniform1(ug, gamma);
+                }
+
+                var avatar = shaderManager?.GetProgram("avatar");
+                if (avatar != null)
+                {
+                    var ug2 = avatar.Uni("gamma");
+                    if (ug2 != -1) GL.Uniform1(ug2, gamma);
+                }
+            }
+            catch { }
+        }
+
+        // Set material layer uniforms for the shiny shader (exposed to RenderPrimitive)
+        public void SetShaderMaterialLayer(bool hasMaterial, OpenTK.Vector3 specColor, float shininess, float strength)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uHas = prog.Uni("hasMaterial");
+                if (uHas != -1) GL.Uniform1(uHas, hasMaterial ? 1 : 0);
+
+                var uSpec = prog.Uni("materialSpecularColor");
+                if (uSpec != -1) GL.Uniform3(uSpec, specColor.X, specColor.Y, specColor.Z);
+
+                var uSh = prog.Uni("materialShininess");
+                if (uSh != -1) GL.Uniform1(uSh, shininess);
+
+                var uStr = prog.Uni("materialSpecularStrength");
+                if (uStr != -1) GL.Uniform1(uStr, strength);
+            }
+            catch { }
+        }
+
+        // Select shiny shader as the current shader
         public void StartShiny()
         {
             if (RenderSettings.EnableShiny)
@@ -1154,6 +1199,20 @@ namespace Radegast.Rendering
                     // Set default glow to 0.0
                     var ug = prog.Uni("glow");
                     if (ug != -1) GL.Uniform1(ug, 0.0f);
+
+                    // Set default emissive strength
+                    var ues = prog.Uni("emissiveStrength");
+                    if (ues != -1) GL.Uniform1(ues, 1.0f);
+
+                    // Default material layer uniforms
+                    var uHasMat = prog.Uni("hasMaterial");
+                    if (uHasMat != -1) GL.Uniform1(uHasMat, 0);
+                    var uMatSpec = prog.Uni("materialSpecularColor");
+                    if (uMatSpec != -1) GL.Uniform3(uMatSpec, specularColor.X, specularColor.Y, specularColor.Z);
+                    var uMatSh = prog.Uni("materialShininess");
+                    if (uMatSh != -1) GL.Uniform1(uMatSh, 24.0f);
+                    var uMatStr = prog.Uni("materialSpecularStrength");
+                    if (uMatStr != -1) GL.Uniform1(uMatStr, 1.0f);
 
                     // Set default shininess exponent and specular strength
                     var ushexp = prog.Uni("shininessExp");
@@ -1228,80 +1287,26 @@ namespace Radegast.Rendering
                 var ug = prog.Uni("glow");
                 if (ug != -1) GL.Uniform1(ug, 0.0f);
 
-                // Set default gamma for avatar shader from RenderSettings
-                var ugAv = prog.Uni("gamma");
-                if (ugAv != -1) GL.Uniform1(ugAv, RenderSettings.Gamma);
+                // Set default emissive strength for avatar shader
+                var uesAv = prog.Uni("emissiveStrength");
+                if (uesAv != -1) GL.Uniform1(uesAv, 1.0f);
+
+                // Default material layer uniforms for avatar shader
+                var uHasMatAv = prog.Uni("hasMaterial");
+                if (uHasMatAv != -1) GL.Uniform1(uHasMatAv, 0);
+                var uMatSpecAv = prog.Uni("materialSpecularColor");
+                if (uMatSpecAv != -1) GL.Uniform3(uMatSpecAv, specularColor.X, specularColor.Y, specularColor.Z);
+                var uMatShAv = prog.Uni("materialShininess");
+                if (uMatShAv != -1) GL.Uniform1(uMatShAv, 24.0f);
+                var uMatStrAv = prog.Uni("materialSpecularStrength");
+                if (uMatStrAv != -1) GL.Uniform1(uMatStrAv, 1.0f);
 
                 // Update matrix uniforms for current modelview/projection
-                UpdateAvatarShaderMatrices();
+                UpdateShaderMatrices();
             }
             catch
             {
             }
-        }
-
-        /// <summary>
-        /// Update avatar shader matrix uniforms (call when modelview has been modified)
-        /// </summary>
-        public void UpdateAvatarShaderMatrices()
-        {
-            if (!RenderSettings.HasShaders || !RenderSettings.AvatarRenderingEnabled) return;
-
-            try
-            {
-                var prog = shaderManager?.GetProgram("avatar");
-                if (prog == null) return;
-
-                // Verify a shader program is actually active before setting uniforms
-                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
-                if (activeProgram == 0 || activeProgram != prog.ID) return;
-
-                var uMVP = prog.Uni("uMVP");
-                var uModelView = prog.Uni("uModelView");
-                var uNormal = prog.Uni("uNormalMatrix");
-
-                if (uMVP == -1 && uModelView == -1 && uNormal == -1) return;
-
-                GL.GetFloat(GetPName.ProjectionMatrix, out OpenTK.Matrix4 proj);
-                GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
-
-                if (uMVP != -1)
-                {
-                    var mvp = mv * proj;
-                    GL.UniformMatrix4(uMVP, false, ref mvp);
-                }
-
-                if (uModelView != -1)
-                {
-                    GL.UniformMatrix4(uModelView, false, ref mv);
-                }
-
-                if (uNormal != -1)
-                {
-                    var normal = new OpenTK.Matrix3(
-                        mv.M11, mv.M12, mv.M13,
-                        mv.M21, mv.M22, mv.M23,
-                        mv.M31, mv.M32, mv.M33);
-
-                    // Compute inverse transpose for correct normal transformation
-                    try
-                    {
-                        normal = normal.Inverted();
-                        normal = new OpenTK.Matrix3(
-                            normal.M11, normal.M21, normal.M31,
-                            normal.M12, normal.M22, normal.M32,
-                            normal.M13, normal.M23, normal.M33);
-                        GL.UniformMatrix3(uNormal, false, ref normal);
-                    }
-                    catch
-                    {
-                        // If matrix is singular, use identity
-                        var identity = OpenTK.Matrix3.Identity;
-                        GL.UniformMatrix3(uNormal, false, ref identity);
-                    }
-                }
-            }
-            catch { }
         }
 
         /// <summary>

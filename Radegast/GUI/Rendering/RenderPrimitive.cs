@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
+using SkiaSharp;
 
 namespace Radegast.Rendering
 {
@@ -716,33 +717,91 @@ namespace Radegast.Rendering
                                                 sw.SetShaderMaterialColor(RGBA);
                                                 sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
 
-                                                // Set shininess exponent and specular strength per face
+                                                // If the TE has material properties, set the material layer uniforms
                                                 try
                                                 {
-                                                    float exp = 24.0f;
-                                                    float specStr = 1.0f;
+                                                    // Use the known TextureEntryFace fields instead of reflection
+                                                    // - teFace.material (byte) encodes bump/shiny/fullbright
+                                                    // - teFace.MaterialID (UUID) references a material texture/asset when present
+                                                    bool hasMat = teFace.MaterialID != UUID.Zero;
+                                                    var matSpec = new OpenTK.Vector3(0.5f, 0.5f, 0.5f);
+                                                    float matSh = 24.0f;
+                                                    float matStr = 1.0f;
+
+                                                    // Map the Shiny enum to a shader shininess value
                                                     switch (teFace.Shiny)
                                                     {
                                                         case Shininess.High:
-                                                            exp = 48.0f; specStr = 1.4f; break;
+                                                            matSh = 94.0f;
+                                                            break;
                                                         case Shininess.Medium:
-                                                            exp = 24.0f; specStr = 1.0f; break;
+                                                            matSh = 64.0f;
+                                                            break;
                                                         case Shininess.Low:
-                                                            exp = 12.0f; specStr = 0.6f; break;
+                                                            matSh = 24.0f;
+                                                            break;
+                                                        default:
+                                                            matSh = 24.0f;
+                                                            break;
                                                     }
-                                                    sw.SetShaderShininessExp(exp);
-                                                    sw.SetShaderSpecularStrength(specStr);
-                                                }
-                                                catch { }
 
-                                                // Set per-face glow if available
-                                                try
-                                                {
-                                                   float faceGlow = 0f;
-                                                   try { faceGlow = teFace.Glow; } catch { faceGlow = 0f; }
-                                                   sw.SetShaderGlow(faceGlow);
-                                                }
-                                                catch { }
+                                                    if (hasMat)
+                                                    {
+                                                        // Try to use the material asset as a texture: if already downloaded, sample it to derive specular info
+                                                        try
+                                                        {
+                                                            TextureInfo matTexInfo;
+                                                            if (sw.TryGetTextureInfo(teFace.MaterialID, out matTexInfo) && matTexInfo != null && matTexInfo.TexturePointer != 0 && matTexInfo.Texture != null)
+                                                            {
+                                                                SKBitmap bmp = matTexInfo.Texture;
+                                                                if (bmp.Width > 0 && bmp.Height > 0)
+                                                                {
+                                                                    // Sample center pixel as a cheap approximation of specular color
+                                                                    var px = bmp.GetPixel(bmp.Width / 2, bmp.Height / 2);
+                                                                    float r = px.Red / 255f;
+                                                                    float g = px.Green / 255f;
+                                                                    float b = px.Blue / 255f;
+                                                                    matSpec = new OpenTK.Vector3(r, g, b);
+                                                                    // Strength = average brightness
+                                                                    matStr = (r + g + b) / 3f;
+                                                                }
+                                                            }
+                                                            else
+                                                            {
+                                                                // Not available yet: request download of the material texture by creating a temporary TE with TextureID = MaterialID
+                                                                try
+                                                                {
+                                                                    var tempFace = (Primitive.TextureEntryFace)teFace.Clone();
+                                                                    tempFace.TextureID = teFace.MaterialID;
+                                                                    sw.DownloadTexture(new TextureLoadItem()
+                                                                    {
+                                                                        Prim = Prim,
+                                                                        TeFace = tempFace,
+                                                                        Data = data
+                                                                    }, false);
+                                                                }
+                                                                catch { }
+                                                            }
+                                                        }
+                                                        catch { }
+
+                                                        sw.SetShaderMaterialLayer(true, matSpec, matSh, matStr);
+                                                    }
+                                                    else
+                                                    {
+                                                        sw.SetShaderMaterialLayer(false, matSpec, matSh, matStr);
+                                                    }
+                                                 }
+                                                 catch { }
+
+                                                 // Set per-face glow if available
+                                                 try
+                                                 {
+                                                    float faceGlow = 0f;
+                                                    try { faceGlow = teFace.Glow; } catch { faceGlow = 0f; }
+                                                    sw.SetShaderGlow(faceGlow);
+                                                 }
+                                                 catch { }
 
                                                 // Bind the vertex and index buffers
                                                 Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);

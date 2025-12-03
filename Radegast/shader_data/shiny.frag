@@ -12,6 +12,13 @@ uniform float glowStrength;
 uniform float shininessExp; // specular exponent
 uniform float specularStrength; // specular multiplier
 uniform float gamma; // gamma correction value (>0 to enable)
+uniform float emissiveStrength; // global emissive multiplier for glow
+
+// Material layer support
+uniform int hasMaterial; // 0 = no material, 1 = has material
+uniform vec3 materialSpecularColor;
+uniform float materialShininess;
+uniform float materialSpecularStrength;
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -54,9 +61,20 @@ void main()
     // Specular
     vec3 viewDir = safeNormalize(-vPos, vec3(0.0, 0.0, 1.0));
     vec3 halfVec = safeNormalize(ld + viewDir, ld);
-    float spec = pow(max(dot(n, halfVec), 0.0), max(1.0, shininessExp));
-    // Apply specular strength and specular color
-    color += specularColor * spec * specularStrength;
+    
+    // Choose shininess and specular strength from material layer if present
+    float shininess = max(1.0, shininessExp);
+    float specStr = specularStrength;
+    vec3 specColor = vec3(specularColor.x, specularColor.y, specularColor.z);
+    if (hasMaterial != 0)
+    {
+        shininess = max(1.0, materialShininess);
+        specStr = materialSpecularStrength;
+        specColor = materialSpecularColor;
+    }
+
+    float spec = pow(max(dot(n, halfVec), 0.0), shininess);
+    color.rgb += specColor * spec * specStr;
 
     // Ensure minimum brightness to prevent completely black surfaces
     vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;
@@ -66,7 +84,8 @@ void main()
     if (glow > 0.0)
     {
         // Multiply glow by a strength factor to allow stronger effect
-        color.rgb += tex.rgb * glow * glowStrength;
+        // Treat glow as emissive — use both global glowStrength and emissiveStrength
+        color.rgb += tex.rgb * glow * glowStrength * emissiveStrength;
     }
 
     // Clamp and guard against NaNs before writing to the framebuffer
