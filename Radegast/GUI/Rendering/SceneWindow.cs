@@ -1204,6 +1204,10 @@ namespace Radegast.Rendering
                     var ues = prog.Uni("emissiveStrength");
                     if (ues != -1) GL.Uniform1(ues, 1.0f);
 
+                    // Ensure glowStrength multiplier is set so per-face glow contributes
+                    var uGlowStr = prog.Uni("glowStrength");
+                    if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
+
                     // Default material layer uniforms
                     var uHasMat = prog.Uni("hasMaterial");
                     if (uHasMat != -1) GL.Uniform1(uHasMat, 0);
@@ -1290,6 +1294,9 @@ namespace Radegast.Rendering
                 // Set default emissive strength for avatar shader
                 var uesAv = prog.Uni("emissiveStrength");
                 if (uesAv != -1) GL.Uniform1(uesAv, 1.0f);
+                // Ensure glowStrength multiplier for avatar shader
+                var uGlowStrAv = prog.Uni("glowStrength");
+                if (uGlowStrAv != -1) GL.Uniform1(uGlowStrAv, 1.0f);
 
                 // Default material layer uniforms for avatar shader
                 var uHasMatAv = prog.Uni("hasMaterial");
