@@ -6,6 +6,8 @@ uniform vec4 ambientColor;
 uniform vec4 diffuseColor;
 uniform vec4 specularColor;
 uniform int hasTexture; // 0 = no texture, 1 = has texture
+uniform float glow;
+uniform float glowStrength;
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -13,7 +15,8 @@ varying vec3 vPos;
 
 vec3 safeNormalize(vec3 v, vec3 defaultDir)
 {
-    if (isnan(v.x) || isnan(v.y) || isnan(v.z)) return defaultDir;
+    // Guard against NaNs
+    if (v.x != v.x || v.y != v.y || v.z != v.z) return defaultDir;
     float len = length(v);
     if (len <= 1e-6) return defaultDir;
     return v / len;
@@ -47,7 +50,14 @@ void main()
     vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;
     color.rgb = max(color.rgb, minBright);
 
-    if (isnan(color.r) || isnan(color.g) || isnan(color.b) || isnan(color.a))
+    // Additive glow
+    if (glow > 0.0)
+    {
+        color.rgb += tex.rgb * glow * glowStrength;
+    }
+
+    // NaN guard
+    if (color.r != color.r || color.g != color.g || color.b != color.b || color.a != color.a)
     {
         color = vec4(0.5 * ambientColor.rgb, tex.a);
     }

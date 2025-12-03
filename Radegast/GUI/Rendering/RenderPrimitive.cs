@@ -569,8 +569,9 @@ namespace Radegast.Rendering
                     }
                     else
                     {
-                        // Ensure shader is stopped for non-shiny faces
-                        scene.StopShiny();
+                        // No shader start for non-shiny faces. Don't stop shader here —
+                        // stopping mid-prim can cause flicker between shaded and
+                        // fixed-function rendering for adjacent faces.
                     }
                     GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shiny);
                     var faceColor = new float[] { RGBA.R, RGBA.G, RGBA.B, RGBA.A };
@@ -685,8 +686,7 @@ namespace Radegast.Rendering
                                     var normLoc = sw.GetShaderAttr("aNormal");
                                     var texLoc = sw.GetShaderAttr("aTexCoord");
                                     
-                                    // If any required attribute is missing, the shader cannot be used.
-                                    // Ensure we stop the shader to avoid having a program bound while using fixed-function attributes.
+                                    // If any of the required attributes are missing, fall back to fixed-function
                                     if (posLoc == -1 || normLoc == -1 || texLoc == -1)
                                     {
                                         // Stop shader and fall back to fixed-function path
@@ -715,6 +715,15 @@ namespace Radegast.Rendering
                                                 // Pass face material color to shader
                                                 sw.SetShaderMaterialColor(RGBA);
                                                 sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
+
+                                                // Set per-face glow if available
+                                                try
+                                                {
+                                                   float faceGlow = 0f;
+                                                   try { faceGlow = teFace.Glow; } catch { faceGlow = 0f; }
+                                                   sw.SetShaderGlow(faceGlow);
+                                                }
+                                                catch { }
 
                                                 // Bind the vertex and index buffers
                                                 Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);
@@ -763,10 +772,9 @@ namespace Radegast.Rendering
                             inShaderMode = false;
                         }
                         
-                        if (shiny > 0f && pass != RenderPass.Picking)
-                        {
-                            scene.StopShiny();
-                        }
+                        // Do not call StopShiny() here; shader stop is handled once
+                        // after the prim rendering to avoid toggling the program
+                        // between faces which produces visual flicker.
                         
                         // Apply texture animation for fixed-function VBO path
                         if (animatedTexture && data.AnimInfo != null)

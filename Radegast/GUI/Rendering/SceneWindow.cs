@@ -1042,6 +1042,44 @@ namespace Radegast.Rendering
             catch { }
         }
 
+        // Set per-face glow uniform for shiny shader
+        public void SetShaderGlow(float glow)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uGlow = prog.Uni("glow");
+                if (uGlow != -1)
+                {
+                    GL.Uniform1(uGlow, glow);
+                }
+            }
+            catch { }
+        }
+
+        // Set shader-wide glow strength (global multiplier)
+        public void SetShaderGlowStrength(float strength)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var ugs = prog.Uni("glowStrength");
+                if (ugs != -1)
+                {
+                    GL.Uniform1(ugs, strength);
+                }
+            }
+            catch { }
+        }
+
         /// <summary>
         /// Select shiny shader as the current shader
         /// </summary>
@@ -1092,6 +1130,14 @@ namespace Radegast.Rendering
                     {
                         GL.Uniform1(uColorMap, 0);
                     }
+
+                    // Set default glow to 0.0
+                    var ug = prog.Uni("glow");
+                    if (ug != -1) GL.Uniform1(ug, 0.0f);
+
+                    // Set default glowStrength to 1.0
+                    var ugs = prog.Uni("glowStrength");
+                    if (ugs != -1) GL.Uniform1(ugs, 1.0f);
 
                     // Update matrix uniforms for current modelview/projection
                     UpdateShaderMatrices();
@@ -1151,6 +1197,10 @@ namespace Radegast.Rendering
                 {
                     GL.Uniform1(uColorMap, 0);
                 }
+
+                // Set default glow to 0.0
+                var ug = prog.Uni("glow");
+                if (ug != -1) GL.Uniform1(ug, 0.0f);
 
                 // Update matrix uniforms for current modelview/projection
                 UpdateAvatarShaderMatrices();

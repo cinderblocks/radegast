@@ -7,6 +7,8 @@ uniform vec4 diffuseColor;
 uniform vec4 specularColor;
 uniform vec4 materialColor; // Per-face RGBA color
 uniform int hasTexture; // 0 = no texture, 1 = has texture
+uniform float glow;
+uniform float glowStrength;
 
 varying vec3 vNormal;
 varying vec2 vTexCoord;
@@ -55,6 +57,13 @@ void main()
     // Ensure minimum brightness to prevent completely black surfaces
     vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;
     color.rgb = max(color.rgb, minBright);
+
+    // Additive glow component (uses texture color as tint)
+    if (glow > 0.0)
+    {
+        // Multiply glow by a strength factor to allow stronger effect
+        color.rgb += tex.rgb * glow * glowStrength;
+    }
 
     // Clamp and guard against NaNs before writing to the framebuffer
     // Use self-comparison to detect NaNs since 'isnan' may not be available in GLSL 1.20

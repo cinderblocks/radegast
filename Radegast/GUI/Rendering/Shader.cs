@@ -180,6 +180,7 @@ namespace Radegast.Rendering
             if (CurrentProgram != 0)
             {
                 GL.UseProgram(0);
+                CurrentProgram = 0;
             }
         }
 
