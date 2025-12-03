@@ -656,23 +656,12 @@ namespace Radegast.Rendering
         #endregion Static vertices and indices for a cube (used for bounding box drawing)
 
         // Legacy overload for compatibility - converts Bitmap to SKBitmap
-        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha)
-        {
-            return GLLoadImage(bitmap.ToSKBitmap(), hasAlpha, true);
-        }
-
-        // Legacy overload for compatibility - converts Bitmap to SKBitmap
-        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha, bool useMipmap)
+        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha, bool useMipmap = true)
         {
             return GLLoadImage(bitmap.ToSKBitmap(), hasAlpha, useMipmap);
         }
 
-        public static int GLLoadImage(SKBitmap bitmap, bool hasAlpha)
-        {
-            return GLLoadImage(bitmap, hasAlpha, true);
-        }
-
-        public static int GLLoadImage(SKBitmap bitmap, bool hasAlpha, bool useMipmap)
+        public static int GLLoadImage(SKBitmap bitmap, bool hasAlpha = true, bool useMipmap = true)
         {
             useMipmap = useMipmap && RenderSettings.HasMipmap;
             int ret;
