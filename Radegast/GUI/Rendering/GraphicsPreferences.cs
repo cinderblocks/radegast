@@ -379,6 +379,75 @@ namespace Radegast.Rendering
             }
         }
 
+        private void btnDefaults_Click(object sender, EventArgs e)
+        {
+            // Reset GlobalSettings to defaults
+            Instance.GlobalSettings["use_multi_sampling"] = true;
+            Instance.GlobalSettings["draw_distance"] = 128;
+            Instance.GlobalSettings["water_reflections"] = false;
+            Instance.GlobalSettings["rendering_occlusion_culling_enabled2"] = false;
+            Instance.GlobalSettings["scene_viewer_shiny"] = false;
+            Instance.GlobalSettings["scene_ambient_light"] = RenderSettings.AmbientLight = 0.70f;
+            Instance.GlobalSettings["scene_diffuse_light"] = RenderSettings.DiffuseLight = 0.80f;
+            Instance.GlobalSettings["scene_specular_light"] = RenderSettings.SpecularLight = 0.50f;
+            Instance.GlobalSettings["scene_gamma"] = RenderSettings.Gamma = 1.0f;
+            Instance.GlobalSettings["scene_emissive_strength"] = RenderSettings.EmissiveStrength = 1.0f;
+            Instance.GlobalSettings["fallback_water_animation_enabled"] = RenderSettings.FallbackWaterAnimationEnabled = true;
+            Instance.GlobalSettings["fallback_water_animation_speed"] = RenderSettings.FallbackWaterAnimationSpeed = 1.5f;
+            Instance.GlobalSettings["fallback_water_animation_amplitude"] = RenderSettings.FallbackWaterAnimationAmplitude = 0.12f;
+            Instance.GlobalSettings["fallback_water_base_alpha"] = RenderSettings.FallbackWaterBaseAlpha = 0.84f;
+            Instance.GlobalSettings["scene_enable_glow"] = RenderSettings.EnableGlow = true;
+            Instance.GlobalSettings["scene_enable_materials"] = RenderSettings.EnableMaterials = true;
+
+            // Update UI controls
+            var tbGammaCtrl = FindTrackBar("tbGamma");
+            var lblGammaCtrl = FindLabel("lblGamma");
+            if (tbGammaCtrl != null) tbGammaCtrl.Value = (int)(RenderSettings.Gamma * 100f);
+            if (lblGammaCtrl != null) lblGammaCtrl.Text = $"Gamma: {RenderSettings.Gamma:0.00}";
+
+            var tbEmissiveCtrl = FindTrackBar("tbEmissive");
+            var lblEmissiveCtrl = FindLabel("lblEmissive");
+            if (tbEmissiveCtrl != null) tbEmissiveCtrl.Value = (int)(RenderSettings.EmissiveStrength * 100f);
+            if (lblEmissiveCtrl != null) lblEmissiveCtrl.Text = $"Emissive: {RenderSettings.EmissiveStrength:0.00}";
+
+            cbAA.Checked = Instance.GlobalSettings["use_multi_sampling"];
+            tbDrawDistance.Value = Utils.Clamp(Instance.GlobalSettings["draw_distance"].AsInteger(), tbDrawDistance.Minimum, tbDrawDistance.Maximum);
+            lblDrawDistance.Text = $"Draw distance: {tbDrawDistance.Value}";
+            cbWaterReflections.Checked = Instance.GlobalSettings["water_reflections"];
+            cbOcclusionCulling.Checked = Instance.GlobalSettings["rendering_occlusion_culling_enabled2"];
+            cbShiny.Checked = Instance.GlobalSettings["scene_viewer_shiny"];
+
+            tbAmbient.Value = (int)(RenderSettings.AmbientLight * 100);
+            lblAmbient.Text = $"Ambient: {RenderSettings.AmbientLight:0.00}";
+            tbDiffuse.Value = (int)(RenderSettings.DiffuseLight * 100);
+            lblDiffuse.Text = $"Diffuse: {RenderSettings.DiffuseLight:0.00}";
+            tbSpecular.Value = (int)(RenderSettings.SpecularLight * 100);
+            lblSpecular.Text = $"Specular: {RenderSettings.SpecularLight:0.00}";
+
+            cbFallbackAnim.Checked = RenderSettings.FallbackWaterAnimationEnabled;
+            nudFallbackSpeed.Value = (decimal)RenderSettings.FallbackWaterAnimationSpeed;
+            nudFallbackAmp.Value = (decimal)RenderSettings.FallbackWaterAnimationAmplitude;
+            nudFallbackBaseAlpha.Value = (decimal)RenderSettings.FallbackWaterBaseAlpha;
+
+            var cbGlowCtrl = this.Controls.Find("cbGlow", true);
+            if (cbGlowCtrl != null && cbGlowCtrl.Length > 0 && cbGlowCtrl[0] is System.Windows.Forms.CheckBox cbGlow)
+                cbGlow.Checked = RenderSettings.EnableGlow;
+            var cbMaterialsCtrl = this.Controls.Find("cbMaterials", true);
+            if (cbMaterialsCtrl != null && cbMaterialsCtrl.Length > 0 && cbMaterialsCtrl[0] is System.Windows.Forms.CheckBox cbMaterials)
+                cbMaterials.Checked = RenderSettings.EnableMaterials;
+
+            // Apply to SceneWindow if available
+            var window = Instance.TabConsole.TabExists("scene_window") ? (SceneWindow)Instance.TabConsole.Tabs["scene_window"].Control : null;
+            if (window != null)
+            {
+                window.DrawDistance = tbDrawDistance.Value;
+                window.UpdateLighting();
+                window.SetShaderGamma(RenderSettings.Gamma);
+                window.SetShaderEmissiveStrength(RenderSettings.EmissiveStrength);
+                RenderSettings.EnableShiny = cbShiny.Checked && RenderSettings.HasShaders;
+            }
+        }
+
         // Helper to find a TrackBar by name in the control hierarchy
         private TrackBar FindTrackBar(string name)
         {

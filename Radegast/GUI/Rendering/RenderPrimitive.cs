@@ -804,17 +804,17 @@ namespace Radegast.Rendering
                                                     {
                                                         sw.SetShaderMaterialLayer(false, matSpec, matSh, matStr);
                                                     }
-                                                 }
-                                                 catch { }
+                                                }
+                                                catch { }
 
-                                                 // Set per-face glow if available
-                                                 try
-                                                 {
+                                                // Set per-face glow if available
+                                                try
+                                                {
                                                     float faceGlow = 0f;
                                                     try { faceGlow = teFace.Glow; } catch { faceGlow = 0f; }
                                                     sw.SetShaderGlow(faceGlow);
-                                                 }
-                                                 catch { }
+                                                }
+                                                catch { }
 
                                                 // Bind the vertex and index buffers
                                                 Compat.BindBuffer(BufferTarget.ArrayBuffer, data.VertexVBO);

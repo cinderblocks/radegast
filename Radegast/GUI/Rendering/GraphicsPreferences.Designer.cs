@@ -54,6 +54,7 @@
             this.lblEmissive = new System.Windows.Forms.Label();
             this.cbMaterials = new System.Windows.Forms.CheckBox();
             this.cbGlow = new System.Windows.Forms.CheckBox();
+            this.btnDefaults = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).BeginInit();
@@ -348,7 +349,7 @@
             this.cbMaterials.AutoSize = true;
             this.cbMaterials.Location = new System.Drawing.Point(150, 34);
             this.cbMaterials.Name = "cbMaterials";
-            this.cbMaterials.Size = new System.Drawing.Size(69, 17);
+            this.cbMaterials.Size = new System.Drawing.Size(68, 17);
             this.cbMaterials.TabIndex = 39;
             this.cbMaterials.Text = "Materials";
             this.cbMaterials.UseVisualStyleBackColor = true;
@@ -362,6 +363,17 @@
             this.cbGlow.TabIndex = 40;
             this.cbGlow.Text = "Glow";
             this.cbGlow.UseVisualStyleBackColor = true;
+            // 
+            // btnDefaults
+            // 
+            this.btnDefaults.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnDefaults.AutoSize = true;
+            this.btnDefaults.Location = new System.Drawing.Point(204, 368);
+            this.btnDefaults.Name = "btnDefaults";
+            this.btnDefaults.Size = new System.Drawing.Size(75, 23);
+            this.btnDefaults.TabIndex = 999;
+            this.btnDefaults.Text = "Defaults";
+            this.btnDefaults.Click += new System.EventHandler(this.btnDefaults_Click);
             // 
             // GraphicsPreferences
             // 
@@ -393,8 +405,9 @@
             this.Controls.Add(this.cbShiny);
             this.Controls.Add(this.cbOcclusionCulling);
             this.Controls.Add(this.chkWireFrame);
+            this.Controls.Add(this.btnDefaults);
             this.Name = "GraphicsPreferences";
-            this.Size = new System.Drawing.Size(283, 373);
+            this.Size = new System.Drawing.Size(283, 397);
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).EndInit();
@@ -437,5 +450,6 @@
         private System.Windows.Forms.NumericUpDown nudFallbackBaseAlpha;
         private System.Windows.Forms.CheckBox cbGlow;
         private System.Windows.Forms.CheckBox cbMaterials;
+        private System.Windows.Forms.Button btnDefaults;
     }
 }
