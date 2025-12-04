@@ -69,7 +69,7 @@ namespace Radegast.Rendering
         public static bool PrimitiveRenderingEnabled = true;
 
         /// <summary>
-        /// Show avatar skeloton
+        /// Show avatar skeleton
         /// </summary>
         public static bool RenderAvatarSkeleton = false;
 
@@ -111,7 +111,7 @@ namespace Radegast.Rendering
         #endregion Lighting
 
         #region Water
-        public static bool WaterReflections = false;
+        public static bool WaterReflections = true;
         // Fallback CPU-side water animation when shaders are unavailable
         public static bool FallbackWaterAnimationEnabled = true;
         // Speed multiplier for the CPU fallback animation (higher -> faster)

@@ -2656,5 +2656,167 @@ namespace Radegast.Rendering
             
             base.Dispose();
         }
+
+        public override void Render(RenderPass pass, int pickingID, SceneWindow scene, float time)
+        {
+            if (!RenderSettings.AvatarRenderingEnabled) return;
+            if (glavatar == null || glavatar._meshes == null || glavatar._meshes.Count == 0) return;
+            if (pass == RenderPass.Picking || pass == RenderPass.Invisible) return;
+
+            // World transform for this avatar
+            GL.PushMatrix();
+            GL.MultMatrix(Math3D.CreateSRTMatrix(Vector3.One, RenderRotation, RenderPosition));
+
+            // Try to use avatar shader if available
+            bool shaderActive = false;
+            try
+            {
+                scene.StartAvatarShader();
+                shaderActive = true;
+                scene.UpdateShaderMatrices();
+                // Avatars are typically lit by scene lights; no per-face color here
+                // Any additional uniforms (gamma, emissive) are managed by SceneWindow
+            }
+            catch { shaderActive = false; }
+
+            foreach (var kvp in glavatar._meshes)
+            {
+                var mesh = kvp.Value;
+                if (mesh == null) continue;
+
+                // Skip empty meshes
+                if (mesh.RenderData.Vertices == null || mesh.RenderData.Vertices.Length == 0 ||
+                    mesh.RenderData.Indices == null || mesh.RenderData.Indices.Length == 0)
+                {
+                    continue;
+                }
+
+                // Prepare VBOs if supported
+                bool usingVbo = RenderSettings.UseVBO && !mesh.VBOFailed && mesh.PrepareVBO();
+
+                if (shaderActive)
+                {
+                    // Use programmable pipeline: set attributes and draw
+                    int posLoc = scene.GetShaderAttr("aPosition");
+                    int normLoc = scene.GetShaderAttr("aNormal");
+                    int texLoc = scene.GetShaderAttr("aTexCoord");
+
+                    if (posLoc != -1 && normLoc != -1 && texLoc != -1)
+                    {
+                        if (usingVbo)
+                        {
+                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
+
+                            GL.EnableVertexAttribArray(posLoc);
+                            GL.EnableVertexAttribArray(normLoc);
+                            GL.EnableVertexAttribArray(texLoc);
+
+                            // Interleaved: pos(3), norm(3), tex(2) => stride 8 floats
+                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
+                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 3 * sizeof(float));
+                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 * sizeof(float));
+
+                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                            GL.DisableVertexAttribArray(posLoc);
+                            GL.DisableVertexAttribArray(normLoc);
+                            GL.DisableVertexAttribArray(texLoc);
+
+                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                        }
+                        else
+                        {
+                            // Client arrays fallback
+                            GL.DisableClientState(ArrayCap.VertexArray);
+                            GL.DisableClientState(ArrayCap.NormalArray);
+                            GL.DisableClientState(ArrayCap.TextureCoordArray);
+
+                            GL.EnableVertexAttribArray(posLoc);
+                            GL.EnableVertexAttribArray(normLoc);
+                            GL.EnableVertexAttribArray(texLoc);
+
+                            unsafe
+                            {
+                                fixed (float* vPtr = mesh.RenderData.Vertices)
+                                fixed (float* nPtr = mesh.RenderData.Normals)
+                                fixed (float* tPtr = mesh.RenderData.TexCoords)
+                                fixed (ushort* iPtr = mesh.RenderData.Indices)
+                                {
+                                    GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, 0, (IntPtr)vPtr);
+                                    GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, 0, (IntPtr)nPtr);
+                                    GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, 0, (IntPtr)tPtr);
+
+                                    GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, (IntPtr)iPtr);
+                                }
+                            }
+
+                            GL.DisableVertexAttribArray(posLoc);
+                            GL.DisableVertexAttribArray(normLoc);
+                            GL.DisableVertexAttribArray(texLoc);
+                        }
+                    }
+                    else
+                    {
+                        // Attributes missing - fallback to fixed-function
+                        shaderActive = false;
+                        try { scene.StopAvatarShader(); } catch { }
+                    }
+                }
+
+                if (!shaderActive)
+                {
+                    // Fixed-function fallback
+                    if (usingVbo)
+                    {
+                        Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
+
+                        GL.EnableClientState(ArrayCap.VertexArray);
+                        GL.EnableClientState(ArrayCap.NormalArray);
+                        GL.EnableClientState(ArrayCap.TextureCoordArray);
+
+                        // Interleaved: pos(3) @ 0, norm(3) @ 12, tex(2) @ 24
+                        GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), (IntPtr)0);
+                        GL.NormalPointer(NormalPointerType.Float, 8 * sizeof(float), (IntPtr)(3 * sizeof(float)));
+                        GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), (IntPtr)(6 * sizeof(float)));
+
+                        GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                        GL.DisableClientState(ArrayCap.VertexArray);
+                        GL.DisableClientState(ArrayCap.NormalArray);
+                        GL.DisableClientState(ArrayCap.TextureCoordArray);
+
+                        Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                        Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                    }
+                    else
+                    {
+                        // Pure client arrays
+                        GL.EnableClientState(ArrayCap.VertexArray);
+                        GL.EnableClientState(ArrayCap.NormalArray);
+                        GL.EnableClientState(ArrayCap.TextureCoordArray);
+
+                        GL.VertexPointer(3, VertexPointerType.Float, 0, mesh.RenderData.Vertices);
+                        GL.NormalPointer(NormalPointerType.Float, 0, mesh.RenderData.Normals);
+                        GL.TexCoordPointer(2, TexCoordPointerType.Float, 0, mesh.RenderData.TexCoords);
+
+                        GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, mesh.RenderData.Indices);
+
+                        GL.DisableClientState(ArrayCap.VertexArray);
+                        GL.DisableClientState(ArrayCap.NormalArray);
+                        GL.DisableClientState(ArrayCap.TextureCoordArray);
+                    }
+                }
+            }
+
+            // Stop shader
+            try { scene.StopAvatarShader(); } catch { }
+
+            GL.PopMatrix();
+
+            base.Render(pass, pickingID, scene, time);
+        }
     }
 }
