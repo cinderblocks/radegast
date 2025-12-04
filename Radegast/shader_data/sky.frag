@@ -3,6 +3,7 @@
 // Sky dome fragment shader implementing a simple Rayleigh + Mie scattering approximation
 
 varying vec4 vColor;
+varying vec3 vDir;
 
 const float PI = 3.14159265358979323846;
 
@@ -17,6 +18,20 @@ uniform float mieScale;      // multiplier for Mie scattering
 uniform float mieG;          // anisotropy for Mie (0..0.99)
 uniform float sunIntensity; // intensity multiplier for sunlight
 uniform float exposure;      // simple exposure/tone control
+
+// Cloud samplers (up to 4 layers)
+uniform sampler2D cloud0;
+uniform sampler2D cloud1;
+uniform sampler2D cloud2;
+uniform float cloud0Scale;
+uniform float cloud1Scale;
+uniform float cloud2Scale;
+uniform float cloud0Alpha;
+uniform float cloud1Alpha;
+uniform float cloud2Alpha;
+uniform float cloud0Offset;
+uniform float cloud1Offset;
+uniform float cloud2Offset;
 
 // safe normalize helper
 vec3 safeNormalize(vec3 v)
@@ -37,7 +52,7 @@ void main()
     vec3 dir = vec3(0.0, 0.0, 1.0);
 
     // Use the blue channel of the vertex color as a simple altitude indicator
-    float altitude = clamp(vColor.b, 0.0, 1.0);
+    float altitude = clamp(vDir.z * 0.5 + 0.5, 0.0, 1.0);
 
     // Surface normal (upwards for a dome approximation)
     vec3 normal = vec3(0.0, 0.0, 1.0);
@@ -85,6 +100,31 @@ void main()
     float sunDot = clamp(dot(normalize(sd), normal), 0.0, 1.0);
     float sunCore = smoothstep(0.98, 1.0, sunDot);
     color += sunCore * sunColor.rgb * sunI * 0.6;
+
+    // Cloud layers sampling
+    vec2 uv0 = vDir.xy * cloud0Scale + vec2(cloud0Offset, cloud0Offset);
+    vec2 uv1 = vDir.xy * cloud1Scale + vec2(cloud1Offset, cloud1Offset);
+    vec2 uv2 = vDir.xy * cloud2Scale + vec2(cloud2Offset, cloud2Offset);
+
+    // Wrap UVs
+    uv0 = fract(uv0);
+    uv1 = fract(uv1);
+    uv2 = fract(uv2);
+
+    // Sample cloud textures
+    vec4 c0 = texture2D(cloud0, uv0);
+    vec4 c1 = texture2D(cloud1, uv1);
+    vec4 c2 = texture2D(cloud2, uv2);
+
+    // Combine clouds with different alphas and modulate by altitude (less clouds at horizon if desired)
+    float cloudAmount0 = c0.r * cloud0Alpha * (1.0 - smoothstep(0.0, 0.2, 1.0 - altitude));
+    float cloudAmount1 = c1.r * cloud1Alpha * (1.0 - smoothstep(0.0, 0.3, 1.0 - altitude));
+    float cloudAmount2 = c2.r * cloud2Alpha * (1.0 - smoothstep(0.0, 0.4, 1.0 - altitude));
+
+    vec3 cloudColor = vec3(1.0);
+    color = mix(color, mix(color, cloudColor, cloudAmount0), cloudAmount0);
+    color = mix(color, mix(color, cloudColor, cloudAmount1), cloudAmount1);
+    color = mix(color, mix(color, cloudColor, cloudAmount2), cloudAmount2);
 
     // Apply exposure / simple tone mapping
     color = 1.0 - exp(-color * expExposure);

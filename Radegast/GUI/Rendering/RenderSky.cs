@@ -74,6 +74,17 @@ namespace Radegast.Rendering
         
         private readonly SceneWindow scene;
         private Vector3 sunDirection;
+
+        // Cloud layer fields
+        private int[] cloudTextures = null;
+        private int cloudLayerCount = 3;
+        private float[] cloudRotation;
+        private float[] cloudSpeed;
+        private float[] cloudScaleFactors;
+        private float[] cloudHeights;
+        private int cloudTextureSize = 512;
+        private int lastCloudUpdateMs = Environment.TickCount;
+        private readonly Random cloudRand = new Random();
         #endregion
 
         #region Construction and Disposal
@@ -106,6 +117,19 @@ namespace Radegast.Rendering
             skyColors = null;
             skyIndices = null;
             initialized = false;
+
+            // Dispose cloud textures
+            if (cloudTextures != null)
+            {
+                foreach (var t in cloudTextures)
+                {
+                    if (t > 0)
+                    {
+                        try { GL.DeleteTexture(t); } catch { }
+                    }
+                }
+                cloudTextures = null;
+            }
         }
         #endregion
 
@@ -125,6 +149,9 @@ namespace Radegast.Rendering
             }
             
             initialized = true;
+
+            // Prepare cloud layers
+            GenerateCloudLayers();
         }
 
         /// <summary>
@@ -319,6 +346,77 @@ namespace Radegast.Rendering
                 if (skyVAO != -1) { try { Compat.DeleteVertexArray(skyVAO); } catch { } skyVAO = -1; }
             }
         }
+
+        /// <summary>
+        /// Generate cloud layers textures and parameters
+        /// </summary>
+        private void GenerateCloudLayers()
+        {
+            // Initialize arrays
+            cloudTextures = new int[cloudLayerCount];
+            cloudRotation = new float[cloudLayerCount];
+            cloudSpeed = new float[cloudLayerCount];
+            cloudScaleFactors = new float[cloudLayerCount];
+            cloudHeights = new float[cloudLayerCount];
+
+            for (int i = 0; i < cloudLayerCount; i++)
+            {
+                // Different speeds and scales per layer for parallax
+                cloudRotation[i] = (float)(cloudRand.NextDouble() * 360.0);
+                // small speeds, some clockwise, some counter
+                cloudSpeed[i] = (float)((cloudRand.NextDouble() * 10.0 + 2.0) * (cloudRand.Next(0,2) == 0 ? 1.0 : -1.0));
+                cloudScaleFactors[i] = 1.0f + (float)i * 0.8f; // higher layers larger
+                cloudHeights[i] = 60.0f + i * 30.0f; // offsets above camera
+
+                // Generate bitmap
+                using (var bmp = new SkiaSharp.SKBitmap(cloudTextureSize, cloudTextureSize, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul))
+                using (var canvas = new SkiaSharp.SKCanvas(bmp))
+                {
+                    canvas.Clear(SkiaSharp.SKColors.Transparent);
+
+                    // Paint many soft circles to approximate cloud shapes
+                    int circles = 120 + i * 40;
+                    for (int c = 0; c < circles; c++)
+                    {
+                        float rx = (float)(cloudRand.NextDouble() * cloudTextureSize);
+                        float ry = (float)(cloudRand.NextDouble() * cloudTextureSize);
+                        float radius = (float)(cloudRand.NextDouble() * (cloudTextureSize * (0.05 + i * 0.05)) + cloudTextureSize * 0.02);
+                        float alpha = (float)(0.03 + cloudRand.NextDouble() * 0.07);
+
+                        using (var paint = new SkiaSharp.SKPaint())
+                        {
+                            paint.IsAntialias = true;
+                            paint.Color = new SkiaSharp.SKColor(255, 255, 255, (byte)(alpha * 255));
+                            // Use a radial gradient to make softer edges
+                            var shader = SkiaSharp.SKShader.CreateRadialGradient(new SkiaSharp.SKPoint(rx, ry), radius,
+                                new SkiaSharp.SKColor[] { new SkiaSharp.SKColor(255,255,255,(byte)(alpha*255)), SkiaSharp.SKColors.Transparent },
+                                new float[] { 0, 1 }, SkiaSharp.SKShaderTileMode.Clamp);
+                            paint.Shader = shader;
+                            canvas.DrawCircle(rx, ry, radius, paint);
+                            paint.Shader?.Dispose();
+                        }
+                    }
+
+                    // Slight global fade and variation
+                    using (var paint = new SkiaSharp.SKPaint())
+                    {
+                        paint.Color = new SkiaSharp.SKColor(255, 255, 255, 25);
+                        canvas.DrawRect(new SkiaSharp.SKRect(0, 0, cloudTextureSize, cloudTextureSize), paint);
+                    }
+
+                    // Upload to GL and store texture
+                    try
+                    {
+                        int tex = RHelp.GLLoadImage(bmp, true);
+                        cloudTextures[i] = tex;
+                    }
+                    catch
+                    {
+                        cloudTextures[i] = -1;
+                    }
+                }
+            }
+        }
         #endregion
 
         #region Rendering
@@ -346,6 +444,19 @@ namespace Radegast.Rendering
         {
             if (!initialized) Initialize();
             if (pass == RenderPass.Picking) return; // Don't render sky in picking pass
+
+            // Update cloud rotations
+            int nowMs = Environment.TickCount;
+            float dt = Math.Max(0f, (nowMs - lastCloudUpdateMs) / 1000f);
+            lastCloudUpdateMs = nowMs;
+
+            if (cloudTextures != null)
+            {
+                for (int i = 0; i < cloudLayerCount; i++)
+                {
+                    cloudRotation[i] += cloudSpeed[i] * dt;
+                }
+            }
 
             // Save state
             GL.PushAttrib(AttribMask.EnableBit | AttribMask.DepthBufferBit | AttribMask.LightingBit);
@@ -412,6 +523,39 @@ namespace Radegast.Rendering
                 {
                     RenderWithClientArrays();
                 }
+
+                // Render cloud layers as large textured quads centered on camera (fixed-function fallback)
+                GL.Enable(EnableCap.Texture2D);
+                for (int i = 0; i < cloudLayerCount; i++)
+                {
+                    int tex = cloudTextures[i];
+                    if (tex <= 0) continue;
+
+                    GL.PushMatrix();
+                    // place layer at camera altitude + layer height
+                    GL.Translate(cameraPosition.X, cameraPosition.Y, cameraPosition.Z + cloudHeights[i]);
+                    GL.Rotate(cloudRotation[i], 0f, 0f, 1f);
+                    float size = SKY_RADIUS * 2.5f * cloudScaleFactors[i];
+
+                    GL.Color4(1f, 1f, 1f, 0.6f - i * 0.12f);
+                    GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, tex);
+
+                    GL.Begin(PrimitiveType.Quads);
+                    GL.TexCoord2(0f, 0f); GL.Vertex3(-size, -size, 0f);
+                    GL.TexCoord2(1f, 0f); GL.Vertex3(size, -size, 0f);
+                    GL.TexCoord2(1f, 1f); GL.Vertex3(size, size, 0f);
+                    GL.TexCoord2(0f, 1f); GL.Vertex3(-size, size, 0f);
+                    GL.End();
+
+                    GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0);
+                    GL.PopMatrix();
+                }
+                GL.Disable(EnableCap.Texture2D);
+                GL.Color4(1f, 1f, 1f, 1f);
+            }
+            else
+            {
+                // Shader path handled cloud composition inside the fragment shader; nothing else to do here.
             }
             
             GL.PopMatrix();
@@ -431,9 +575,9 @@ namespace Radegast.Rendering
                 var progType = prog.GetType();
                 var uniMethod = progType.GetMethod("Uni");
                 var attrMethod = progType.GetMethod("Attr");
-                
+
                 if (uniMethod == null || attrMethod == null) return false;
-                
+
                 // Get uniform locations
                 int uMVP = (int)uniMethod.Invoke(prog, new object[] { "uMVP" });
                 int uAtmosphere = (int)uniMethod.Invoke(prog, new object[] { "atmosphereStrength" });
@@ -488,24 +632,89 @@ namespace Radegast.Rendering
                 if (uSunI != -1) GL.Uniform1(uSunI, 20.0f);
                 if (uExposure != -1) GL.Uniform1(uExposure, 1.0f);
 
+                // Gamma uniform via reflection
+                int ugu = (int)uniMethod.Invoke(prog, new object[] { "gamma" });
+                if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
+
+                // Bind cloud textures and set cloud uniforms if present
+                try
+                {
+                    int baseUnit = 4;
+
+                    int uCloud0 = (int)uniMethod.Invoke(prog, new object[] { "cloud0" });
+                    int uCloud1 = (int)uniMethod.Invoke(prog, new object[] { "cloud1" });
+                    int uCloud2 = (int)uniMethod.Invoke(prog, new object[] { "cloud2" });
+
+                    int uCloud0Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud0Scale" });
+                    int uCloud1Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud1Scale" });
+                    int uCloud2Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud2Scale" });
+
+                    int uCloud0Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud0Alpha" });
+                    int uCloud1Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud1Alpha" });
+                    int uCloud2Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud2Alpha" });
+
+                    int uCloud0Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud0Offset" });
+                    int uCloud1Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud1Offset" });
+                    int uCloud2Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud2Offset" });
+
+                    if (cloudTextures != null)
+                    {
+                        for (int i = 0; i < cloudLayerCount && i < cloudTextures.Length; i++)
+                        {
+                            int tex = cloudTextures[i];
+                            if (tex <= 0) continue;
+
+                            GL.ActiveTexture(TextureUnit.Texture0 + (baseUnit + i));
+                            GL.Enable(EnableCap.Texture2D);
+                            GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, tex);
+
+                            if (i == 0 && uCloud0 != -1) GL.Uniform1(uCloud0, baseUnit + i);
+                            if (i == 1 && uCloud1 != -1) GL.Uniform1(uCloud1, baseUnit + i);
+                            if (i == 2 && uCloud2 != -1) GL.Uniform1(uCloud2, baseUnit + i);
+
+                            if (i == 0)
+                            {
+                                if (uCloud0Scale != -1) GL.Uniform1(uCloud0Scale, cloudScaleFactors[i]);
+                                if (uCloud0Alpha != -1) GL.Uniform1(uCloud0Alpha, 0.6f - i * 0.12f);
+                                if (uCloud0Offset != -1) GL.Uniform1(uCloud0Offset, cloudRotation[i] / 360.0f);
+                            }
+                            else if (i == 1)
+                            {
+                                if (uCloud1Scale != -1) GL.Uniform1(uCloud1Scale, cloudScaleFactors[i]);
+                                if (uCloud1Alpha != -1) GL.Uniform1(uCloud1Alpha, 0.6f - i * 0.12f);
+                                if (uCloud1Offset != -1) GL.Uniform1(uCloud1Offset, cloudRotation[i] / 360.0f);
+                            }
+                            else if (i == 2)
+                            {
+                                if (uCloud2Scale != -1) GL.Uniform1(uCloud2Scale, cloudScaleFactors[i]);
+                                if (uCloud2Alpha != -1) GL.Uniform1(uCloud2Alpha, 0.6f - i * 0.12f);
+                                if (uCloud2Offset != -1) GL.Uniform1(uCloud2Offset, cloudRotation[i] / 360.0f);
+                            }
+                        }
+
+                        GL.ActiveTexture(TextureUnit.Texture0);
+                    }
+                }
+                catch { }
+
                 // Render with VBO and shader attributes
                 if (RenderSettings.UseVBO && !vboFailed && skyVBO != -1 && skyIndexVBO != -1)
                 {
                     Compat.BindBuffer(BufferTarget.ArrayBuffer, skyVBO);
                     Compat.BindBuffer(BufferTarget.ElementArrayBuffer, skyIndexVBO);
-                    
+
                     int stride = 7 * sizeof(float);
                     GL.EnableVertexAttribArray(aPosition);
                     GL.EnableVertexAttribArray(aColor);
-                    
+
                     GL.VertexAttribPointer(aPosition, 3, VertexAttribPointerType.Float, false, stride, IntPtr.Zero);
                     GL.VertexAttribPointer(aColor, 4, VertexAttribPointerType.Float, false, stride, (IntPtr)(3 * sizeof(float)));
-                    
+
                     GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, IntPtr.Zero);
-                    
+
                     GL.DisableVertexAttribArray(aPosition);
                     GL.DisableVertexAttribArray(aColor);
-                    
+
                     Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
                     Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
                 }
@@ -514,7 +723,7 @@ namespace Radegast.Rendering
                     // Shader with client arrays (fallback)
                     GL.EnableVertexAttribArray(aPosition);
                     GL.EnableVertexAttribArray(aColor);
-                    
+
                     unsafe
                     {
                         fixed (float* vPtr = skyVertices)
@@ -526,11 +735,11 @@ namespace Radegast.Rendering
                             GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, (IntPtr)iPtr);
                         }
                     }
-                    
+
                     GL.DisableVertexAttribArray(aPosition);
                     GL.DisableVertexAttribArray(aColor);
                 }
-                
+
                 return true;
             }
             catch
