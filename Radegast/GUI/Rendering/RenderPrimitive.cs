@@ -607,18 +607,9 @@ namespace Radegast.Rendering
                         GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
                         try { GL.TexEnv(TextureEnvTarget.TextureEnv, TextureEnvParameter.TextureEnvMode, (int)TextureEnvMode.Modulate); } catch { }
 
-                        // Only whiten for shiny textured faces to avoid tinting issues
-                        if (shiny > 0f)
-                        {
-                            var white = new float[] { 1f, 1f, 1f, RGBA.A };
-                            GL.Color4(white);
-                            GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, white);
-                        }
-                        else
-                        {
-                            // Non-shiny textured: keep face color
-                            GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
-                        }
+                        // Tint textured faces using TE face color (RGBA), regardless of shiny
+                        GL.Color4(faceColor);
+                        GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
 
                         // Texture animation
                         if ((Prim.TextureAnim.Flags & Primitive.TextureAnimMode.ANIM_ON) != 0
@@ -724,7 +715,7 @@ namespace Radegast.Rendering
                                                     inShaderMode = true;
                                                 }
                                                 
-                                                // Pass face material color to shader
+                                                // Pass TE face RGBA as tint to shader
                                                 sw.SetShaderMaterialColor(RGBA);
                                                 sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
 
