@@ -135,6 +135,8 @@ namespace Radegast.Rendering
                 GL.BindAttribLocation(ID, 0, "aPosition");
                 GL.BindAttribLocation(ID, 1, "aNormal");
                 GL.BindAttribLocation(ID, 2, "aTexCoord");
+                // Also bind aColor if present in shaders so clients that use location 1 for colors work
+                GL.BindAttribLocation(ID, 3, "aColor");
             }
             catch { }
 

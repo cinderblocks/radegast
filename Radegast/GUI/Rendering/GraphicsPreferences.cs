@@ -215,6 +215,35 @@ namespace Radegast.Rendering
                 };
             }
 
+            // Initialize sky shader toggle
+            if (!Instance.GlobalSettings.ContainsKey("scene_enable_sky_shader"))
+            {
+                Instance.GlobalSettings["scene_enable_sky_shader"] = RenderSettings.EnableSkyShader;
+            }
+
+            var cbSkyShaderCtrl = this.Controls.Find("cbSkyShader", true).FirstOrDefault() as CheckBox;
+            if (cbSkyShaderCtrl != null)
+            {
+                cbSkyShaderCtrl.Checked = (bool)Instance.GlobalSettings["scene_enable_sky_shader"];
+                cbSkyShaderCtrl.CheckedChanged += (s, e2) =>
+                {
+                    Instance.GlobalSettings["scene_enable_sky_shader"] = cbSkyShaderCtrl.Checked;
+                    RenderSettings.EnableSkyShader = cbSkyShaderCtrl.Checked;
+
+                    // Apply immediately: force a repaint so RenderSky will use/skip shader next frame
+                    try
+                    {
+                        var w = Window;
+                        if (w != null && w.glControl != null && !w.glControl.IsDisposed)
+                        {
+                            try { w.glControl.MakeCurrent(); } catch { }
+                            w.glControl.Invalidate();
+                        }
+                    }
+                    catch { }
+                };
+            }
+
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
@@ -385,6 +414,9 @@ namespace Radegast.Rendering
             Instance.GlobalSettings["use_multi_sampling"] = true;
             Instance.GlobalSettings["draw_distance"] = 128;
             Instance.GlobalSettings["water_reflections"] = false;
+            Instance.GlobalSettings["scene_enable_sky_shader"] = RenderSettings.EnableSkyShader = true;
+            var cbSky = this.Controls.Find("cbSkyShader", true).FirstOrDefault() as CheckBox;
+            if (cbSky != null) cbSky.Checked = true;
             Instance.GlobalSettings["rendering_occlusion_culling_enabled2"] = false;
             Instance.GlobalSettings["scene_viewer_shiny"] = false;
             Instance.GlobalSettings["scene_ambient_light"] = RenderSettings.AmbientLight = 0.70f;

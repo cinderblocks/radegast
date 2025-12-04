@@ -88,6 +88,11 @@ namespace Radegast.Rendering
         /// </summary>
         public static bool EnableMaterials = true;
 
+        /// <summary>
+        /// Enable use of the sky shader (if available)
+        /// </summary>
+        public static bool EnableSkyShader = true;
+
         #region Lighting
         /// <summary>
         /// Ambient light level (0.0 to 1.0)

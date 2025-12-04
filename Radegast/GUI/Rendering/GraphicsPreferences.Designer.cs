@@ -55,6 +55,7 @@
             this.cbMaterials = new System.Windows.Forms.CheckBox();
             this.cbGlow = new System.Windows.Forms.CheckBox();
             this.btnDefaults = new System.Windows.Forms.Button();
+            this.cbSkyShader = new System.Windows.Forms.CheckBox();
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).BeginInit();
@@ -69,7 +70,7 @@
             // cbAA
             // 
             this.cbAA.AutoSize = true;
-            this.cbAA.Location = new System.Drawing.Point(3, 62);
+            this.cbAA.Location = new System.Drawing.Point(3, 71);
             this.cbAA.Name = "cbAA";
             this.cbAA.Size = new System.Drawing.Size(160, 17);
             this.cbAA.TabIndex = 2;
@@ -375,10 +376,21 @@
             this.btnDefaults.Text = "Defaults";
             this.btnDefaults.Click += new System.EventHandler(this.btnDefaults_Click);
             // 
+            // cbSkyShader
+            // 
+            this.cbSkyShader.AutoSize = true;
+            this.cbSkyShader.Location = new System.Drawing.Point(3, 53);
+            this.cbSkyShader.Name = "cbSkyShader";
+            this.cbSkyShader.Size = new System.Drawing.Size(84, 17);
+            this.cbSkyShader.TabIndex = 3;
+            this.cbSkyShader.Text = "Atmospheric";
+            this.cbSkyShader.UseVisualStyleBackColor = true;
+            // 
             // GraphicsPreferences
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.Controls.Add(this.cbSkyShader);
             this.Controls.Add(this.cbGlow);
             this.Controls.Add(this.cbMaterials);
             this.Controls.Add(this.nudFallbackBaseAlpha);
@@ -451,5 +463,6 @@
         private System.Windows.Forms.CheckBox cbGlow;
         private System.Windows.Forms.CheckBox cbMaterials;
         private System.Windows.Forms.Button btnDefaults;
+        private System.Windows.Forms.CheckBox cbSkyShader;
     }
 }

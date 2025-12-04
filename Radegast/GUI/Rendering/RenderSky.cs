@@ -29,6 +29,7 @@
 //
 
 using System;
+using System.Reflection;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse;
 
@@ -364,13 +365,35 @@ namespace Radegast.Rendering
             bool usedShader = false;
             
             // Try shader path if available
-            if (RenderSettings.HasShaders && scene != null)
+            if (RenderSettings.HasShaders && RenderSettings.EnableSkyShader && scene != null)
             {
                 try
                 {
-                    // Sky uses simple vertex color shader (no lighting needed)
-                    // We can reuse existing infrastructure or implement a simple pass-through
-                    usedShader = false; // For now, use fixed-function
+                    var shaderManager = scene.GetType().GetField("shaderManager", 
+                        BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(scene);
+                    
+                    if (shaderManager != null)
+                    {
+                        var startMethod = shaderManager.GetType().GetMethod("StartShader");
+                        var getMethod = shaderManager.GetType().GetMethod("GetProgram");
+                        
+                        if (startMethod != null && getMethod != null)
+                        {
+                            bool started = (bool)startMethod.Invoke(shaderManager, new object[] { "sky" });
+                            if (started)
+                            {
+                                var prog = getMethod.Invoke(shaderManager, new object[] { "sky" });
+                                if (prog != null)
+                                {
+                                    usedShader = RenderWithShader(prog);
+                                    
+                                    // Stop shader
+                                    var stopMethod = shaderManager.GetType().GetMethod("StopShader");
+                                    stopMethod?.Invoke(shaderManager, null);
+                                }
+                            }
+                        }
+                    }
                 }
                 catch
                 {
@@ -396,6 +419,124 @@ namespace Radegast.Rendering
             // Restore state
             GL.DepthMask(true);
             GL.PopAttrib();
+        }
+
+        /// <summary>
+        /// Render using shader program
+        /// </summary>
+        private bool RenderWithShader(object prog)
+        {
+            try
+            {
+                var progType = prog.GetType();
+                var uniMethod = progType.GetMethod("Uni");
+                var attrMethod = progType.GetMethod("Attr");
+                
+                if (uniMethod == null || attrMethod == null) return false;
+                
+                // Get uniform locations
+                int uMVP = (int)uniMethod.Invoke(prog, new object[] { "uMVP" });
+                int uAtmosphere = (int)uniMethod.Invoke(prog, new object[] { "atmosphereStrength" });
+                int uSunDir = (int)uniMethod.Invoke(prog, new object[] { "sunDirection" });
+                int uSunColor = (int)uniMethod.Invoke(prog, new object[] { "sunColor" });
+                int uSunInfluence = (int)uniMethod.Invoke(prog, new object[] { "sunInfluence" });
+                int uRayleigh = (int)uniMethod.Invoke(prog, new object[] { "rayleighScale" });
+                int uMie = (int)uniMethod.Invoke(prog, new object[] { "mieScale" });
+                int uMieG = (int)uniMethod.Invoke(prog, new object[] { "mieG" });
+                int uSunI = (int)uniMethod.Invoke(prog, new object[] { "sunIntensity" });
+                int uExposure = (int)uniMethod.Invoke(prog, new object[] { "exposure" });
+
+                // Get attribute locations
+                int aPosition = (int)attrMethod.Invoke(prog, new object[] { "aPosition" });
+                int aColor = (int)attrMethod.Invoke(prog, new object[] { "aColor" });
+
+                if (aPosition == -1 || aColor == -1) return false;
+
+                // Set uniforms
+                if (uMVP != -1)
+                {
+                    GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+                    GL.GetFloat(GetPName.ProjectionMatrix, out OpenTK.Matrix4 proj);
+                    var mvp = mv * proj;
+                    GL.UniformMatrix4(uMVP, false, ref mvp);
+                }
+
+                if (uAtmosphere != -1)
+                {
+                    GL.Uniform1(uAtmosphere, 0.3f); // Subtle atmospheric effect
+                }
+
+                if (uSunDir != -1)
+                {
+                    GL.Uniform3(uSunDir, sunDirection.X, sunDirection.Y, sunDirection.Z);
+                }
+
+                if (uSunColor != -1)
+                {
+                    GL.Uniform4(uSunColor, SUN_CORE_COLOR.R, SUN_CORE_COLOR.G, SUN_CORE_COLOR.B, SUN_CORE_COLOR.A);
+                }
+
+                if (uSunInfluence != -1)
+                {
+                    GL.Uniform1(uSunInfluence, 0.5f);
+                }
+
+                // Additional scattering uniforms with defaults
+                if (uRayleigh != -1) GL.Uniform1(uRayleigh, 0.0025f);
+                if (uMie != -1) GL.Uniform1(uMie, 0.0010f);
+                if (uMieG != -1) GL.Uniform1(uMieG, 0.76f);
+                if (uSunI != -1) GL.Uniform1(uSunI, 20.0f);
+                if (uExposure != -1) GL.Uniform1(uExposure, 1.0f);
+
+                // Render with VBO and shader attributes
+                if (RenderSettings.UseVBO && !vboFailed && skyVBO != -1 && skyIndexVBO != -1)
+                {
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, skyVBO);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, skyIndexVBO);
+                    
+                    int stride = 7 * sizeof(float);
+                    GL.EnableVertexAttribArray(aPosition);
+                    GL.EnableVertexAttribArray(aColor);
+                    
+                    GL.VertexAttribPointer(aPosition, 3, VertexAttribPointerType.Float, false, stride, IntPtr.Zero);
+                    GL.VertexAttribPointer(aColor, 4, VertexAttribPointerType.Float, false, stride, (IntPtr)(3 * sizeof(float)));
+                    
+                    GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, IntPtr.Zero);
+                    
+                    GL.DisableVertexAttribArray(aPosition);
+                    GL.DisableVertexAttribArray(aColor);
+                    
+                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+                }
+                else
+                {
+                    // Shader with client arrays (fallback)
+                    GL.EnableVertexAttribArray(aPosition);
+                    GL.EnableVertexAttribArray(aColor);
+                    
+                    unsafe
+                    {
+                        fixed (float* vPtr = skyVertices)
+                        fixed (float* cPtr = skyColors)
+                        fixed (ushort* iPtr = skyIndices)
+                        {
+                            GL.VertexAttribPointer(aPosition, 3, VertexAttribPointerType.Float, false, 0, (IntPtr)vPtr);
+                            GL.VertexAttribPointer(aColor, 4, VertexAttribPointerType.Float, false, 0, (IntPtr)cPtr);
+                            GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, (IntPtr)iPtr);
+                        }
+                    }
+                    
+                    GL.DisableVertexAttribArray(aPosition);
+                    GL.DisableVertexAttribArray(aColor);
+                }
+                
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
