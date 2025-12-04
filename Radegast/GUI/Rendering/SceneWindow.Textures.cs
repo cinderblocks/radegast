@@ -31,7 +31,6 @@
 //
 
 using System;
-using System.Drawing;
 using System.Reflection;
 using System.Threading;
 using CoreJ2K;
@@ -42,7 +41,6 @@ using OpenMetaverse;
 using OpenMetaverse.Assets;
 using OpenMetaverse.Imaging;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 namespace Radegast.Rendering
 {
@@ -272,11 +270,17 @@ namespace Radegast.Rendering
 
                 if (skBitmap != null)
                 {
-                    var bitmap = skBitmap.ToBitmap();
-                    try { skBitmap.Dispose(); } catch { }
-                    bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                    // Flip vertically for OpenGL
+                    var flipped = new SKBitmap(skBitmap.Width, skBitmap.Height, skBitmap.ColorType, skBitmap.AlphaType);
+                    using (var canvas = new SKCanvas(flipped))
+                    {
+                        canvas.Scale(1, -1, 0, skBitmap.Height / 2f);
+                        canvas.DrawBitmap(skBitmap, 0, 0);
+                    }
 
-                    UploadTexture(item, bitmap);
+                    try { skBitmap.Dispose(); } catch { }
+
+                    UploadTexture(item, flipped);
                 }
             }
 
@@ -284,7 +288,7 @@ namespace Radegast.Rendering
             imageBytes = null;
         }
 
-        private void UploadTexture(TextureLoadItem item, Bitmap bitmap)
+        private void UploadTexture(TextureLoadItem item, SKBitmap bitmap)
         {
             if (textureContext != null)
             {
