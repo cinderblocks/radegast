@@ -170,6 +170,7 @@ namespace Radegast.Rendering
         private float drawDistanceSquared;
 
         private readonly RenderTerrain terrain;
+        private RenderSky sky;
 
         private readonly GridClient Client;
         private readonly RadegastInstanceForms Instance;
@@ -210,6 +211,7 @@ namespace Radegast.Rendering
             chatOverlay = new ChatOverlay(instance, this);
             textRendering = new TextRendering(instance);
             terrain = new RenderTerrain(instance);
+            sky = new RenderSky(this);
 
             cbChatType.SelectedIndex = 1;
 
@@ -251,6 +253,9 @@ namespace Radegast.Rendering
 
             SafeDispose(textRendering, "TextRendering", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             textRendering = null;
+
+            SafeDispose(sky, "RenderSky", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            sky = null;
 
             Client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
             Client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
@@ -725,6 +730,14 @@ namespace Radegast.Rendering
             diffuse = RenderSettings.DiffuseLight;
             specular = RenderSettings.SpecularLight;
             SetSun();
+            
+            // Update sky sun direction when lighting changes
+            if (sky != null)
+            {
+                Vector3 sunDir = new Vector3(sunPos[0], sunPos[1], sunPos[2]);
+                sunDir.Normalize();
+                sky.UpdateSunDirection(sunDir);
+            }
         }
 
         private bool glControlLoaded = false;
@@ -2127,6 +2140,12 @@ namespace Radegast.Rendering
                 meshingsRequestedThisFrame = 0;
 
                 CheckKeyboard(lastFrameTime);
+
+                // Render vibrant sky dome first, before anything else
+                if (sky != null)
+                {
+                    sky.Render(RenderPass.Simple, Camera.RenderPosition);
+                }
 
                 // If programmable shaders are available and enabled, start the shiny shader
                 // Note: Do not bind shiny shader globally here. Shaders are enabled per-face
