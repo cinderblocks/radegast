@@ -829,12 +829,12 @@ namespace Radegast.Rendering
                     // Shadow
                     if (color != Color.Black)
                     {
-                        textRendering.Print(text, f, Color.Black, 
+                        textRendering.Print(text, f, new SKColor(0, 0, 0, 255), 
                             new Rectangle((int)screenPos.X + TEXT_SHADOW_OFFSET, 
                                           (int)screenPos.Y + TEXT_SHADOW_OFFSET, 
                                           size.Width, size.Height), flags);
                     }
-                    textRendering.Print(text, f, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
+                    textRendering.Print(text, f, new SKColor(color.R, color.G, color.B, color.A), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
                 }
                 textRendering.End();
             }

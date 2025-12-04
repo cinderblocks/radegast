@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using OpenTK.Graphics.OpenGL;
+using SkiaSharp;
 
 namespace Radegast.Rendering
 {
@@ -40,7 +41,7 @@ namespace Radegast.Rendering
         {
             public readonly string Text;
             public readonly Font Font;
-            public readonly Color Color;
+            public readonly SKColor Color;
             public Rectangle Box;
             public readonly TextFormatFlags Flags;
 
@@ -49,7 +50,7 @@ namespace Radegast.Rendering
 
             public int TextureID = -1;
 
-            public TextItem(string text, Font font, Color color, Rectangle box, TextFormatFlags flags)
+            public TextItem(string text, Font font, SKColor color, Rectangle box, TextFormatFlags flags)
             {
                 Text = text;
                 Font = font;
@@ -78,14 +79,14 @@ namespace Radegast.Rendering
         {
         }
 
-        public void Print(string text, Font font, Color color, Rectangle box, TextFormatFlags flags)
+        public void Print(string text, Font font, SKColor color, Rectangle box, TextFormatFlags flags)
         {
             textItems.Add(new TextItem(text, font, color, box, flags));
         }
 
         public static Size Measure(string text, Font font, TextFormatFlags flags)
         {
-            return TextRenderer.MeasureText(text, font, MaxSize, flags);
+            return MeasureSkia(text, font);
         }
 
         public void Begin()
@@ -126,7 +127,7 @@ namespace Radegast.Rendering
                         }
                     }
                     if (tex.TextureID == -1) continue;
-                    GL.Color4(item.Color);
+                    GL.Color4(item.Color.Red / 255f, item.Color.Green / 255f, item.Color.Blue / 255f, item.Color.Alpha / 255f);
                     GL.BindTexture(TextureTarget.Texture2D, tex.TextureID);
                     RHelp.Draw2DBox(item.Box.X, ScreenHeight - item.Box.Y - tex.Height, tex.Width, tex.Height, 0f);
                 }
@@ -152,7 +153,6 @@ namespace Radegast.Rendering
 
         private void PrepareText(TextItem item)
         {
-
             // If we're modified and have texture already delete it from graphics card
             if (item.TextureID > 0)
             {
@@ -161,14 +161,10 @@ namespace Radegast.Rendering
             }
 
             Size s;
-            
+
             try
             {
-                 s = TextRenderer.MeasureText(
-                    item.Text,
-                    item.Font,
-                    MaxSize,
-                    item.Flags);
+                s = MeasureSkia(item.Text, item.Font);
             }
             catch
             {
@@ -184,28 +180,78 @@ namespace Radegast.Rendering
                 item.ImgHeight = RHelp.NextPow2(s.Height);
             }
 
-            Bitmap img = new Bitmap(
-                item.ImgWidth,
-                item.ImgHeight,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var skBitmap = new SKBitmap(item.ImgWidth, item.ImgHeight, SKColorType.Bgra8888, SKAlphaType.Premul))
+            using (var canvas = new SKCanvas(skBitmap))
+            using (var paint = CreatePaint(item.Font))
+            {
+                canvas.Clear(SKColors.Transparent);
 
-            Graphics g = Graphics.FromImage(img);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                paint.Color = item.Color;
 
-            TextRenderer.DrawText(
-                g,
-                item.Text,
-                item.Font,
-                new Rectangle(0, 0, s.Width + 2, s.Height + 2),
-                Color.White,
-                Color.Transparent,
-                item.Flags);
+                // Compute baseline and line height
+                paint.GetFontMetrics(out var metrics);
+                float baseline = -metrics.Ascent;
+                float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
+                if (lineHeight <= 0f) lineHeight = baseline + metrics.Descent;
 
-            item.TextureID = RHelp.GLLoadImage(img, true, false);
-            g.Dispose();
-            img.Dispose();
+                // Prepare lines and total height
+                var lines = item.Text.Split(new[] { "\n" }, StringSplitOptions.None);
+                float totalHeight = lineHeight * lines.Length;
+                // Start Y such that text block is vertically centered
+                float y = ((float)item.ImgHeight - totalHeight) * 0.5f + baseline;
+                foreach (var line in lines)
+                {
+                    // Measure line width to center horizontally
+                    float lineWidth = paint.MeasureText(line ?? string.Empty);
+                    float x = ((float)item.ImgWidth - lineWidth) * 0.5f;
+                    canvas.DrawText(line, x, y, paint);
+                    y += lineHeight;
+                }
+
+                item.TextureID = RHelp.GLLoadImage(skBitmap, true, false);
+            }
         }
 
+        private static Size MeasureSkia(string text, Font font)
+        {
+            using (var paint = CreatePaint(font))
+            {
+                // Height via metrics
+                paint.GetFontMetrics(out var metrics);
+                float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
+                if (lineHeight <= 0f) lineHeight = (-metrics.Ascent) + metrics.Descent;
+
+                // Measure each line
+                var lines = text?.Split(new[] { "\n" }, StringSplitOptions.None) ?? Array.Empty<string>();
+                if (lines.Length == 0) lines = new[] { string.Empty };
+
+                float maxWidth = 0f;
+                foreach (var line in lines)
+                {
+                    float w = paint.MeasureText(line ?? string.Empty);
+                    if (w > maxWidth) maxWidth = w;
+                }
+                float totalHeight = lineHeight * lines.Length;
+
+                return new Size((int)Math.Ceiling(maxWidth), (int)Math.Ceiling(totalHeight));
+            }
+        }
+
+        private static SKPaint CreatePaint(Font font)
+        {
+            // Create typeface from font family name
+            var typeface = SKTypeface.FromFamilyName(font.Name);
+            var paint = new SKPaint
+            {
+                Typeface = typeface,
+                TextSize = font.Size,
+                IsAntialias = true,
+                SubpixelText = true,
+                IsStroke = false,
+                FilterQuality = SKFilterQuality.High
+            };
+            return paint;
+        }
 
         private bool depthTestEnabled;
         private bool lightningEnabled;

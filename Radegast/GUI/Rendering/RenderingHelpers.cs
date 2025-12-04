@@ -655,12 +655,6 @@ namespace Radegast.Rendering
         };
         #endregion Static vertices and indices for a cube (used for bounding box drawing)
 
-        // Legacy overload for compatibility - converts Bitmap to SKBitmap
-        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha, bool useMipmap = true)
-        {
-            return GLLoadImage(bitmap.ToSKBitmap(), hasAlpha, useMipmap);
-        }
-
         public static int GLLoadImage(SKBitmap bitmap, bool hasAlpha = true, bool useMipmap = true)
         {
             useMipmap = useMipmap && RenderSettings.HasMipmap;
@@ -760,6 +754,110 @@ namespace Radegast.Rendering
             GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Emission, new float[] { 0f, 0f, 0f, 1.0f });
             GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Shininess, 0f);
             ShaderProgram.Stop();
+        }
+
+        public static void DrawRounded2DBox(float x, float y, float width, float height, float radius, float depth)
+        {
+            // Clamp radius
+            radius = Math.Max(0f, Math.Min(radius, Math.Min(width, height) * 0.5f));
+
+            // Precompute corner centers
+            float left = x;
+            float right = x + width;
+            float top = y + height;
+            float bottom = y;
+
+            float cxLeft = left + radius;
+            float cxRight = right - radius;
+            float cyTop = top - radius;
+            float cyBottom = bottom + radius;
+
+            // Draw center rectangle
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.End();
+
+            // Draw side rectangles
+            GL.Begin(PrimitiveType.Quads);
+            // Left side
+            GL.Vertex3(left, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.Vertex3(left, cyTop, depth);
+
+            // Right side
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(right, cyBottom, depth);
+            GL.Vertex3(right, cyTop, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+
+            // Bottom side
+            GL.Vertex3(cxLeft, bottom, depth);
+            GL.Vertex3(cxRight, bottom, depth);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+
+            // Top side
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+            GL.Vertex3(cxRight, top, depth);
+            GL.Vertex3(cxLeft, top, depth);
+            GL.End();
+
+            // Draw rounded corners with triangle fans (approximate quarter-circles)
+            const int segments = 12;
+            double step = Math.PI / 2.0 / segments;
+
+            // Bottom-left corner (center at cxLeft, cyBottom), angles 180..270
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = Math.PI + i * step;
+                float vx = cxLeft + (float)(Math.Cos(ang) * radius);
+                float vy = cyBottom + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Bottom-right corner (center at cxRight, cyBottom), angles 270..360
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 1.5 * Math.PI + i * step;
+                float vx = cxRight + (float)(Math.Cos(ang) * radius);
+                float vy = cyBottom + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Top-right corner (center at cxRight, cyTop), angles 0..90
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxRight, cyTop, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 0 + i * step;
+                float vx = cxRight + (float)(Math.Cos(ang) * radius);
+                float vy = cyTop + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Top-left corner (center at cxLeft, cyTop), angles 90..180
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 0.5 * Math.PI + i * step;
+                float vx = cxLeft + (float)(Math.Cos(ang) * radius);
+                float vy = cyTop + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
         }
     }
 

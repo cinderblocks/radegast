@@ -36,6 +36,7 @@ using System.Linq;
 using System.Windows.Forms;
 using OpenTK.Graphics.OpenGL;
 using OpenMetaverse;
+using SkiaSharp;
 
 namespace Radegast.Rendering
 {
@@ -66,17 +67,6 @@ namespace Radegast.Rendering
             // Stats in window title for now
             Text =
                 $"Scene Viewer: FPS {1d/advTimerTick:000.00} Texture decode queue: {PendingTextures.Count}, Sculpt queue: {PendingTasks.Count}";
-
-#if TURNS_OUT_PRINTER_IS_EXPENISVE
-            int posX = glControl.Width - 100;
-            int posY = 0;
-
-            Printer.Begin();
-            Printer.Print(String.Format("FPS {0:000.00}", 1d / advTimerTick), AvatarTagFont, Color.Orange,
-                new RectangleF(posX, posY, 100, 50),
-                OpenTK.Graphics.TextPrinterOptions.Default, OpenTK.Graphics.TextAlignment.Center);
-            Printer.End();
-#endif
         }
 
         private void RenderText(RenderPass pass)
@@ -132,18 +122,18 @@ namespace Radegast.Rendering
                         // Render tag background
                         float halfWidth = tSize.Width / 2 + 12;
                         float halfHeight = tSize.Height / 2 + 5;
-                        GL.Color4(0f, 0f, 0f, 0.4f);
-                        RHelp.Draw2DBox(quadPos.X - halfWidth, quadPos.Y - halfHeight, halfWidth * 2, halfHeight * 2, screenPos.Z);
+                        // Ensure blending is enabled for semi-transparent background
+                        GL.Enable(EnableCap.Blend);
+                        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                        GL.Color4(0f, 0f, 0f, 0.7f);
+                        RHelp.DrawRounded2DBox(quadPos.X - halfWidth, quadPos.Y - halfHeight, halfWidth * 2, halfHeight * 2, 8f, screenPos.Z);
 
                         if (pass == RenderPass.Simple)
                         {
                             textRendering.Begin();
-                            var textColor = pass == RenderPass.Simple ?
-                                Color.Orange :
-                                Color.FromArgb(faceColor[3], faceColor[0], faceColor[1], faceColor[2]);
-                            textRendering.Print(tagText, AvatarTagFont, textColor,
-                                new Rectangle((int)screenPos.X, (int)screenPos.Y, tSize.Width + 2, tSize.Height + 2),
-                                flags);
+                            textRendering.Print(tagText, AvatarTagFont, SKColors.Yellow,
+                                 new Rectangle((int)screenPos.X, (int)screenPos.Y, tSize.Width + 2, tSize.Height + 2),
+                                 flags);
                             textRendering.End();
                         }
                     }
@@ -195,7 +185,7 @@ namespace Radegast.Rendering
                                 {
                                     var primNrBytes = Utils.Int16ToBytes((short)((FaceData)f.UserData).PickingID);
                                     var faceColor = new byte[] { primNrBytes[0], primNrBytes[1], (byte)faceID, 255 };
-                                    textRendering.Print(text, HoverTextFont, Color.FromArgb(faceColor[3], faceColor[0], faceColor[1], faceColor[2]), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
+                                    textRendering.Print(text, HoverTextFont, new SKColor(faceColor[0], faceColor[1], faceColor[2], faceColor[3]), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
                                     break;
                                 }
                                 faceID++;
@@ -205,10 +195,10 @@ namespace Radegast.Rendering
                         {
                             // Shadow
                             if (color != Color.Black)
-                                textRendering.Print(text, HoverTextFont, Color.Black, new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width + 2, size.Height + 2), flags);
+                                textRendering.Print(text, HoverTextFont, new SKColor(0, 0, 0, 128), new Rectangle((int)screenPos.X + 1, (int)screenPos.Y + 1, size.Width + 2, size.Height + 2), flags);
 
                             // Text
-                            textRendering.Print(text, HoverTextFont, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
+                            textRendering.Print(text, HoverTextFont, new SKColor(color.R, color.G, color.B, color.A), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width + 2, size.Height + 2), flags);
                         }
                     }
 
