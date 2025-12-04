@@ -574,24 +574,22 @@ namespace Radegast.Rendering
                         // stopping mid-prim can cause flicker between shaded and
                         // fixed-function rendering for adjacent faces.
                     }
-                    GL.Material(MaterialFace.Front, MaterialParameter.Shininess, shiny);
-                    var faceColor = new float[] { RGBA.R, RGBA.G, RGBA.B, RGBA.A };
-                    GL.Color4(faceColor);
 
+                    // Set base material color
+                    var faceColor = new float[] { RGBA.R, RGBA.G, RGBA.B, RGBA.A };
+
+                    // Default: use face color
+                    GL.Color4(faceColor);
                     GL.Material(MaterialFace.Front, MaterialParameter.Specular, new float[] { 0.5f, 0.5f, 0.5f, 1f });
 
-                    if (data.TextureInfo.TexturePointer == 0)
-                    {
-                        TextureInfo teInfo;
-                        if (scene.TryGetTextureInfo(teFace.TextureID, out teInfo))
-                        {
-                            data.TextureInfo = teInfo;
-                        }
-                    }
+                    bool hasTexture = data.TextureInfo.TexturePointer != 0;
 
-                    if (data.TextureInfo.TexturePointer == 0)
+                    if (!hasTexture)
                     {
+                        // Untextured: use face color for ambient+diffuse
                         GL.Disable(EnableCap.Texture2D);
+                        GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
+
                         if (!data.TextureInfo.FetchFailed)
                         {
                             scene.DownloadTexture(new TextureLoadItem()
@@ -605,11 +603,24 @@ namespace Radegast.Rendering
                     else
                     {
                         GL.Enable(EnableCap.Texture2D);
-                        // Ensure texture unit 0 is active for shader sampling
                         GL.ActiveTexture(TextureUnit.Texture0);
                         GL.BindTexture(TextureTarget.Texture2D, data.TextureInfo.TexturePointer);
-                        
-                        // Check if this face uses texture animation
+                        try { GL.TexEnv(TextureEnvTarget.TextureEnv, TextureEnvParameter.TextureEnvMode, (int)TextureEnvMode.Modulate); } catch { }
+
+                        // Only whiten for shiny textured faces to avoid tinting issues
+                        if (shiny > 0f)
+                        {
+                            var white = new float[] { 1f, 1f, 1f, RGBA.A };
+                            GL.Color4(white);
+                            GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, white);
+                        }
+                        else
+                        {
+                            // Non-shiny textured: keep face color
+                            GL.Material(MaterialFace.Front, MaterialParameter.AmbientAndDiffuse, faceColor);
+                        }
+
+                        // Texture animation
                         if ((Prim.TextureAnim.Flags & Primitive.TextureAnimMode.ANIM_ON) != 0
                             && (Prim.TextureAnim.Face == j || Prim.TextureAnim.Face == 255))
                         {
@@ -716,6 +727,17 @@ namespace Radegast.Rendering
                                                 // Pass face material color to shader
                                                 sw.SetShaderMaterialColor(RGBA);
                                                 sw.SetShaderHasTexture(data.TextureInfo.TexturePointer != 0);
+
+                                                // Respect global toggles for materials/glow
+                                                if (!RenderSettings.EnableMaterials)
+                                                {
+                                                    sw.SetShaderMaterialLayer(false, new OpenTK.Vector3(0.0f, 0.0f, 0.0f), 0f, 0f);
+                                                }
+                                                if (!RenderSettings.EnableGlow)
+                                                {
+                                                    sw.SetShaderGlow(0f);
+                                                }
+                                                
 
                                                 // If the TE has material properties, set the material layer uniforms
                                                 try

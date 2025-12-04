@@ -32,6 +32,7 @@
 
 using System;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
 using OpenMetaverse;
 
@@ -175,6 +176,44 @@ namespace Radegast.Rendering
 
             nudFallbackBaseAlpha.Value = (decimal)RenderSettings.FallbackWaterBaseAlpha;
             nudFallbackBaseAlpha.ValueChanged += nudFallbackBaseAlpha_ValueChanged;
+
+            // Initialize glow/materials toggles
+            if (!Instance.GlobalSettings.ContainsKey("scene_enable_glow"))
+            {
+                Instance.GlobalSettings["scene_enable_glow"] = RenderSettings.EnableGlow;
+            }
+            if (!Instance.GlobalSettings.ContainsKey("scene_enable_materials"))
+            {
+                Instance.GlobalSettings["scene_enable_materials"] = RenderSettings.EnableMaterials;
+            }
+            RenderSettings.EnableGlow = Instance.GlobalSettings["scene_enable_glow"];
+            RenderSettings.EnableMaterials = Instance.GlobalSettings["scene_enable_materials"];
+
+            // Hook designer checkboxes if present
+            var cbGlowCtrl = this.Controls.Find("cbGlow", true).FirstOrDefault() as CheckBox;
+            var cbMaterialsCtrl = this.Controls.Find("cbMaterials", true).FirstOrDefault() as CheckBox;
+            if (cbGlowCtrl != null)
+            {
+                cbGlowCtrl.Checked = RenderSettings.EnableGlow;
+                cbGlowCtrl.CheckedChanged += (s, e2) =>
+                {
+                    Instance.GlobalSettings["scene_enable_glow"] = cbGlowCtrl.Checked;
+                    RenderSettings.EnableGlow = cbGlowCtrl.Checked;
+                    if (Window != null)
+                    {
+                        Window.SetShaderGlow(cbGlowCtrl.Checked ? 0f : 0f); // Reset per-face; actual glow comes from faces
+                    }
+                };
+            }
+            if (cbMaterialsCtrl != null)
+            {
+                cbMaterialsCtrl.Checked = RenderSettings.EnableMaterials;
+                cbMaterialsCtrl.CheckedChanged += (s, e2) =>
+                {
+                    Instance.GlobalSettings["scene_enable_materials"] = cbMaterialsCtrl.Checked;
+                    RenderSettings.EnableMaterials = cbMaterialsCtrl.Checked;
+                };
+            }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }

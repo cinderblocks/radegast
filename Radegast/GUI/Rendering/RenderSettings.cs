@@ -78,6 +78,16 @@ namespace Radegast.Rendering
         /// </summary>
         public static bool EnableShiny = false;
 
+        /// <summary>
+        /// Enable glow effect in shaders
+        /// </summary>
+        public static bool EnableGlow = true;
+
+        /// <summary>
+        /// Enable material layer usage in shaders (specular color/strength/shininess)
+        /// </summary>
+        public static bool EnableMaterials = true;
+
         #region Lighting
         /// <summary>
         /// Ambient light level (0.0 to 1.0)
