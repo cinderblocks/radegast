@@ -1113,6 +1113,28 @@ namespace Radegast.Rendering
             catch { }
         }
 
+        // Set shadow uniforms for shiny shader
+        public void SetShaderShadows(bool enable, float intensity)
+        {
+            // Update runtime settings
+            RenderSettings.EnableShadows = enable;
+            RenderSettings.ShadowIntensity = intensity;
+
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uEnable = prog.Uni("enableShadows");
+                if (uEnable != -1) GL.Uniform1(uEnable, enable ? 1 : 0);
+
+                var uIntensity = prog.Uni("shadowIntensity");
+                if (uIntensity != -1) GL.Uniform1(uIntensity, intensity);
+            }
+            catch { }
+        }
+
         // Set gamma uniform on active shaders (shiny and avatar)
         public void SetShaderGamma(float gamma)
         {
@@ -1132,6 +1154,24 @@ namespace Radegast.Rendering
                     var ug2 = avatar.Uni("gamma");
                     if (ug2 != -1) GL.Uniform1(ug2, gamma);
                 }
+            }
+            catch { }
+        }
+
+        // Set default shadow uniforms (optional)
+        public void SetShaderShadows()
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+
+                var uEnableShadows = prog.Uni("enableShadows");
+                if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
+                var uShadowIntensity = prog.Uni("shadowIntensity");
+                if (uShadowIntensity != -1) GL.Uniform1(uShadowIntensity, RenderSettings.ShadowIntensity);
             }
             catch { }
         }
@@ -1240,6 +1280,12 @@ namespace Radegast.Rendering
                     // Set default gamma (1.0 = no correction, typical sRGB gamma ~2.2)
                     var ugu = prog.Uni("gamma");
                     if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
+
+                    // Set default shadow uniforms (optional)
+                    var uEnableShadows = prog.Uni("enableShadows");
+                    if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
+                    var uShadowIntensity = prog.Uni("shadowIntensity");
+                    if (uShadowIntensity != -1) GL.Uniform1(uShadowIntensity, RenderSettings.ShadowIntensity);
 
                     // Update matrix uniforms for current modelview/projection
                     UpdateShaderMatrices();

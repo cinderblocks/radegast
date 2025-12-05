@@ -245,6 +245,49 @@ namespace Radegast.Rendering
             }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
+            InitializeShadowControls();
+        }
+
+        // Add handlers for shadow controls if present in designer
+        private void InitializeShadowControls()
+        {
+            // Ensure global settings have defaults
+            if (!Instance.GlobalSettings.ContainsKey("scene_enable_shadows"))
+                Instance.GlobalSettings["scene_enable_shadows"] = RenderSettings.EnableShadows;
+            if (!Instance.GlobalSettings.ContainsKey("scene_shadow_intensity"))
+                Instance.GlobalSettings["scene_shadow_intensity"] = RenderSettings.ShadowIntensity;
+
+            var cbShadows = this.Controls.Find("cbShadows", true).FirstOrDefault() as CheckBox;
+            var tbShadowIntensity = this.Controls.Find("tbShadowIntensity", true).FirstOrDefault() as TrackBar;
+            var lblShadowIntensity = this.Controls.Find("lblShadowIntensity", true).FirstOrDefault() as Label;
+
+            if (cbShadows != null)
+            {
+                cbShadows.Checked = Instance.GlobalSettings["scene_enable_shadows"];
+                cbShadows.CheckedChanged += (s, e) =>
+                {
+                    Instance.GlobalSettings["scene_enable_shadows"] = cbShadows.Checked;
+                    RenderSettings.EnableShadows = cbShadows.Checked;
+                    // Apply to scene window immediately
+                    var w = Window;
+                    if (w != null) w.SetShaderShadows(cbShadows.Checked, (float)Instance.GlobalSettings["scene_shadow_intensity"].AsReal());
+                };
+            }
+
+            if (tbShadowIntensity != null)
+            {
+                tbShadowIntensity.Value = Utils.Clamp((int)(Instance.GlobalSettings["scene_shadow_intensity"].AsReal() * 100f), tbShadowIntensity.Minimum, tbShadowIntensity.Maximum);
+                if (lblShadowIntensity != null) lblShadowIntensity.Text = $"Shadow intensity: {Instance.GlobalSettings["scene_shadow_intensity"].AsReal():0.00}";
+                tbShadowIntensity.Scroll += (s, e) =>
+                {
+                    float v = (float)tbShadowIntensity.Value / 100f;
+                    if (lblShadowIntensity != null) lblShadowIntensity.Text = $"Shadow intensity: {v:0.00}";
+                    Instance.GlobalSettings["scene_shadow_intensity"] = v;
+                    RenderSettings.ShadowIntensity = v;
+                    var w = Window;
+                    if (w != null) w.SetShaderShadows((bool)Instance.GlobalSettings["scene_enable_shadows"], v);
+                };
+            }
         }
 
         private void cbFallbackAnim_CheckedChanged(object sender, EventArgs e)
@@ -269,6 +312,39 @@ namespace Radegast.Rendering
         {
             Instance.GlobalSettings["fallback_water_base_alpha"] = (float)nudFallbackBaseAlpha.Value;
             RenderSettings.FallbackWaterBaseAlpha = (float)nudFallbackBaseAlpha.Value;
+        }
+
+        // Designer event handler for Shadows checkbox (also used by InitializeShadowControls)
+        private void cbShadows_CheckedChanged(object sender, EventArgs e)
+        {
+            var cb = sender as CheckBox ?? this.Controls.Find("cbShadows", true).FirstOrDefault() as CheckBox;
+            if (cb == null) return;
+            Instance.GlobalSettings["scene_enable_shadows"] = cb.Checked;
+            RenderSettings.EnableShadows = cb.Checked;
+            var w = Window;
+            if (w != null)
+            {
+                float intensity = (float)Instance.GlobalSettings["scene_shadow_intensity"].AsReal();
+                w.SetShaderShadows(cb.Checked, intensity);
+            }
+        }
+
+        // Designer event handler for Shadow intensity trackbar
+        private void tbShadowIntensity_Scroll(object sender, EventArgs e)
+        {
+            var tb = sender as TrackBar ?? this.Controls.Find("tbShadowIntensity", true).FirstOrDefault() as TrackBar;
+            var lbl = FindLabel("lblShadowIntensity");
+            if (tb == null) return;
+            float v = (float)tb.Value / 100f;
+            if (lbl != null) lbl.Text = $"Shadow intensity: {v:0.00}";
+            Instance.GlobalSettings["scene_shadow_intensity"] = v;
+            RenderSettings.ShadowIntensity = v;
+            var w = Window;
+            if (w != null)
+            {
+                bool enable = Instance.GlobalSettings.ContainsKey("scene_enable_shadows") && Instance.GlobalSettings["scene_enable_shadows"];
+                w.SetShaderShadows(enable, v);
+            }
         }
 
         private void GraphicsPreferences_Disposed(object sender, EventArgs e)

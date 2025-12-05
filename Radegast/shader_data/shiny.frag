@@ -14,6 +14,10 @@ uniform float specularStrength; // specular multiplier
 uniform float gamma; // gamma correction value (>0 to enable)
 uniform float emissiveStrength; // global emissive multiplier for glow
 
+// Shadow support (optional)
+uniform int enableShadows; // 0 = off, 1 = on
+uniform float shadowIntensity; // 0.0 = no shadowing, 1.0 = full shadowing
+
 // Material layer support
 uniform int hasMaterial; // 0 = no material, 1 = has material
 uniform vec3 materialSpecularColor;
@@ -58,6 +62,14 @@ void main()
     // Use additive combination to preserve brightness on shiny materials
     vec4 color = ambientContribution + diffuseContribution;
     
+    // Optional simple shadowing: darken based on the lambert term
+    if (enableShadows != 0)
+    {
+        // lambert is in 0.5..1.0 range; produce multiplier in (1 - shadowIntensity*(1-lambert))
+        float shadowFactor = 1.0 - shadowIntensity * (1.0 - lambert);
+        color.rgb *= shadowFactor;
+    }
+    
     // Specular
     vec3 viewDir = safeNormalize(-vPos, vec3(0.0, 0.0, 1.0));
     vec3 halfVec = safeNormalize(ld + viewDir, ld);
@@ -74,7 +86,10 @@ void main()
     }
 
     float spec = pow(max(dot(n, halfVec), 0.0), shininess);
-    color.rgb += specColor * spec * specStr;
+
+    // Use luminance of the specular color to avoid strongly colored highlights (e.g., yellow tint)
+    float specLum = dot(specColor, vec3(0.2126, 0.7152, 0.0722));
+    color.rgb += vec3(specLum) * spec * specStr;
 
     // Ensure minimum brightness to prevent completely black surfaces
     vec3 minBright = ambientColor.rgb * tex.rgb * 0.3;

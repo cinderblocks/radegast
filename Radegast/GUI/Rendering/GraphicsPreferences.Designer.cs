@@ -56,6 +56,9 @@
             this.cbGlow = new System.Windows.Forms.CheckBox();
             this.btnDefaults = new System.Windows.Forms.Button();
             this.cbSkyShader = new System.Windows.Forms.CheckBox();
+            this.cbShadows = new System.Windows.Forms.CheckBox();
+            this.tbShadowIntensity = new System.Windows.Forms.TrackBar();
+            this.lblShadowIntensity = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).BeginInit();
@@ -65,12 +68,13 @@
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).BeginInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbEmissive)).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbShadowIntensity)).BeginInit();
             this.SuspendLayout();
             // 
             // cbAA
             // 
             this.cbAA.AutoSize = true;
-            this.cbAA.Location = new System.Drawing.Point(3, 71);
+            this.cbAA.Location = new System.Drawing.Point(3, 58);
             this.cbAA.Name = "cbAA";
             this.cbAA.Size = new System.Drawing.Size(160, 17);
             this.cbAA.TabIndex = 2;
@@ -92,7 +96,7 @@
             // lblDrawDistance
             // 
             this.lblDrawDistance.AutoSize = true;
-            this.lblDrawDistance.Location = new System.Drawing.Point(3, 100);
+            this.lblDrawDistance.Location = new System.Drawing.Point(3, 81);
             this.lblDrawDistance.Name = "lblDrawDistance";
             this.lblDrawDistance.Size = new System.Drawing.Size(93, 13);
             this.lblDrawDistance.TabIndex = 21;
@@ -101,7 +105,7 @@
             // 
             // tbDrawDistance
             // 
-            this.tbDrawDistance.Location = new System.Drawing.Point(90, 96);
+            this.tbDrawDistance.Location = new System.Drawing.Point(90, 77);
             this.tbDrawDistance.Maximum = 256;
             this.tbDrawDistance.Minimum = 32;
             this.tbDrawDistance.Name = "tbDrawDistance";
@@ -114,7 +118,7 @@
             // cbWaterReflections
             // 
             this.cbWaterReflections.AutoSize = true;
-            this.cbWaterReflections.Location = new System.Drawing.Point(6, 321);
+            this.cbWaterReflections.Location = new System.Drawing.Point(6, 276);
             this.cbWaterReflections.Name = "cbWaterReflections";
             this.cbWaterReflections.Size = new System.Drawing.Size(111, 17);
             this.cbWaterReflections.TabIndex = 3;
@@ -136,7 +140,7 @@
             // cbShiny
             // 
             this.cbShiny.AutoSize = true;
-            this.cbShiny.Location = new System.Drawing.Point(3, 34);
+            this.cbShiny.Location = new System.Drawing.Point(3, 23);
             this.cbShiny.Name = "cbShiny";
             this.cbShiny.Size = new System.Drawing.Size(52, 17);
             this.cbShiny.TabIndex = 4;
@@ -147,7 +151,7 @@
             // lblAmbient
             // 
             this.lblAmbient.AutoSize = true;
-            this.lblAmbient.Location = new System.Drawing.Point(3, 218);
+            this.lblAmbient.Location = new System.Drawing.Point(3, 173);
             this.lblAmbient.Name = "lblAmbient";
             this.lblAmbient.Size = new System.Drawing.Size(72, 13);
             this.lblAmbient.TabIndex = 27;
@@ -156,7 +160,7 @@
             // 
             // tbAmbient
             // 
-            this.tbAmbient.Location = new System.Drawing.Point(90, 215);
+            this.tbAmbient.Location = new System.Drawing.Point(90, 170);
             this.tbAmbient.Maximum = 100;
             this.tbAmbient.Name = "tbAmbient";
             this.tbAmbient.Size = new System.Drawing.Size(183, 45);
@@ -168,7 +172,7 @@
             // lblDiffuse
             // 
             this.lblDiffuse.AutoSize = true;
-            this.lblDiffuse.Location = new System.Drawing.Point(3, 252);
+            this.lblDiffuse.Location = new System.Drawing.Point(3, 207);
             this.lblDiffuse.Name = "lblDiffuse";
             this.lblDiffuse.Size = new System.Drawing.Size(67, 13);
             this.lblDiffuse.TabIndex = 29;
@@ -177,7 +181,7 @@
             // 
             // tbDiffuse
             // 
-            this.tbDiffuse.Location = new System.Drawing.Point(90, 249);
+            this.tbDiffuse.Location = new System.Drawing.Point(90, 204);
             this.tbDiffuse.Maximum = 100;
             this.tbDiffuse.Name = "tbDiffuse";
             this.tbDiffuse.Size = new System.Drawing.Size(183, 45);
@@ -189,7 +193,7 @@
             // lblSpecular
             // 
             this.lblSpecular.AutoSize = true;
-            this.lblSpecular.Location = new System.Drawing.Point(3, 285);
+            this.lblSpecular.Location = new System.Drawing.Point(3, 240);
             this.lblSpecular.Name = "lblSpecular";
             this.lblSpecular.Size = new System.Drawing.Size(76, 13);
             this.lblSpecular.TabIndex = 31;
@@ -198,7 +202,7 @@
             // 
             // tbSpecular
             // 
-            this.tbSpecular.Location = new System.Drawing.Point(90, 282);
+            this.tbSpecular.Location = new System.Drawing.Point(90, 237);
             this.tbSpecular.Maximum = 100;
             this.tbSpecular.Name = "tbSpecular";
             this.tbSpecular.Size = new System.Drawing.Size(183, 45);
@@ -210,7 +214,7 @@
             // cbFallbackAnim
             // 
             this.cbFallbackAnim.AutoSize = true;
-            this.cbFallbackAnim.Location = new System.Drawing.Point(123, 321);
+            this.cbFallbackAnim.Location = new System.Drawing.Point(123, 276);
             this.cbFallbackAnim.Name = "cbFallbackAnim";
             this.cbFallbackAnim.Size = new System.Drawing.Size(103, 17);
             this.cbFallbackAnim.TabIndex = 32;
@@ -221,7 +225,7 @@
             // lblFallbackSpeed
             // 
             this.lblFallbackSpeed.AutoSize = true;
-            this.lblFallbackSpeed.Location = new System.Drawing.Point(6, 346);
+            this.lblFallbackSpeed.Location = new System.Drawing.Point(6, 301);
             this.lblFallbackSpeed.Name = "lblFallbackSpeed";
             this.lblFallbackSpeed.Size = new System.Drawing.Size(41, 13);
             this.lblFallbackSpeed.TabIndex = 33;
@@ -235,7 +239,7 @@
             0,
             0,
             131072});
-            this.nudFallbackSpeed.Location = new System.Drawing.Point(48, 344);
+            this.nudFallbackSpeed.Location = new System.Drawing.Point(48, 299);
             this.nudFallbackSpeed.Maximum = new decimal(new int[] {
             10,
             0,
@@ -249,7 +253,7 @@
             // lblFallbackAmp
             // 
             this.lblFallbackAmp.AutoSize = true;
-            this.lblFallbackAmp.Location = new System.Drawing.Point(95, 346);
+            this.lblFallbackAmp.Location = new System.Drawing.Point(95, 301);
             this.lblFallbackAmp.Name = "lblFallbackAmp";
             this.lblFallbackAmp.Size = new System.Drawing.Size(56, 13);
             this.lblFallbackAmp.TabIndex = 35;
@@ -263,7 +267,7 @@
             0,
             0,
             131072});
-            this.nudFallbackAmp.Location = new System.Drawing.Point(152, 344);
+            this.nudFallbackAmp.Location = new System.Drawing.Point(152, 299);
             this.nudFallbackAmp.Maximum = new decimal(new int[] {
             1,
             0,
@@ -277,7 +281,7 @@
             // lblFallbackBaseAlpha
             // 
             this.lblFallbackBaseAlpha.AutoSize = true;
-            this.lblFallbackBaseAlpha.Location = new System.Drawing.Point(202, 346);
+            this.lblFallbackBaseAlpha.Location = new System.Drawing.Point(202, 301);
             this.lblFallbackBaseAlpha.Name = "lblFallbackBaseAlpha";
             this.lblFallbackBaseAlpha.Size = new System.Drawing.Size(37, 13);
             this.lblFallbackBaseAlpha.TabIndex = 37;
@@ -291,7 +295,7 @@
             0,
             0,
             131072});
-            this.nudFallbackBaseAlpha.Location = new System.Drawing.Point(238, 342);
+            this.nudFallbackBaseAlpha.Location = new System.Drawing.Point(238, 297);
             this.nudFallbackBaseAlpha.Maximum = new decimal(new int[] {
             1,
             0,
@@ -304,7 +308,7 @@
             // 
             // tbGamma
             // 
-            this.tbGamma.Location = new System.Drawing.Point(90, 148);
+            this.tbGamma.Location = new System.Drawing.Point(90, 103);
             this.tbGamma.Maximum = 300;
             this.tbGamma.Minimum = 50;
             this.tbGamma.Name = "tbGamma";
@@ -317,7 +321,7 @@
             // lblGamma
             // 
             this.lblGamma.AutoSize = true;
-            this.lblGamma.Location = new System.Drawing.Point(3, 151);
+            this.lblGamma.Location = new System.Drawing.Point(3, 106);
             this.lblGamma.Name = "lblGamma";
             this.lblGamma.Size = new System.Drawing.Size(70, 13);
             this.lblGamma.TabIndex = 23;
@@ -326,7 +330,7 @@
             // 
             // tbEmissive
             // 
-            this.tbEmissive.Location = new System.Drawing.Point(90, 181);
+            this.tbEmissive.Location = new System.Drawing.Point(90, 136);
             this.tbEmissive.Maximum = 300;
             this.tbEmissive.Name = "tbEmissive";
             this.tbEmissive.Size = new System.Drawing.Size(183, 45);
@@ -338,7 +342,7 @@
             // lblEmissive
             // 
             this.lblEmissive.AutoSize = true;
-            this.lblEmissive.Location = new System.Drawing.Point(3, 184);
+            this.lblEmissive.Location = new System.Drawing.Point(3, 139);
             this.lblEmissive.Name = "lblEmissive";
             this.lblEmissive.Size = new System.Drawing.Size(75, 13);
             this.lblEmissive.TabIndex = 25;
@@ -348,7 +352,7 @@
             // cbMaterials
             // 
             this.cbMaterials.AutoSize = true;
-            this.cbMaterials.Location = new System.Drawing.Point(150, 34);
+            this.cbMaterials.Location = new System.Drawing.Point(150, 24);
             this.cbMaterials.Name = "cbMaterials";
             this.cbMaterials.Size = new System.Drawing.Size(68, 17);
             this.cbMaterials.TabIndex = 39;
@@ -358,7 +362,7 @@
             // cbGlow
             // 
             this.cbGlow.AutoSize = true;
-            this.cbGlow.Location = new System.Drawing.Point(70, 34);
+            this.cbGlow.Location = new System.Drawing.Point(80, 24);
             this.cbGlow.Name = "cbGlow";
             this.cbGlow.Size = new System.Drawing.Size(50, 17);
             this.cbGlow.TabIndex = 40;
@@ -369,7 +373,7 @@
             // 
             this.btnDefaults.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.btnDefaults.AutoSize = true;
-            this.btnDefaults.Location = new System.Drawing.Point(204, 368);
+            this.btnDefaults.Location = new System.Drawing.Point(204, 367);
             this.btnDefaults.Name = "btnDefaults";
             this.btnDefaults.Size = new System.Drawing.Size(75, 23);
             this.btnDefaults.TabIndex = 999;
@@ -379,18 +383,53 @@
             // cbSkyShader
             // 
             this.cbSkyShader.AutoSize = true;
-            this.cbSkyShader.Location = new System.Drawing.Point(3, 53);
+            this.cbSkyShader.Location = new System.Drawing.Point(3, 41);
             this.cbSkyShader.Name = "cbSkyShader";
             this.cbSkyShader.Size = new System.Drawing.Size(84, 17);
             this.cbSkyShader.TabIndex = 3;
             this.cbSkyShader.Text = "Atmospheric";
             this.cbSkyShader.UseVisualStyleBackColor = true;
             // 
+            // cbShadows
+            // 
+            this.cbShadows.AutoSize = true;
+            this.cbShadows.Location = new System.Drawing.Point(150, 41);
+            this.cbShadows.Name = "cbShadows";
+            this.cbShadows.Size = new System.Drawing.Size(70, 17);
+            this.cbShadows.TabIndex = 41;
+            this.cbShadows.Text = "Shadows";
+            this.cbShadows.UseVisualStyleBackColor = true;
+            this.cbShadows.CheckedChanged += new System.EventHandler(this.cbShadows_CheckedChanged);
+            // 
+            // tbShadowIntensity
+            // 
+            this.tbShadowIntensity.Location = new System.Drawing.Point(90, 323);
+            this.tbShadowIntensity.Maximum = 100;
+            this.tbShadowIntensity.Name = "tbShadowIntensity";
+            this.tbShadowIntensity.Size = new System.Drawing.Size(183, 45);
+            this.tbShadowIntensity.TabIndex = 42;
+            this.tbShadowIntensity.TickStyle = System.Windows.Forms.TickStyle.None;
+            this.tbShadowIntensity.Value = 50;
+            this.tbShadowIntensity.Scroll += new System.EventHandler(this.tbShadowIntensity_Scroll);
+            // 
+            // lblShadowIntensity
+            // 
+            this.lblShadowIntensity.AutoSize = true;
+            this.lblShadowIntensity.Location = new System.Drawing.Point(3, 327);
+            this.lblShadowIntensity.Name = "lblShadowIntensity";
+            this.lblShadowIntensity.Size = new System.Drawing.Size(114, 13);
+            this.lblShadowIntensity.TabIndex = 43;
+            this.lblShadowIntensity.Text = "Shadow intensity: 0.50";
+            this.lblShadowIntensity.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
+            // 
             // GraphicsPreferences
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
             this.Controls.Add(this.cbSkyShader);
+            this.Controls.Add(this.cbShadows);
+            this.Controls.Add(this.tbShadowIntensity);
+            this.Controls.Add(this.lblShadowIntensity);
             this.Controls.Add(this.cbGlow);
             this.Controls.Add(this.cbMaterials);
             this.Controls.Add(this.nudFallbackBaseAlpha);
@@ -419,7 +458,7 @@
             this.Controls.Add(this.chkWireFrame);
             this.Controls.Add(this.btnDefaults);
             this.Name = "GraphicsPreferences";
-            this.Size = new System.Drawing.Size(283, 397);
+            this.Size = new System.Drawing.Size(283, 396);
             ((System.ComponentModel.ISupportInitialize)(this.tbDrawDistance)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbAmbient)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbDiffuse)).EndInit();
@@ -429,6 +468,7 @@
             ((System.ComponentModel.ISupportInitialize)(this.nudFallbackBaseAlpha)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbGamma)).EndInit();
             ((System.ComponentModel.ISupportInitialize)(this.tbEmissive)).EndInit();
+            ((System.ComponentModel.ISupportInitialize)(this.tbShadowIntensity)).EndInit();
             this.ResumeLayout(false);
             this.PerformLayout();
 
@@ -464,5 +504,8 @@
         private System.Windows.Forms.CheckBox cbMaterials;
         private System.Windows.Forms.Button btnDefaults;
         private System.Windows.Forms.CheckBox cbSkyShader;
+        private System.Windows.Forms.CheckBox cbShadows;
+        private System.Windows.Forms.TrackBar tbShadowIntensity;
+        private System.Windows.Forms.Label lblShadowIntensity;
     }
 }

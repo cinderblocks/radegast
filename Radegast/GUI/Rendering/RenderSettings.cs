@@ -93,6 +93,16 @@ namespace Radegast.Rendering
         /// </summary>
         public static bool EnableSkyShader = true;
 
+        /// <summary>
+        /// Enable simple shadowing in shaders
+        /// </summary>
+        public static bool EnableShadows = false;
+
+        /// <summary>
+        /// Shadow intensity multiplier used by shaders (0.0 - 1.0)
+        /// </summary>
+        public static float ShadowIntensity = 0.5f;
+
         #region Lighting
         /// <summary>
         /// Ambient light level (0.0 to 1.0)
