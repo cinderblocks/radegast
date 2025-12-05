@@ -18,6 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using System;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
 using System.Windows.Forms;
@@ -68,7 +69,7 @@ namespace Radegast
             {
                 if (!instance.MonoRuntime || IsHandleCreated)
                 {
-                    BeginInvoke(new MethodInvoker(GetTextures));
+                    ThreadingHelper.SafeInvoke(this, new Action(GetTextures), instance.MonoRuntime);
                 }
 
                 return;

@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using LibreMetaverse;
+using LibreMetaverse.Appearance;
 using Radegast.Commands;
 using Radegast.Media;
 using OpenMetaverse;
@@ -75,7 +76,7 @@ namespace Radegast
         public GridManager GridManger { get; private set; }
 
         /// <summary>Current Outfit Folder (appearance) manager</summary>
-        public CurrentOutfitFolder COF { get; private set; }
+        public OutfitManager COF { get; private set; }
 
         /// <summary>Gesture manager</summary>
         public GestureManager GestureManager { get; private set; }
@@ -181,7 +182,7 @@ namespace Radegast
             InitializeClient(Client);
 
             // COF must be created before RLV
-            COF = new CurrentOutfitFolder(this);
+            COF = new OutfitManager(this);
 
             RLV = new RlvManager(this);
 
@@ -189,7 +190,8 @@ namespace Radegast
             GridManger.LoadGrids();
 
             Names = new NameManager(this);
-            GestureManager = new GestureManager(this);
+            // Use the centralized LibreMetaverse gesture manager
+            GestureManager = new LibreMetaverse.GestureManager(Client);
             LslSyntax = new LslSyntax(Client);
 
             // IMSession manager
@@ -200,7 +202,7 @@ namespace Radegast
             IMSessions.TypingStopped += IMSessions_TypingStopped;
 
             // Initialize core handlers that rely on client/login lifecycle
-            _initialOutfitHandler = new InitialOutfitHandler(this);
+            _initialOutfitHandler = new InitialOutfitHandler(client0, COF);
         }
 
         private void IMSessions_SessionOpened(object sender, IMSessionEventArgs e)

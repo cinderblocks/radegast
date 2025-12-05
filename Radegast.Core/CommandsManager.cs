@@ -25,6 +25,7 @@ using System.Threading.Tasks;
 using System.Text;
 using OpenMetaverse;
 using Radegast.Core.Commands;
+using LibreMetaverse;
 
 namespace Radegast.Commands
 {
@@ -178,8 +179,7 @@ namespace Radegast.Commands
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("ERROR in Radegast Command: " + type + " because " + ex.Message + " " + ex.StackTrace,
-                               Helpers.LogLevel.Debug);
+                    Logger.Debug($"ERROR in Radegast Command: {type} because {ex.Message}", ex);
                     throw;
                 }
                 return false;
@@ -200,7 +200,7 @@ namespace Radegast.Commands
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log("ERROR in Radegast ICommandInterpreter: " + type + " because " + ex.Message + " " + ex.StackTrace, Helpers.LogLevel.Debug);
+                        Logger.Debug($"ERROR in Radegast ICommandInterpreter: {type} because {ex.Message}", ex);
                         throw;
                     }
                 }
@@ -316,8 +316,10 @@ namespace Radegast.Commands
                 InterpretersLoaded.Clear();
             }
             CommandsByName.Clear();
-            commandWorkerCancelToken.Cancel();
-            commandWorkerCancelToken.Dispose();
+            // Safely cancel and dispose the command worker cancellation token
+            DisposalHelper.SafeCancelAndDispose(commandWorkerCancelToken, (msg, ex) => {
+                if (ex != null) Logger.Debug(msg + ": " + ex.Message, ex); else Logger.Debug(msg);
+            });
             CommandQueued = null;
         }
 

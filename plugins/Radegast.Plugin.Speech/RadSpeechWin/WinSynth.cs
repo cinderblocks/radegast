@@ -209,12 +209,12 @@ namespace RadegastSpeech
             }
             catch (Exception e)
             {
-                Logger.Log("Synthesizer error: " + e.Message, Helpers.LogLevel.Error);
+                Logger.Error("Synthesizer error: " + e.Message);
             }
             finally
             {
                 // VERY IMPORTANT we set the synthesizer output to null here.
-                // Otherwise it does not fully close its output stream.
+                // Otherwise, it does not fully close its output stream.
                 syn.SetOutputToNull();
                 mstream.Flush();
                 mstream.Close();

@@ -41,11 +41,10 @@ namespace RadegastSpeech
                 rec.LoadGrammar(dGrammar);
                 cGrammars = new Dictionary<string, Grammar>();
             }
-            catch (Exception e)
+            catch (Exception ex)
             {
                 rec = null;
-                Logger.Log("Speech recognition disabled, " + e.Message,
-                    Helpers.LogLevel.Warning);
+                Logger.Warn("Speech recognition disabled", ex);
             }
         }
 

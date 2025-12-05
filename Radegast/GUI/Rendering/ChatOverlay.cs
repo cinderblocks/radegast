@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 using OpenTK.Graphics.OpenGL;
+using SkiaSharp;
 
 namespace Radegast.Rendering
 {
@@ -152,8 +153,10 @@ namespace Radegast.Rendering
             int x = 5;
             int y = 5;
             GL.Enable(EnableCap.Texture2D);
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             GL.Color4(ChatBackground);
-            RHelp.Draw2DBox(x, y, actualMaxWidth + 6, height + 10, 1f);
+            RHelp.DrawRounded2DBox(x, y, actualMaxWidth + 6, height + 10, 6f, 1f);
             for (int i = c - 1; i >= 0; i--)
             {
                 ChatLine line = lines[i];
@@ -216,42 +219,57 @@ namespace Radegast.Rendering
                     textureID = -1;
                 }
 
-                TextFormatFlags flags = TextFormatFlags.Top | TextFormatFlags.Left | TextFormatFlags.WordBreak;
-
-                Size s = TextRenderer.MeasureText(
-                    txt,
-                    ChatOverlay.ChatFont,
-                    new Size(maxWidth, 2000), flags);
-
-                ImgWidth = TextWidth = s.Width;
-                ImgHeight = TextHeight = s.Height;
-
-                if (!RenderSettings.TextureNonPowerOfTwoSupported)
+                // Create paint for measuring and drawing
+                using (var paint = CreatePaint(ChatOverlay.ChatFont))
                 {
-                    ImgWidth = RHelp.NextPow2(TextWidth);
-                    ImgHeight = RHelp.NextPow2(TextHeight);
+                    // Word-wrap into lines not exceeding maxWidth
+                    var lines = WrapText(txt, paint, maxWidth);
+
+                    // Measure height via font metrics
+                    paint.GetFontMetrics(out var metrics);
+                    float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
+                    if (lineHeight <= 0f) lineHeight = (-metrics.Ascent) + metrics.Descent;
+
+                    // Measure width as max line width
+                    float maxLineWidth = 0f;
+                    foreach (var line in lines)
+                    {
+                        float w = paint.MeasureText(line);
+                        if (w > maxLineWidth) maxLineWidth = w;
+                    }
+
+                    TextWidth = (int)Math.Ceiling(maxLineWidth);
+                    TextHeight = (int)Math.Ceiling(lineHeight * lines.Count);
+
+                    ImgWidth = TextWidth;
+                    ImgHeight = TextHeight;
+
+                    if (!RenderSettings.TextureNonPowerOfTwoSupported)
+                    {
+                        ImgWidth = RHelp.NextPow2(TextWidth);
+                        ImgHeight = RHelp.NextPow2(TextHeight);
+                    }
+
+                    using (var skBitmap = new SKBitmap(ImgWidth, ImgHeight, SKColorType.Bgra8888, SKAlphaType.Premul))
+                    using (var canvas = new SKCanvas(skBitmap))
+                    {
+                        canvas.Clear(SKColors.Transparent);
+
+                        // Draw lines centered horizontally within ImgWidth
+                        float baseline = -metrics.Ascent;
+                        float y = baseline;
+                        foreach (var line in lines)
+                        {
+                            float lw = paint.MeasureText(line);
+                            float x = ((float)ImgWidth - lw) * 0.0f; // Left align within box; HUD positions will handle centering
+                            canvas.DrawText(line, x, y, paint);
+                            y += lineHeight;
+                        }
+
+                        widthForTextureGenerated = maxWidth;
+                        textureID = RHelp.GLLoadImage(skBitmap, true, false);
+                    }
                 }
-
-                Bitmap img = new Bitmap(
-                    ImgWidth,
-                    ImgHeight,
-                    System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                
-                Graphics g = Graphics.FromImage(img);
-
-                TextRenderer.DrawText(
-                    g,
-                    txt,
-                    ChatOverlay.ChatFont,
-                    new Rectangle(0, ImgHeight - TextHeight, TextWidth + 2, TextHeight + 2),
-                    Color.White,
-                    Color.Transparent,
-                    flags);
-
-                widthForTextureGenerated = maxWidth;
-                textureID = RHelp.GLLoadImage(img, true, false);
-                g.Dispose();
-                img.Dispose();
             }
         }
 
@@ -260,6 +278,57 @@ namespace Radegast.Rendering
             if (textureID == -1) return;
             GL.BindTexture(TextureTarget.Texture2D, textureID);
             RHelp.Draw2DBox(x, y, ImgWidth, ImgHeight, 0f);
+        }
+
+        private static SKPaint CreatePaint(Font font)
+        {
+            var typeface = SKTypeface.FromFamilyName(font.Name);
+            return new SKPaint
+            {
+                Typeface = typeface,
+                TextSize = font.Size,
+                IsAntialias = true,
+                SubpixelText = true,
+                IsStroke = false,
+                FilterQuality = SKFilterQuality.High,
+                Color = new SKColor(255, 255, 255, 255)
+            };
+        }
+
+        private static List<string> WrapText(string text, SKPaint paint, int maxWidth)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(text)) { result.Add(string.Empty); return result; }
+
+            var words = text.Split(new[] { ' ' }, StringSplitOptions.None);
+            var line = string.Empty;
+
+            foreach (var word in words)
+            {
+                var candidate = string.IsNullOrEmpty(line) ? word : line + " " + word;
+                float width = paint.MeasureText(candidate);
+                if (width <= maxWidth)
+                {
+                    line = candidate;
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(line)) result.Add(line);
+                    // If single word exceeds maxWidth, force break
+                    if (paint.MeasureText(word) > maxWidth)
+                    {
+                        result.Add(word);
+                        line = string.Empty;
+                    }
+                    else
+                    {
+                        line = word;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(line)) result.Add(line);
+            return result;
         }
     }
 }

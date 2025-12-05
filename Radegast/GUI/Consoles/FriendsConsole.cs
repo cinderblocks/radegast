@@ -27,7 +27,6 @@ using OpenMetaverse.StructuredData;
 using System.Threading;
 using OpenMetaverse;
 using System.Reflection;
-using Radegast.Properties;
 
 namespace Radegast
 {
@@ -74,10 +73,7 @@ namespace Radegast
 
             if (moded)
             {
-                if (InvokeRequired)
-                    BeginInvoke(new MethodInvoker(() => listFriends.Invalidate()));
-                else
-                    listFriends.Invalidate();
+                ThreadingHelper.SafeInvoke(this, () => listFriends.Invalidate(), instance.MonoRuntime);
             }
         }
 
@@ -151,47 +147,30 @@ namespace Radegast
 
         private void Friends_FriendNames(object sender, FriendNamesEventArgs e)
         {
-            if (InvokeRequired)
-            {
-                BeginInvoke(new MethodInvoker(() => Friends_FriendNames(sender, e)));
-                return;
-            }
-
-            RefreshFriendsList();
+            ThreadingHelper.SafeInvoke(this, () => RefreshFriendsList(), instance.MonoRuntime);
         }
 
         private void Friends_FriendshipResponse(object sender, FriendshipResponseEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                BeginInvoke(new MethodInvoker(() => Friends_FriendshipResponse(sender, e)));
-                return;
-            }
-
-            if (e.Accepted)
-            {
-                ThreadPool.QueueUserWorkItem(sync =>
+                if (e.Accepted)
                 {
-                    string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
-                    string text = string.Format(Resources.FriendshipAccepted, !string.IsNullOrEmpty(e.AgentName) ? e.AgentName : name);
-                    MethodInvoker display = () =>
+                    ThreadPool.QueueUserWorkItem(sync =>
                     {
-                        DisplayNotification(e.AgentID, text);
-                        AnnounceForScreenReader(text);
-                    };
+                        string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                        string text = $"{(!string.IsNullOrEmpty(e.AgentName) ? e.AgentName : name)} accepted your friendship offer";
+                        
+                        ThreadingHelper.SafeInvoke(this, () =>
+                        {
+                            DisplayNotification(e.AgentID, text);
+                            AnnounceForScreenReader(text);
+                        }, instance.MonoRuntime);
+                    });
+                }
 
-                    if (InvokeRequired)
-                    {
-                        BeginInvoke(display);
-                    }
-                    else
-                    {
-                        display();
-                    }
-                });
-            }
-
-            RefreshFriendsList();
+                RefreshFriendsList();
+            }, instance.MonoRuntime);
         }
 
         public static bool TryFindIMTab(RadegastInstanceForms instance, UUID friendID, out IMTabWindow console)
@@ -298,22 +277,14 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
-                string text = string.Format(Resources.FriendIsOffline, name);
-                MethodInvoker display = () =>
+                string text = $"{name} is offline";
+                
+                ThreadingHelper.SafeInvoke(this, () =>
                 {
                     DisplayNotification(e.Friend.UUID, text);
                     AnnounceForScreenReader(text);
                     RefreshFriendsList();
-                };
-
-                if (InvokeRequired)
-                {
-                    BeginInvoke(display);
-                }
-                else
-                {
-                    display();
-                }
+                }, instance.MonoRuntime);
             });
         }
 
@@ -324,22 +295,14 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.Friend.UUID, e.Friend.Name);
-                string text = string.Format(Resources.FriendIsOnline, name);
-                MethodInvoker display = () =>
+                string text = $"{name} is online";
+                
+                ThreadingHelper.SafeInvoke(this, () =>
                 {
                     DisplayNotification(e.Friend.UUID, text);
                     AnnounceForScreenReader(text);
                     RefreshFriendsList();
-                };
-
-                if (InvokeRequired)
-                {
-                    BeginInvoke(display);
-                }
-                else
-                {
-                    display();
-                }
+                }, instance.MonoRuntime);
             });
         }
 
@@ -348,22 +311,14 @@ namespace Radegast
             ThreadPool.QueueUserWorkItem(sync =>
             {
                 string name = ResolveNameBlocking(e.AgentID);
-                string text = string.Format(Resources.FriendRemoved, name);
-                MethodInvoker display = () =>
+                string text = $"Friendship terminated with {name}.";
+                
+                ThreadingHelper.SafeInvoke(this, () =>
                 {
                     DisplayNotification(e.AgentID, text);
                     AnnounceForScreenReader(text);
                     RefreshFriendsList();
-                };
-
-                if (InvokeRequired)
-                {
-                    BeginInvoke(display);
-                }
-                else
-                {
-                    display();
-                }
+                }, instance.MonoRuntime);
             });
         }
 
@@ -442,7 +397,8 @@ namespace Radegast
                                 ));
                             }
                             client.Self.GroupChatJoined -= handler;
-                            BeginInvoke(new MethodInvoker(RefreshFriendsList));
+                            
+                            ThreadingHelper.SafeInvoke(this, RefreshFriendsList, instance.MonoRuntime);
                         }
                     }
                 );

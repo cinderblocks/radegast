@@ -206,16 +206,11 @@ namespace Radegast
 
         public void SafeInvalidate()
         {
-            if (InvokeRequired)
-            {
-                if (!Instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(Invalidate));
-            }
-            else
+            ThreadingHelper.SafeInvoke(this, () =>
             {
                 if (!Instance.MonoRuntime || IsHandleCreated)
                     Invalidate();
-            }
+            }, Instance.MonoRuntime);
         }
 
         public void CenterMap(ulong regionHandle, uint localX, uint localY, bool setTarget)

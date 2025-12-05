@@ -131,10 +131,8 @@ namespace Radegast.Media
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log(
-                            $"Error on volume change on channel {channel.handle.ToString("X")} sound {sound.handle.ToString("X")} finished {finished}",
-                            Helpers.LogLevel.Error,
-                            ex);
+                        Logger.Error(
+                            $"Error on volume change on channel {channel.handle.ToString("X")} sound {sound.handle.ToString("X")} finished {finished}", ex);
                     }
                 });
             }
@@ -161,9 +159,8 @@ namespace Radegast.Media
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log(
-                            $"Error on position change on channel {channel.handle.ToString("X")} sound {sound.handle.ToString("X")} finished {finished}",
-                            Helpers.LogLevel.Error, ex);
+                        Logger.Error(
+                            $"Error on position change on channel {channel.handle.ToString("X")} sound {sound.handle.ToString("X")} finished {finished}", ex);
                     }
                 });
 
@@ -270,7 +267,7 @@ namespace Radegast.Media
 
         protected static void FMODExec(RESULT result, string trace)
         {
-            Logger.Log($"FMOD call {trace} returned {result}", Helpers.LogLevel.Info);
+            Logger.Info($"FMOD call {trace} returned {result}");
             if (result != RESULT.OK)
             {
                 throw new MediaException($"FMOD error! {result} - {Error.String(result)}");

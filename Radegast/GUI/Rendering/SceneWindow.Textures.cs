@@ -31,20 +31,16 @@
 //
 
 using System;
-using System.Drawing;
 using System.Reflection;
 using System.Threading;
-using System.Windows.Forms;
 using CoreJ2K;
 using CoreJ2K.Util;
 using OpenTK.Graphics;
-using OpenTK.Graphics.OpenGL;
 using OpenTK.Platform;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
 using OpenMetaverse.Imaging;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 namespace Radegast.Rendering
 {
@@ -274,11 +270,17 @@ namespace Radegast.Rendering
 
                 if (skBitmap != null)
                 {
-                    var bitmap = skBitmap.ToBitmap();
-                    try { skBitmap.Dispose(); } catch { }
-                    bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                    // Flip vertically for OpenGL
+                    var flipped = new SKBitmap(skBitmap.Width, skBitmap.Height, skBitmap.ColorType, skBitmap.AlphaType);
+                    using (var canvas = new SKCanvas(flipped))
+                    {
+                        canvas.Scale(1, -1, 0, skBitmap.Height / 2f);
+                        canvas.DrawBitmap(skBitmap, 0, 0);
+                    }
 
-                    UploadTexture(item, bitmap);
+                    try { skBitmap.Dispose(); } catch { }
+
+                    UploadTexture(item, flipped);
                 }
             }
 
@@ -286,7 +288,7 @@ namespace Radegast.Rendering
             imageBytes = null;
         }
 
-        private void UploadTexture(TextureLoadItem item, Bitmap bitmap)
+        private void UploadTexture(TextureLoadItem item, SKBitmap bitmap)
         {
             if (textureContext != null)
             {
@@ -300,11 +302,11 @@ namespace Radegast.Rendering
                     Logger.Warn($"Texture thread GL upload failed, falling back to UI thread: {ex.Message}", ex, Client);
                     if (instance.MainForm.IsHandleCreated)
                     {
-                        instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                        ThreadingHelper.SafeInvoke(instance.MainForm, new Action(() =>
                         {
                             item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
                             try { bitmap.Dispose(); } catch { }
-                        }));
+                        }), instance.MonoRuntime);
                     }
                     else
                     {
@@ -320,11 +322,11 @@ namespace Radegast.Rendering
             {
                 if (instance.MainForm.IsHandleCreated)
                 {
-                    instance.MainForm.BeginInvoke(new MethodInvoker(() =>
+                    ThreadingHelper.SafeInvoke(instance.MainForm, new Action(() =>
                     {
                         item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, item.Data.TextureInfo.HasAlpha);
                         try { bitmap.Dispose(); } catch { }
-                    }));
+                    }), instance.MonoRuntime);
                 }
                 else
                 {

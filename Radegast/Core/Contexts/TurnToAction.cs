@@ -19,6 +19,7 @@
  */
 
 using System;
+using LibreMetaverse;
 using OpenMetaverse;
 
 namespace Radegast
@@ -47,7 +48,7 @@ namespace Radegast
             if (TryFindPos(target, out var sim, out var pos))
             {
                 instance.ShowNotificationInChat($"Facing {pname}");
-                Client.Self.Movement.TurnToward(instance.State.ToLocalPosition(sim.Handle, pos));
+                Client.Self.Movement.TurnToward(PositionHelper.ToLocalPosition(sim.Handle, pos));
             }
             else
             {

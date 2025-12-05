@@ -44,6 +44,16 @@ namespace Radegast.Rendering
         /// <param name="height">Viewport height</param>
         public static void BeginHUD(int width, int height)
         {
+            // Disable shaders before HUD rendering to prevent shader interference with text/2D rendering
+            if (RenderSettings.HasShaders)
+            {
+                try
+                {
+                    GL.UseProgram(0);
+                }
+                catch { }
+            }
+            
             GL.Disable(EnableCap.DepthTest);
             GL.Disable(EnableCap.Lighting);
             GL.MatrixMode(MatrixMode.Projection);

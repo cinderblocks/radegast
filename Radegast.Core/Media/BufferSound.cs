@@ -71,8 +71,7 @@ namespace Radegast.Media
             volumeSetting = vol;
             loopSound = loop;
 
-            Logger.Log($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}",
-                Helpers.LogLevel.Debug);
+            Logger.Debug($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}");
 
             // Set flags to determine how it will be played.
             mode = MODE.DEFAULT |
@@ -243,14 +242,13 @@ namespace Radegast.Media
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log("Error playing sound: ", Helpers.LogLevel.Error, ex);
+                        Logger.Error("Error playing sound", ex);
                     }
                 });
             }
             else
             {
-                Logger.Log("Failed to download sound: " + transfer.Status,
-                                        Helpers.LogLevel.Error);
+                Logger.Error($"Failed to download sound: {transfer.Status}");
             }
         }
 
@@ -260,20 +258,37 @@ namespace Radegast.Media
         /// <returns>RESULT.OK</returns>
         protected override RESULT EndCallbackHandler()
         {
-            StopSound();
+            // Stop asynchronously from FMOD callback thread to avoid blocking
+            _ = StopSoundAsync(false);
             return RESULT.OK;
         }
 
         protected void StopSound()
         {
-            StopSound(false);
+            // Fire-and-forget non-blocking stop
+            _ = StopSoundAsync(false);
         }
 
         protected void StopSound(bool blocking)
         {
-            ManualResetEvent stopped = null;
-            if (blocking)
-                stopped = new ManualResetEvent(false);
+            // Preserve synchronous blocking behavior by waiting on the async task
+            try
+            {
+                StopSoundAsync(blocking).GetAwaiter().GetResult();
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Asynchronous implementation of stopping the sound. When 'blocking' is true the returned Task
+        /// will complete after FMOD resource cleanup has executed on the FMOD/UI thread invoked by invoke(...).
+        /// </summary>
+        /// <param name="blocking">If true, caller will wait for cleanup to finish</param>
+        /// <returns></returns>
+        protected async System.Threading.Tasks.Task StopSoundAsync(bool blocking)
+        {
+            System.Threading.Tasks.TaskCompletionSource<bool> tcs = null;
+            if (blocking) tcs = new System.Threading.Tasks.TaskCompletionSource<bool>(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
 
             finished = true;
 
@@ -283,21 +298,23 @@ namespace Radegast.Media
                 string soundStr = "none";
 
                 // Release the buffer to avoid a big memory leak.
-                if (channel.hasHandle())
+                try
                 {
-                    lock (allChannels)
-                        allChannels.Remove(channel.handle);
-                    chanStr = channel.handle.ToString("X");
-                    channel.stop();
-                    channel.clearHandle();
-                }
+                    if (channel.hasHandle())
+                    {
+                        lock (allChannels)
+                            allChannels.Remove(channel.handle);
+                        chanStr = channel.handle.ToString("X");
+                        channel.stop();
+                        channel.clearHandle();
+                    }
 
-                if (sound.hasHandle())
-                {
-                    soundStr = sound.handle.ToString("X");
-                    sound.release();
-                    sound.clearHandle();
-                }
+                    if (sound.hasHandle())
+                    {
+                        soundStr = sound.handle.ToString("X");
+                        sound.release();
+                        sound.clearHandle();
+                    }
 #if TRACE_SOUND
                 Logger.Log(String.Format("Removing channel {0} sound {1} ID {2}",
                     chanStr,
@@ -305,16 +322,21 @@ namespace Radegast.Media
                     Id.ToString()),
                     Helpers.LogLevel.Debug);
 #endif
-                lock (allBuffers)
-                    allBuffers.Remove(ContainerId);
+                    lock (allBuffers)
+                        allBuffers.Remove(ContainerId);
+                }
+                catch { }
 
                 if (blocking)
-                    stopped?.Set();
+                {
+                    try { tcs?.TrySetResult(true); } catch { }
+                }
             });
 
-            if (blocking)
-                stopped.WaitOne();
-
+            if (blocking && tcs != null)
+            {
+                await tcs.Task.ConfigureAwait(false);
+            }
         }
 
     }

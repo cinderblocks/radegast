@@ -111,7 +111,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(() => Assets_OnAssetReceived(transfer, asset)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnAssetReceived(transfer, asset)), instance.MonoRuntime);
                 return;
             }
 
@@ -154,11 +154,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(delegate()
-                {
-                    On_ItemCreated(success, status, itemID, assetID);
-                }
-                ));
+                ThreadingHelper.SafeInvoke(this, new Action(() => On_ItemCreated(success, status, itemID, assetID)), instance.MonoRuntime);
                 return;
             }
 

@@ -20,13 +20,10 @@
 
 using System;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Threading;
 using CoreJ2K;
 using OpenMetaverse;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 namespace Radegast.Rendering
 {
@@ -38,6 +35,7 @@ namespace Radegast.Rendering
         private static readonly UUID GRASS_DETAIL = new UUID("63338ede-0037-c4fd-855b-015d77112fc8");
         private static readonly UUID MOUNTAIN_DETAIL = new UUID("303cd381-8560-7579-23f1-f0a880799740");
         private static readonly UUID ROCK_DETAIL = new UUID("53a2f406-4895-1d13-d541-d2e3b86bc19c");
+        private static readonly UUID TERRAIN_CACHE_MAGIC = new UUID("2c0c7ef2-56be-4eb8-aacb-76712c535b4b");
         private static readonly int RegionSize = 256;
 
         private static readonly UUID[] DEFAULT_TERRAIN_DETAIL = new UUID[]
@@ -48,15 +46,13 @@ namespace Radegast.Rendering
             ROCK_DETAIL
         };
 
-        private static readonly Color[] DEFAULT_TERRAIN_COLOR = new Color[]
+        private static readonly SKColor[] DEFAULT_TERRAIN_COLOR = new SKColor[]
         {
-            Color.FromArgb(255, 164, 136, 117),
-            Color.FromArgb(255, 65, 87, 47),
-            Color.FromArgb(255, 157, 145, 131),
-            Color.FromArgb(255, 125, 128, 130)
+            new SKColor(164, 136, 117, 255),
+            new SKColor(65, 87, 47, 255),
+            new SKColor(157, 145, 131, 255),
+            new SKColor(125, 128, 130, 255)
         };
-
-        private static readonly UUID TERRAIN_CACHE_MAGIC = new UUID("2c0c7ef2-56be-4eb8-aacb-76712c535b4b");
 
         #endregion Constants
 
@@ -72,14 +68,14 @@ namespace Radegast.Rendering
         /// <returns>A composited 256x256 RGB texture ready for rendering</returns>
         /// <remarks>Based on the algorithm described at http://opensimulator.org/wiki/Terrain_Splatting
         /// </remarks>
-        public static Bitmap Splat(IRadegastInstance instance, float[,] heightmap, UUID[] textureIDs, float[] startHeights, float[] heightRanges)
+        public static SKBitmap Splat(IRadegastInstance instance, float[,] heightmap, UUID[] textureIDs, float[] startHeights, float[] heightRanges)
         {
             Debug.Assert(textureIDs.Length == 4);
             Debug.Assert(startHeights.Length == 4);
             Debug.Assert(heightRanges.Length == 4);
             int outputSize = 2048;
 
-            Bitmap[] detailTexture = new Bitmap[4];
+            SKBitmap[] detailTexture = new SKBitmap[4];
 
             // Swap empty terrain textureIDs with default IDs
             for (int i = 0; i < textureIDs.Length; i++)
@@ -101,22 +97,41 @@ namespace Radegast.Rendering
 
             #endregion Texture Fetching
 
-            // Fill in any missing textures with a solid color
+            // Fill in any missing textures with a solid color and ensure all are in BGRA8888 format
             for (int i = 0; i < 4; i++)
             {
                 if (detailTexture[i] == null)
                 {
-                    // Create a solid color texture for this layer
-                    detailTexture[i] = new Bitmap(outputSize, outputSize, PixelFormat.Format24bppRgb);
-                    using (Graphics gfx = Graphics.FromImage(detailTexture[i]))
+                    // Create a solid color texture for this layer in BGRA format
+                    detailTexture[i] = new SKBitmap(outputSize, outputSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
+                    using (var canvas = new SKCanvas(detailTexture[i]))
                     {
-                        using (SolidBrush brush = new SolidBrush(DEFAULT_TERRAIN_COLOR[i]))
-                            gfx.FillRectangle(brush, 0, 0, outputSize, outputSize);
+                        canvas.Clear(DEFAULT_TERRAIN_COLOR[i]);
                     }
                 }
-                else if (detailTexture[i].Width != outputSize || detailTexture[i].Height != outputSize)
+                else
                 {
-                    detailTexture[i] = ResizeBitmap(detailTexture[i], 256, 256);
+                    // Ensure texture is in BGRA8888 format and correct size
+                    var needsConversion = detailTexture[i].ColorType != SKColorType.Bgra8888;
+                    var needsResize = detailTexture[i].Width != 256 || detailTexture[i].Height != 256;
+
+                    if (needsConversion || needsResize)
+                    {
+                        var targetWidth = needsResize ? 256 : detailTexture[i].Width;
+                        var targetHeight = needsResize ? 256 : detailTexture[i].Height;
+                        var converted = new SKBitmap(targetWidth, targetHeight, SKColorType.Bgra8888, SKAlphaType.Opaque);
+                        
+                        using (var canvas = new SKCanvas(converted))
+                        {
+                            canvas.DrawBitmap(detailTexture[i], new SKRect(0, 0, targetWidth, targetHeight), new SKPaint
+                            {
+                                FilterQuality = SKFilterQuality.High
+                            });
+                        }
+                        
+                        detailTexture[i].Dispose();
+                        detailTexture[i] = converted;
+                    }
                 }
             }
 
@@ -178,45 +193,26 @@ namespace Radegast.Rendering
             #endregion Layer Map
 
             #region Texture Compositing
-            Bitmap output = new Bitmap(outputSize, outputSize, PixelFormat.Format24bppRgb);
-            BitmapData outputData = output.LockBits(new Rectangle(0, 0, outputSize, outputSize), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+            // Output in BGRA8888 to match input textures
+            SKBitmap output = new SKBitmap(outputSize, outputSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
 
             unsafe
             {
-                // Get handles to all texture data arrays
-                BitmapData[] datas = new BitmapData[]
-                {
-                    detailTexture[0].LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.ReadOnly, detailTexture[0].PixelFormat),
-                    detailTexture[1].LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.ReadOnly, detailTexture[1].PixelFormat),
-                    detailTexture[2].LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.ReadOnly, detailTexture[2].PixelFormat),
-                    detailTexture[3].LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.ReadOnly, detailTexture[3].PixelFormat)
-                };
+                // Get pixel pointers for all textures (all in BGRA8888 format now)
+                IntPtr[] scans = new IntPtr[4];
+                int[] rowBytes = new int[4];
 
-                int[] comps = new int[]
+                for (int i = 0; i < 4; i++)
                 {
-                    (datas[0].PixelFormat == PixelFormat.Format32bppArgb) ? 4 : 3,
-                    (datas[1].PixelFormat == PixelFormat.Format32bppArgb) ? 4 : 3,
-                    (datas[2].PixelFormat == PixelFormat.Format32bppArgb) ? 4 : 3,
-                    (datas[3].PixelFormat == PixelFormat.Format32bppArgb) ? 4 : 3
-                };
+                    scans[i] = detailTexture[i].GetPixels();
+                    rowBytes[i] = detailTexture[i].RowBytes;
+                }
 
-                int[] strides = new int[]
-                {
-                    datas[0].Stride,
-                    datas[1].Stride,
-                    datas[2].Stride,
-                    datas[3].Stride
-                };
-
-                IntPtr[] scans = new IntPtr[]
-                {
-                    datas[0].Scan0,
-                    datas[1].Scan0,
-                    datas[2].Scan0,
-                    datas[3].Scan0
-                };
+                IntPtr outputScan = output.GetPixels();
+                int outputRowBytes = output.RowBytes;
 
                 int ratio = outputSize / RegionSize;
+                int bytesPerPixel = 4; // BGRA8888 is always 4 bytes per pixel
 
                 for (int y = 0; y < outputSize; y++)
                 {
@@ -232,22 +228,26 @@ namespace Radegast.Rendering
                         int l0 = (int)Math.Floor(layer);
                         int l1 = Math.Min(l0 + 1, 3);
 
-                        byte* ptrA = (byte*)scans[l0] + (y % 256) * strides[l0] + (x % 256) * comps[l0];
-                        byte* ptrB = (byte*)scans[l1] + (y % 256) * strides[l1] + (x % 256) * comps[l1];
-                        byte* ptrO = (byte*)outputData.Scan0 + y * outputData.Stride + x * 3;
+                        int texY = y % 256;
+                        int texX = x % 256;
 
+                        byte* ptrA = (byte*)scans[l0] + texY * rowBytes[l0] + texX * bytesPerPixel;
+                        byte* ptrB = (byte*)scans[l1] + texY * rowBytes[l1] + texX * bytesPerPixel;
+                        byte* ptrO = (byte*)outputScan + y * outputRowBytes + x * bytesPerPixel;
+
+                        // BGRA format: B=0, G=1, R=2, A=3
                         float aB = *(ptrA + 0);
                         float aG = *(ptrA + 1);
                         float aR = *(ptrA + 2);
 
                         int lX = (int)Math.Floor(layerx);
-                        byte* ptrX = (byte*)scans[lX] + (y % 256) * strides[lX] + (x % 256) * comps[lX];
+                        byte* ptrX = (byte*)scans[lX] + texY * rowBytes[lX] + texX * bytesPerPixel;
                         int lXX = (int)Math.Floor(layerxx);
-                        byte* ptrXX = (byte*)scans[lXX] + (y % 256) * strides[lXX] + (x % 256) * comps[lXX];
+                        byte* ptrXX = (byte*)scans[lXX] + texY * rowBytes[lXX] + texX * bytesPerPixel;
                         int lY = (int)Math.Floor(layery);
-                        byte* ptrY = (byte*)scans[lY] + (y % 256) * strides[lY] + (x % 256) * comps[lY];
+                        byte* ptrY = (byte*)scans[lY] + texY * rowBytes[lY] + texX * bytesPerPixel;
                         int lYY = (int)Math.Floor(layeryy);
-                        byte* ptrYY = (byte*)scans[lYY] + (y % 256) * strides[lYY] + (x % 256) * comps[lYY];
+                        byte* ptrYY = (byte*)scans[lYY] + texY * rowBytes[lYY] + texX * bytesPerPixel;
 
                         float bB = *(ptrB + 0);
                         float bG = *(ptrB + 1);
@@ -258,12 +258,13 @@ namespace Radegast.Rendering
                         float xxlayerDiff = layerxx - layer;
                         float ylayerDiff = layery - layer;
                         float yylayerDiff = layeryy - layer;
-                        // Interpolate between the two selected textures
+
+                        // Interpolate between the two selected textures (BGRA format)
                         *(ptrO + 0) = (byte)Math.Floor(aB + layerDiff * (bB - aB) + 
-                            xlayerDiff * (*ptrX - aB) + 
-                            xxlayerDiff * (*(ptrXX) - aB) + 
-                            ylayerDiff * (*ptrY - aB) + 
-                            yylayerDiff * (*(ptrYY) - aB));
+                            xlayerDiff * (*(ptrX + 0) - aB) + 
+                            xxlayerDiff * (*(ptrXX + 0) - aB) + 
+                            ylayerDiff * (*(ptrY + 0) - aB) + 
+                            yylayerDiff * (*(ptrYY + 0) - aB));
                         *(ptrO + 1) = (byte)Math.Floor(aG + layerDiff * (bG - aG) + 
                             xlayerDiff * (*(ptrX + 1) - aG) +
                             xxlayerDiff * (*(ptrXX + 1) - aG) + 
@@ -274,59 +275,70 @@ namespace Radegast.Rendering
                             xxlayerDiff * (*(ptrXX + 2) - aR) +
                             ylayerDiff * (*(ptrY + 2) - aR) + 
                             yylayerDiff * (*(ptrYY + 2) - aR));
+                        *(ptrO + 3) = 255; // Alpha channel
                     }
                 }
 
                 for (int i = 0; i < 4; i++)
                 {
-                    detailTexture[i].UnlockBits(datas[i]);
                     detailTexture[i].Dispose();
                 }
             }
 
             layermap = null;
-            output.UnlockBits(outputData);
 
-            output.RotateFlip(RotateFlipType.Rotate270FlipNone);
+            // Rotate the output
+            var rotated = new SKBitmap(outputSize, outputSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
+            using (var canvas = new SKCanvas(rotated))
+            {
+                canvas.Translate(outputSize / 2f, outputSize / 2f);
+                canvas.RotateDegrees(270);
+                canvas.Translate(-outputSize / 2f, -outputSize / 2f);
+                canvas.DrawBitmap(output, 0, 0);
+            }
+            output.Dispose();
 
             #endregion Texture Compositing
 
-            return output;
+            return rotated;
         }
 
-        private static TextureDownloadCallback TextureDownloadCallback(Bitmap[] detailTexture, int i, AutoResetEvent textureDone)
+        private static TextureDownloadCallback TextureDownloadCallback(SKBitmap[] detailTexture, int i, AutoResetEvent textureDone)
         {
             return (state, assetTexture) =>
             {
                 if (state == TextureRequestState.Finished && assetTexture?.AssetData != null)
                 {
-                    detailTexture[i] = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>().ToBitmap();
+                    detailTexture[i] = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>();
                 }
                 textureDone.Set();
             };
         }
 
-        public static Bitmap ResizeBitmap(Bitmap b, int nWidth, int nHeight)
+        public static SKBitmap ResizeBitmap(SKBitmap b, int nWidth, int nHeight)
         {
-            Bitmap result = new Bitmap(nWidth, nHeight);
-            using (Graphics g = Graphics.FromImage((Image)result))
+            var result = new SKBitmap(nWidth, nHeight, b.ColorType, b.AlphaType);
+            using (var canvas = new SKCanvas(result))
             {
-                g.DrawImage(b, 0, 0, nWidth, nHeight);
+                canvas.DrawBitmap(b, new SKRect(0, 0, nWidth, nHeight), new SKPaint
+                {
+                    FilterQuality = SKFilterQuality.High
+                });
             }
             b.Dispose();
             return result;
         }
 
-        public static Bitmap TileBitmap(Bitmap b, int tiles)
+        public static SKBitmap TileBitmap(SKBitmap b, int tiles)
         {
-            Bitmap result = new Bitmap(b.Width * tiles, b.Width * tiles);
-            using (Graphics g = Graphics.FromImage((Image)result))
+            var result = new SKBitmap(b.Width * tiles, b.Width * tiles, b.ColorType, b.AlphaType);
+            using (var canvas = new SKCanvas(result))
             {
                 for (int x = 0; x < tiles; x++)
                 {
                     for (int y = 0; y < tiles; y++)
                     {
-                        g.DrawImage(b, x * 256, y * 256, x * 256 + 256, y * 256 + 256);
+                        canvas.DrawBitmap(b, x * 256, y * 256);
                     }
                 }
             }
@@ -334,17 +346,20 @@ namespace Radegast.Rendering
             return result;
         }
 
-        public static Bitmap SplatSimple(float[,] heightmap)
+        public static SKBitmap SplatSimple(float[,] heightmap)
         {
             const float BASE_HSV_H = 93f / 360f;
             const float BASE_HSV_S = 44f / 100f;
             const float BASE_HSV_V = 34f / 100f;
 
-            Bitmap img = new Bitmap(256, 256);
-            BitmapData bitmapData = img.LockBits(new Rectangle(0, 0, 256, 256), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
+            var img = new SKBitmap(256, 256, SKColorType.Rgb888x, SKAlphaType.Opaque);
 
             unsafe
             {
+                IntPtr pixels = img.GetPixels();
+                int rowBytes = img.RowBytes;
+                int bytesPerPixel = img.BytesPerPixel;
+
                 for (int y = 255; y >= 0; y--)
                 {
                     for (int x = 0; x < 256; x++)
@@ -354,15 +369,14 @@ namespace Radegast.Rendering
 
                         Color4 color = Color4.FromHSV(BASE_HSV_H, BASE_HSV_S, normHeight);
 
-                        byte* ptr = (byte*)bitmapData.Scan0 + y * bitmapData.Stride + x * 3;
-                        *(ptr + 0) = (byte)(color.B * 255f);
+                        byte* ptr = (byte*)pixels + y * rowBytes + x * bytesPerPixel;
+                        *(ptr + 0) = (byte)(color.R * 255f);
                         *(ptr + 1) = (byte)(color.G * 255f);
-                        *(ptr + 2) = (byte)(color.R * 255f);
+                        *(ptr + 2) = (byte)(color.B * 255f);
                     }
                 }
             }
 
-            img.UnlockBits(bitmapData);
             return img;
         }
     }

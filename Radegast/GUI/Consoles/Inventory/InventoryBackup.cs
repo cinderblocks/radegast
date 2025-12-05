@@ -316,8 +316,7 @@ namespace Radegast
                                             }
                                             else
                                             {
-                                                Logger.Log(
-                                                    $"Failed to decode asset for '{item.Name}' - {receivedAsset.AssetID}", Helpers.LogLevel.Warning, client);
+                                                Logger.Warn($"Failed to decode asset for '{item.Name}' - {receivedAsset.AssetID}", client);
                                             }
 
                                             break;

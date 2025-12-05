@@ -206,11 +206,7 @@ namespace Radegast
         {
             if (MainForm.InvokeRequired)
             {
-                if (MainForm.IsHandleCreated || !MonoRuntime)
-                {
-                    MainForm.Invoke(new MethodInvoker(() => CopyObjectUUIDHandler(sender, e)));
-                }
-
+                ThreadingHelper.SafeInvokeSync(MainForm, new Action(() => CopyObjectUUIDHandler(sender, e)), MonoRuntime);
                 return;
             }
 

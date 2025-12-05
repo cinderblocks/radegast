@@ -26,10 +26,10 @@ using System.IO.Compression;
 using OpenTK.Graphics.OpenGL;
 using System.Runtime.InteropServices;
 using System.Drawing;
-using System.Drawing.Imaging;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using SkiaSharp;
+using SkiaSharp.Views.Desktop;
 
 namespace Radegast.Rendering
 {
@@ -655,36 +655,63 @@ namespace Radegast.Rendering
         };
         #endregion Static vertices and indices for a cube (used for bounding box drawing)
 
-        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha)
-        {
-            return GLLoadImage(bitmap, hasAlpha, true);
-        }
-
-        public static int GLLoadImage(Bitmap bitmap, bool hasAlpha, bool useMipmap)
+        public static int GLLoadImage(SKBitmap bitmap, bool hasAlpha = true, bool useMipmap = true)
         {
             useMipmap = useMipmap && RenderSettings.HasMipmap;
             int ret;
             GL.GenTextures(1, out ret);
             GL.BindTexture(TextureTarget.Texture2D, ret);
 
-            Rectangle rectangle = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
+            IntPtr pixels = bitmap.GetPixels();
+            int width = bitmap.Width;
+            int height = bitmap.Height;
 
-            BitmapData bitmapData =
-                bitmap.LockBits(
-                rectangle,
-                ImageLockMode.ReadOnly,
-                hasAlpha ? System.Drawing.Imaging.PixelFormat.Format32bppArgb : System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+            OpenTK.Graphics.OpenGL.PixelFormat pixelFormat;
+            PixelInternalFormat internalFormat;
+
+            // Determine format based on the actual SKBitmap color type
+            if (bitmap.ColorType == SKColorType.Bgra8888)
+            {
+                // BGRA8888 format - always 4 bytes per pixel
+                pixelFormat = OpenTK.Graphics.OpenGL.PixelFormat.Bgra;
+                internalFormat = hasAlpha ? PixelInternalFormat.Rgba : PixelInternalFormat.Rgb8;
+            }
+            else if (bitmap.ColorType == SKColorType.Rgba8888)
+            {
+                // RGBA8888 format - always 4 bytes per pixel
+                pixelFormat = OpenTK.Graphics.OpenGL.PixelFormat.Rgba;
+                internalFormat = hasAlpha ? PixelInternalFormat.Rgba : PixelInternalFormat.Rgb8;
+            }
+            else if (bitmap.ColorType == SKColorType.Rgb888x)
+            {
+                // RGB888x format - 4 bytes per pixel with unused alpha
+                pixelFormat = OpenTK.Graphics.OpenGL.PixelFormat.Rgba;
+                internalFormat = PixelInternalFormat.Rgb8;
+            }
+            else
+            {
+                // Fallback: convert to BGRA8888
+                var converted = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                using (var canvas = new SKCanvas(converted))
+                {
+                    canvas.DrawBitmap(bitmap, 0, 0);
+                }
+                bitmap = converted;
+                pixels = bitmap.GetPixels();
+                pixelFormat = OpenTK.Graphics.OpenGL.PixelFormat.Bgra;
+                internalFormat = hasAlpha ? PixelInternalFormat.Rgba : PixelInternalFormat.Rgb8;
+            }
 
             GL.TexImage2D(
                 TextureTarget.Texture2D,
                 0,
-                hasAlpha ? PixelInternalFormat.Rgba : PixelInternalFormat.Rgb8,
-                bitmap.Width,
-                bitmap.Height,
+                internalFormat,
+                width,
+                height,
                 0,
-                hasAlpha ? OpenTK.Graphics.OpenGL.PixelFormat.Bgra : OpenTK.Graphics.OpenGL.PixelFormat.Bgr,
+                pixelFormat,
                 PixelType.UnsignedByte,
-                bitmapData.Scan0);
+                pixels);
 
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
             GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
@@ -700,7 +727,6 @@ namespace Radegast.Rendering
                 GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
             }
 
-            bitmap.UnlockBits(bitmapData);
             return ret;
         }
 
@@ -728,6 +754,110 @@ namespace Radegast.Rendering
             GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Emission, new float[] { 0f, 0f, 0f, 1.0f });
             GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Shininess, 0f);
             ShaderProgram.Stop();
+        }
+
+        public static void DrawRounded2DBox(float x, float y, float width, float height, float radius, float depth)
+        {
+            // Clamp radius
+            radius = Math.Max(0f, Math.Min(radius, Math.Min(width, height) * 0.5f));
+
+            // Precompute corner centers
+            float left = x;
+            float right = x + width;
+            float top = y + height;
+            float bottom = y;
+
+            float cxLeft = left + radius;
+            float cxRight = right - radius;
+            float cyTop = top - radius;
+            float cyBottom = bottom + radius;
+
+            // Draw center rectangle
+            GL.Begin(PrimitiveType.Quads);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.End();
+
+            // Draw side rectangles
+            GL.Begin(PrimitiveType.Quads);
+            // Left side
+            GL.Vertex3(left, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.Vertex3(left, cyTop, depth);
+
+            // Right side
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(right, cyBottom, depth);
+            GL.Vertex3(right, cyTop, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+
+            // Bottom side
+            GL.Vertex3(cxLeft, bottom, depth);
+            GL.Vertex3(cxRight, bottom, depth);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+
+            // Top side
+            GL.Vertex3(cxLeft, cyTop, depth);
+            GL.Vertex3(cxRight, cyTop, depth);
+            GL.Vertex3(cxRight, top, depth);
+            GL.Vertex3(cxLeft, top, depth);
+            GL.End();
+
+            // Draw rounded corners with triangle fans (approximate quarter-circles)
+            const int segments = 12;
+            double step = Math.PI / 2.0 / segments;
+
+            // Bottom-left corner (center at cxLeft, cyBottom), angles 180..270
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxLeft, cyBottom, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = Math.PI + i * step;
+                float vx = cxLeft + (float)(Math.Cos(ang) * radius);
+                float vy = cyBottom + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Bottom-right corner (center at cxRight, cyBottom), angles 270..360
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxRight, cyBottom, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 1.5 * Math.PI + i * step;
+                float vx = cxRight + (float)(Math.Cos(ang) * radius);
+                float vy = cyBottom + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Top-right corner (center at cxRight, cyTop), angles 0..90
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxRight, cyTop, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 0 + i * step;
+                float vx = cxRight + (float)(Math.Cos(ang) * radius);
+                float vy = cyTop + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
+
+            // Top-left corner (center at cxLeft, cyTop), angles 90..180
+            GL.Begin(PrimitiveType.TriangleFan);
+            GL.Vertex3(cxLeft, cyTop, depth);
+            for (int i = 0; i <= segments; i++)
+            {
+                double ang = 0.5 * Math.PI + i * step;
+                float vx = cxLeft + (float)(Math.Cos(ang) * radius);
+                float vy = cyTop + (float)(Math.Sin(ang) * radius);
+                GL.Vertex3(vx, vy, depth);
+            }
+            GL.End();
         }
     }
 

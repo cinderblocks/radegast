@@ -24,8 +24,13 @@ namespace Radegast.Rendering
 {
     public static class RenderSettings
     {
+        /// <summary>
+        /// Gamma correction value applied in shaders (1.0 = no correction)
+        /// </summary>
+        public static float Gamma = 1.0f;
+
         #region VBO support
-        public static bool UseVBO;
+        public static bool UseVBO = true; // VBOs are always used when supported
         public static bool CoreVBOPresent;
         public static bool ARBVBOPresent;
         #endregion VBO support
@@ -38,7 +43,6 @@ namespace Radegast.Rendering
         #endregion Occlusion queries
 
         public static bool HasMultiTexturing;
-        public static bool UseFBO;
         public static bool HasMipmap;
         public static bool HasShaders;
         public static DetailLevel PrimRenderDetail = DetailLevel.High;
@@ -65,7 +69,7 @@ namespace Radegast.Rendering
         public static bool PrimitiveRenderingEnabled = true;
 
         /// <summary>
-        /// Show avatar skeloton
+        /// Show avatar skeleton
         /// </summary>
         public static bool RenderAvatarSkeleton = false;
 
@@ -74,25 +78,63 @@ namespace Radegast.Rendering
         /// </summary>
         public static bool EnableShiny = false;
 
+        /// <summary>
+        /// Enable glow effect in shaders
+        /// </summary>
+        public static bool EnableGlow = true;
+
+        /// <summary>
+        /// Enable material layer usage in shaders (specular color/strength/shininess)
+        /// </summary>
+        public static bool EnableMaterials = true;
+
+        /// <summary>
+        /// Enable use of the sky shader (if available)
+        /// </summary>
+        public static bool EnableSkyShader = true;
+
+        /// <summary>
+        /// Enable simple shadowing in shaders
+        /// </summary>
+        public static bool EnableShadows = false;
+
+        /// <summary>
+        /// Shadow intensity multiplier used by shaders (0.0 - 1.0)
+        /// </summary>
+        public static float ShadowIntensity = 1.0f;
+
         #region Lighting
         /// <summary>
         /// Ambient light level (0.0 to 1.0)
         /// </summary>
-        public static float AmbientLight = 0.70f;
+        public static float AmbientLight = 0.40f;
 
         /// <summary>
         /// Diffuse light level (0.0 to 1.0)
         /// </summary>
-        public static float DiffuseLight = 0.80f;
+        public static float DiffuseLight = 0.75f;
 
         /// <summary>
         /// Specular light level (0.0 to 1.0)
         /// </summary>
         public static float SpecularLight = 0.50f;
+
+        /// <summary>
+        /// Global emissive strength multiplier used by shaders for glowing faces
+        /// </summary>
+        public static float EmissiveStrength = 1.0f;
         #endregion Lighting
 
         #region Water
-        public static bool WaterReflections = false;
+        public static bool WaterReflections = true;
+        // Fallback CPU-side water animation when shaders are unavailable
+        public static bool FallbackWaterAnimationEnabled = true;
+        // Speed multiplier for the CPU fallback animation (higher -> faster)
+        public static float FallbackWaterAnimationSpeed = 1.5f;
+        // Amplitude of the alpha modulation used by the CPU fallback (0 = no modulation)
+        public static float FallbackWaterAnimationAmplitude = 0.12f;
+        // Base alpha used by the CPU fallback
+        public static float FallbackWaterBaseAlpha = 0.84f;
         #endregion Water
     }
 }

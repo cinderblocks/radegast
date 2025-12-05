@@ -70,7 +70,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed to save settings", Helpers.LogLevel.Warning, ex);
+                Logger.Warn("Failed to save settings", ex);
             }
         }
 

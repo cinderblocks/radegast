@@ -27,6 +27,7 @@ using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using AIMLbot;
 using System.Threading.Tasks;
+using Radegast.Core;
 
 namespace Radegast.Plugin.Alice
 {
@@ -587,7 +588,7 @@ namespace Radegast.Plugin.Alice
                     Instance.NetCom.SendIMStopTyping(e.IM.FromAgentID, e.IM.IMSessionID);
                     if (Instance.MainForm.InvokeRequired)
                     {
-                        Instance.MainForm.BeginInvoke(new MethodInvoker(() => Instance.NetCom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID)));
+                        ThreadingHelper.SafeInvoke(Instance.MainForm, new Action(() => Instance.NetCom.SendInstantMessage(msg, e.IM.FromAgentID, e.IM.IMSessionID)), Instance.MonoRuntime);
                     }
                     else
                     {

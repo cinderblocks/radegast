@@ -92,7 +92,7 @@ namespace Radegast
             if (e.Names.Keys.Contains(msg.FromAgentID))
             {
                 instance.Names.NameUpdated -= Avatars_UUIDNameReply;
-                BeginInvoke(new MethodInvoker(() => txtInfo.Text = objectOfferText()));
+                ThreadingHelper.SafeInvoke(this, new Action(() => txtInfo.Text = objectOfferText()), instance.MonoRuntime);
             }
         }
 

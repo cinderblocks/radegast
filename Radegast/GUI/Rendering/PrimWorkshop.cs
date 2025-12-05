@@ -699,16 +699,22 @@ namespace Radegast.Rendering
 
                 if (LoadTexture(item.TeFace.TextureID, ref item.Data.TextureInfo.Texture, false))
                 {
-                    Bitmap bitmap = null;
                     try
                     {
-                        bitmap = item.Data.TextureInfo.Texture.ToBitmap();
-
-                        bool hasAlpha = bitmap.PixelFormat == System.Drawing.Imaging.PixelFormat.Format32bppArgb;
+                        var skBitmap = item.Data.TextureInfo.Texture;
+                        
+                        // Determine if texture has alpha based on color type
+                        bool hasAlpha = skBitmap.AlphaType != SKAlphaType.Opaque;
                         
                         item.Data.TextureInfo.HasAlpha = hasAlpha;
 
-                        bitmap.RotateFlip(RotateFlipType.RotateNoneFlipY);
+                        // Flip the texture vertically for OpenGL
+                        var flipped = new SKBitmap(skBitmap.Width, skBitmap.Height, skBitmap.ColorType, skBitmap.AlphaType);
+                        using (var canvas = new SKCanvas(flipped))
+                        {
+                            canvas.Scale(1, -1, 0, skBitmap.Height / 2f);
+                            canvas.DrawBitmap(skBitmap, 0, 0);
+                        }
 
                         var loadOnMainThread = new MethodInvoker(() =>
                         {
@@ -716,7 +722,7 @@ namespace Radegast.Rendering
                             {
                                 if (!disposed && !Disposing && !IsDisposed)
                                 {
-                                    item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(bitmap, hasAlpha, RenderSettings.HasMipmap);
+                                    item.Data.TextureInfo.TexturePointer = RHelp.GLLoadImage(flipped, hasAlpha, RenderSettings.HasMipmap);
                                     TexturesPtrMap[item.TeFace.TextureID] = item.Data.TextureInfo;
                                     item.Data.TextureInfo.Texture = null;
                                     SafeInvalidate();
@@ -724,35 +730,27 @@ namespace Radegast.Rendering
                             }
                             finally
                             {
-                                bitmap?.Dispose();
+                                flipped?.Dispose();
                             }
                         });
 
                         if (disposed || Disposing || IsDisposed)
                         {
-                            bitmap?.Dispose();
+                            flipped?.Dispose();
                             break;
                         }
 
-                        if (!instance.MonoRuntime || IsHandleCreated)
-                        {
-                            BeginInvoke(loadOnMainThread);
-                        }
-                        else
-                        {
-                            bitmap?.Dispose();
-                        }
+                        ThreadingHelper.SafeInvoke(this, new Action(loadOnMainThread), instance.MonoRuntime);
                     }
                     catch (Exception ex)
                     {
                         Logger.Debug($"Error processing texture: {ex.Message}", Client);
-                        bitmap?.Dispose();
                     }
                 }
             }
             Logger.DebugLog("Texture thread exited");
-        }
-        #endregion Texture thread
+         }
+         #endregion Texture thread
 
         private void FrmPrimWorkshop_Shown(object sender, EventArgs e)
         {
@@ -831,12 +829,12 @@ namespace Radegast.Rendering
                     // Shadow
                     if (color != Color.Black)
                     {
-                        textRendering.Print(text, f, Color.Black, 
+                        textRendering.Print(text, f, new SKColor(0, 0, 0, 255), 
                             new Rectangle((int)screenPos.X + TEXT_SHADOW_OFFSET, 
                                           (int)screenPos.Y + TEXT_SHADOW_OFFSET, 
                                           size.Width, size.Height), flags);
                     }
-                    textRendering.Print(text, f, color, new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
+                    textRendering.Print(text, f, new SKColor(color.R, color.G, color.B, color.A), new Rectangle((int)screenPos.X, (int)screenPos.Y, size.Width, size.Height), flags);
                 }
                 textRendering.End();
             }
@@ -1231,34 +1229,17 @@ namespace Radegast.Rendering
         {
             if (disposed || glControl == null || !RenderingEnabled) return;
 
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
+                try
                 {
-                    try
-                    {
-                        BeginInvoke(new MethodInvoker(SafeInvalidate));
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Control already disposed
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        // Handle already destroyed
-                    }
+                    glControl?.Invalidate();
                 }
-                return;
-            }
-
-            try
-            {
-                glControl?.Invalidate();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Control already disposed
-            }
+                catch (ObjectDisposedException)
+                {
+                    // Control already disposed
+                }
+            }, instance.MonoRuntime);
         }
 
         /// <summary>

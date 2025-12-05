@@ -143,10 +143,9 @@ namespace Radegast.Media
                 {
                     action();
                 }
-                catch (Exception e)
+                catch (Exception ex)
                 {
-                    Logger.Log("Error in sound action:\n    " + e.Message + "\n" + e.StackTrace,
-                        Helpers.LogLevel.Error);
+                    Logger.Error($"Error in sound action: {ex.Message}", ex);
                 }
             }
         }
@@ -258,11 +257,11 @@ namespace Radegast.Media
                 );
 
                 SoundSystemAvailable = true;
-                Logger.Log("Initialized FMOD interface: " + outputType, Helpers.LogLevel.Info);
+                Logger.Info($"Initialized FMOD interface: {outputType}");
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed to initialize the sound system: " + ex, Helpers.LogLevel.Warning);
+                Logger.Warn("Failed to initialize the sound system", ex);
             }
         }
 
@@ -285,7 +284,7 @@ namespace Radegast.Media
 
             if (system.hasHandle())
             {
-                Logger.Log("FMOD interface stopping", Helpers.LogLevel.Info);
+                Logger.Info("FMOD interface stopping");
                 system.release();
                 system.clearHandle();
             }
@@ -396,8 +395,7 @@ namespace Radegast.Media
         {
             if (e.SoundID == UUID.Zero) return;
 
-            Logger.Log("Trigger sound " + e.SoundID +" in object " + e.ObjectID,
-                Helpers.LogLevel.Debug);
+            Logger.Debug($"Trigger sound {e.SoundID} in object {e.ObjectID}");
 
             new BufferSound(
                 e.ObjectID,
@@ -580,7 +578,7 @@ namespace Radegast.Media
                 {
                     // Subscribe to events about inworld sounds
                     RegisterClientEvents(Instance.Client);
-                    Logger.Log("Inworld sound enabled", Helpers.LogLevel.Info);
+                    Logger.Info("Inworld sound enabled");
                 }
                 else
                 {
@@ -588,7 +586,7 @@ namespace Radegast.Media
                     UnregisterClientEvents(Instance.Client);
                     // Stop all running sounds
                     BufferSound.KillAll();
-                    Logger.Log("Inworld sound disabled", Helpers.LogLevel.Info);
+                    Logger.Info("Inworld sound disabled");
                 }
 
                 m_objectEnabled = value;

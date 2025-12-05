@@ -26,6 +26,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Drawing.Text;
+using LibreMetaverse;
 using OpenMetaverse;
 
 namespace Radegast
@@ -55,10 +56,13 @@ namespace Radegast
         public readonly Dictionary<UUID, ulong> agentSimHandle = new Dictionary<UUID, ulong>();
         public ChatInputBox ChatInputText => cbxInput;
 
-        public ChatConsole(RadegastInstanceForms instance)
-        {
-            InitializeComponent();
-            Disposed += ChatConsole_Disposed;
+        // Cached bold font reused for marking self in the list to avoid creating many Font instances
+        private Font cachedBoldFont;
+ 
+         public ChatConsole(RadegastInstanceForms instance)
+         {
+             InitializeComponent();
+             Disposed += ChatConsole_Disposed;
 
             ctxAnim.Visible = false;
             ctxTextures.Visible = false;
@@ -164,7 +168,14 @@ namespace Radegast
             UnregisterClientEvents(client);
             ChatManager.Dispose();
             ChatManager = null;
-        }
+
+            // Dispose cached font if we created one
+            try
+            {
+                cachedBoldFont?.Dispose();
+            }
+            catch { }
+         }
 
         public static Font ChangeFontSize(Font font, float fontSize)
         {
@@ -206,78 +217,72 @@ namespace Radegast
                 ResetAvatarList();
             }
         }
+        
         private void Network_SimDisconnected(object sender, SimDisconnectedEventArgs e)
         {
-            try
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (InvokeRequired)
+                try
                 {
-                    if (!instance.MonoRuntime || IsHandleCreated)
-                        BeginInvoke(new MethodInvoker(() => Network_SimDisconnected(sender, e)));
-                    return;
-                }
-                lock (agentSimHandle)
-                {
-                    var h = e.Simulator.Handle;
-                    List<UUID> remove = new List<UUID>();
-                    foreach (var uh in agentSimHandle)
+                    lock (agentSimHandle)
                     {
-                        if (uh.Value == h)
+                        var h = e.Simulator.Handle;
+                        List<UUID> remove = new List<UUID>();
+                        foreach (var uh in agentSimHandle)
                         {
-                            remove.Add(uh.Key);
+                            if (uh.Value == h)
+                            {
+                                remove.Add(uh.Key);
+                            }
+                        }
+                        if (remove.Count == 0) return;
+                        lvwObjects.BeginUpdate();
+                        try
+                        {
+                            foreach (UUID key in remove)
+                            {
+                                agentSimHandle.Remove(key);
+                                try
+                                {
+                                    lvwObjects.Items.RemoveByKey(key.ToString());
+                                }
+                                catch (Exception)
+                                {
+
+                                }
+                            }
+                        }
+                        finally
+                        {
+                            lvwObjects.EndUpdate();
                         }
                     }
-                    if (remove.Count == 0) return;
-                    lvwObjects.BeginUpdate();
+                }
+                catch (Exception ex)
+                {
+                    Logger.DebugLog("Failed to update radar: " + ex);
+                }
+            }, instance.MonoRuntime);
+        }
+
+        private void ResetAvatarList()
+        {
+            ThreadingHelper.SafeInvoke(this, () =>
+            {
+                lock (agentSimHandle)
+                {
                     try
                     {
-                        foreach (UUID key in remove)
-                        {
-                            agentSimHandle.Remove(key);
-                            try
-                            {
-                                lvwObjects.Items.RemoveByKey(key.ToString());
-                            }
-                            catch (Exception)
-                            {
-
-                            }
-                        }
+                        lvwObjects.BeginUpdate();
+                        agentSimHandle.Clear();
+                        lvwObjects.Clear();
                     }
                     finally
                     {
                         lvwObjects.EndUpdate();
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                Logger.DebugLog("Failed to update radar: " + ex);
-            }
-        }
-
-        private void ResetAvatarList()
-        {
-            if (InvokeRequired)
-            {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(ResetAvatarList));
-                return;
-            }
-            lock (agentSimHandle)
-            {
-                try
-                {
-
-                    lvwObjects.BeginUpdate();
-                    agentSimHandle.Clear();
-                    lvwObjects.Clear();
-                }
-                finally
-                {
-                    lvwObjects.EndUpdate();
-                }
-            }
+            }, instance.MonoRuntime);
         }
 
         private void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
@@ -291,148 +296,142 @@ namespace Radegast
 
         private void UpdateRadar(CoarseLocationUpdateEventArgs e)
         {
-            if (client.Network.CurrentSim == null /*|| client.Network.CurrentSim.Handle != sim.Handle*/)
+            if (client.Network.CurrentSim == null) return;
+
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                return;
-            }
-
-            if (InvokeRequired)
-            {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => UpdateRadar(e)));
-                return;
-            }
-
-            // *TODO: later on we can set this with something from the GUI
-            const double MAX_DISTANCE = 362.0; // one sim a corner to corner distance
-            lock (agentSimHandle)
-                try
-                {
-                    lvwObjects.BeginUpdate();
-                    var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
-                        ? StateManager.ToVector3D(e.Simulator.Handle, position) 
-                        : client.Self.GlobalPosition;
-
-                    // CoarseLocationUpdate gives us height of 0 when actual height is
-                    // between 1024-4096m.
-                    if (agentPosition.Z < 0.1)
+                const double MAX_DISTANCE = 362.0; // one sim corner-to-corner
+                lock (agentSimHandle)
+                    try
                     {
-                        agentPosition.Z = client.Self.GlobalPosition.Z;
-                    }
+                        lvwObjects.BeginUpdate();
 
-                    var existing = new List<UUID>();
-                    var removed = new List<UUID>(e.RemovedEntries);
+                        var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
+                            ? PositionHelper.ToGlobalPosition(e.Simulator.Handle, position)
+                            : client.Self.GlobalPosition;
 
-                    foreach (var avatarPos in e.Simulator.AvatarPositions)
-                    {
-                        existing.Add(avatarPos.Key);
-                        if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString()))
+                        if (agentPosition.Z < 0.1)
                         {
-                            continue;
-                        }
-                        var name = instance.Names.Get(avatarPos.Key);
-                        var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
-                        if (avatarPos.Key == client.Self.AgentID)
-                        {
-                            // Stops our name saying "Loading..."
-                            item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
-                            item.Font = new Font(item.Font, FontStyle.Bold);
-                        }
-                        item.Tag = avatarPos.Key;
-                        agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
-                    }
-
-                    foreach (ListViewItem item in lvwObjects.Items)
-                    {
-                        if (item == null) continue;
-                        var key = (UUID)item.Tag;
-
-                        if (agentSimHandle[key] != e.Simulator.Handle)
-                        {
-                            // not for this sim
-                            continue;
+                            agentPosition.Z = client.Self.GlobalPosition.Z;
                         }
 
-                        if (key == client.Self.AgentID)
+                        var existing = new HashSet<UUID>();
+                        var removed = new List<UUID>(e.RemovedEntries);
+
+                        var globalPositions = new Dictionary<UUID, Vector3d>(e.Simulator.AvatarPositions.Count);
+                        foreach (var kv in e.Simulator.AvatarPositions)
                         {
-                            if (instance.Names.Mode != NameMode.Standard)
-                                item.Text = instance.Names.Get(key);
-                            continue;
+                            globalPositions[kv.Key] = PositionHelper.ToGlobalPosition(e.Simulator.Handle, kv.Value);
                         }
 
-                        //the AvatarPositions is checked once more because it changes wildly on its own
-                        //even though the !existing should have been adequate
-                        if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
+                        var avatarsById = new Dictionary<UUID, Avatar>(e.Simulator.ObjectsAvatars.Count);
+                        foreach (var kv in e.Simulator.ObjectsAvatars)
                         {
-                            // not here anymore
-                            removed.Add(key);
-                            continue;
-                        }
-
-                        var kvp = e.Simulator.ObjectsAvatars.FirstOrDefault(
-                            av => av.Value.ID == key);
-                        var foundAvi = kvp.Value;
-
-                        // CoarseLocationUpdate gives us height of 0 when actual height is
-                        // between 1024-4096m on OpenSim grids. 1020 on SL
-                        var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
-                        if (unknownAltitude) 
-                        {
-                            if (foundAvi != null)
+                            if (kv.Value != null && kv.Value.ID != UUID.Zero)
                             {
-                                if (foundAvi.ParentID == 0)
-                                {
-                                    pos.Z = foundAvi.Position.Z;
-                                }
-                                else
-                                {
-                                    if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
-                                    {
-                                        pos.Z = primitive.Position.Z;
-                                    }
-                                }
+                                avatarsById[kv.Value.ID] = kv.Value;
                             }
                         }
 
-                        var d = (int)Vector3d.Distance(StateManager.ToVector3D(e.Simulator.Handle, pos), agentPosition);
+                        // Add any new avatars
+                        foreach (var avatarPos in e.Simulator.AvatarPositions)
+                        {
+                            existing.Add(avatarPos.Key);
+                            if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString())) continue;
 
-                        if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
-                        {
-                            removed.Add(key);
-                            continue;
+                            var name = instance.Names.Get(avatarPos.Key);
+                            var item = lvwObjects.Items.Add(avatarPos.Key.ToString(), name, string.Empty);
+                            if (avatarPos.Key == client.Self.AgentID)
+                            {
+                                if (cachedBoldFont == null)
+                                {
+                                    try { cachedBoldFont = new Font(item.Font, FontStyle.Bold); } catch { cachedBoldFont = item.Font; }
+                                }
+                                item.Text = instance.Names.Get(avatarPos.Key, client.Self.Name);
+                                item.Font = cachedBoldFont;
+                            }
+                            item.Tag = avatarPos.Key;
+                            agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
                         }
 
-                        if (unknownAltitude)
+                        foreach (ListViewItem item in lvwObjects.Items)
                         {
-                            item.Text = instance.Names.Get(key) + " (?m)";
-                        }
-                        else
-                        {
-                            item.Text = instance.Names.Get(key) + $" ({d}m)";
+                            if (item == null) continue;
+                            if (!(item.Tag is UUID key)) continue;
+
+                            if (agentSimHandle.TryGetValue(key, out var handle) && handle != e.Simulator.Handle) continue;
+
+                            if (key == client.Self.AgentID)
+                            {
+                                if (instance.Names.Mode != NameMode.Standard)
+                                {
+                                    var newName = instance.Names.Get(key);
+                                    if (item.Text != newName) item.Text = newName;
+                                }
+                                continue;
+                            }
+
+                            if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
+                            {
+                                removed.Add(key);
+                                continue;
+                            }
+
+                            avatarsById.TryGetValue(key, out var foundAvi);
+
+                            var unknownAltitude = instance.NetCom.LoginOptions.Grid.Platform == "SecondLife" ? pos.Z == 1020f : pos.Z == 0f;
+
+                            Vector3d globalPos = globalPositions.TryGetValue(key, out var gp) ? gp : PositionHelper.ToGlobalPosition(e.Simulator.Handle, pos);
+
+                            if (unknownAltitude)
+                            {
+                                if (foundAvi != null)
+                                {
+                                    if (foundAvi.ParentID == 0)
+                                    {
+                                        globalPos.Z = foundAvi.Position.Z;
+                                    }
+                                    else if (e.Simulator.ObjectsPrimitives.TryGetValue(foundAvi.ParentID, out var primitive))
+                                    {
+                                        globalPos.Z = primitive.Position.Z;
+                                    }
+                                }
+                            }
+
+                            var d = (int)Vector3d.Distance(globalPos, agentPosition);
+
+                            if (e.Simulator != client.Network.CurrentSim && d > MAX_DISTANCE)
+                            {
+                                removed.Add(key);
+                                continue;
+                            }
+
+                            string newText = unknownAltitude ? instance.Names.Get(key) + " (?m)" : instance.Names.Get(key) + $" ({d}m)";
+                            if (foundAvi != null) newText += "*";
+
+                            if (item.Text != newText)
+                            {
+                                item.Text = newText;
+                            }
                         }
 
-                        if (foundAvi != null)
+                        foreach (var key in removed)
                         {
-                            item.Text += "*";
+                            lvwObjects.Items.RemoveByKey(key.ToString());
+                            agentSimHandle.Remove(key);
                         }
+
+                        lvwObjects.Sort();
                     }
-
-                    foreach (var key in removed)
+                    catch (Exception ex)
                     {
-                        lvwObjects.Items.RemoveByKey(key.ToString());
-                        agentSimHandle.Remove(key);
+                        Logger.Error("Location update exception in ChatConsole", ex, client);
                     }
-
-                    lvwObjects.Sort();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error("Location update exception in ChatConsole", ex, client);
-                }
-                finally
-                {
-                    lvwObjects.EndUpdate();
-                }
+                    finally
+                    {
+                        lvwObjects.EndUpdate();
+                    }
+            }, instance.MonoRuntime);
         }
 
 
@@ -573,7 +572,9 @@ namespace Radegast
                 }
                 #endregion
 
-                var processedMessage = instance.GestureManager.PreProcessChatMessage(msg).Trim();
+                // Use the new TryPreProcessChatMessage API (works with legacy PreProcessChatMessage too)
+                instance.GestureManager.TryPreProcessChatMessage(msg, out var processedMessage, out var _);
+                processedMessage = processedMessage?.Trim();
                 if (!string.IsNullOrEmpty(processedMessage))
                 {
                     NetCom.ChatOut(processedMessage, type, ch);

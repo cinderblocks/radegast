@@ -105,7 +105,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(UpdateResident));
+                ThreadingHelper.SafeInvoke(this, new Action(UpdateResident), Instance.MonoRuntime);
                 return;
             }
 
@@ -137,7 +137,7 @@ namespace Radegast
 
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Objects_PayPriceReply(sender, e)));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Objects_PayPriceReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
 

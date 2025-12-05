@@ -28,6 +28,7 @@ using System.Threading;
 using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using LibreMetaverse;
 using OpenMetaverse.StructuredData;
 
 namespace Radegast
@@ -101,8 +102,8 @@ namespace Radegast
                 {
                     if (!lease.IsAcquired)
                     {
-                        Logger.Log("Unable to require rate limit lease in name manager.", Helpers.LogLevel.Warning, Client);
-                        await Task.Delay(1000, cancellationToken);
+                        Logger.Warn("Unable to require rate limit lease in name manager.", Client);
+                        await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
                         continue;
                     }
 
@@ -186,7 +187,7 @@ namespace Radegast
                     }
                     else
                     {
-                        Logger.Log("Failed fetching display names", Helpers.LogLevel.Warning, Client);
+                        Logger.Warn("Failed fetching display names", Client);
                     }
                 }, cancellationToken);
             }
@@ -220,7 +221,7 @@ namespace Radegast
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log("Failed to load avatar name cache: " + ex.Message, Helpers.LogLevel.Warning, Client);
+                    Logger.Warn("Failed to load avatar name cache", ex, Client);
                 }
             });
         }
@@ -261,7 +262,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failed to save avatar name cache: ", Helpers.LogLevel.Error, Client, ex);
+                Logger.Error("Failed to save avatar name cache", ex, Client);
             }
             finally
             {
@@ -281,7 +282,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Error cleaning name cache.", Helpers.LogLevel.Error, ex);
+                Logger.Error("Error cleaning name cache.", ex);
             }
         }
 
@@ -374,42 +375,30 @@ namespace Radegast
                 return FormatName(displayName);
             }
 
-            TaskCompletionSource<string> tcs = new TaskCompletionSource<string>();
+            // Use EventSubscriptionHelper to wait for NameUpdated without manual TaskCompletionSource
+            await QueueNameRequestAsync(agentID, cancellationToken);
 
-            void NameReplyHandler(object sender, UUIDNameReplyEventArgs e)
+            var result = await EventSubscriptionHelper.WaitForEventAsync<UUIDNameReplyEventArgs, string>(
+                h => NameUpdated += h,
+                h => NameUpdated -= h,
+                e => e.Names != null && e.Names.ContainsKey(agentID),
+                e => e.Names[agentID],
+                5000,
+                cancellationToken,
+                RadegastInstance.INCOMPLETE_NAME).ConfigureAwait(false);
+
+            if (result != RadegastInstance.INCOMPLETE_NAME)
             {
-                if (e.Names.TryGetValue(agentID, out var found))
-                {
-                    tcs.SetResult(found);
-                }
+                return result;
             }
 
-            using (cancellationToken.Register(tcs.SetCanceled))
+            // Fallback: maybe the name was filled into the cache while we awaited
+            if (names.TryGetValue(agentID, out var avatarDisplayName))
             {
-                NameUpdated += NameReplyHandler;
-                await QueueNameRequestAsync(agentID, cancellationToken);
-
-                try
-                {
-                    Task completedTask = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(5), cancellationToken));
-                    if (completedTask == tcs.Task)
-                    {
-                        return await tcs.Task;
-                    }
-
-                    // Maybe the name was fetched, before registering to the NameUpdated event
-                    if (names.TryGetValue(agentID, out var avatarDisplayName))
-                    {
-                        tcs.SetResult(FormatName(avatarDisplayName));
-                    }
-
-                    return RadegastInstance.INCOMPLETE_NAME;
-                }
-                finally
-                {
-                    NameUpdated -= NameReplyHandler;
-                }
+                return FormatName(avatarDisplayName);
             }
+
+            return RadegastInstance.INCOMPLETE_NAME;
         }
 
         /// <summary>
@@ -533,7 +522,7 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Logger.Log("Failure in event handler: " + ex.Message, Helpers.LogLevel.Warning, Client, ex);
+                Logger.Warn("Failure in event handler", ex, Client);
             }
         }
 
@@ -546,7 +535,7 @@ namespace Radegast
 
             if (!backlog.Writer.TryWrite(agentID))
             {
-                Logger.Log("Failed to queue avatar name resolving.", Helpers.LogLevel.Warning);
+                Logger.Warn("Failed to queue avatar name resolving.");
             }
         }
 
@@ -619,7 +608,7 @@ namespace Radegast
                 Updated = DateTime.Now
             });
 
-            if (!TryParseTwoNames(name, out string first, out string last))
+            if (!Utilities.TryParseTwoNames(name, out string first, out string last))
             {
                 return null;
             }
@@ -637,57 +626,6 @@ namespace Radegast
 
             hasUpdates = true;
             return FormatName(agentDisplayName);
-        }
-
-        /// <summary>
-        /// Attempts to parse the input string into exactly two name parts: first and last.
-        /// </summary>
-        /// <remarks>This method avoids allocations from <see cref="string.Split"/> and temporary
-        /// character arrays. It ensures that the input string contains exactly two non-whitespace tokens, with no
-        /// additional content before, between, or after the tokens.</remarks>
-        /// <param name="input">The input string to parse. The string may contain leading or trailing whitespace.</param>
-        /// <param name="first">When this method returns, contains the first name part, if the parsing is successful; otherwise, <see
-        /// langword="null"/>.</param>
-        /// <param name="last">When this method returns, contains the last name part, if the parsing is successful; otherwise, <see
-        /// langword="null"/>.</param>
-        /// <returns><see langword="true"/> if the input string contains exactly two name tokens separated by whitespace;
-        /// otherwise, <see langword="false"/>.</returns>
-        private static bool TryParseTwoNames(string input, out string first, out string last)
-        {
-            first = null;
-            last = null;
-            if (string.IsNullOrEmpty(input)) return false;
-
-            int len = input.Length;
-            int i = 0;
-
-            // skip leading whitespace
-            while (i < len && char.IsWhiteSpace(input[i])) i++;
-            if (i >= len) return false;
-
-            int j = i;
-            // find end of first token
-            while (j < len && !char.IsWhiteSpace(input[j])) j++;
-            if (j == i) return false;
-
-            // skip spaces between first and second
-            int k = j;
-            while (k < len && char.IsWhiteSpace(input[k])) k++;
-            if (k >= len) return false;
-
-            int l = k;
-            // find end of second token
-            while (l < len && !char.IsWhiteSpace(input[l])) l++;
-            if (l == k) return false;
-
-            // ensure no non-space content after second token
-            int m = l;
-            while (m < len && char.IsWhiteSpace(input[m])) m++;
-            if (m != len) return false;
-
-            first = input.Substring(i, j - i);
-            last = input.Substring(k, l - k);
-            return true;
         }
     }
 

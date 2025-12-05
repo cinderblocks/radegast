@@ -31,7 +31,6 @@ using OpenMetaverse.Assets;
 
 namespace Radegast
 {
-
     public partial class ScriptEditor : UserControl
     {
         private readonly RadegastInstanceForms instance;
@@ -110,7 +109,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => OnScriptRunningReplyReceived(sender, e)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => OnScriptRunningReplyReceived(sender, e)), instance.MonoRuntime);
                 return;
             }
 
@@ -123,7 +122,7 @@ namespace Radegast
             if (InvokeRequired)
             {
                 if (!instance.MonoRuntime || IsHandleCreated)
-                    BeginInvoke(new MethodInvoker(() => Assets_OnAssetReceived(transfer, asset)));
+                    ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnAssetReceived(transfer, asset)), instance.MonoRuntime);
                 return;
             }
 
@@ -692,7 +691,7 @@ namespace Radegast
                     // Resume on UI thread to update controls
                     if (!IsHandleCreated && instance.MonoRuntime) return;
 
-                    BeginInvoke(new MethodInvoker(() =>
+                    ThreadingHelper.SafeInvoke(this, new Action(() =>
                     {
                         if (result.UploadSuccess && result.CompileSuccess)
                         {
@@ -740,7 +739,7 @@ namespace Radegast
                                 lblScripStatus.Text = rtb.Text = "Failed to download.";
                             }
                         }
-                    }));
+                    }), instance.MonoRuntime);
                 }
             }
             catch (OperationCanceledException)

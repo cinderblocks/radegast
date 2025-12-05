@@ -41,7 +41,7 @@ namespace Radegast
         CommandsManager CommandsManager { get; }
         RlvManager RLV { get; }
         GridManager GridManger { get; }
-        CurrentOutfitFolder COF { get; }
+        OutfitManager COF { get; }
         GestureManager GestureManager { get; }
         LslSyntax LslSyntax { get; }
         RadegastMovement Movement { get; }

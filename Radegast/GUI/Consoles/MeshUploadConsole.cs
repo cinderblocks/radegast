@@ -26,6 +26,7 @@ using System.IO;
 using System.Threading;
 using OpenMetaverse;
 using System.Threading.Tasks;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -58,106 +59,78 @@ namespace Radegast
 
         private void MeshUploadConsole_Disposed(object sender, EventArgs e)
         {
-            if (uploadCts != null)
-            {
-                uploadCts.Cancel();
-                uploadCts.Dispose();
-            }
+            DisposalHelper.SafeCancelAndDispose(uploadCts, (m, ex) => { });
 
             Running = false;
         }
 
         private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Netcom_ClientDisconnected(sender, e)));
-                }
-                return;
-            }
-            
-            uploadCts?.Cancel();
-            Running = false;
+                DisposalHelper.SafeCancelAndDispose(uploadCts, (m, ex) => { });
+                Running = false;
 
-            UpdateButtons();
+                UpdateButtons();
+            }, instance.MonoRuntime);
         }
 
         private void Netcom_ClientConnected(object sender, EventArgs e)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Netcom_ClientConnected(sender, e)));
-                }
-                return;
-            }
-
-            UpdateButtons();
+                UpdateButtons();
+            }, instance.MonoRuntime);
         }
 
         private void Msg(string msg)
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(() => Msg(msg)));
-                }
-                return;
-            }
-
-            txtUploadLog.AppendText(msg + "\n");
+                txtUploadLog.AppendText(msg + "\n");
+            }, instance.MonoRuntime);
         }
 
         private void UpdateButtons()
         {
-            if (InvokeRequired)
+            ThreadingHelper.SafeInvoke(this, () =>
             {
-                if (!instance.MonoRuntime || IsHandleCreated)
-                {
-                    BeginInvoke(new MethodInvoker(UpdateButtons));
-                }
-                return;
-            }
+                UploadImages = cbUploadImages.Checked;
 
-            UploadImages = cbUploadImages.Checked;
-
-            if (client.Network.Connected)
-            {
-                if (Running)
+                if (client.Network.Connected)
                 {
-                    btnBrowse.Enabled = false;
-                    btnStart.Enabled = false;
+                    if (Running)
+                    {
+                        btnBrowse.Enabled = false;
+                        btnStart.Enabled = false;
+                    }
+                    else
+                    {
+                        btnBrowse.Enabled = true;
+                        lock (FileNames)
+                        {
+                            btnStart.Enabled = FileNames.Count > 0;
+                        }
+                    }
                 }
                 else
                 {
                     btnBrowse.Enabled = true;
-                    lock (FileNames)
-                    {
-                        btnStart.Enabled = FileNames.Count > 0;
-                    }
+                    btnStart.Enabled = false;
                 }
-            }
-            else
-            {
-                btnBrowse.Enabled = true;
-                btnStart.Enabled = false;
-            }
 
-            lock (FileNames)
-            {
-                lblStatus.Text = $"{FileNames.Count} files remaining";
-            }
+                lock (FileNames)
+                {
+                    lblStatus.Text = $"{FileNames.Count} files remaining";
+                }
+            }, instance.MonoRuntime);
         }
 
         private void btnBrowse_Click(object sender, EventArgs e)
         {
             var o = new OpenFileDialog
             {
-                Filter = "Collada files (*.dae)|*.dae|All files (*.*)|*.*", 
+                Filter = "Collada files (*.dae)|*.dae|All files (*.*)|*.*",
                 Multiselect = true
             };
             var res = o.ShowDialog();
@@ -224,12 +197,12 @@ namespace Radegast
 
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims, 
+                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims,
                         Path.GetFileNameWithoutExtension(filename), "Radegast " + DateTime.Now.ToString(CultureInfo.InvariantCulture))
-                        {
-                            IncludePhysicsStub = true,
-                            UseModelAsPhysics = false
-                        };
+                    {
+                        IncludePhysicsStub = true,
+                        UseModelAsPhysics = false
+                    };
 
                     await uploader.Upload((res =>
                     {
@@ -237,7 +210,7 @@ namespace Radegast
 
                     }), cancellationToken);
                 }
-            } 
+            }
             catch (OperationCanceledException)
             {
                 Msg("Upload cancelled.");

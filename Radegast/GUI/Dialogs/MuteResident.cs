@@ -69,7 +69,12 @@ namespace Radegast
             ((NetCom)sender).ClientDisconnected -= NetComClientDisconnected;
 
             if (!instance.MonoRuntime || IsHandleCreated)
-                BeginInvoke(new MethodInvoker(Close));
+            {
+                ThreadingHelper.SafeInvoke(this, Close, instance.MonoRuntime);
+                return;
+            }
+
+            Close();
         }
 
 

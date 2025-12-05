@@ -19,7 +19,6 @@
  */
 
 using System;
-using System.Windows.Forms;
 using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
@@ -58,7 +57,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate() { Assets_OnAssetReceived(transfer, asset); }));
+                ThreadingHelper.SafeInvoke(this, new Action(() => Assets_OnAssetReceived(transfer, asset)), instance.MonoRuntime);
                 return;
             }
 
@@ -121,7 +120,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(delegate() { UpdateStatus(msg); }));
+                ThreadingHelper.SafeInvoke(this, new Action(() => UpdateStatus(msg)), instance.MonoRuntime);
                 return;
             }
 
