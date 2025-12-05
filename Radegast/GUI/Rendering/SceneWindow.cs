@@ -147,8 +147,8 @@ namespace Radegast.Rendering
 
         private readonly Dictionary<UUID, int> AssetFetchFailCount = new Dictionary<UUID, int>();
 
-        private readonly Font HoverTextFont = new Font(FontFamily.GenericSansSerif, 9f, FontStyle.Regular);
-        private readonly Font AvatarTagFont = new Font(FontFamily.GenericSansSerif, 10f, FontStyle.Bold);
+        private Font HoverTextFont = new Font(FontFamily.GenericSansSerif, 9f, FontStyle.Regular);
+        private Font AvatarTagFont = new Font(FontFamily.GenericSansSerif, 10f, FontStyle.Bold);
         private readonly Dictionary<UUID, SKBitmap> sculptCache = new Dictionary<UUID, SKBitmap>();
         private OpenTK.Matrix4 ModelMatrix;
         private OpenTK.Matrix4 ProjectionMatrix;
@@ -279,6 +279,10 @@ namespace Radegast.Rendering
             {
                 Instance.NetCom.ClientDisconnected -= Netcom_ClientDisconnected;
             }
+
+            // Dispose Font objects
+            SafeDispose(HoverTextFont, "HoverTextFont", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+            SafeDispose(AvatarTagFont, "AvatarTagFont", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
 
             // Dispose cached sculpt bitmaps
             lock (sculptCache)
@@ -1339,6 +1343,10 @@ namespace Radegast.Rendering
                 var us = prog.Uni("specularColor");
                 if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
 
+                // Set default material color (white, fully opaque)
+                var uMatColor = prog.Uni("materialColor");
+                if (uMatColor != -1) GL.Uniform4(uMatColor, 1.0f, 1.0f, 1.0f, 1.0f);
+
                 // Ensure colorMap sampler is bound to texture unit 0
                 var uColorMap = prog.Uni("colorMap");
                 if (uColorMap != -1)
@@ -1351,21 +1359,38 @@ namespace Radegast.Rendering
                 if (ug != -1) GL.Uniform1(ug, 0.0f);
 
                 // Set default emissive strength for avatar shader
-                var uesAv = prog.Uni("emissiveStrength");
-                if (uesAv != -1) GL.Uniform1(uesAv, 1.0f);
+                var ues = prog.Uni("emissiveStrength");
+                if (ues != -1) GL.Uniform1(ues, 1.0f);
+
                 // Ensure glowStrength multiplier for avatar shader
-                var uGlowStrAv = prog.Uni("glowStrength");
-                if (uGlowStrAv != -1) GL.Uniform1(uGlowStrAv, 1.0f);
+                var uGlowStr = prog.Uni("glowStrength");
+                if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
+
+                // Set default shininess exponent and specular strength
+                var ushexp = prog.Uni("shininessExp");
+                if (ushexp != -1) GL.Uniform1(ushexp, 24.0f);
+                var uspecstr = prog.Uni("specularStrength");
+                if (uspecstr != -1) GL.Uniform1(uspecstr, 1.0f);
+
+                // Set default gamma
+                var ugu = prog.Uni("gamma");
+                if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
+
+                // Set shadow uniforms
+                var uEnableShadows = prog.Uni("enableShadows");
+                if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
+                var uShadowIntensity = prog.Uni("shadowIntensity");
+                if (uShadowIntensity != -1) GL.Uniform1(uShadowIntensity, RenderSettings.ShadowIntensity);
 
                 // Default material layer uniforms for avatar shader
-                var uHasMatAv = prog.Uni("hasMaterial");
-                if (uHasMatAv != -1) GL.Uniform1(uHasMatAv, 0);
-                var uMatSpecAv = prog.Uni("materialSpecularColor");
-                if (uMatSpecAv != -1) GL.Uniform3(uMatSpecAv, specularColor.X, specularColor.Y, specularColor.Z);
-                var uMatShAv = prog.Uni("materialShininess");
-                if (uMatShAv != -1) GL.Uniform1(uMatShAv, 24.0f);
-                var uMatStrAv = prog.Uni("materialSpecularStrength");
-                if (uMatStrAv != -1) GL.Uniform1(uMatStrAv, 1.0f);
+                var uHasMat = prog.Uni("hasMaterial");
+                if (uHasMat != -1) GL.Uniform1(uHasMat, 0);
+                var uMatSpec = prog.Uni("materialSpecularColor");
+                if (uMatSpec != -1) GL.Uniform3(uMatSpec, specularColor.X, specularColor.Y, specularColor.Z);
+                var uMatSh = prog.Uni("materialShininess");
+                if (uMatSh != -1) GL.Uniform1(uMatSh, 24.0f);
+                var uMatStr = prog.Uni("materialSpecularStrength");
+                if (uMatStr != -1) GL.Uniform1(uMatStr, 1.0f);
 
                 // Update matrix uniforms for current modelview/projection
                 UpdateShaderMatrices();
