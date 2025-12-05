@@ -177,64 +177,29 @@ namespace Radegast.Rendering
             nudFallbackBaseAlpha.Value = (decimal)RenderSettings.FallbackWaterBaseAlpha;
             nudFallbackBaseAlpha.ValueChanged += nudFallbackBaseAlpha_ValueChanged;
 
-            // Initialize glow/materials toggles
-            if (!Instance.GlobalSettings.ContainsKey("scene_enable_glow"))
-            {
-                Instance.GlobalSettings["scene_enable_glow"] = RenderSettings.EnableGlow;
-            }
+            // Force glow and sky shader ON and remove UI controls
+            // Ensure materials stored setting exists and preserve it
             if (!Instance.GlobalSettings.ContainsKey("scene_enable_materials"))
             {
                 Instance.GlobalSettings["scene_enable_materials"] = RenderSettings.EnableMaterials;
             }
-            RenderSettings.EnableGlow = Instance.GlobalSettings["scene_enable_glow"];
+
+            // Enable glow unconditionally
+            Instance.GlobalSettings["scene_enable_glow"] = true;
+            RenderSettings.EnableGlow = true;
+
+            // Preserve materials setting
             RenderSettings.EnableMaterials = Instance.GlobalSettings["scene_enable_materials"];
 
-            // Hook designer checkboxes if present
-            var cbGlowCtrl = this.Controls.Find("cbGlow", true).FirstOrDefault() as CheckBox;
-            if (cbGlowCtrl != null)
-            {
-                cbGlowCtrl.Checked = RenderSettings.EnableGlow;
-                cbGlowCtrl.CheckedChanged += (s, e2) =>
-                {
-                    Instance.GlobalSettings["scene_enable_glow"] = cbGlowCtrl.Checked;
-                    RenderSettings.EnableGlow = cbGlowCtrl.Checked;
-                    if (Window != null)
-                    {
-                        Window.SetShaderGlow(cbGlowCtrl.Checked ? 0f : 0f); // Reset per-face; actual glow comes from faces
-                    }
-                };
-            }
+            // Enable sky shader unconditionally
+            Instance.GlobalSettings["scene_enable_sky_shader"] = true;
+            RenderSettings.EnableSkyShader = true;
 
-            // Materials checkbox removed from UI: keep stored setting but do not expose control
-
-            // Initialize sky shader toggle
-            if (!Instance.GlobalSettings.ContainsKey("scene_enable_sky_shader"))
-            {
-                Instance.GlobalSettings["scene_enable_sky_shader"] = RenderSettings.EnableSkyShader;
-            }
-
-            var cbSkyShaderCtrl = this.Controls.Find("cbSkyShader", true).FirstOrDefault() as CheckBox;
-            if (cbSkyShaderCtrl != null)
-            {
-                cbSkyShaderCtrl.Checked = (bool)Instance.GlobalSettings["scene_enable_sky_shader"];
-                cbSkyShaderCtrl.CheckedChanged += (s, e2) =>
-                {
-                    Instance.GlobalSettings["scene_enable_sky_shader"] = cbSkyShaderCtrl.Checked;
-                    RenderSettings.EnableSkyShader = cbSkyShaderCtrl.Checked;
-
-                    // Apply immediately: force a repaint so RenderSky will use/skip shader next frame
-                    try
-                    {
-                        var w = Window;
-                        if (w != null && w.glControl != null && !w.glControl.IsDisposed)
-                        {
-                            try { w.glControl.MakeCurrent(); } catch { }
-                            w.glControl.Invalidate();
-                        }
-                    }
-                    catch { }
-                };
-            }
+            // Remove any designer checkbox controls if present to avoid user confusion
+            var existingGlow = this.Controls.Find("cbGlow", true).FirstOrDefault() as Control;
+            existingGlow?.Dispose();
+            var existingSky = this.Controls.Find("cbSkyShader", true).FirstOrDefault() as Control;
+            existingSky?.Dispose();
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
             InitializeShadowControls();
@@ -528,10 +493,6 @@ namespace Radegast.Rendering
             nudFallbackSpeed.Value = (decimal)RenderSettings.FallbackWaterAnimationSpeed;
             nudFallbackAmp.Value = (decimal)RenderSettings.FallbackWaterAnimationAmplitude;
             nudFallbackBaseAlpha.Value = (decimal)RenderSettings.FallbackWaterBaseAlpha;
-
-            var cbGlowCtrl = this.Controls.Find("cbGlow", true);
-            if (cbGlowCtrl != null && cbGlowCtrl.Length > 0 && cbGlowCtrl[0] is System.Windows.Forms.CheckBox cbGlow)
-                cbGlow.Checked = RenderSettings.EnableGlow;
 
             // Apply to SceneWindow if available
             var window = Instance.TabConsole.TabExists("scene_window") ? (SceneWindow)Instance.TabConsole.Tabs["scene_window"].Control : null;

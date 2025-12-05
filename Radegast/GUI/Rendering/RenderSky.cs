@@ -361,61 +361,102 @@ namespace Radegast.Rendering
 
             for (int i = 0; i < cloudLayerCount; i++)
             {
-                // Different speeds and scales per layer for parallax
+                // Different speeds and scales per layer for parallax effect
                 cloudRotation[i] = (float)(cloudRand.NextDouble() * 360.0);
-                // small speeds, some clockwise, some counter
-                cloudSpeed[i] = (float)((cloudRand.NextDouble() * 10.0 + 2.0) * (cloudRand.Next(0,2) == 0 ? 1.0 : -1.0));
-                cloudScaleFactors[i] = 1.0f + (float)i * 0.8f; // higher layers larger
-                cloudHeights[i] = 60.0f + i * 30.0f; // offsets above camera
+                cloudSpeed[i] = (float)((cloudRand.NextDouble() * 2.0 + 0.5) * (cloudRand.Next(0, 2) == 0 ? 1.0 : -1.0));
+                cloudScaleFactors[i] = 1.0f + (float)i * 0.3f;
+                cloudHeights[i] = 100.0f + i * 40.0f;
 
-                // Generate bitmap
-                using (var bmp = new SkiaSharp.SKBitmap(cloudTextureSize, cloudTextureSize, SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul))
-                using (var canvas = new SkiaSharp.SKCanvas(bmp))
+                // Create cloud texture directly using GL calls for reliability
+                try
                 {
-                    canvas.Clear(SkiaSharp.SKColors.Transparent);
+                    cloudTextures[i] = CreateCloudTexture(i);
+                }
+                catch
+                {
+                    cloudTextures[i] = 0;
+                }
+            }
+        }
 
-                    // Paint many soft circles to approximate cloud shapes
-                    int circles = 120 + i * 40;
-                    for (int c = 0; c < circles; c++)
+        /// <summary>
+        /// Create a single cloud texture layer
+        /// </summary>
+        private int CreateCloudTexture(int layerIndex)
+        {
+            int size = cloudTextureSize;
+            byte[] pixels = new byte[size * size * 4]; // RGBA
+
+            // Initialize to fully transparent
+            for (int i = 0; i < pixels.Length; i += 4)
+            {
+                pixels[i] = 255;     // R - white
+                pixels[i + 1] = 255; // G - white
+                pixels[i + 2] = 255; // B - white
+                pixels[i + 3] = 0;   // A - transparent
+            }
+
+            // Draw cloud puffs - simple circles with soft edges
+            int numPuffs = 60 + layerIndex * 20;
+            for (int p = 0; p < numPuffs; p++)
+            {
+                int cx = cloudRand.Next(size);
+                int cy = cloudRand.Next(size);
+                int radius = cloudRand.Next(30, 80 + layerIndex * 20);
+                float maxAlpha = 0.3f + (float)cloudRand.NextDouble() * 0.5f; // 0.3 to 0.8
+
+                // Draw soft circle
+                for (int dy = -radius; dy <= radius; dy++)
+                {
+                    for (int dx = -radius; dx <= radius; dx++)
                     {
-                        float rx = (float)(cloudRand.NextDouble() * cloudTextureSize);
-                        float ry = (float)(cloudRand.NextDouble() * cloudTextureSize);
-                        float radius = (float)(cloudRand.NextDouble() * (cloudTextureSize * (0.05 + i * 0.05)) + cloudTextureSize * 0.02);
-                        float alpha = (float)(0.03 + cloudRand.NextDouble() * 0.07);
+                        int px = cx + dx;
+                        int py = cy + dy;
 
-                        using (var paint = new SkiaSharp.SKPaint())
+                        // Wrap coordinates for tiling
+                        px = ((px % size) + size) % size;
+                        py = ((py % size) + size) % size;
+
+                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
+                        if (dist < radius)
                         {
-                            paint.IsAntialias = true;
-                            paint.Color = new SkiaSharp.SKColor(255, 255, 255, (byte)(alpha * 255));
-                            // Use a radial gradient to make softer edges
-                            var shader = SkiaSharp.SKShader.CreateRadialGradient(new SkiaSharp.SKPoint(rx, ry), radius,
-                                new SkiaSharp.SKColor[] { new SkiaSharp.SKColor(255,255,255,(byte)(alpha*255)), SkiaSharp.SKColors.Transparent },
-                                new float[] { 0, 1 }, SkiaSharp.SKShaderTileMode.Clamp);
-                            paint.Shader = shader;
-                            canvas.DrawCircle(rx, ry, radius, paint);
-                            paint.Shader?.Dispose();
+                            // Soft falloff from center
+                            float falloff = 1.0f - (dist / radius);
+                            falloff = falloff * falloff; // Quadratic for softer edges
+                            float alpha = maxAlpha * falloff;
+
+                            int idx = (py * size + px) * 4;
+                            
+                            // Alpha blend with existing
+                            float existingAlpha = pixels[idx + 3] / 255.0f;
+                            float newAlpha = alpha + existingAlpha * (1.0f - alpha);
+                            
+                            // Clamp and store
+                            pixels[idx + 3] = (byte)Math.Min(255, (int)(newAlpha * 255));
                         }
-                    }
-
-                    // Slight global fade and variation
-                    using (var paint = new SkiaSharp.SKPaint())
-                    {
-                        paint.Color = new SkiaSharp.SKColor(255, 255, 255, 25);
-                        canvas.DrawRect(new SkiaSharp.SKRect(0, 0, cloudTextureSize, cloudTextureSize), paint);
-                    }
-
-                    // Upload to GL and store texture
-                    try
-                    {
-                        int tex = RHelp.GLLoadImage(bmp, true);
-                        cloudTextures[i] = tex;
-                    }
-                    catch
-                    {
-                        cloudTextures[i] = -1;
                     }
                 }
             }
+
+            // Upload to OpenGL
+            int texId;
+            GL.GenTextures(1, out texId);
+            GL.BindTexture(TextureTarget.Texture2D, texId);
+
+            // Set texture parameters for proper alpha blending
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+
+            // Upload pixel data
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba,
+                size, size, 0,
+                OpenTK.Graphics.OpenGL.PixelFormat.Rgba, PixelType.UnsignedByte, pixels);
+
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+
+            return texId;
         }
         #endregion
 
@@ -524,34 +565,54 @@ namespace Radegast.Rendering
                     RenderWithClientArrays();
                 }
 
-                // Render cloud layers as large textured quads centered on camera (fixed-function fallback)
-                GL.Enable(EnableCap.Texture2D);
-                for (int i = 0; i < cloudLayerCount; i++)
+                // Render cloud layers as large textured quads above the camera
+                if (cloudTextures != null && cloudHeights != null)
                 {
-                    int tex = cloudTextures[i];
-                    if (tex <= 0) continue;
+                    GL.Enable(EnableCap.Texture2D);
+                    GL.EnableClientState(ArrayCap.TextureCoordArray);
+                    
+                    for (int i = 0; i < cloudLayerCount; i++)
+                    {
+                        int tex = i < cloudTextures.Length ? cloudTextures[i] : 0;
+                        if (tex <= 0) continue;
 
-                    GL.PushMatrix();
-                    // place layer at camera altitude + layer height
-                    GL.Translate(cameraPosition.X, cameraPosition.Y, cameraPosition.Z + cloudHeights[i]);
-                    GL.Rotate(cloudRotation[i], 0f, 0f, 1f);
-                    float size = SKY_RADIUS * 2.5f * cloudScaleFactors[i];
+                        GL.PushMatrix();
+                        
+                        // Position cloud layer above camera
+                        GL.Translate(0f, 0f, cloudHeights[i]);
+                        GL.Rotate(cloudRotation[i], 0f, 0f, 1f);
+                        
+                        float size = SKY_RADIUS * 1.5f * cloudScaleFactors[i];
+                        float cloudAlpha = 0.8f - i * 0.15f;
+                        
+                        GL.BindTexture(TextureTarget.Texture2D, tex);
+                        GL.Color4(1f, 1f, 1f, cloudAlpha);
 
-                    GL.Color4(1f, 1f, 1f, 0.6f - i * 0.12f);
-                    GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, tex);
+                        // Draw textured quad
+                        GL.Begin(PrimitiveType.Quads);
+                        {
+                            GL.TexCoord2(0f, 0f);
+                            GL.Vertex3(-size, -size, 0f);
+                            
+                            GL.TexCoord2(2f, 0f);  // Tile texture 2x for more cloud detail
+                            GL.Vertex3(size, -size, 0f);
+                            
+                            GL.TexCoord2(2f, 2f);
+                            GL.Vertex3(size, size, 0f);
+                            
+                            GL.TexCoord2(0f, 2f);
+                            GL.Vertex3(-size, size, 0f);
+                        }
+                        GL.End();
 
-                    GL.Begin(PrimitiveType.Quads);
-                    GL.TexCoord2(0f, 0f); GL.Vertex3(-size, -size, 0f);
-                    GL.TexCoord2(1f, 0f); GL.Vertex3(size, -size, 0f);
-                    GL.TexCoord2(1f, 1f); GL.Vertex3(size, size, 0f);
-                    GL.TexCoord2(0f, 1f); GL.Vertex3(-size, size, 0f);
-                    GL.End();
-
-                    GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, 0);
-                    GL.PopMatrix();
+                        GL.BindTexture(TextureTarget.Texture2D, 0);
+                        GL.PopMatrix();
+                    }
+                    
+                    GL.DisableClientState(ArrayCap.TextureCoordArray);
+                    GL.Disable(EnableCap.Texture2D);
+                    GL.Color4(1f, 1f, 1f, 1f);
                 }
-                GL.Disable(EnableCap.Texture2D);
-                GL.Color4(1f, 1f, 1f, 1f);
             }
             else
             {
