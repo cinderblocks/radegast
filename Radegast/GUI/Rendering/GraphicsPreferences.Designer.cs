@@ -52,7 +52,6 @@
             this.lblGamma = new System.Windows.Forms.Label();
             this.tbEmissive = new System.Windows.Forms.TrackBar();
             this.lblEmissive = new System.Windows.Forms.Label();
-            this.cbMaterials = new System.Windows.Forms.CheckBox();
             this.cbGlow = new System.Windows.Forms.CheckBox();
             this.btnDefaults = new System.Windows.Forms.Button();
             this.cbSkyShader = new System.Windows.Forms.CheckBox();
@@ -349,20 +348,10 @@
             this.lblEmissive.Text = "Emissive: 1.00";
             this.lblEmissive.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             // 
-            // cbMaterials
-            // 
-            this.cbMaterials.AutoSize = true;
-            this.cbMaterials.Location = new System.Drawing.Point(150, 24);
-            this.cbMaterials.Name = "cbMaterials";
-            this.cbMaterials.Size = new System.Drawing.Size(68, 17);
-            this.cbMaterials.TabIndex = 39;
-            this.cbMaterials.Text = "Materials";
-            this.cbMaterials.UseVisualStyleBackColor = true;
-            // 
             // cbGlow
             // 
             this.cbGlow.AutoSize = true;
-            this.cbGlow.Location = new System.Drawing.Point(80, 24);
+            this.cbGlow.Location = new System.Drawing.Point(150, 24);
             this.cbGlow.Name = "cbGlow";
             this.cbGlow.Size = new System.Drawing.Size(50, 17);
             this.cbGlow.TabIndex = 40;
@@ -431,7 +420,6 @@
             this.Controls.Add(this.tbShadowIntensity);
             this.Controls.Add(this.lblShadowIntensity);
             this.Controls.Add(this.cbGlow);
-            this.Controls.Add(this.cbMaterials);
             this.Controls.Add(this.nudFallbackBaseAlpha);
             this.Controls.Add(this.lblFallbackBaseAlpha);
             this.Controls.Add(this.nudFallbackAmp);
@@ -501,7 +489,6 @@
         private System.Windows.Forms.Label lblFallbackBaseAlpha;
         private System.Windows.Forms.NumericUpDown nudFallbackBaseAlpha;
         private System.Windows.Forms.CheckBox cbGlow;
-        private System.Windows.Forms.CheckBox cbMaterials;
         private System.Windows.Forms.Button btnDefaults;
         private System.Windows.Forms.CheckBox cbSkyShader;
         private System.Windows.Forms.CheckBox cbShadows;

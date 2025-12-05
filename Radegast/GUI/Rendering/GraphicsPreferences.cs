@@ -191,7 +191,6 @@ namespace Radegast.Rendering
 
             // Hook designer checkboxes if present
             var cbGlowCtrl = this.Controls.Find("cbGlow", true).FirstOrDefault() as CheckBox;
-            var cbMaterialsCtrl = this.Controls.Find("cbMaterials", true).FirstOrDefault() as CheckBox;
             if (cbGlowCtrl != null)
             {
                 cbGlowCtrl.Checked = RenderSettings.EnableGlow;
@@ -205,15 +204,8 @@ namespace Radegast.Rendering
                     }
                 };
             }
-            if (cbMaterialsCtrl != null)
-            {
-                cbMaterialsCtrl.Checked = RenderSettings.EnableMaterials;
-                cbMaterialsCtrl.CheckedChanged += (s, e2) =>
-                {
-                    Instance.GlobalSettings["scene_enable_materials"] = cbMaterialsCtrl.Checked;
-                    RenderSettings.EnableMaterials = cbMaterialsCtrl.Checked;
-                };
-            }
+
+            // Materials checkbox removed from UI: keep stored setting but do not expose control
 
             // Initialize sky shader toggle
             if (!Instance.GlobalSettings.ContainsKey("scene_enable_sky_shader"))
@@ -540,9 +532,6 @@ namespace Radegast.Rendering
             var cbGlowCtrl = this.Controls.Find("cbGlow", true);
             if (cbGlowCtrl != null && cbGlowCtrl.Length > 0 && cbGlowCtrl[0] is System.Windows.Forms.CheckBox cbGlow)
                 cbGlow.Checked = RenderSettings.EnableGlow;
-            var cbMaterialsCtrl = this.Controls.Find("cbMaterials", true);
-            if (cbMaterialsCtrl != null && cbMaterialsCtrl.Length > 0 && cbMaterialsCtrl[0] is System.Windows.Forms.CheckBox cbMaterials)
-                cbMaterials.Checked = RenderSettings.EnableMaterials;
 
             // Apply to SceneWindow if available
             var window = Instance.TabConsole.TabExists("scene_window") ? (SceneWindow)Instance.TabConsole.Tabs["scene_window"].Control : null;

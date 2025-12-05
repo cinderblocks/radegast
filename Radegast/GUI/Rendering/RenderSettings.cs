@@ -27,7 +27,7 @@ namespace Radegast.Rendering
         /// <summary>
         /// Gamma correction value applied in shaders (1.0 = no correction)
         /// </summary>
-        public static float Gamma = 0.5f;
+        public static float Gamma = 1.0f;
 
         #region VBO support
         public static bool UseVBO = true; // VBOs are always used when supported

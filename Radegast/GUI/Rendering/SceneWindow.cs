@@ -969,7 +969,7 @@ namespace Radegast.Rendering
                 var prog = shaderManager?.GetProgram("shiny");
                 if (prog == null) return;
 
-                // Verify a shader program is actually active before setting uniforms
+                // Verify a shader program is actually active before setting uniform
                 GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
                 if (activeProgram == 0 || activeProgram != prog.ID) return;
 
@@ -1040,79 +1040,76 @@ namespace Radegast.Rendering
             catch { }
         }
 
-        // Set hasTexture uniform for shader
+        // Set hasTexture uniform for shader (works on currently active program)
         public void SetShaderHasTexture(bool hasTexture)
         {
-            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            if (!RenderSettings.HasShaders) return;
 
             try
             {
-                var prog = shaderManager?.GetProgram("shiny");
-                if (prog == null) return;
+                // Get the currently active shader program
+                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                if (activeProgram == 0) return;
 
-                var uHasTexture = prog.Uni("hasTexture");
-                if (uHasTexture != -1)
+                // Try shiny program first
+                var shinyProg = shaderManager?.GetProgram("shiny");
+                if (shinyProg != null && shinyProg.ID == activeProgram)
                 {
-                    GL.Uniform1(uHasTexture, hasTexture ? 1 : 0);
+                    var uHasTexture = shinyProg.Uni("hasTexture");
+                    if (uHasTexture != -1)
+                    {
+                        GL.Uniform1(uHasTexture, hasTexture ? 1 : 0);
+                    }
+                    return;
+                }
+
+                // Try avatar program
+                var avatarProg = shaderManager?.GetProgram("avatar");
+                if (avatarProg != null && avatarProg.ID == activeProgram)
+                {
+                    var uHasTexture = avatarProg.Uni("hasTexture");
+                    if (uHasTexture != -1)
+                    {
+                        GL.Uniform1(uHasTexture, hasTexture ? 1 : 0);
+                    }
                 }
             }
             catch { }
         }
 
-        // Set per-face glow uniform for shiny shader
+        // Set per-face glow uniform for currently active shader
         public void SetShaderGlow(float glow)
         {
-            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            if (!RenderSettings.HasShaders) return;
 
             try
             {
-                var prog = shaderManager?.GetProgram("shiny");
-                if (prog == null) return;
+                // Get the currently active shader program
+                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                if (activeProgram == 0) return;
 
-                var uGlow = prog.Uni("glow");
-                if (uGlow != -1)
+                // Try shiny program first
+                var shinyProg = shaderManager?.GetProgram("shiny");
+                if (shinyProg != null && shinyProg.ID == activeProgram)
                 {
-                    GL.Uniform1(uGlow, glow);
+                    var uGlow = shinyProg.Uni("glow");
+                    if (uGlow != -1)
+                    {
+                        GL.Uniform1(uGlow, glow);
+                    }
+                    return;
                 }
-            }
-            catch { }
-        }
 
-        public void SetShaderShininessExp(float exp)
-        {
-            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
-            try
-            {
-                var prog = shaderManager?.GetProgram("shiny");
-                if (prog == null) return;
-                var u = prog.Uni("shininessExp");
-                if (u != -1) GL.Uniform1(u, exp);
-            }
-            catch { }
-        }
-
-        public void SetShaderSpecularStrength(float s)
-        {
-            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
-            try
-            {
-                var prog = shaderManager?.GetProgram("shiny");
-                if (prog == null) return;
-                var u = prog.Uni("specularStrength");
-                if (u != -1) GL.Uniform1(u, s);
-            }
-            catch { }
-        }
-
-        public void SetShaderEmissiveStrength(float s)
-        {
-            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
-            try
-            {
-                var prog = shaderManager?.GetProgram("shiny");
-                if (prog == null) return;
-                var u = prog.Uni("emissiveStrength");
-                if (u != -1) GL.Uniform1(u, s);
+                // Try avatar program
+                var avatarProg = shaderManager?.GetProgram("avatar");
+                if (avatarProg != null && avatarProg.ID == activeProgram)
+                {
+                    var uGlow = avatarProg.Uni("glow");
+                    if (uGlow != -1)
+                    {
+                        GL.Uniform1(uGlow, glow);
+                    }
+                }
             }
             catch { }
         }
@@ -1246,12 +1243,20 @@ namespace Radegast.Rendering
                     var us = prog.Uni("specularColor");
                     if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
 
+                    // Set default material color (white, fully opaque) - CRITICAL for correct coloring
+                    var uMatColor = prog.Uni("materialColor");
+                    if (uMatColor != -1) GL.Uniform4(uMatColor, 1.0f, 1.0f, 1.0f, 1.0f);
+
                     // Ensure colorMap sampler is bound to texture unit 0
                     var uColorMap = prog.Uni("colorMap");
                     if (uColorMap != -1)
                     {
                         GL.Uniform1(uColorMap, 0);
                     }
+
+                    // Set default hasTexture to 0 (no texture)
+                    var uHasTexture = prog.Uni("hasTexture");
+                    if (uHasTexture != -1) GL.Uniform1(uHasTexture, 0);
 
                     // Set default glow to 0.0
                     var ug = prog.Uni("glow");
@@ -1265,27 +1270,17 @@ namespace Radegast.Rendering
                     var uGlowStr = prog.Uni("glowStrength");
                     if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
 
-                    // Default material layer uniforms
-                    var uHasMat = prog.Uni("hasMaterial");
-                    if (uHasMat != -1) GL.Uniform1(uHasMat, 0);
-                    var uMatSpec = prog.Uni("materialSpecularColor");
-                    if (uMatSpec != -1) GL.Uniform3(uMatSpec, specularColor.X, specularColor.Y, specularColor.Z);
-                    var uMatSh = prog.Uni("materialShininess");
-                    if (uMatSh != -1) GL.Uniform1(uMatSh, 24.0f);
-                    var uMatStr = prog.Uni("materialSpecularStrength");
-                    if (uMatStr != -1) GL.Uniform1(uMatStr, 1.0f);
-
-                    // Set default shininess exponent and specular strength
+                    // Set default shininess and specular strength
                     var ushexp = prog.Uni("shininessExp");
                     if (ushexp != -1) GL.Uniform1(ushexp, 24.0f);
                     var uspecstr = prog.Uni("specularStrength");
                     if (uspecstr != -1) GL.Uniform1(uspecstr, 1.0f);
 
-                    // Set default gamma (1.0 = no correction, typical sRGB gamma ~2.2)
+                    // Set default gamma (1.0 = no correction)
                     var ugu = prog.Uni("gamma");
                     if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
 
-                    // Set default shadow uniforms (optional)
+                    // Set shadow uniforms
                     var uEnableShadows = prog.Uni("enableShadows");
                     if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
                     var uShadowIntensity = prog.Uni("shadowIntensity");
@@ -1301,103 +1296,67 @@ namespace Radegast.Rendering
         }
 
         /// <summary>
-        /// Start the avatar shader for avatar rendering
+        /// Update shader matrix uniforms for the avatar shader
         /// </summary>
-        public void StartAvatarShader()
+        public void UpdateAvatarShaderMatrices()
         {
-            if (!RenderSettings.HasShaders || !RenderSettings.AvatarRenderingEnabled) return;
-            if (shaderManager == null) return;
-            if (!shaderManager.StartShader("avatar")) return;
+            if (!RenderSettings.HasShaders) return;
 
             try
             {
-                var prog = shaderManager.GetProgram("avatar");
+                var prog = shaderManager?.GetProgram("avatar");
                 if (prog == null) return;
 
-                // Set light direction uniform
-                var uLight = prog.Uni("lightDir");
-                if (uLight != -1)
+                // Verify avatar shader program is actually active before setting uniforms
+                GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                if (activeProgram == 0 || activeProgram != prog.ID) return;
+
+                var uMVP = prog.Uni("uMVP");
+                var uModelView = prog.Uni("uModelView");
+                var uNormal = prog.Uni("uNormalMatrix");
+
+                if (uMVP == -1 && uModelView == -1 && uNormal == -1) return;
+
+                GL.GetFloat(GetPName.ProjectionMatrix, out ProjectionMatrix);
+                GL.GetFloat(GetPName.ModelviewMatrix, out ModelMatrix);
+
+                if (uMVP != -1)
                 {
+                    var mvp = ModelMatrix * ProjectionMatrix;
+                    GL.UniformMatrix4(uMVP, false, ref mvp);
+                }
+
+                if (uModelView != -1)
+                {
+                    GL.UniformMatrix4(uModelView, false, ref ModelMatrix);
+                }
+
+                if (uNormal != -1)
+                {
+                    var normal = new OpenTK.Matrix3(
+                        ModelMatrix.M11, ModelMatrix.M12, ModelMatrix.M13,
+                        ModelMatrix.M21, ModelMatrix.M22, ModelMatrix.M23,
+                        ModelMatrix.M31, ModelMatrix.M32, ModelMatrix.M33);
+
+                    // Compute inverse transpose for correct normal transformation
                     try
                     {
-                        // Get current modelview matrix
-                        GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
-                        // Transform sun direction into eye space using w=0 to avoid translation
-                        var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
-                        var trans = OpenTK.Vector4.Transform(sunDir, mv);
-                        var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
-                        GL.Uniform3(uLight, ld);
+                        normal = normal.Inverted();
+                        normal = new OpenTK.Matrix3(
+                            normal.M11, normal.M21, normal.M31,
+                            normal.M12, normal.M22, normal.M32,
+                            normal.M13, normal.M23, normal.M33);
+                        GL.UniformMatrix3(uNormal, false, ref normal);
                     }
                     catch
                     {
-                        // fallback to sending raw sunPos if transform fails
-                        GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                        // If matrix is singular, use identity
+                        var identity = OpenTK.Matrix3.Identity;
+                        GL.UniformMatrix3(uNormal, false, ref identity);
                     }
                 }
-
-                // Set color uniforms
-                var ua = prog.Uni("ambientColor");
-                if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
-                var ud = prog.Uni("diffuseColor");
-                if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
-                var us = prog.Uni("specularColor");
-                if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
-
-                // Set default material color (white, fully opaque)
-                var uMatColor = prog.Uni("materialColor");
-                if (uMatColor != -1) GL.Uniform4(uMatColor, 1.0f, 1.0f, 1.0f, 1.0f);
-
-                // Ensure colorMap sampler is bound to texture unit 0
-                var uColorMap = prog.Uni("colorMap");
-                if (uColorMap != -1)
-                {
-                    GL.Uniform1(uColorMap, 0);
-                }
-
-                // Set default glow to 0.0
-                var ug = prog.Uni("glow");
-                if (ug != -1) GL.Uniform1(ug, 0.0f);
-
-                // Set default emissive strength for avatar shader
-                var ues = prog.Uni("emissiveStrength");
-                if (ues != -1) GL.Uniform1(ues, 1.0f);
-
-                // Ensure glowStrength multiplier for avatar shader
-                var uGlowStr = prog.Uni("glowStrength");
-                if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
-
-                // Set default shininess exponent and specular strength
-                var ushexp = prog.Uni("shininessExp");
-                if (ushexp != -1) GL.Uniform1(ushexp, 24.0f);
-                var uspecstr = prog.Uni("specularStrength");
-                if (uspecstr != -1) GL.Uniform1(uspecstr, 1.0f);
-
-                // Set default gamma
-                var ugu = prog.Uni("gamma");
-                if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
-
-                // Set shadow uniforms
-                var uEnableShadows = prog.Uni("enableShadows");
-                if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
-                var uShadowIntensity = prog.Uni("shadowIntensity");
-                if (uShadowIntensity != -1) GL.Uniform1(uShadowIntensity, RenderSettings.ShadowIntensity);
-
-                // Default material layer uniforms for avatar shader
-                var uHasMat = prog.Uni("hasMaterial");
-                if (uHasMat != -1) GL.Uniform1(uHasMat, 0);
-                var uMatSpec = prog.Uni("materialSpecularColor");
-                if (uMatSpec != -1) GL.Uniform3(uMatSpec, specularColor.X, specularColor.Y, specularColor.Z);
-                var uMatSh = prog.Uni("materialShininess");
-                if (uMatSh != -1) GL.Uniform1(uMatSh, 24.0f);
-                var uMatStr = prog.Uni("materialSpecularStrength");
-                if (uMatStr != -1) GL.Uniform1(uMatStr, 1.0f);
-
-                // Update matrix uniforms for current modelview/projection
-                UpdateShaderMatrices();
             }
-            catch
-            {
-            }
+            catch { }
         }
 
         /// <summary>
@@ -1429,6 +1388,133 @@ namespace Radegast.Rendering
                     shaderManager.StopShader();
                 }
                 catch { }
+            }
+        }
+
+        public void SetShaderShininessExp(float exp)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+                var u = prog.Uni("shininessExp");
+                if (u != -1) GL.Uniform1(u, exp);
+            }
+            catch { }
+        }
+
+        public void SetShaderSpecularStrength(float s)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+                var u = prog.Uni("specularStrength");
+                if (u != -1) GL.Uniform1(u, s);
+            }
+            catch { }
+        }
+
+        public void SetShaderEmissiveStrength(float s)
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
+            try
+            {
+                var prog = shaderManager?.GetProgram("shiny");
+                if (prog == null) return;
+                var u = prog.Uni("emissiveStrength");
+                if (u != -1) GL.Uniform1(u, s);
+            }
+            catch { }
+        }
+
+        /// <summary>
+        /// Start the avatar shader for avatar rendering
+        /// </summary>
+        public void StartAvatarShader()
+        {
+            if (!RenderSettings.HasShaders || !RenderSettings.AvatarRenderingEnabled) return;
+            if (shaderManager == null) return;
+            if (!shaderManager.StartShader("avatar")) return;
+
+            try
+            {
+                var prog = shaderManager.GetProgram("avatar");
+                if (prog == null) return;
+
+                // Set light direction uniform
+                var uLight = prog.Uni("lightDir");
+                if (uLight != -1)
+                {
+                    try
+                    {
+                        GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
+                        var sunDir = new OpenTK.Vector4(sunPos[0], sunPos[1], sunPos[2], 0f);
+                        var trans = OpenTK.Vector4.Transform(sunDir, mv);
+                        var ld = OpenTK.Vector3.Normalize(new OpenTK.Vector3(trans.X, trans.Y, trans.Z));
+                        GL.Uniform3(uLight, ld);
+                    }
+                    catch
+                    {
+                        GL.Uniform3(uLight, sunPos[0], sunPos[1], sunPos[2]);
+                    }
+                }
+
+                // Set color uniforms
+                var ua = prog.Uni("ambientColor");
+                if (ua != -1) GL.Uniform4(ua, ambientColor.X, ambientColor.Y, ambientColor.Z, ambientColor.W);
+                var ud = prog.Uni("diffuseColor");
+                if (ud != -1) GL.Uniform4(ud, diffuseColor.X, diffuseColor.Y, diffuseColor.Z, diffuseColor.W);
+                var us = prog.Uni("specularColor");
+                if (us != -1) GL.Uniform4(us, specularColor.X, specularColor.Y, specularColor.Z, specularColor.W);
+
+                // Set default material color (white, fully opaque)
+                var uMatColor = prog.Uni("materialColor");
+                if (uMatColor != -1) GL.Uniform4(uMatColor, 1.0f, 1.0f, 1.0f, 1.0f);
+
+                // Ensure colorMap sampler is bound to texture unit 0
+                var uColorMap = prog.Uni("colorMap");
+                if (uColorMap != -1) GL.Uniform1(uColorMap, 0);
+
+                // Set default hasTexture to 0
+                var uHasTexture = prog.Uni("hasTexture");
+                if (uHasTexture != -1) GL.Uniform1(uHasTexture, 0);
+
+                // Set default glow to 0.0
+                var ug = prog.Uni("glow");
+                if (ug != -1) GL.Uniform1(ug, 0.0f);
+
+                // Set default emissive strength
+                var ues = prog.Uni("emissiveStrength");
+                if (ues != -1) GL.Uniform1(ues, 1.0f);
+
+                // Ensure glowStrength multiplier is set so per-face glow contributes
+                var uGlowStr = prog.Uni("glowStrength");
+                if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
+
+                // Set default shininess and specular strength
+                var ushexp = prog.Uni("shininessExp");
+                if (ushexp != -1) GL.Uniform1(ushexp, 24.0f);
+                var uspecstr = prog.Uni("specularStrength");
+                if (uspecstr != -1) GL.Uniform1(uspecstr, 1.0f);
+
+                // Set default gamma (1.0 = no correction)
+                var ugu = prog.Uni("gamma");
+                if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
+
+                // Set shadow uniforms
+                var uEnableShadows = prog.Uni("enableShadows");
+                if (uEnableShadows != -1) GL.Uniform1(uEnableShadows, RenderSettings.EnableShadows ? 1 : 0);
+                var uShadowIntensity = prog.Uni("shadowIntensity");
+                if (uShadowIntensity != -1) GL.Uniform1(uShadowIntensity, RenderSettings.ShadowIntensity);
+
+                // Update matrix uniforms
+                UpdateAvatarShaderMatrices();
+            }
+            catch
+            {
             }
         }
 
@@ -1825,11 +1911,7 @@ namespace Radegast.Rendering
         {
             SortedObjects = new List<SceneObject>();
             VisibleAvatars = new List<RenderAvatar>();
-
-            if (RenderSettings.OcclusionCullingEnabled)
-            {
-                OccludedObjects = new List<SceneObject>();
-            }
+            OccludedObjects = new List<SceneObject>();
 
             lock (Prims)
             {

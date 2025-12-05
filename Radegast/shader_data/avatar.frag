@@ -18,12 +18,6 @@ uniform float emissiveStrength; // global emissive multiplier for glow
 uniform int enableShadows; // 0 = off, 1 = on
 uniform float shadowIntensity; // 0.0 = no shadowing, 1.0 = full shadowing
 
-// Material layer support
-uniform int hasMaterial; // 0 = no material, 1 = has material
-uniform vec3 materialSpecularColor;
-uniform float materialShininess;
-uniform float materialSpecularStrength;
-
 varying vec3 vNormal;
 varying vec2 vTexCoord;
 varying vec3 vPos;
@@ -69,26 +63,17 @@ void main()
         color.rgb *= shadowFactor;
     }
     
-    // Specular
+    // Specular - use base specular color and shininess
     vec3 viewDir = safeNormalize(-vPos, vec3(0.0, 0.0, 1.0));
     vec3 halfVec = safeNormalize(ld + viewDir, ld);
     
-    // Choose shininess and specular strength from material layer if present
     float shininess = max(1.0, shininessExp);
     float specStr = specularStrength;
-    vec3 specColor = vec3(specularColor.x, specularColor.y, specularColor.z);
-    if (hasMaterial != 0)
-    {
-        shininess = max(1.0, materialShininess);
-        specStr = materialSpecularStrength;
-        specColor = materialSpecularColor;
-    }
 
     float spec = pow(max(dot(n, halfVec), 0.0), shininess);
 
-    // Use luminance of the specular color to avoid strongly colored highlights
-    // Apply a 0.6 multiplier for more subtle specular on avatars
-    float specLum = dot(specColor, vec3(0.2126, 0.7152, 0.0722));
+    // Use luminance of the specular color - subtle for avatars
+    float specLum = dot(specularColor.rgb, vec3(0.2126, 0.7152, 0.0722));
     color.rgb += vec3(specLum) * spec * specStr * 0.6;
     
     // Guarantee minimum brightness (slightly higher for avatars)

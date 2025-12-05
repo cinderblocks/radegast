@@ -467,7 +467,7 @@ namespace Radegast.Rendering
                     // Update shader matrices after setting modelview for this avatar
                     if (useShader)
                     {
-                        UpdateShaderMatrices();
+                        UpdateAvatarShaderMatrices();
                     }
 
                     if (av.glavatar._meshes.Count > 0)
@@ -512,34 +512,32 @@ namespace Radegast.Rendering
                             }
                             else
                             {
+                                bool hasTexture = false;
                                 if (av.data[mesh.teFaceID] == null)
                                 {
                                     GL.Disable(EnableCap.Texture2D);
-                                    if (useShader)
-                                    {
-                                        SetShaderHasTexture(false);
-                                    }
+                                    hasTexture = false;
                                 }
                                 else
                                 {
-                                    if (mesh.teFaceID != 0)
+                                    if (mesh.teFaceID != 0 && av.data[mesh.teFaceID].TextureInfo.TexturePointer != 0)
                                     {
                                         GL.Enable(EnableCap.Texture2D);
                                         GL.ActiveTexture(TextureUnit.Texture0);
                                         GL.BindTexture(TextureTarget.Texture2D, av.data[mesh.teFaceID].TextureInfo.TexturePointer);
-                                        if (useShader)
-                                        {
-                                            SetShaderHasTexture(true);
-                                        }
+                                        hasTexture = true;
                                     }
                                     else
                                     {
                                         GL.Disable(EnableCap.Texture2D);
-                                        if (useShader)
-                                        {
-                                            SetShaderHasTexture(false);
-                                        }
+                                        hasTexture = false;
                                     }
+                                }
+                                
+                                // Set hasTexture uniform for shader
+                                if (useShader)
+                                {
+                                    SetShaderHasTexture(hasTexture);
                                 }
                             }
 
