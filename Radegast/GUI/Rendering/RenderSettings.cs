@@ -27,7 +27,7 @@ namespace Radegast.Rendering
         /// <summary>
         /// Gamma correction value applied in shaders (1.0 = no correction)
         /// </summary>
-        public static float Gamma = 1.0f;
+        public static float Gamma = 0.5f;
 
         #region VBO support
         public static bool UseVBO = true; // VBOs are always used when supported
@@ -101,18 +101,18 @@ namespace Radegast.Rendering
         /// <summary>
         /// Shadow intensity multiplier used by shaders (0.0 - 1.0)
         /// </summary>
-        public static float ShadowIntensity = 0.5f;
+        public static float ShadowIntensity = 1.0f;
 
         #region Lighting
         /// <summary>
         /// Ambient light level (0.0 to 1.0)
         /// </summary>
-        public static float AmbientLight = 0.70f;
+        public static float AmbientLight = 0.40f;
 
         /// <summary>
         /// Diffuse light level (0.0 to 1.0)
         /// </summary>
-        public static float DiffuseLight = 0.80f;
+        public static float DiffuseLight = 0.75f;
 
         /// <summary>
         /// Specular light level (0.0 to 1.0)
