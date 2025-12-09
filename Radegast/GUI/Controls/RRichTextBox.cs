@@ -645,7 +645,12 @@ namespace Radegast
             }
             else
             {
-                SelectedRtf = rtfHeader + RtfUnicode(text) + @"\v " + LinkSeparator + hyperlink + @"\v0}";
+                // Escape/encode both the visible text and the hidden hyperlink so the
+                // constructed RTF is always valid. RtfUnicode will encode unicode
+                // sequences; make sure to also escape braces/backslashes inside it.
+                string encodedText = RtfUnicode(text);
+                string encodedHyperlink = RtfUnicode(hyperlink);
+                SelectedRtf = rtfHeader + encodedText + @"\v " + LinkSeparator + encodedHyperlink + @"\v0}";
                 Select(position, text.Length + hyperlink.Length + 1);
                 SetSelectionLink(true);
                 Select(position + text.Length + hyperlink.Length + 1, 0);
