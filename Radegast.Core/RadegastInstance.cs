@@ -22,6 +22,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast.Commands;
@@ -107,6 +109,8 @@ namespace Radegast
 
         public IMSessionManager IMSessions { get; private set; }
         private InitialOutfitHandler _initialOutfitHandler;
+        // Cancellation token source for COF initialization retries
+        private CancellationTokenSource _cofInitCts;
 
         #region Events
 
@@ -181,28 +185,131 @@ namespace Radegast
 
             InitializeClient(Client);
 
-            // COF must be created before RLV
-            COF = new OutfitManager(this);
+            // Initialize COF and managers that depend on it asynchronously with retry logic.
+            // COF must be created before RLV, and some grids may not have the appearance
+            // capabilities available immediately after client construction. Try a few
+            // times with exponential backoff, then fall back to periodic retries.
+            EnsureCOFInitialized(client0);
+        }
 
-            RLV = new RlvManager(this);
+        private void EnsureCOFInitialized(GridClient client)
+        {
+            // Cancel any previous attempt
+            _cofInitCts?.Cancel();
+            _cofInitCts?.Dispose();
+            _cofInitCts = new CancellationTokenSource();
+            var token = _cofInitCts.Token;
 
-            GridManger = new GridManager();
-            GridManger.LoadGrids();
+            Task.Run(async () =>
+            {
+                int attempts = 0;
+                const int maxAttempts = 5;
+                int delayMs = 1000;
 
-            Names = new NameManager(this);
-            // Use the centralized LibreMetaverse gesture manager
-            GestureManager = new LibreMetaverse.GestureManager(Client);
-            LslSyntax = new LslSyntax(Client);
+                while (!token.IsCancellationRequested)
+                {
+                    attempts++;
+                    try
+                    {
+                        Logger.Info("COF initialization requested", Client);
 
-            // IMSession manager
-            IMSessions = new IMSessionManager(this);
-            IMSessions.SessionOpened += IMSessions_SessionOpened;
-            IMSessions.SessionClosed += IMSessions_SessionClosed;
-            IMSessions.TypingStarted += IMSessions_TypingStarted;
-            IMSessions.TypingStopped += IMSessions_TypingStopped;
+                        // Wait for simulator capabilities (necessary for Appearance/GetCurrentOutfitFolder)
+                        var capsReady = await WaitForSimulatorCapabilitiesAsync(client, TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
+                        if (!capsReady)
+                        {
+                            Logger.Warn("COF initialization: simulator capabilities not ready; will retry", Client);
+                            throw new InvalidOperationException("Simulator capabilities not ready");
+                        }
 
-            // Initialize core handlers that rely on client/login lifecycle
-            _initialOutfitHandler = new InitialOutfitHandler(client0, COF);
+                        COF = new OutfitManager(this);
+
+                        Logger.Info("COF initialization: COF constructed", Client);
+
+                        // Now it's safe to initialize RLV and the managers that depend on COF
+                        RLV = new RlvManager(this);
+
+                        GridManger = new GridManager();
+                        GridManger.LoadGrids();
+
+                        Names = new NameManager(this);
+                        // Use the centralized LibreMetaverse gesture manager
+                        GestureManager = new GestureManager(Client);
+                        LslSyntax = new LslSyntax(Client);
+
+                        // IMSession manager
+                        IMSessions = new IMSessionManager(this);
+                        IMSessions.SessionOpened += IMSessions_SessionOpened;
+                        IMSessions.SessionClosed += IMSessions_SessionClosed;
+                        IMSessions.TypingStarted += IMSessions_TypingStarted;
+                        IMSessions.TypingStopped += IMSessions_TypingStopped;
+
+                        // Initialize core handlers that rely on client/login lifecycle
+                        _initialOutfitHandler = new InitialOutfitHandler(client, COF);
+
+                        Logger.Info("COF initialization completed", Client);
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"COF initialization attempt {attempts} failed", ex, Client);
+
+                        if (attempts >= maxAttempts)
+                        {
+                            Logger.Warn("COF initialization: maximum attempts reached, switching to periodic retry", Client);
+
+                            // Periodic retry every 30 seconds until success or cancelled
+                            while (!token.IsCancellationRequested)
+                            {
+                                try
+                                {
+                                    await Task.Delay(TimeSpan.FromSeconds(30), token).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException) { break; }
+
+                                try
+                                {
+                                    COF = new OutfitManager(this);
+                                    Logger.Info("COF initialization: COF constructed on periodic retry", Client);
+
+                                    RLV = new RlvManager(this);
+
+                                    GridManger = new GridManager();
+                                    GridManger.LoadGrids();
+
+                                    Names = new NameManager(this);
+                                    GestureManager = new LibreMetaverse.GestureManager(Client);
+                                    LslSyntax = new LslSyntax(Client);
+
+                                    IMSessions = new IMSessionManager(this);
+                                    IMSessions.SessionOpened += IMSessions_SessionOpened;
+                                    IMSessions.SessionClosed += IMSessions_SessionClosed;
+                                    IMSessions.TypingStarted += IMSessions_TypingStarted;
+                                    IMSessions.TypingStopped += IMSessions_TypingStopped;
+
+                                    _initialOutfitHandler = new InitialOutfitHandler(client, COF);
+
+                                    Logger.Info("COF periodic retry succeeded", Client);
+                                    return;
+                                }
+                                catch (Exception exRetry)
+                                {
+                                    Logger.Warn("COF periodic retry failed", exRetry, Client);
+                                }
+                            }
+
+                            break;
+                        }
+
+                        try
+                        {
+                            await Task.Delay(delayMs, token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { break; }
+
+                        delayMs = Math.Min(delayMs * 2, 30_000);
+                    }
+                }
+            }, token);
         }
 
         private void IMSessions_SessionOpened(object sender, IMSessionEventArgs e)
@@ -298,6 +405,15 @@ namespace Radegast
         public virtual void CleanUp()
         {
             MarkEndExecution();
+
+            // cancel COF init task if running
+            try
+            {
+                _cofInitCts?.Cancel();
+                _cofInitCts?.Dispose();
+                _cofInitCts = null;
+            }
+            catch { }
 
             if (COF != null)
             {
@@ -603,6 +719,55 @@ namespace Radegast
         }
 
         #endregion Crash reporting
+
+        private async Task<bool> WaitForSimulatorCapabilitiesAsync(GridClient client, TimeSpan timeout, CancellationToken token)
+        {
+            if (client == null) return false;
+
+            // Ensure we have a current simulator
+            if (client.Network?.CurrentSim == null)
+            {
+                var tcsSim = new TaskCompletionSource<bool>();
+                EventHandler<SimChangedEventArgs> simHandler = null;
+                simHandler = (s, e) =>
+                {
+                    if (client.Network?.CurrentSim != null)
+                    {
+                        client.Network.SimChanged -= simHandler;
+                        tcsSim.TrySetResult(true);
+                    }
+                };
+
+                client.Network.SimChanged += simHandler;
+                var completedSim = await Task.WhenAny(tcsSim.Task, Task.Delay(timeout, token)).ConfigureAwait(false);
+                client.Network.SimChanged -= simHandler;
+                if (completedSim != tcsSim.Task) return false;
+            }
+
+            var sim = client.Network.CurrentSim;
+            if (sim == null) return false;
+
+            // If capabilities are already received, we assume readiness. Otherwise wait for the event.
+            var caps = sim.Caps;
+            if (caps == null) return false;
+
+            var tcs = new TaskCompletionSource<bool>();
+            EventHandler<CapabilitiesReceivedEventArgs> capsHandler = null;
+            capsHandler = (s, e) =>
+            {
+                if (e.Simulator == sim)
+                {
+                    caps.CapabilitiesReceived -= capsHandler;
+                    tcs.TrySetResult(true);
+                }
+            };
+
+            caps.CapabilitiesReceived += capsHandler;
+
+            var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout, token)).ConfigureAwait(false);
+            caps.CapabilitiesReceived -= capsHandler;
+            return completed == tcs.Task;
+        }
     }
 
     #region Event classes
