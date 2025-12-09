@@ -274,12 +274,18 @@ namespace Radegast.Core.RLV
                 currentOutfitMap[item.ActualUUID] = item;
             }
 
-            var sharedFolderConverted = new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "");
+            // If there is no shared #RLV folder in the user's inventory, create an empty representation
+            var sharedFolderConverted = sharedFolder != null
+                ? new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "")
+                : new RlvSharedFolder(Guid.Empty, "#RLV");
 
             var itemMap = new Dictionary<Guid, RlvInventoryItem>();
             var folderMap = new Dictionary<Guid, RlvSharedFolder>();
 
-            BuildSharedFolder(currentOutfitMap, attachmentIdToInventoryIdMap, sharedFolder, sharedFolderConverted, folderMap, itemMap);
+            if (sharedFolder != null)
+            {
+                BuildSharedFolder(currentOutfitMap, attachmentIdToInventoryIdMap, sharedFolder, sharedFolderConverted, folderMap, itemMap);
+            }
 
             // Gather external attached items
             var externalItems = new List<RlvInventoryItem>();
