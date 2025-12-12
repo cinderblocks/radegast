@@ -185,6 +185,19 @@ namespace Radegast
 
             InitializeClient(Client);
 
+            GridManger = new GridManager();
+            GridManger.LoadGrids();
+            Names = new NameManager(this);
+            GestureManager = new GestureManager(Client);
+            LslSyntax = new LslSyntax(Client);
+
+            // IMSession manager
+            IMSessions = new IMSessionManager(this);
+            IMSessions.SessionOpened += IMSessions_SessionOpened;
+            IMSessions.SessionClosed += IMSessions_SessionClosed;
+            IMSessions.TypingStarted += IMSessions_TypingStarted;
+            IMSessions.TypingStopped += IMSessions_TypingStopped;
+
             // Initialize COF and managers that depend on it asynchronously with retry logic.
             // COF must be created before RLV, and some grids may not have the appearance
             // capabilities available immediately after client construction. Try a few
@@ -227,21 +240,6 @@ namespace Radegast
 
                         // Now it's safe to initialize RLV and the managers that depend on COF
                         RLV = new RlvManager(this);
-
-                        GridManger = new GridManager();
-                        GridManger.LoadGrids();
-
-                        Names = new NameManager(this);
-                        // Use the centralized LibreMetaverse gesture manager
-                        GestureManager = new GestureManager(Client);
-                        LslSyntax = new LslSyntax(Client);
-
-                        // IMSession manager
-                        IMSessions = new IMSessionManager(this);
-                        IMSessions.SessionOpened += IMSessions_SessionOpened;
-                        IMSessions.SessionClosed += IMSessions_SessionClosed;
-                        IMSessions.TypingStarted += IMSessions_TypingStarted;
-                        IMSessions.TypingStopped += IMSessions_TypingStopped;
 
                         // Initialize core handlers that rely on client/login lifecycle
                         _initialOutfitHandler = new InitialOutfitHandler(client, COF);
