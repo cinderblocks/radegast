@@ -659,7 +659,7 @@ namespace Radegast
         {
             if (InvokeRequired)
             {
-                Invoke(new MethodInvoker(delegate () { UpdateStatus(text); }));
+                BeginInvoke(new MethodInvoker(delegate () { UpdateStatus(text); }));
                 return;
             }
 
