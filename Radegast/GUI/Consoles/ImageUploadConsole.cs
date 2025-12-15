@@ -33,6 +33,7 @@ using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
 using Targa = OpenMetaverse.Imaging.Targa;
 using System.Threading;
+using CoreJ2K.Configuration;
 using LibreMetaverse;
 
 namespace Radegast
@@ -214,16 +215,12 @@ namespace Radegast
 
                 txtStatus.AppendText("Encoding image..." + Environment.NewLine);
 
-                var plist = J2K.GetDefaultEncoderParameterList();
+                var encConfig = new CompleteEncoderConfigurationBuilder().ForStreaming().Build();
                 if (chkLossless.Checked)
                 {
-                    plist["lossless"] = "on";
+                    encConfig.Lossless = true;
                 }
-                else
-                {
-                    plist["Mct"] = "on";
-                }
-                UploadData = J2kImage.ToBytes(bitmap.ToSKBitmap(), plist);
+                UploadData = J2kImage.ToBytes(bitmap.ToSKBitmap(), encConfig);
 
                 txtStatus.AppendText("Finished encoding." + Environment.NewLine);
                 ImageLoaded = true;
