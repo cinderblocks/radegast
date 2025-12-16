@@ -31,6 +31,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using LibreMetaverse.Appearance;
 
 namespace Radegast
 {
@@ -916,7 +917,7 @@ namespace Radegast
                 }
                 else
                 {
-                    Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID, token);
+                    await Client.Inventory.RequestFetchInventoryAsync(attachment.UUID, Client.Self.AgentID, token);
                     return;
                 }
             }
@@ -2013,7 +2014,7 @@ namespace Radegast
                                     trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
                                     // give server a short moment to register the new folder
                                     await Task.Delay(200).ConfigureAwait(false);
-                                    Client.Inventory.MoveFolder(folder.UUID, trash);
+                                    await Client.Inventory.MoveFolderAsync(folder.UUID, trash);
                                 }
                                 catch (Exception ex)
                                 {
@@ -2068,9 +2069,9 @@ namespace Radegast
                     case "outfit_take_off":
                         var removeFromOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationtoken);
+                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationToken);
                         }, UpdateWornLabels);
                         break;
                 }
@@ -2120,7 +2121,7 @@ namespace Radegast
                                     trashCreated.Reset();
                                     trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
                                     await Task.Delay(200).ConfigureAwait(false);
-                                    Client.Inventory.MoveItem(item.UUID, trash, item.Name);
+                                    await Client.Inventory.MoveItemAsync(item.UUID, trash, item.Name);
                                 }
                                 catch (Exception ex)
                                 {
@@ -2130,7 +2131,7 @@ namespace Radegast
                             return;
                         }
 
-                        Client.Inventory.MoveItem(item.UUID, Client.Inventory.FindFolderForType(FolderType.Trash), item.Name);
+                        await Client.Inventory.MoveItemAsync(item.UUID, Client.Inventory.FindFolderForType(FolderType.Trash), item.Name);
                         break;
 
                     case "rename_item":
@@ -2140,7 +2141,7 @@ namespace Radegast
                     case "touch":
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID
-                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
+                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
@@ -2155,34 +2156,34 @@ namespace Radegast
                         break;
 
                     case "detach":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Detach(item, cancellationtoken);
+                            await instance.COF.Detach(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationtoken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationtoken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
 
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, pt, true, cancellationtoken);
+                            await instance.COF.Attach(item, pt, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2197,9 +2198,9 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(item, cancellationtoken);
+                            await instance.COF.RemoveFromOutfit(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
@@ -2207,17 +2208,17 @@ namespace Radegast
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationtoken);
+                            await instance.COF.AddToOutfit(item, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, false, cancellationtoken);
+                            await instance.COF.AddToOutfit(item, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2383,7 +2384,7 @@ namespace Radegast
 
                                     foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
                                     {
-                                        Client.Inventory.RequestCopyItem(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
+                                        await Client.Inventory.RequestCopyItemAsync(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
                                     }
                                 }
                                 catch (Exception ex)
@@ -2509,22 +2510,22 @@ namespace Radegast
              if (!(_EditNode?.Tag is InventoryBase))
                  return;
 
-            RunOnUi(() =>
-            {
-                _EditingNode = true;
-                var tv = _EditNode.TreeView;
-                if (tv == null || tv.IsDisposed || tv.Disposing)
-                {
-                    if (_EditNode.Tag is InventoryBase ib)
-                    {
-                        UUID2NodeCache.TryRemove(ib.UUID, out _);
-                    }
-                    return;
-                }
+             RunOnUi(() =>
+             {
+                 _EditingNode = true;
+                 var tv = _EditNode.TreeView;
+                 if (tv == null || tv.IsDisposed || tv.Disposing)
+                 {
+                     if (_EditNode.Tag is InventoryBase ib)
+                     {
+                         UUID2NodeCache.TryRemove(ib.UUID, out _);
+                     }
+                     return;
+                 }
 
-                _EditNode.Text = ItemLabel((InventoryBase)_EditNode.Tag, true);
-                _EditNode.BeginEdit();
-            });
+                 _EditNode.Text = ItemLabel((InventoryBase)_EditNode.Tag, true);
+                 _EditNode.BeginEdit();
+             });
          }
 
         private void invTree_BeforeLabelEdit(object sender, NodeLabelEditEventArgs e)
@@ -2612,10 +2613,10 @@ namespace Radegast
                         switch (invTree.SelectedNode.Tag)
                         {
                             case InventoryItem item:
-                                Client.Inventory.MoveItem(item.UUID, trash);
+                                await Client.Inventory.MoveItemAsync(item.UUID, trash);
                                 break;
                             case InventoryFolder folder:
-                                Client.Inventory.MoveFolder(folder.UUID, trash);
+                                await Client.Inventory.MoveFolderAsync(folder.UUID, trash);
                                 break;
                         }
 
@@ -2646,15 +2647,14 @@ namespace Radegast
                 highlightedNode = null;
             }
 
-            TreeNode sourceNode = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            if (sourceNode == null) return;
+            if (!(e.Data.GetData(typeof(TreeNode)) is TreeNode sourceNode)) { return; }
 
             Point pt = ((BufferedTreeView)sender).PointToClient(new Point(e.X, e.Y));
             TreeNode destinationNode = ((BufferedTreeView)sender).GetNodeAt(pt);
 
-            if (destinationNode == null) return;
+            if (destinationNode == null) { return; }
 
-            if (sourceNode == destinationNode) return;
+            if (sourceNode == destinationNode) { return; }
 
             // If dropping to item within folder drop to its folder
             if (destinationNode.Tag is InventoryItem)
@@ -2662,7 +2662,7 @@ namespace Radegast
                 destinationNode = destinationNode.Parent;
             }
 
-            if (!(destinationNode.Tag is InventoryFolder dest)) return;
+            if (!(destinationNode.Tag is InventoryFolder dest)) { return; }
 
             switch (sourceNode.Tag)
             {
@@ -2677,8 +2677,7 @@ namespace Radegast
 
         private void invTree_DragEnter(object sender, DragEventArgs e)
         {
-            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            e.Effect = node == null ? DragDropEffects.None : DragDropEffects.Move;
+            e.Effect = !(e.Data.GetData(typeof(TreeNode)) is TreeNode node) ? DragDropEffects.None : DragDropEffects.Move;
         }
 
         private TreeNode highlightedNode = null;
@@ -2805,23 +2804,15 @@ namespace Radegast
                 else
                 {
                     var it = item as InventoryItem;
-                    bool add = false;
-
-                    if (cbSrchName.Checked && !string.IsNullOrEmpty(searchString) &&
-                        it.Name.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        add = true;
-                    }
-                    else if (cbSrchDesc.Checked && !string.IsNullOrEmpty(searchString) &&
-                        it.Description.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        add = true;
-                    }
+                    bool add = ((cbSrchName.Checked && !string.IsNullOrEmpty(searchString) &&
+                                 it.Name.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0) 
+                                || (cbSrchDesc.Checked && !string.IsNullOrEmpty(searchString) &&
+                                    it.Description.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0));
 
                     if (cbSrchWorn.Checked && add &&
-                        !(it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID)
-                          || (it.InventoryType == InventoryType.Attachment
-                              || it.InventoryType == InventoryType.Object) && IsAttached(it)))
+                        !((it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID))
+                          || ((it.InventoryType == InventoryType.Attachment
+                               || it.InventoryType == InventoryType.Object) && IsAttached(it))))
                     {
                         add = false;
                     }
