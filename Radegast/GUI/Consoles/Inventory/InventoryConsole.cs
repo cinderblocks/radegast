@@ -555,11 +555,24 @@ namespace Radegast
                     // Did we move to a different folder
                     if (currentNode.Parent != parent)
                     {
-                        TreeNode movedNode = (TreeNode)currentNode.Clone();
-                        movedNode.Tag = newObject;
-                        parent.Nodes.Add(movedNode);
-                        RemoveNode(currentNode);
-                        CacheNode(movedNode);
+                        // Safely reparent the existing node instead of cloning to preserve references and selection
+                        try
+                        {
+                            invTree.BeginUpdate();
+                            var oldParent = currentNode.Parent;
+                            // Update tag and name first
+                            currentNode.Tag = newObject;
+                            currentNode.Name = newObject.Name;
+                            // Remove from old parent and add to new parent (this re-parents the node)
+                            try { currentNode.Remove(); } catch { }
+                            parent.Nodes.Add(currentNode);
+                            // Refresh cache entries for this node and its children
+                            CacheNode(currentNode);
+                        }
+                        finally
+                        {
+                            try { invTree.EndUpdate(); } catch { }
+                        }
                     }
                     else // Update
                     {
