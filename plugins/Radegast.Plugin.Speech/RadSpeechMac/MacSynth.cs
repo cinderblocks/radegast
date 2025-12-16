@@ -24,6 +24,7 @@
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using RadegastSpeech.Talk;
 using Monobjc.Cocoa;
 using OpenMetaverse.StructuredData;
@@ -40,7 +41,7 @@ namespace RadegastSpeech
         private readonly OSDMap voiceProperties;
         internal MacSynth(PluginControl pc, string[] beeps )
         {
-			BeepNames = beeps;
+            BeepNames = beeps;
             voiceProperties = pc.config["properties"] as OSDMap;
         }
 
@@ -96,6 +97,11 @@ namespace RadegastSpeech
             {
                 Thread.Sleep(200);  // Check 5x per second.
             }
+        }
+
+        internal Task SpeakAsync(QueuedSpeech utterance, string outputfile)
+        {
+            return Task.Run(() => Speak(utterance, outputfile));
         }
 
         internal void Stop()

@@ -202,7 +202,11 @@ namespace Radegast
             // COF must be created before RLV, and some grids may not have the appearance
             // capabilities available immediately after client construction. Try a few
             // times with exponential backoff, then fall back to periodic retries.
-            EnsureCOFInitialized(client0);
+            // EnsureCOFInitialized(client0);
+            // Defer COF initialization until after the client has connected to a simulator
+            // to avoid starting the capability wait prematurely and producing first-chance
+            // exceptions. COF initialization will be started from NetCom_ClientConnected.
+            // EnsureCOFInitialized(client0);
         }
 
         private void EnsureCOFInitialized(GridClient client)
@@ -478,6 +482,16 @@ namespace Radegast
         private void NetCom_ClientConnected(object sender, EventArgs e)
         {
             Client.Self.RequestMuteList();
+
+            try
+            {
+                // Start COF initialization now that we've connected to a simulator
+                EnsureCOFInitialized(Client);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to start COF initialization on client connected", ex, Client);
+            }
         }
 
         private void Network_LoginProgress(object sender, LoginProgressEventArgs e)

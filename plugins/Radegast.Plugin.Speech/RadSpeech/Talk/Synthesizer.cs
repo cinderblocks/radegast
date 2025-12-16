@@ -18,7 +18,9 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace RadegastSpeech.Talk
 {
@@ -61,9 +63,14 @@ namespace RadegastSpeech.Talk
             return control.osLayer?.GetVoices();
         }
 
-        internal void Speak(QueuedSpeech q, string outputfile)
+        /// <summary>
+        /// Asynchronous variant of Speak. Prefer calling the OS-layer async implementation
+        /// if present; otherwise attempt to call a legacy synchronous Speak via reflection.
+        /// </summary>
+        internal Task SpeakAsync(QueuedSpeech q, string outputfile)
         {
-            control.osLayer?.Speak(q, outputfile);
+            var t = control.osLayer?.Speak(q, outputfile);
+            return t ?? Task.CompletedTask;
         }
 
         internal void Shutdown()

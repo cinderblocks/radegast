@@ -31,6 +31,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using LibreMetaverse.Appearance;
 
 namespace Radegast
 {
@@ -52,6 +53,9 @@ namespace Radegast
         private BlockingCollection<InventoryBase> ItemsToUpdate;
         private Task queueProcessorTask;
         private CancellationTokenSource queueProcessorCts;
+        // Master lifetime token to link background workers so they can be cancelled together
+        private readonly CancellationTokenSource lifetimeCts = new CancellationTokenSource();
+        private CancellationTokenSource queueProcessorLinkedCts;
         private readonly ConcurrentDictionary<UUID, byte> ItemsToUpdateSet = new ConcurrentDictionary<UUID, byte>();
         // Queue bounds to prevent runaway memory growth
         private const int MAX_QUEUE_SIZE = 20000; // maximum items allowed in each queue
@@ -64,12 +68,20 @@ namespace Radegast
         private readonly AutoResetEvent trashCreated = new AutoResetEvent(false);
         private Task inventoryUpdateTask;
         private CancellationTokenSource inventoryUpdateCancelToken;
+        private readonly SynchronizationContext uiContext;
+        // Guard to suppress recursive Opening events when we programmatically show the context menu
+        private bool ctxInvBuilding = false;
 
         #region Construction and disposal
         public InventoryConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
+            // capture UI synchronization context for centralized marshaling
+            uiContext = SynchronizationContext.Current;
             Disposed += InventoryConsole_Disposed;
+            // Clear node cache when underlying tree is disposed to avoid stale references
+            try { invTree.Disposed += InvTree_Disposed; } 
+            catch (Exception ex) { Logger.Debug("Failed to subscribe to invTree.Disposed: " + ex.Message, Client); }
 
             TreeUpdateTimer = new System.Timers.Timer()
             {
@@ -83,7 +95,9 @@ namespace Radegast
             ItemsToAdd = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
             ItemsToUpdate = new BlockingCollection<InventoryBase>(MAX_QUEUE_SIZE);
             queueProcessorCts = new CancellationTokenSource();
-            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorCts.Token), queueProcessorCts.Token);
+            try { queueProcessorLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(queueProcessorCts.Token, lifetimeCts.Token); } 
+            catch { queueProcessorLinkedCts = queueProcessorCts; }
+            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorLinkedCts.Token), queueProcessorLinkedCts.Token);
 
             this.instance = instance;
             Inventory = Client.Inventory.Store;
@@ -91,14 +105,31 @@ namespace Radegast
             invTree.ImageList = frmMain.ResourceImages;
             invRootNode = AddDir(null, Inventory.RootFolder);
             UpdateStatus("Reading cache");
-            ThreadPool.QueueUserWorkItem(sync =>
+            // Restore cache on a background task without blocking thread-pool threads
+            Task.Run(() =>
             {
-                Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
-                Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
-                Init();
+                try
+                {
+                    Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
+                    Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
+                    Init();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error restoring inventory cache: " + ex.Message, ex);
+                }
             });
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private void InvTree_Disposed(object sender, EventArgs e)
+        {
+            try
+            {
+                UUID2NodeCache.Clear();
+            }
+            catch { }
         }
 
         public void Init()
@@ -163,10 +194,11 @@ namespace Radegast
                     // Marshal Expand to UI thread to avoid cross-thread control access
                     RunOnUi(() =>
                     {
-                        try { invRootNode.Expand(); } catch { }
+                        try { invRootNode.Expand(); } 
+                        catch (Exception ex) { Logger.Debug("invRootNode.Expand failed: " + ex.Message, Client); }
                     });
                 }
-                catch { }
+                catch (Exception ex) { Logger.Debug("RunOnUi expand failed: " + ex.Message, Client); }
             }
 
             invTree.AfterExpand += TreeView_AfterExpand;
@@ -175,13 +207,28 @@ namespace Radegast
 
             _EditTimer = new System.Threading.Timer(OnLabelEditTimer, null, Timeout.Infinite, Timeout.Infinite);
 
-            // Callbacks
-            Inventory.InventoryObjectAdded += Inventory_InventoryObjectAdded;
-            Inventory.InventoryObjectUpdated += Inventory_InventoryObjectUpdated;
-            Inventory.InventoryObjectRemoved += Inventory_InventoryObjectRemoved;
+            // Subscribe to non-UI events using centralized helper (easier to unsubscribe and avoid leaks)
+            SubscribeEvents();
+        }
 
-            Client.Appearance.AppearanceSet += Appearance_AppearanceSet;
-            Client.Objects.ObjectUpdate += Objects_AttachmentUpdate;
+        private void SubscribeEvents()
+        {
+            try { Inventory.InventoryObjectAdded += Inventory_InventoryObjectAdded; } catch (Exception ex) { Logger.Debug("Failed to subscribe InventoryObjectAdded: " + ex.Message, Client); }
+            try { Inventory.InventoryObjectUpdated += Inventory_InventoryObjectUpdated; } catch (Exception ex) { Logger.Debug("Failed to subscribe InventoryObjectUpdated: " + ex.Message, Client); }
+            try { Inventory.InventoryObjectRemoved += Inventory_InventoryObjectRemoved; } catch (Exception ex) { Logger.Debug("Failed to subscribe InventoryObjectRemoved: " + ex.Message, Client); }
+
+            try { Client.Appearance.AppearanceSet += Appearance_AppearanceSet; } catch (Exception ex) { Logger.Debug("Failed to subscribe AppearanceSet: " + ex.Message, Client); }
+            try { Client.Objects.ObjectUpdate += Objects_AttachmentUpdate; } catch (Exception ex) { Logger.Debug("Failed to subscribe Objects.ObjectUpdate: " + ex.Message, Client); }
+        }
+
+        private void UnsubscribeEvents()
+        {
+            try { Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded; } catch (Exception ex) { Logger.Debug("Failed to unsubscribe InventoryObjectAdded: " + ex.Message, Client); }
+            try { Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated; } catch (Exception ex) { Logger.Debug("Failed to unsubscribe InventoryObjectUpdated: " + ex.Message, Client); }
+            try { Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved; } catch (Exception ex) { Logger.Debug("Failed to unsubscribe InventoryObjectRemoved: " + ex.Message, Client); }
+
+            try { Client.Appearance.AppearanceSet -= Appearance_AppearanceSet; } catch (Exception ex) { Logger.Debug("Failed to unsubscribe AppearanceSet: " + ex.Message, Client); }
+            try { Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate; } catch (Exception ex) { Logger.Debug("Failed to unsubscribe Objects.ObjectUpdate: " + ex.Message, Client); }
         }
 
         /// <summary>
@@ -190,10 +237,28 @@ namespace Radegast
         /// </summary>
         private void RunOnUi(Action action)
         {
-            if (action == null) return;
+            if (action == null) { return; }
+
+            // Avoid posting/invoking actions when this control is disposing or already disposed
+            if (this.IsDisposed || this.Disposing) { return; }
 
             try
             {
+                // If we captured a SynchronizationContext (usually the UI thread), post to it.
+                if (uiContext != null && SynchronizationContext.Current != uiContext)
+                {
+                    try
+                    {
+                        uiContext.Post(_ =>
+                        {
+                            try { action(); } 
+                            catch (Exception ex) { Logger.Debug("Action post exception: " + ex.Message, Client); }
+                        }, null);
+                        return;
+                    }
+                    catch (Exception ex) { Logger.Debug("UI context post exception: " + ex.Message, Client); }
+                }
+
                 if (this.IsHandleCreated && this.InvokeRequired)
                 {
                     this.BeginInvoke(action);
@@ -217,9 +282,9 @@ namespace Radegast
                         action();
                     }
                 }
-                catch { }
+                catch (Exception ex) { Logger.Debug("Fallback action invoke exception: " + ex.Message, Client); }
             }
-            catch { }
+            catch (Exception ex) { Logger.Debug("RunOnUi exception: " + ex.Message, Client); }
         }
 
         private async void InventoryConsole_Disposed(object sender, EventArgs e)
@@ -231,7 +296,8 @@ namespace Radegast
 
                 if (inventoryUpdateCancelToken != null)
                 {
-                    try { inventoryUpdateCancelToken.Cancel(); } catch { }
+                    try { inventoryUpdateCancelToken.Cancel(); } 
+                    catch (Exception ex) { Logger.Debug("Failed to cancel inventoryUpdateCancelToken: " + ex.Message, Client); }
                 }
 
                 if (inventoryUpdateTask != null)
@@ -257,7 +323,7 @@ namespace Radegast
                     }
                 }
             }
-            catch (Exception) { }
+            catch (Exception ex) { Logger.Debug("Error during disposal traversal shutdown: " + ex.Message, Client); }
 
             // Stop timers and unsubscribe events that touch controls on the UI thread
             try
@@ -268,28 +334,50 @@ namespace Radegast
                     {
                         if (TreeUpdateTimer != null)
                         {
-                            try { TreeUpdateTimer.Stop(); TreeUpdateTimer.Dispose(); } catch { }
+                            try { TreeUpdateTimer.Stop(); TreeUpdateTimer.Dispose(); } 
+                            catch (Exception ex) { Logger.Debug("Error disposing TreeUpdateTimer: " + ex.Message, Client); }
                             TreeUpdateTimer = null;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { Logger.Debug("Error stopping TreeUpdateTimer: " + ex.Message, Client); }
 
+                    UnsubscribeEvents();
+                    // Unsubscribe UI events from the tree and other controls
                     try
                     {
-                        Inventory.InventoryObjectAdded -= Inventory_InventoryObjectAdded;
-                        Inventory.InventoryObjectUpdated -= Inventory_InventoryObjectUpdated;
-                        Inventory.InventoryObjectRemoved -= Inventory_InventoryObjectRemoved;
-
-                        Client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
-                        Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
+                        if (invTree != null)
+                        {
+                            try { invTree.AfterExpand -= TreeView_AfterExpand; } catch { }
+                            try { invTree.NodeMouseClick -= invTree_MouseClick; } catch { }
+                            try { invTree.NodeMouseDoubleClick -= invTree_NodeMouseDoubleClick; } catch { }
+                            try { invTree.Disposed -= InvTree_Disposed; } catch { }
+                        }
                     }
-                    catch (Exception) { }
-                });
+                    catch { }
+                 });
             }
-            catch { }
+            catch (Exception ex) { Logger.Debug("Error during disposal UI cleanup: " + ex.Message, Client); }
+
+            // Dispose timers and unmanaged resources that are not part of the UI thread
+            try
+            {
+                try { _EditTimer?.Dispose(); } 
+                catch (Exception ex) { Logger.Debug("Error disposing _EditTimer: " + ex.Message, Client); }
+                _EditTimer = null;
+            }
+            catch (Exception ex) { Logger.Debug("Error disposing _EditTimer (outer): " + ex.Message, Client); }
+
+            try { trashCreated?.Dispose(); }
+            catch (Exception ex) { Logger.Debug("Error disposing trashCreated: " + ex.Message, Client); }
+
+            try { inventoryUpdateCancelToken?.Dispose(); } 
+            catch (Exception ex) { Logger.Debug("Error disposing inventoryUpdateCancelToken: " + ex.Message, Client); }
 
             // Shutdown and dispose bounded queues and background processor
-            try { queueProcessorCts?.Cancel(); } catch { }
+            try { queueProcessorCts?.Cancel(); } 
+            catch (Exception ex) { Logger.Debug("Error disposing queueProcessorCts: " + ex.Message, Client); }
+            try { lifetimeCts?.Cancel(); } 
+            catch (Exception ex) { Logger.Debug("Error disposing lifetimeCts: " + ex.Message, Client); }
             if (queueProcessorTask != null)
             {
                 try
@@ -309,8 +397,12 @@ namespace Radegast
             try { ItemsToUpdate?.CompleteAdding(); } catch { }
             try { ItemsToAdd?.Dispose(); } catch { }
             try { ItemsToUpdate?.Dispose(); } catch { }
-            try { queueProcessorCts?.Dispose(); } catch { }
-        }
+            try { queueProcessorCts?.Dispose(); } 
+            catch (Exception ex) { Logger.Debug("Error disposing queueProcessorCts (outer): " + ex.Message, Client); }
+            try { lifetimeCts?.Dispose(); } 
+            catch (Exception ex) { Logger.Debug("Error disposing lifetimeCts (outer): " + ex.Message, Client); }
+         }
+
         #endregion
 
         #region Network callbacks
@@ -381,49 +473,39 @@ namespace Radegast
 
         private void Exec_OnInventoryObjectAdded(InventoryBase obj)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                Invoke(new MethodInvoker(delegate ()
-                {
-                    Exec_OnInventoryObjectAdded(obj);
-                }
-                ));
-                return;
-            }
+                TreeNode parent = FindNodeForItem(obj.ParentUUID);
 
-            TreeNode parent = FindNodeForItem(obj.ParentUUID);
-
-            if (parent != null)
-            {
-                TreeNode newNode = AddBase(parent, obj);
-                if (obj.Name == newItemName)
+                if (parent != null)
                 {
-                    if (newNode.Parent.IsExpanded)
+                    TreeNode newNode = AddBase(parent, obj);
+                    if (obj.Name == newItemName)
                     {
-                        newNode.BeginEdit();
-                    }
-                    else
-                    {
-                        newNode.Parent.Expand();
+                        if (newNode.Parent.IsExpanded)
+                        {
+                            newNode.BeginEdit();
+                        }
+                        else
+                        {
+                            newNode.Parent.Expand();
+                        }
                     }
                 }
-            }
-            newItemName = string.Empty;
+                newItemName = string.Empty;
+            });
         }
 
         private void Inventory_InventoryObjectRemoved(object sender, InventoryObjectRemovedEventArgs e)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(() => Inventory_InventoryObjectRemoved(sender, e)));
-                return;
-            }
-
-            TreeNode currentNode = FindNodeForItem(e.Obj.UUID);
-            if (currentNode != null)
-            {
-                RemoveNode(currentNode);
-            }
+                TreeNode currentNode = FindNodeForItem(e.Obj.UUID);
+                if (currentNode != null)
+                {
+                    RemoveNode(currentNode);
+                }
+            });
         }
 
         private void Inventory_InventoryObjectUpdated(object sender, InventoryObjectUpdatedEventArgs e)
@@ -458,42 +540,63 @@ namespace Radegast
         {
             if (newObject == null) { return; }
 
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(() => Exec_OnInventoryObjectUpdated(oldObject, newObject)));
-                return;
-            }
+                // Find our current node in the tree
+                TreeNode currentNode = FindNodeForItem(newObject.UUID);
 
-            // Find our current node in the tree
-            TreeNode currentNode = FindNodeForItem(newObject.UUID);
+                // Find which node should be our parent
+                TreeNode parent = FindNodeForItem(newObject.ParentUUID);
 
-            // Find which node should be our parent
-            TreeNode parent = FindNodeForItem(newObject.ParentUUID);
+                if (parent == null) { return; }
 
-            if (parent == null) { return; }
-
-            if (currentNode != null)
-            {
-                // Did we move to a different folder
-                if (currentNode.Parent != parent)
+                if (currentNode != null)
                 {
-                    TreeNode movedNode = (TreeNode)currentNode.Clone();
-                    movedNode.Tag = newObject;
-                    parent.Nodes.Add(movedNode);
-                    RemoveNode(currentNode);
-                    CacheNode(movedNode);
+                    // Did we move to a different folder
+                    if (currentNode.Parent != parent)
+                    {
+                        // Safely reparent the existing node instead of cloning to preserve references and selection
+                        try
+                        {
+                            invTree.BeginUpdate();
+                            var oldParent = currentNode.Parent;
+                            // Update tag and name first
+                            currentNode.Tag = newObject;
+                            currentNode.Name = newObject.Name;
+                            // Remove from old parent and add to new parent (this re-parents the node)
+                            try { currentNode.Remove(); } catch { }
+                            parent.Nodes.Add(currentNode);
+                            // Refresh cache entries for this node and its children
+                            CacheNode(currentNode);
+                        }
+                        finally
+                        {
+                            try { invTree.EndUpdate(); } catch { }
+                        }
+                    }
+                    else // Update
+                    {
+                        currentNode.Tag = newObject;
+                        var tv = currentNode.TreeView;
+                        if (tv == null || tv.IsDisposed || tv.Disposing)
+                        {
+                            if (currentNode.Tag is InventoryBase ib)
+                            {
+                                UUID2NodeCache.TryRemove(ib.UUID, out _);
+                            }
+                        }
+                        else
+                        {
+                            currentNode.Text = ItemLabel(newObject, false);
+                        }
+                        currentNode.Name = newObject.Name;
+                    }
                 }
-                else // Update
+                else // We are not in the tree already, add
                 {
-                    currentNode.Tag = newObject;
-                    currentNode.Text = ItemLabel(newObject, false);
-                    currentNode.Name = newObject.Name;
+                    AddBase(parent, newObject);
                 }
-            }
-            else // We are not in the tree already, add
-            {
-                AddBase(parent, newObject);
-            }
+            });
         }
         #endregion
 
@@ -567,10 +670,7 @@ namespace Radegast
                 }
                 parentNode.Nodes.Add(dirNode);
             }
-            lock (UUID2NodeCache)
-            {
-                UUID2NodeCache[f.UUID] = dirNode;
-            }
+            UUID2NodeCache[f.UUID] = dirNode;
             return dirNode;
         }
 
@@ -608,10 +708,7 @@ namespace Radegast
             itemNode.ImageIndex = img;
             itemNode.SelectedImageIndex = img;
             parent.Nodes.Add(itemNode);
-            lock (UUID2NodeCache)
-            {
-                UUID2NodeCache[item.UUID] = itemNode;
-            }
+            UUID2NodeCache[item.UUID] = itemNode;
             return itemNode;
         }
 
@@ -657,18 +754,15 @@ namespace Radegast
         #region Private methods
         private void UpdateStatus(string text)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                Invoke(new MethodInvoker(delegate () { UpdateStatus(text); }));
-                return;
-            }
+                if (text == "OK")
+                {
+                    saveAllTToolStripMenuItem.Enabled = true;
+                }
 
-            if (text == "OK")
-            {
-                saveAllTToolStripMenuItem.Enabled = true;
-            }
-
-            tlabelStatus.Text = text;
+                tlabelStatus.Text = text;
+            });
         }
 
         private void UpdateNodeLabel(UUID itemID)
@@ -678,6 +772,17 @@ namespace Radegast
                 TreeNode node = FindNodeForItem(itemID);
                 if (node != null)
                 {
+                    // Guard against the owning TreeView/control being disposed between queuing and execution
+                    var tv = node.TreeView;
+                    if (tv == null || tv.IsDisposed || tv.Disposing)
+                    {
+                        if (node.Tag is InventoryBase ib)
+                        {
+                            UUID2NodeCache.TryRemove(ib.UUID, out _);
+                        }
+                        return;
+                    }
+
                     node.Text = ItemLabel((InventoryBase)node.Tag, false);
                 }
             });
@@ -750,7 +855,7 @@ namespace Radegast
                     {
                         UpdateStatus($"Loading... {UUID2NodeCache.Count} items, {folderKeys.Count} folders remaining");
                     }
-                    catch { }
+                    catch (Exception ex) { Logger.Debug("Status update exception: " + ex.Message, Client); }
                     var tasks = folderKeys
                         .Select(folderKey => Client.Inventory.RequestFolderContents(
                             folderKey,
@@ -825,7 +930,7 @@ namespace Radegast
                 }
                 else
                 {
-                    Client.Inventory.RequestFetchInventory(attachment.UUID, Client.Self.AgentID, token);
+                    await Client.Inventory.RequestFetchInventoryAsync(attachment.UUID, Client.Self.AgentID, token);
                     return;
                 }
             }
@@ -891,7 +996,10 @@ namespace Radegast
 
             // restart queue processor
             queueProcessorCts = new CancellationTokenSource();
-            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorCts.Token), queueProcessorCts.Token);
+            // Link queue processor token with lifetime token so disposal cancels it too
+            try { queueProcessorLinkedCts?.Dispose(); } catch { }
+            try { queueProcessorLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(queueProcessorCts.Token, lifetimeCts.Token); } catch { queueProcessorLinkedCts = queueProcessorCts; }
+            queueProcessorTask = Task.Run(() => QueueProcessor(queueProcessorLinkedCts.Token), queueProcessorLinkedCts.Token);
 
             // Start traversal on thread-pool and keep reference so we can cancel later
             inventoryUpdateTask = Task.Run(() => StartTraverseNodes(inventoryUpdateCancelToken.Token), inventoryUpdateCancelToken.Token);
@@ -985,7 +1093,7 @@ namespace Radegast
                                     invTree.BeginUpdate();
                                     foreach (var u in updates)
                                     {
-                                        try { Exec_OnInventoryObjectUpdated(u, u); } catch { }
+                                        try { Exec_OnInventoryObjectUpdated(u, u); } catch (Exception ex) { Logger.Debug("Exec_OnInventoryObjectUpdated exception: " + ex.Message, Client); }
                                         try { ItemsToUpdateSet.TryRemove(u.UUID, out _); } catch { }
                                     }
                                 }
@@ -1351,384 +1459,444 @@ namespace Radegast
             }
         }
 
-        private void ctxInv_Opening(object sender, CancelEventArgs e)
+        private async void ctxInv_Opening(object sender, CancelEventArgs e)
         {
-            e.Cancel = false;
+            // If we are programmatically showing the menu allow the opening once and reset the guard
+            if (ctxInvBuilding)
+            {
+                ctxInvBuilding = false;
+                return;
+            }
+
+            // Cancel the default opening and build the menu asynchronously to avoid UI flicker
+            e.Cancel = true;
+
             TreeNode node = invTree.SelectedNode;
             if (node == null)
             {
-                e.Cancel = true;
+                return;
             }
-            else
+
+            // For item-specific async checks (permissions/capabilities) gather information first
+            InventoryFolder folder = null;
+            InventoryItem itemTag = null;
+            if (node.Tag is InventoryFolder f) folder = f;
+            else if (node.Tag is InventoryItem t) itemTag = t;
+
+            bool canDetach = false;
+            bool canAttach = false;
+
+            InventoryItem resolvedItem = null;
+            if (itemTag != null)
             {
-                #region Folder context menu
-                if (node.Tag is InventoryFolder)
+                // Resolve links and check capabilities off the UI thread
+                resolvedItem = instance.COF.ResolveInventoryLink(itemTag) ?? itemTag;
+
+                try
                 {
-                    InventoryFolder folder = (InventoryFolder)node.Tag;
-                    ctxInv.Items.Clear();
-
-                    ToolStripMenuItem ctxItem;
-
-                    if (folder.PreferredType >= FolderType.EnsembleStart &&
-                        folder.PreferredType <= FolderType.EnsembleEnd)
+                    if (IsAttached(resolvedItem))
                     {
-                        ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) { Name = "fix_type" };
-                        ctxInv.Items.Add(ctxItem);
-                        ctxInv.Items.Add(new ToolStripSeparator());
+                        canDetach = await instance.COF.CanDetachItem(resolvedItem).ConfigureAwait(false);
                     }
 
-                    ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) { Name = "new_folder" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) { Name = "new_notecard" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) { Name = "new_script" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) { Name = "refresh" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) { Name = "backup" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxInv.Items.Add(new ToolStripSeparator());
-
-                    ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) { Name = "expand" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) { Name = "expand_all" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) { Name = "collapse" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (folder.PreferredType == FolderType.Trash)
+                    if (!IsAttached(resolvedItem) &&
+                        (resolvedItem.InventoryType == InventoryType.Object || resolvedItem.InventoryType == InventoryType.Attachment))
                     {
-                        ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) { Name = "empty_trash" };
-                        ctxInv.Items.Add(ctxItem);
+                        canAttach = await instance.COF.CanAttachItem(resolvedItem).ConfigureAwait(false);
                     }
-
-                    if (folder.PreferredType == FolderType.LostAndFound)
-                    {
-                        ctxItem = new ToolStripMenuItem("Empty Lost and Found", null, OnInvContextClick)
-                        {
-                            Name = "empty_lost_found"
-                        };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (folder.PreferredType == FolderType.None ||
-                        folder.PreferredType == FolderType.Outfit)
-                    {
-                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxInv.Items.Add(new ToolStripSeparator());
-
-                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_folder" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (instance.InventoryClipboard != null)
-                    {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.InventoryClipboard.Item is InventoryItem)
-                        {
-                            ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
-                            {
-                                Name = "paste_folder_link"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (folder.PreferredType == FolderType.None ||
-                        folder.PreferredType == FolderType.Outfit)
-                    {
-                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxInv.Items.Add(new ToolStripSeparator());
-                    }
-
-                    if (folder.PreferredType == FolderType.None || folder.PreferredType == FolderType.Outfit)
-                    {
-                        var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
-
-                        ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
-                        {
-                            Name = "outfit_take_off",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
-                        {
-                            Name = "outfit_add",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
-                        {
-                            Name = "outfit_replace",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    instance.ContextActionManager.AddContributions(ctxInv, folder);
-                    #endregion Folder context menu
                 }
-                else if (node.Tag is InventoryItem tag)
+                catch (Exception ex)
                 {
-                    #region Item context menu
-                    var item = instance.COF.ResolveInventoryLink(tag) ?? tag;
+                    Logger.Error("Error checking attach/detach capabilities: " + ex.Message, Client);
+                }
+            }
+
+            // Build the menu on UI thread and show it at the current cursor position
+            RunOnUi(() =>
+            {
+                try
+                {
                     ctxInv.Items.Clear();
 
-                    ToolStripMenuItem ctxItem;
-
-
-                    if (item.InventoryType == InventoryType.LSL)
+                    if (folder != null)
                     {
-                        ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) { Name = "edit_script" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
+                        #region Folder context menu
+                        InventoryFolder folderLocal = folder;
 
-                    if (item.AssetType == AssetType.Texture)
-                    {
-                        ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) { Name = "view_image" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
+                        ToolStripMenuItem ctxItem;
 
-                    if (item.InventoryType == InventoryType.Landmark)
-                    {
-                        ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) { Name = "lm_teleport" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "lm_info" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item.InventoryType == InventoryType.Notecard)
-                    {
-                        ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) { Name = "notecard_open" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item.InventoryType == InventoryType.Gesture)
-                    {
-                        ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "gesture_play" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "gesture_info" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.Client.Self.ActiveGestures.ContainsKey(item.UUID))
+                        if (folderLocal.PreferredType >= FolderType.EnsembleStart &&
+                            folderLocal.PreferredType <= FolderType.EnsembleEnd)
                         {
-                            ctxItem = new ToolStripMenuItem("Deactivate", null, OnInvContextClick)
+                            ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) { Name = "fix_type" };
+                            ctxInv.Items.Add(ctxItem);
+                            ctxInv.Items.Add(new ToolStripSeparator());
+                        }
+
+                        ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) { Name = "new_folder" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) { Name = "new_notecard" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) { Name = "new_script" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) { Name = "refresh" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) { Name = "backup" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxInv.Items.Add(new ToolStripSeparator());
+
+                        ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) { Name = "expand" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) { Name = "expand_all" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) { Name = "collapse" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (folderLocal.PreferredType == FolderType.Trash)
+                        {
+                            ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) { Name = "empty_trash" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (folderLocal.PreferredType == FolderType.LostAndFound)
+                        {
+                            ctxItem = new ToolStripMenuItem("Empty Lost and Found", null, OnInvContextClick)
                             {
-                                Name = "gesture_deactivate"
+                                Name = "empty_lost_found"
                             };
                             ctxInv.Items.Add(ctxItem);
                         }
-                        else
+
+                        if (folderLocal.PreferredType == FolderType.None ||
+                            folderLocal.PreferredType == FolderType.Outfit)
                         {
-                            ctxItem = new ToolStripMenuItem("Activate", null, OnInvContextClick)
+                            ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxInv.Items.Add(new ToolStripSeparator());
+
+                            ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_folder" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (instance.InventoryClipboard != null)
+                        {
+                            ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.InventoryClipboard.Item is InventoryItem)
                             {
-                                Name = "gesture_activate"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (item.InventoryType == InventoryType.Animation)
-                    {
-                        if (!Client.Self.SignaledAnimations.ContainsKey(item.AssetUUID))
-                        {
-                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "animation_play" };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                        else
-                        {
-                            ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) { Name = "animation_stop" };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (item.InventoryType == InventoryType.Object)
-                    {
-                        ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) { Name = "rez_inworld" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxInv.Items.Add(new ToolStripSeparator());
-
-                    ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (instance.InventoryClipboard != null)
-                    {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_item" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.InventoryClipboard.Item is InventoryItem)
-                        {
-                            ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
-                            {
-                                Name = "paste_item_link"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_item" };
-
-                    if (IsAttached(item) || IsWorn(item))
-                    {
-                        ctxItem.Enabled = false;
-                    }
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (item.InventoryType == InventoryType.Object && IsAttached(item))
-                    {
-                        ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
-                        //TODO: add RLV support
-                        var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
-                            p => p.Value.ParentID == Client.Self.LocalID
-                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
-                        if (kvp.Value != null)
-                        {
-                            var attached = kvp.Value;
-                            ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
-                        }
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (IsAttached(item) && instance.COF.CanDetachItem(item).Result)
-                    {
-                        ctxItem =
-                            new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (!IsAttached(item) &&
-                        (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
-                        instance.COF.CanAttachItem(item).Result)
-                    {
-                        ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
-                        ctxInv.Items.Add(ctxItemAttach);
-
-                        ToolStripMenuItem ctxItemAttachHUD = new ToolStripMenuItem("Attach to HUD");
-                        ctxInv.Items.Add(ctxItemAttachHUD);
-
-                        foreach (AttachmentPoint pt in Enum.GetValues(typeof(AttachmentPoint)))
-                        {
-                            if (!pt.ToString().StartsWith("HUD"))
-                            {
-                                string name = Utils.EnumToText(pt);
-
-                                InventoryItem alreadyAttached = null;
-                                if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
                                 {
-                                    name += $" ({alreadyAttached.Name})";
-                                }
+                                    Name = "paste_folder_link"
+                                };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                        }
 
-                                ToolStripMenuItem ptItem =
-                                    new ToolStripMenuItem(name, null, OnInvContextClick)
-                                    {
-                                        Name = "attach_to",
-                                        Tag = pt
-                                    };
-                                ptItem.Name = "attach_to";
-                                ctxItemAttach.DropDownItems.Add(ptItem);
+                        if (folderLocal.PreferredType == FolderType.None ||
+                            folderLocal.PreferredType == FolderType.Outfit)
+                        {
+                            ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxInv.Items.Add(new ToolStripSeparator());
+                        }
+
+                        if (folderLocal.PreferredType == FolderType.None || folderLocal.PreferredType == FolderType.Outfit)
+                        {
+                            var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
+
+                            ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
+                            {
+                                Name = "outfit_take_off",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
+                            {
+                                Name = "outfit_add",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
+                            {
+                                Name = "outfit_replace",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        instance.ContextActionManager.AddContributions(ctxInv, folderLocal);
+                        #endregion
+                    }
+                    else if (resolvedItem != null)
+                    {
+                        #region Item context menu
+                        var item = resolvedItem;
+                        ToolStripMenuItem ctxItem;
+
+
+                        if (item.InventoryType == InventoryType.LSL)
+                        {
+                            ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) { Name = "edit_script" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.AssetType == AssetType.Texture)
+                        {
+                            ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) { Name = "view_image" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Landmark)
+                        {
+                            ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) { Name = "lm_teleport" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "lm_info" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Notecard)
+                        {
+                            ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) { Name = "notecard_open" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Gesture)
+                        {
+                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "gesture_play" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "gesture_info" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.Client.Self.ActiveGestures.ContainsKey(item.UUID))
+                            {
+                                ctxItem = new ToolStripMenuItem("Deactivate", null, OnInvContextClick)
+                                {
+                                    Name = "gesture_deactivate"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                             else
                             {
-                                string name = Utils.EnumToText(pt).Substring(3);
-
-                                InventoryItem alreadyAttached = null;
-                                if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                ctxItem = new ToolStripMenuItem("Activate", null, OnInvContextClick)
                                 {
-                                    name += $" ({alreadyAttached.Name})";
-                                }
-
-                                ToolStripMenuItem ptItem =
-                                    new ToolStripMenuItem(name, null, OnInvContextClick)
-                                    {
-                                        Name = "attach_to",
-                                        Tag = pt
-                                    };
-                                ptItem.Name = "attach_to";
-                                ctxItemAttachHUD.DropDownItems.Add(ptItem);
+                                    Name = "gesture_activate"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                         }
 
-                        ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick)
+                        if (item.InventoryType == InventoryType.Animation)
                         {
-                            Name = "wear_attachment_add"
-                        };
-                        ctxInv.Items.Add(ctxItem);
+                            if (!Client.Self.SignaledAnimations.ContainsKey(item.AssetUUID))
+                            {
+                                ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "animation_play" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                            else
+                            {
+                                ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) { Name = "animation_stop" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                        }
 
-                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wear_attachment" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item is InventoryWearable wearable)
-                    {
-                        ctxInv.Items.Add(new ToolStripSeparator());
-
-                        if (IsWorn(wearable))
+                        if (item.InventoryType == InventoryType.Object)
                         {
-                            ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
+                            ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) { Name = "rez_inworld" };
                             ctxInv.Items.Add(ctxItem);
                         }
-                        else
+
+                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxInv.Items.Add(new ToolStripSeparator());
+
+                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (instance.InventoryClipboard != null)
                         {
-                            switch (wearable.WearableType)
+                            ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_item" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.InventoryClipboard.Item is InventoryItem)
                             {
-                                case WearableType.Invalid:
-                                    break;
-                                case WearableType.Alpha:
-                                case WearableType.Gloves:
-                                case WearableType.Jacket:
-                                case WearableType.Pants:
-                                case WearableType.Physics:
-                                case WearableType.Shirt:
-                                case WearableType.Shoes:
-                                case WearableType.Socks:
-                                case WearableType.Skirt:
-                                case WearableType.Tattoo:
-                                case WearableType.Underpants:
-                                case WearableType.Undershirt:
-                                case WearableType.Universal:
-                                    ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick) { Name = "wearable_add" };
-                                    ctxInv.Items.Add(ctxItem);
-                                    goto default;
-                                default:
-                                    ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wearable_wear" };
-                                    ctxInv.Items.Add(ctxItem);
-                                    break;
+                                ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
+                                {
+                                    Name = "paste_item_link"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                         }
+
+                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_item" };
+
+                        if (IsAttached(item) || IsWorn(item))
+                        {
+                            ctxItem.Enabled = false;
+                        }
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (item.InventoryType == InventoryType.Object && IsAttached(item))
+                        {
+                            ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
+                            //TODO: add RLV support
+                            var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                p => p.Value.ParentID == Client.Self.LocalID
+                                     && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
+                            if (kvp.Value != null)
+                            {
+                                var attached = kvp.Value;
+                                ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
+                            }
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (IsAttached(item) && canDetach)
+                        {
+                            ctxItem =
+                                new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (!IsAttached(item) &&
+                            (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
+                            canAttach)
+                        {
+                            ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
+                            ctxInv.Items.Add(ctxItemAttach);
+
+                            ToolStripMenuItem ctxItemAttachHUD = new ToolStripMenuItem("Attach to HUD");
+                            ctxInv.Items.Add(ctxItemAttachHUD);
+
+                            foreach (AttachmentPoint pt in Enum.GetValues(typeof(AttachmentPoint)))
+                            {
+                                if (!pt.ToString().StartsWith("HUD"))
+                                {
+                                    string name = Utils.EnumToText(pt);
+
+                                    InventoryItem alreadyAttached = null;
+                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    {
+                                        name += $" ({alreadyAttached.Name})";
+                                    }
+
+                                    ToolStripMenuItem ptItem =
+                                        new ToolStripMenuItem(name, null, OnInvContextClick)
+                                        {
+                                            Name = "attach_to",
+                                            Tag = pt
+                                        };
+                                    ptItem.Name = "attach_to";
+                                    ctxItemAttach.DropDownItems.Add(ptItem);
+                                }
+                                else
+                                {
+                                    string name = Utils.EnumToText(pt).Substring(3);
+
+                                    InventoryItem alreadyAttached = null;
+                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    {
+                                        name += $" ({alreadyAttached.Name})";
+                                    }
+
+                                    ToolStripMenuItem ptItem =
+                                        new ToolStripMenuItem(name, null, OnInvContextClick)
+                                        {
+                                            Name = "attach_to",
+                                            Tag = pt
+                                        };
+                                    ptItem.Name = "attach_to";
+                                    ctxItemAttachHUD.DropDownItems.Add(ptItem);
+                                }
+                            }
+
+                            ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick)
+                            {
+                                Name = "wear_attachment_add"
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wear_attachment" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item is InventoryWearable wearable)
+                        {
+                            ctxInv.Items.Add(new ToolStripSeparator());
+
+                            if (IsWorn(wearable))
+                            {
+                                ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                            else
+                            {
+                                switch (wearable.WearableType)
+                                {
+                                    case WearableType.Invalid:
+                                        break;
+                                    case WearableType.Alpha:
+                                    case WearableType.Gloves:
+                                    case WearableType.Jacket:
+                                    case WearableType.Pants:
+                                    case WearableType.Physics:
+                                    case WearableType.Shirt:
+                                    case WearableType.Shoes:
+                                    case WearableType.Socks:
+                                    case WearableType.Skirt:
+                                    case WearableType.Tattoo:
+                                    case WearableType.Underpants:
+                                    case WearableType.Undershirt:
+                                    case WearableType.Universal:
+                                        ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick) { Name = "wearable_add" };
+                                        ctxInv.Items.Add(ctxItem);
+                                        goto default;
+                                    default:
+                                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wearable_wear" };
+                                        ctxInv.Items.Add(ctxItem);
+                                        break;
+                                }
+                            }
+                        }
+
+                        instance.ContextActionManager.AddContributions(ctxInv, item);
+                        #endregion
                     }
 
-                    instance.ContextActionManager.AddContributions(ctxInv, item);
-                    #endregion Item context menu
+                    // Show menu at mouse cursor position. Use guard to avoid recursive Opening handling.
+                    try
+                    {
+                        ctxInvBuilding = true;
+                        var pos = invTree.PointToClient(Cursor.Position);
+                        ctxInv.Show(invTree, pos.X, pos.Y);
+                    }
+                    catch (Exception ex) { Logger.Debug("Error showing context menu: " + ex.Message, Client); }
                 }
-            }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error building inventory context menu: " + ex.Message, Client);
+                }
+            });
         }
 
         private void RunBackgroundTask(Func<CancellationToken, Task> work, Action uiCallback = null, int timeoutSeconds = 120)
@@ -1784,7 +1952,7 @@ namespace Radegast
                         }
                         try
                         {
-                            await FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None).ConfigureAwait(true);
+                            await FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?. Token ?? CancellationToken.None).ConfigureAwait(true);
                         }
                         catch (OperationCanceledException) { }
                         catch (Exception ex)
@@ -1850,13 +2018,21 @@ namespace Radegast
                         var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
                         if (trash == Inventory.RootFolder.UUID)
                         {
-                            ThreadPool.QueueUserWorkItem(sync =>
+                            // Create trash on a background thread and then move folder; avoid blocking
+                            Task.Run(async () =>
                             {
-                                trashCreated.Reset();
-                                trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                                trashCreated.WaitOne(20 * 1000, false);
-                                Thread.Sleep(200);
-                                Client.Inventory.MoveFolder(folder.UUID, trash);
+                                try
+                                {
+                                    trashCreated.Reset();
+                                    trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                                    // give server a short moment to register the new folder
+                                    await Task.Delay(200).ConfigureAwait(false);
+                                    await Client.Inventory.MoveFolderAsync(folder.UUID, trash);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error creating/moving folder to Trash: " + ex.Message, ex);
+                                }
                             });
                             return;
                         }
@@ -1951,18 +2127,24 @@ namespace Radegast
                         var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
                         if (trash == Inventory.RootFolder.UUID)
                         {
-                            ThreadPool.QueueUserWorkItem(sync =>
+                            Task.Run(async () =>
                             {
-                                trashCreated.Reset();
-                                trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                                trashCreated.WaitOne(20 * 1000, false);
-                                Thread.Sleep(200);
-                                Client.Inventory.MoveItem(item.UUID, trash, item.Name);
+                                try
+                                {
+                                    trashCreated.Reset();
+                                    trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                                    await Task.Delay(200).ConfigureAwait(false);
+                                    await Client.Inventory.MoveItemAsync(item.UUID, trash, item.Name);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error creating/moving item to Trash: " + ex.Message, ex);
+                                }
                             });
                             return;
                         }
 
-                        Client.Inventory.MoveItem(item.UUID, Client.Inventory.FindFolderForType(FolderType.Trash), item.Name);
+                        await Client.Inventory.MoveItemAsync(item.UUID, Client.Inventory.FindFolderForType(FolderType.Trash), item.Name);
                         break;
 
                     case "rename_item":
@@ -1972,48 +2154,49 @@ namespace Radegast
                     case "touch":
                         var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
                             p => p.Value.ParentID == Client.Self.LocalID
-                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
+                                 && CurrentOutfitFolder.GetAttachmentItemID(p.Value) == item.UUID);
                         if (kvp.Value != null)
                         {
                             var attached = kvp.Value;
                             Client.Self.Grab(attached.LocalID,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero, 0,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero);
-                            Thread.Sleep(100);
+                            // brief pause to emulate grab/release without blocking UI
+                            try { await Task.Delay(100).ConfigureAwait(false); } catch { }
                             Client.Self.DeGrab(attached.LocalID, Vector3.Zero, Vector3.Zero, 0,
                                 Vector3.Zero, Vector3.Zero, Vector3.Zero);
                         }
                         break;
 
                     case "detach":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Detach(item, cancellationtoken);
+                            await instance.COF.Detach(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationtoken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationtoken);
+                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "attach_to":
                         AttachmentPoint pt = (AttachmentPoint)((ToolStripMenuItem)sender).Tag;
 
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, pt, true, cancellationtoken);
+                            await instance.COF.Attach(item, pt, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2028,9 +2211,9 @@ namespace Radegast
 
                     case "wearable_take_off":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(item, cancellationtoken);
+                            await instance.COF.RemoveFromOutfit(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
@@ -2038,17 +2221,17 @@ namespace Radegast
 
                     case "wearable_wear":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationtoken);
+                            await instance.COF.AddToOutfit(item, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wearable_add":
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationtoken) =>
+                        RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, false, cancellationtoken);
+                            await instance.COF.AddToOutfit(item, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2205,33 +2388,23 @@ namespace Radegast
                     {
                         if (instance.InventoryClipboard.Item is InventoryFolder)
                         {
-                            ThreadPool.QueueUserWorkItem(state =>
+                            Task.Run(async () =>
                             {
-                                UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, instance.InventoryClipboard.Item.Name, FolderType.None);
-                                Thread.Sleep(500);
-
-                                // FIXME: for some reason copying a bunch of items in one operation does not work
-
-                                //List<UUID> items = new List<UUID>();
-                                //List<UUID> folders = new List<UUID>();
-                                //List<string> names = new List<string>();
-                                //UUID oldOwner = UUID.Zero;
-
-                                foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
+                                try
                                 {
-                                    //folders.Add(newFolderID);
-                                    //names.Add(oldItem.Name);
-                                    //items.Add(oldItem.UUID);
-                                    //oldOwner = oldItem.OwnerID;
-                                    Client.Inventory.RequestCopyItem(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
-                                }
+                                    UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, instance.InventoryClipboard.Item.Name, FolderType.None);
+                                    await Task.Delay(500).ConfigureAwait(false);
 
-                                //if (folders.Count > 0)
-                                //{
-                                //    Client.Inventory.RequestCopyItems(items, folders, names, oldOwner, (InventoryBase target) => { });
-                                //}
-                            }
-                            );
+                                    foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
+                                    {
+                                        await Client.Inventory.RequestCopyItemAsync(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error copying folder contents: " + ex.Message, ex);
+                                }
+                            });
                         }
 
                         break;
@@ -2257,18 +2430,15 @@ namespace Radegast
 
         private void UpdateWornLabels()
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(UpdateWornLabels));
-                return;
-            }
-
-            invTree.BeginUpdate();
-            foreach (var wearable in Client.Appearance.GetWearables())
-            {
-                UpdateLabelsFor(wearable, suspendLayout: false);
-            }
-            invTree.EndUpdate();
+                invTree.BeginUpdate();
+                foreach (var wearable in Client.Appearance.GetWearables())
+                {
+                    UpdateLabelsFor(wearable, suspendLayout: false);
+                }
+                invTree.EndUpdate();
+            });
         }
 
         private void UpdateLabelsFor(OpenMetaverse.AppearanceManager.WearableData wearable, bool suspendLayout = true)
@@ -2290,41 +2460,48 @@ namespace Radegast
 
         private void UpdateLabelsFor(UUID assertId, bool suspendLayout = true)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(() => UpdateLabelsFor(assertId)));
-                return;
-            }
-
-            if (suspendLayout)
-            {
-                invTree.SuspendLayout();
-            }
-
-            TreeNode itemNode = FindNodeForItem(assertId);
-            if (itemNode != null)
-            {
-                itemNode.Text = ItemLabel((InventoryBase)itemNode.Tag, false);
-            }
-
-            List<InventoryNode> links = Client.Inventory.Store.FindAllLinks(assertId);
-            foreach (var link in links)
-            {
-                if (link.Data is InventoryItem item)
+                if (suspendLayout)
                 {
-                    TreeNode linkNode = FindNodeForItem(item.UUID);
-                    if (linkNode != null)
+                    invTree.SuspendLayout();
+                }
+
+                TreeNode itemNode = FindNodeForItem(assertId);
+                if (itemNode != null)
+                {
+                    itemNode.Text = ItemLabel((InventoryBase)itemNode.Tag, false);
+                }
+
+                List<InventoryNode> links = Client.Inventory.Store.FindAllLinks(assertId);
+                foreach (var link in links)
+                {
+                    if (link.Data is InventoryItem item)
                     {
-                        linkNode.Text = ItemLabel((InventoryBase)linkNode.Tag, false);
+                        TreeNode linkNode = FindNodeForItem(item.UUID);
+                        if (linkNode != null)
+                        {
+                            var tv = linkNode.TreeView;
+                            if (tv == null || tv.IsDisposed || tv.Disposing)
+                            {
+                                if (linkNode.Tag is InventoryBase ib)
+                                {
+                                    UUID2NodeCache.TryRemove(ib.UUID, out _);
+                                }
+                            }
+                            else
+                            {
+                                linkNode.Text = ItemLabel((InventoryBase)linkNode.Tag, false);
+                            }
+                        }
                     }
                 }
-            }
-            if (suspendLayout)
-            {
-                invTree.EndUpdate();
-            }
-        }
-
+                if (suspendLayout)
+                {
+                    invTree.EndUpdate();
+                }
+            });
+         }
         private void TreeView_AfterExpand(object sender, TreeViewEventArgs e)
         {
             // Check if we need to go into edit mode for new items
@@ -2342,20 +2519,27 @@ namespace Radegast
         private bool _EditingNode = false;
 
         private void OnLabelEditTimer(object sender)
-        {
-            if (!(_EditNode?.Tag is InventoryBase))
-                return;
+         {
+             if (!(_EditNode?.Tag is InventoryBase))
+                 return;
 
-            if (InvokeRequired)
-            {
-                RunOnUi(() => OnLabelEditTimer(sender));
-                return;
-            }
+             RunOnUi(() =>
+             {
+                 _EditingNode = true;
+                 var tv = _EditNode.TreeView;
+                 if (tv == null || tv.IsDisposed || tv.Disposing)
+                 {
+                     if (_EditNode.Tag is InventoryBase ib)
+                     {
+                         UUID2NodeCache.TryRemove(ib.UUID, out _);
+                     }
+                     return;
+                 }
 
-            _EditingNode = true;
-            _EditNode.Text = ItemLabel((InventoryBase)_EditNode.Tag, true);
-            _EditNode.BeginEdit();
-        }
+                 _EditNode.Text = ItemLabel((InventoryBase)_EditNode.Tag, true);
+                 _EditNode.BeginEdit();
+             });
+         }
 
         private void invTree_BeforeLabelEdit(object sender, NodeLabelEditEventArgs e)
         {
@@ -2412,7 +2596,7 @@ namespace Radegast
             }
         }
 
-        private void invTree_KeyUp(object sender, KeyEventArgs e)
+        private async void invTree_KeyUp(object sender, KeyEventArgs e)
         {
             switch (e.KeyCode)
             {
@@ -2435,16 +2619,17 @@ namespace Radegast
                         if (trash == Inventory.RootFolder.UUID)
                         {
                             trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                            Thread.Sleep(2000);
+                            // wait briefly for server to register the new folder without blocking UI
+                            try { await Task.Delay(2000).ConfigureAwait(false); } catch { }
                         }
 
                         switch (invTree.SelectedNode.Tag)
                         {
                             case InventoryItem item:
-                                Client.Inventory.MoveItem(item.UUID, trash);
+                                await Client.Inventory.MoveItemAsync(item.UUID, trash);
                                 break;
                             case InventoryFolder folder:
-                                Client.Inventory.MoveFolder(folder.UUID, trash);
+                                await Client.Inventory.MoveFolderAsync(folder.UUID, trash);
                                 break;
                         }
 
@@ -2475,15 +2660,14 @@ namespace Radegast
                 highlightedNode = null;
             }
 
-            TreeNode sourceNode = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            if (sourceNode == null) return;
+            if (!(e.Data.GetData(typeof(TreeNode)) is TreeNode sourceNode)) { return; }
 
             Point pt = ((BufferedTreeView)sender).PointToClient(new Point(e.X, e.Y));
             TreeNode destinationNode = ((BufferedTreeView)sender).GetNodeAt(pt);
 
-            if (destinationNode == null) return;
+            if (destinationNode == null) { return; }
 
-            if (sourceNode == destinationNode) return;
+            if (sourceNode == destinationNode) { return; }
 
             // If dropping to item within folder drop to its folder
             if (destinationNode.Tag is InventoryItem)
@@ -2491,7 +2675,7 @@ namespace Radegast
                 destinationNode = destinationNode.Parent;
             }
 
-            if (!(destinationNode.Tag is InventoryFolder dest)) return;
+            if (!(destinationNode.Tag is InventoryFolder dest)) { return; }
 
             switch (sourceNode.Tag)
             {
@@ -2506,8 +2690,7 @@ namespace Radegast
 
         private void invTree_DragEnter(object sender, DragEventArgs e)
         {
-            TreeNode node = e.Data.GetData(typeof(TreeNode)) as TreeNode;
-            e.Effect = node == null ? DragDropEffects.None : DragDropEffects.Move;
+            e.Effect = !(e.Data.GetData(typeof(TreeNode)) is TreeNode node) ? DragDropEffects.None : DragDropEffects.Move;
         }
 
         private TreeNode highlightedNode = null;
@@ -2634,21 +2817,15 @@ namespace Radegast
                 else
                 {
                     var it = item as InventoryItem;
-                    bool add = false;
-
-                    if (cbSrchName.Checked && it.Name.ToLower().Contains(searchString))
-                    {
-                        add = true;
-                    }
-                    else if (cbSrchDesc.Checked && it.Description.ToLower().Contains(searchString))
-                    {
-                        add = true;
-                    }
+                    bool add = ((cbSrchName.Checked && !string.IsNullOrEmpty(searchString) &&
+                                 it.Name.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0) 
+                                || (cbSrchDesc.Checked && !string.IsNullOrEmpty(searchString) &&
+                                    it.Description.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0));
 
                     if (cbSrchWorn.Checked && add &&
-                        !(it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID)
-                          || (it.InventoryType == InventoryType.Attachment
-                              || it.InventoryType == InventoryType.Object) && IsAttached(it)))
+                        !((it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID))
+                          || ((it.InventoryType == InventoryType.Attachment
+                               || it.InventoryType == InventoryType.Object) && IsAttached(it))))
                     {
                         add = false;
                     }
@@ -2690,7 +2867,8 @@ namespace Radegast
             }
 
             lstInventorySearch.VirtualListSize = 0;
-            searchString = txtSearch.Text.Trim().ToLower();
+            // keep original search text and use culture-insensitive comparisons when matching
+            searchString = txtSearch.Text.Trim();
 
             //if (searchString == string.Empty && rbSrchAll.Checked)
             //{
@@ -2802,7 +2980,7 @@ namespace Radegast
                 var icon = frmMain.ResourceImages.Images[iconIx];
                 g.DrawImageUnscaled(icon, e.Bounds.X + offset - 18, e.Bounds.Y);
             }
-            catch { }
+            catch (Exception ex) { Logger.Debug("Error drawing icon: " + ex.Message, Client); }
 
             using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap | StringFormatFlags.LineLimit))
             {
@@ -2889,7 +3067,7 @@ namespace Radegast
                     ctxInv.Show(lstInventorySearch, e.X, e.Y);
                 }
             }
-            catch { }
+            catch (Exception ex) { Logger.Debug("Error in lstInventorySearch_MouseClick: " + ex.Message, Client); }
         }
 
         private void lstInventorySearch_MouseDoubleClick(object sender, MouseEventArgs e)
@@ -2905,7 +3083,7 @@ namespace Radegast
                 invTree.SelectedNode = node;
                 invTree_NodeMouseDoubleClick(null, null);
             }
-            catch { }
+            catch (Exception ex) { Logger.Debug("Error in lstInventorySearch_MouseDoubleClick: " + ex.Message, Client); }
 
         }
         #endregion Search

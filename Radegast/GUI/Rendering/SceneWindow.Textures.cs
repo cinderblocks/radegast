@@ -206,7 +206,6 @@ namespace Radegast.Rendering
         private void ProcessTextureItem(TextureLoadItem item)
         {
             byte[] imageBytes = null;
-            PortableImage j2kImage = null;
             SKBitmap skBitmap = null;
 
             if (item.TextureData != null || item.LoadAssetFromCache)
@@ -217,6 +216,7 @@ namespace Radegast.Rendering
                 }
                 if (item.TextureData == null) { return; }
 
+                InterleavedImage j2kImage = null;
                 try
                 {
                     j2kImage = J2kImage.FromBytes(item.TextureData);

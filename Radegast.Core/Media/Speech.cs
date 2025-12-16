@@ -67,32 +67,12 @@ namespace Radegast.Media
         }
 
         /// <summary>
-        /// Plays audio from a file, as created by an external speech synthesizer.
-        /// </summary>
-        /// <param name="speakfile">Name of a WAV file</param>
-        /// <param name="global"></param>
-        /// <param name="pos"></param>
-        /// <returns>Length of the sound in ms</returns>
-        public uint Play(string speakfile, bool global, Vector3 pos)
-        {
-            // Synchronous wrapper preserving previous behavior
-            try
-            {
-                return PlayAsync(speakfile, global, pos).GetAwaiter().GetResult();
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        /// <summary>
         /// Async variant of Play to avoid blocking threads.
         /// </summary>
         /// <param name="speakfile"></param>
         /// <param name="global"></param>
         /// <param name="pos"></param>
-        /// <returns>Length of the sound in ms</returns>
+        /// <returns>Length of the sound in ms (setup length). Does not wait for playback to finish.</returns>
         public async Task<uint> PlayAsync(string speakfile, bool global, Vector3 pos)
         {
             uint len = 0;
@@ -193,6 +173,49 @@ namespace Radegast.Media
             }
 
             return 0;
+        }
+
+        /// <summary>
+        /// Async helper that performs setup and waits for playback to finish. Returns setup length.
+        /// </summary>
+        /// <param name="speakfile"></param>
+        /// <param name="global"></param>
+        /// <param name="pos"></param>
+        /// <returns></returns>
+        public async Task<uint> PlayAndWaitAsync(string speakfile, bool global, Vector3 pos)
+        {
+            uint len = await PlayAsync(speakfile, global, pos).ConfigureAwait(false);
+
+            var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            SpeechDoneCallback callback = null;
+            callback = (sender, e) =>
+            {
+                try { tcs.TrySetResult(true); } catch { }
+            };
+
+            try
+            {
+                OnSpeechDone += callback;
+
+                // Wait until the end callback fires or until a safe timeout (len + 2s)
+                var timeout = (int)Math.Min((long)len + 2000, int.MaxValue);
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout)).ConfigureAwait(false);
+
+                if (completed == tcs.Task)
+                {
+                    // playback finished
+                    await tcs.Task.ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                if (callback != null)
+                {
+                    try { OnSpeechDone -= callback; } catch { }
+                }
+            }
+
+            return len;
         }
 
         /// <summary>

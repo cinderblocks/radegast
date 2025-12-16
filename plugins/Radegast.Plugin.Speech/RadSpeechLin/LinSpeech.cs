@@ -19,6 +19,7 @@
  */
 
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using RadegastSpeech.Talk;
 
 namespace RadegastSpeech
@@ -33,7 +34,7 @@ namespace RadegastSpeech
         // Speech recognition is not yet available on Linux
         public void RecogStart()
         {
-            if (OnRecognition != null) // Supress compiler wanring until we have something for this
+            if (OnRecognition != null) // Suppress compiler warning until we have something for this
             {
             }
         }
@@ -55,18 +56,21 @@ namespace RadegastSpeech
         }
         #endregion
         #region Speech
-        public void SpeechStart( PluginControl pc, string[] beeps)
+        public Task SpeechStart( PluginControl pc, string[] beeps)
         {
             synth = new LinSynth( pc, beeps);
+            return Task.CompletedTask;
         }
-        public void SpeechStop()
+        public Task SpeechStop()
         {
             synth.Stop();
+            return Task.CompletedTask;
         }
 
-        public void SpeechHalt()
+        public Task SpeechHalt()
         {
             synth.Halt();
+            return Task.CompletedTask;
         }
 
         public Dictionary<string, AvailableVoice> GetVoices()
@@ -74,12 +78,11 @@ namespace RadegastSpeech
             return synth.GetVoices();
         }
 
-        public void Speak(
-            QueuedSpeech utterance,
-            string filename)
+        public async Task Speak(QueuedSpeech utterance, string filename)
         {
-            synth.Speak(utterance, filename);
+            await Task.Run(() => synth.Speak(utterance, filename)).ConfigureAwait(false);
         }
+
         #endregion
 
     }

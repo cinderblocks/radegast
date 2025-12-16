@@ -19,6 +19,7 @@
  */
 
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace RadegastSpeech
 {
@@ -26,10 +27,10 @@ namespace RadegastSpeech
     public interface IRadSpeech
     {
         // Speech Synthesis methods
-        void SpeechStart( PluginControl pc, string[] beeps);
-        void SpeechStop();
-        void SpeechHalt();
-        void Speak(Talk.QueuedSpeech utterance, string filename);
+        Task SpeechStart( PluginControl pc, string[] beeps);
+        Task SpeechStop();
+        Task SpeechHalt();
+        Task Speak(Talk.QueuedSpeech utterance, string filename);
         Dictionary<string, Talk.AvailableVoice> GetVoices();
 
         // Speech Recognition methods
