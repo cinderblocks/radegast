@@ -75,6 +75,8 @@ namespace Radegast
             // capture UI synchronization context for centralized marshaling
             uiContext = SynchronizationContext.Current;
             Disposed += InventoryConsole_Disposed;
+            // Clear node cache when underlying tree is disposed to avoid stale references
+            try { invTree.Disposed += InvTree_Disposed; } catch { }
 
             TreeUpdateTimer = new System.Timers.Timer()
             {
@@ -112,6 +114,15 @@ namespace Radegast
             });
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private void InvTree_Disposed(object sender, EventArgs e)
+        {
+            try
+            {
+                UUID2NodeCache.Clear();
+            }
+            catch { }
         }
 
         public void Init()
