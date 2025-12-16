@@ -94,11 +94,19 @@ namespace Radegast
             invTree.ImageList = frmMain.ResourceImages;
             invRootNode = AddDir(null, Inventory.RootFolder);
             UpdateStatus("Reading cache");
-            ThreadPool.QueueUserWorkItem(sync =>
+            // Restore cache on a background task without blocking thread-pool threads
+            Task.Run(() =>
             {
-                Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
-                Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
-                Init();
+                try
+                {
+                    Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
+                    Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
+                    Init();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error restoring inventory cache: " + ex.Message, ex);
+                }
             });
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
@@ -1854,13 +1862,21 @@ namespace Radegast
                         var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
                         if (trash == Inventory.RootFolder.UUID)
                         {
-                            ThreadPool.QueueUserWorkItem(sync =>
+                            // Create trash on background thread and then move folder; avoid blocking
+                            Task.Run(async () =>
                             {
-                                trashCreated.Reset();
-                                trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                                trashCreated.WaitOne(20 * 1000, false);
-                                Thread.Sleep(200);
-                                Client.Inventory.MoveFolder(folder.UUID, trash);
+                                try
+                                {
+                                    trashCreated.Reset();
+                                    trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                                    // give server a short moment to register the new folder
+                                    await Task.Delay(200).ConfigureAwait(false);
+                                    Client.Inventory.MoveFolder(folder.UUID, trash);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error creating/moving folder to Trash: " + ex.Message, ex);
+                                }
                             });
                             return;
                         }
@@ -1955,13 +1971,19 @@ namespace Radegast
                         var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
                         if (trash == Inventory.RootFolder.UUID)
                         {
-                            ThreadPool.QueueUserWorkItem(sync =>
+                            Task.Run(async () =>
                             {
-                                trashCreated.Reset();
-                                trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
-                                trashCreated.WaitOne(20 * 1000, false);
-                                Thread.Sleep(200);
-                                Client.Inventory.MoveItem(item.UUID, trash, item.Name);
+                                try
+                                {
+                                    trashCreated.Reset();
+                                    trash = Client.Inventory.CreateFolder(Inventory.RootFolder.UUID, "Trash", FolderType.Trash);
+                                    await Task.Delay(200).ConfigureAwait(false);
+                                    Client.Inventory.MoveItem(item.UUID, trash, item.Name);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error creating/moving item to Trash: " + ex.Message, ex);
+                                }
                             });
                             return;
                         }
@@ -2209,33 +2231,23 @@ namespace Radegast
                     {
                         if (instance.InventoryClipboard.Item is InventoryFolder)
                         {
-                            ThreadPool.QueueUserWorkItem(state =>
+                            Task.Run(async () =>
                             {
-                                UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, instance.InventoryClipboard.Item.Name, FolderType.None);
-                                Thread.Sleep(500);
-
-                                // FIXME: for some reason copying a bunch of items in one operation does not work
-
-                                //List<UUID> items = new List<UUID>();
-                                //List<UUID> folders = new List<UUID>();
-                                //List<string> names = new List<string>();
-                                //UUID oldOwner = UUID.Zero;
-
-                                foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
+                                try
                                 {
-                                    //folders.Add(newFolderID);
-                                    //names.Add(oldItem.Name);
-                                    //items.Add(oldItem.UUID);
-                                    //oldOwner = oldItem.OwnerID;
-                                    Client.Inventory.RequestCopyItem(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
-                                }
+                                    UUID newFolderID = Client.Inventory.CreateFolder(dest.UUID, instance.InventoryClipboard.Item.Name, FolderType.None);
+                                    await Task.Delay(500).ConfigureAwait(false);
 
-                                //if (folders.Count > 0)
-                                //{
-                                //    Client.Inventory.RequestCopyItems(items, folders, names, oldOwner, (InventoryBase target) => { });
-                                //}
-                            }
-                            );
+                                    foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
+                                    {
+                                        Client.Inventory.RequestCopyItem(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error("Error copying folder contents: " + ex.Message, ex);
+                                }
+                            });
                         }
 
                         break;
