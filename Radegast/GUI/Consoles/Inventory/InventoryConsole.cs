@@ -214,10 +214,10 @@ namespace Radegast
         /// </summary>
         private void RunOnUi(Action action)
         {
-            if (action == null) return;
+            if (action == null) { return; }
 
             // Avoid posting/invoking actions when this control is disposing or already disposed
-            if (this.IsDisposed || this.Disposing) return;
+            if (this.IsDisposed || this.Disposing) { return; }
 
             try
             {
@@ -325,9 +325,34 @@ namespace Radegast
                         Client.Objects.ObjectUpdate -= Objects_AttachmentUpdate;
                     }
                     catch (Exception) { }
-                });
+                    
+                    // Unsubscribe UI events from the tree and other controls
+                    try
+                    {
+                        if (invTree != null)
+                        {
+                            try { invTree.AfterExpand -= TreeView_AfterExpand; } catch { }
+                            try { invTree.NodeMouseClick -= invTree_MouseClick; } catch { }
+                            try { invTree.NodeMouseDoubleClick -= invTree_NodeMouseDoubleClick; } catch { }
+                            try { invTree.Disposed -= InvTree_Disposed; } catch { }
+                        }
+                    }
+                    catch { }
+                 });
             }
             catch { }
+
+            // Dispose timers and unmanaged resources that are not part of the UI thread
+            try
+            {
+                try { _EditTimer?.Dispose(); } catch { }
+                _EditTimer = null;
+            }
+            catch { }
+
+            try { trashCreated?.Dispose(); } catch { }
+
+            try { inventoryUpdateCancelToken?.Dispose(); } catch { }
 
             // Shutdown and dispose bounded queues and background processor
             try { queueProcessorCts?.Cancel(); } catch { }
@@ -351,7 +376,8 @@ namespace Radegast
             try { ItemsToAdd?.Dispose(); } catch { }
             try { ItemsToUpdate?.Dispose(); } catch { }
             try { queueProcessorCts?.Dispose(); } catch { }
-        }
+         }
+
         #endregion
 
         #region Network callbacks
