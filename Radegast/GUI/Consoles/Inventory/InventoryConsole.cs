@@ -580,10 +580,7 @@ namespace Radegast
                 }
                 parentNode.Nodes.Add(dirNode);
             }
-            lock (UUID2NodeCache)
-            {
-                UUID2NodeCache[f.UUID] = dirNode;
-            }
+            UUID2NodeCache[f.UUID] = dirNode;
             return dirNode;
         }
 
@@ -621,10 +618,7 @@ namespace Radegast
             itemNode.ImageIndex = img;
             itemNode.SelectedImageIndex = img;
             parent.Nodes.Add(itemNode);
-            lock (UUID2NodeCache)
-            {
-                UUID2NodeCache[item.UUID] = itemNode;
-            }
+            UUID2NodeCache[item.UUID] = itemNode;
             return itemNode;
         }
 
