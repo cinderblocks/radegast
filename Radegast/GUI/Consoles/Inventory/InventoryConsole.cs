@@ -64,11 +64,14 @@ namespace Radegast
         private readonly AutoResetEvent trashCreated = new AutoResetEvent(false);
         private Task inventoryUpdateTask;
         private CancellationTokenSource inventoryUpdateCancelToken;
+        private readonly SynchronizationContext uiContext;
 
         #region Construction and disposal
         public InventoryConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
+            // capture UI synchronization context for centralized marshaling
+            uiContext = SynchronizationContext.Current;
             Disposed += InventoryConsole_Disposed;
 
             TreeUpdateTimer = new System.Timers.Timer()
@@ -194,6 +197,20 @@ namespace Radegast
 
             try
             {
+                // If we captured a SynchronizationContext (usually the UI thread), post to it.
+                if (uiContext != null && SynchronizationContext.Current != uiContext)
+                {
+                    try
+                    {
+                        uiContext.Post(_ =>
+                        {
+                            try { action(); } catch { }
+                        }, null);
+                        return;
+                    }
+                    catch { /* fallback to BeginInvoke below */ }
+                }
+
                 if (this.IsHandleCreated && this.InvokeRequired)
                 {
                     this.BeginInvoke(action);
@@ -381,13 +398,9 @@ namespace Radegast
 
         private void Exec_OnInventoryObjectAdded(InventoryBase obj)
         {
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
-                Invoke(new MethodInvoker(delegate ()
-                {
-                    Exec_OnInventoryObjectAdded(obj);
-                }
-                ));
+                RunOnUi(() => Exec_OnInventoryObjectAdded(obj));
                 return;
             }
 
@@ -413,9 +426,9 @@ namespace Radegast
 
         private void Inventory_InventoryObjectRemoved(object sender, InventoryObjectRemovedEventArgs e)
         {
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Inventory_InventoryObjectRemoved(sender, e)));
+                RunOnUi(() => Inventory_InventoryObjectRemoved(sender, e));
                 return;
             }
 
@@ -458,9 +471,9 @@ namespace Radegast
         {
             if (newObject == null) { return; }
 
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => Exec_OnInventoryObjectUpdated(oldObject, newObject)));
+                RunOnUi(() => Exec_OnInventoryObjectUpdated(oldObject, newObject));
                 return;
             }
 
@@ -657,18 +670,15 @@ namespace Radegast
         #region Private methods
         private void UpdateStatus(string text)
         {
-            if (InvokeRequired)
+            RunOnUi(() =>
             {
-                BeginInvoke(new MethodInvoker(delegate () { UpdateStatus(text); }));
-                return;
-            }
+                if (text == "OK")
+                {
+                    saveAllTToolStripMenuItem.Enabled = true;
+                }
 
-            if (text == "OK")
-            {
-                saveAllTToolStripMenuItem.Enabled = true;
-            }
-
-            tlabelStatus.Text = text;
+                tlabelStatus.Text = text;
+            });
         }
 
         private void UpdateNodeLabel(UUID itemID)
@@ -2257,9 +2267,9 @@ namespace Radegast
 
         private void UpdateWornLabels()
         {
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(UpdateWornLabels));
+                RunOnUi(() => UpdateWornLabels());
                 return;
             }
 
@@ -2290,9 +2300,9 @@ namespace Radegast
 
         private void UpdateLabelsFor(UUID assertId, bool suspendLayout = true)
         {
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
-                BeginInvoke(new MethodInvoker(() => UpdateLabelsFor(assertId)));
+                RunOnUi(() => UpdateLabelsFor(assertId));
                 return;
             }
 
@@ -2346,7 +2356,7 @@ namespace Radegast
             if (!(_EditNode?.Tag is InventoryBase))
                 return;
 
-            if (InvokeRequired)
+            if (this.IsHandleCreated && this.InvokeRequired)
             {
                 RunOnUi(() => OnLabelEditTimer(sender));
                 return;
