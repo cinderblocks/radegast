@@ -205,6 +205,9 @@ namespace Radegast
         {
             if (action == null) return;
 
+            // Avoid posting/invoking actions when this control is disposing or already disposed
+            if (this.IsDisposed || this.Disposing) return;
+
             try
             {
                 // If we captured a SynchronizationContext (usually the UI thread), post to it.
@@ -509,7 +512,18 @@ namespace Radegast
                 else // Update
                 {
                     currentNode.Tag = newObject;
-                    currentNode.Text = ItemLabel(newObject, false);
+                    var tv = currentNode.TreeView;
+                    if (tv == null || tv.IsDisposed || tv.Disposing)
+                    {
+                        if (currentNode.Tag is InventoryBase ib)
+                        {
+                            UUID2NodeCache.TryRemove(ib.UUID, out _);
+                        }
+                    }
+                    else
+                    {
+                        currentNode.Text = ItemLabel(newObject, false);
+                    }
                     currentNode.Name = newObject.Name;
                 }
             }
@@ -692,6 +706,17 @@ namespace Radegast
                 TreeNode node = FindNodeForItem(itemID);
                 if (node != null)
                 {
+                    // Guard against the owning TreeView/control being disposed between queuing and execution
+                    var tv = node.TreeView;
+                    if (tv == null || tv.IsDisposed || tv.Disposing)
+                    {
+                        if (node.Tag is InventoryBase ib)
+                        {
+                            UUID2NodeCache.TryRemove(ib.UUID, out _);
+                        }
+                        return;
+                    }
+
                     node.Text = ItemLabel((InventoryBase)node.Tag, false);
                 }
             });
@@ -1858,7 +1883,7 @@ namespace Radegast
                         }
                         try
                         {
-                            await FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None).ConfigureAwait(true);
+                            await FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?. Token ?? CancellationToken.None).ConfigureAwait(true);
                         }
                         catch (OperationCanceledException) { }
                         catch (Exception ex)
@@ -2393,7 +2418,18 @@ namespace Radegast
                     TreeNode linkNode = FindNodeForItem(item.UUID);
                     if (linkNode != null)
                     {
-                        linkNode.Text = ItemLabel((InventoryBase)linkNode.Tag, false);
+                        var tv = linkNode.TreeView;
+                        if (tv == null || tv.IsDisposed || tv.Disposing)
+                        {
+                            if (linkNode.Tag is InventoryBase ib)
+                            {
+                                UUID2NodeCache.TryRemove(ib.UUID, out _);
+                            }
+                        }
+                        else
+                        {
+                            linkNode.Text = ItemLabel((InventoryBase)linkNode.Tag, false);
+                        }
                     }
                 }
             }
@@ -2431,6 +2467,16 @@ namespace Radegast
             }
 
             _EditingNode = true;
+            var tv = _EditNode.TreeView;
+            if (tv == null || tv.IsDisposed || tv.Disposing)
+            {
+                if (_EditNode.Tag is InventoryBase ib)
+                {
+                    UUID2NodeCache.TryRemove(ib.UUID, out _);
+                }
+                return;
+            }
+
             _EditNode.Text = ItemLabel((InventoryBase)_EditNode.Tag, true);
             _EditNode.BeginEdit();
         }
