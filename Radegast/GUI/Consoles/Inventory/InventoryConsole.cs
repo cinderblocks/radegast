@@ -65,6 +65,8 @@ namespace Radegast
         private Task inventoryUpdateTask;
         private CancellationTokenSource inventoryUpdateCancelToken;
         private readonly SynchronizationContext uiContext;
+        // Guard to suppress recursive Opening events when we programmatically show the context menu
+        private bool ctxInvBuilding = false;
 
         #region Construction and disposal
         public InventoryConsole(RadegastInstanceForms instance)
@@ -1365,382 +1367,442 @@ namespace Radegast
 
         private async void ctxInv_Opening(object sender, CancelEventArgs e)
         {
-            e.Cancel = false;
+            // If we are programmatically showing the menu allow the opening once and reset the guard
+            if (ctxInvBuilding)
+            {
+                ctxInvBuilding = false;
+                return;
+            }
+
+            // Cancel the default opening and build the menu asynchronously to avoid UI flicker
+            e.Cancel = true;
+
             TreeNode node = invTree.SelectedNode;
             if (node == null)
             {
-                e.Cancel = true;
+                return;
             }
-            else
+
+            // For item-specific async checks (permissions/capabilities) gather information first
+            InventoryFolder folder = null;
+            InventoryItem itemTag = null;
+            if (node.Tag is InventoryFolder f) folder = f;
+            else if (node.Tag is InventoryItem t) itemTag = t;
+
+            bool canDetach = false;
+            bool canAttach = false;
+
+            InventoryItem resolvedItem = null;
+            if (itemTag != null)
             {
-                #region Folder context menu
-                if (node.Tag is InventoryFolder)
+                // Resolve links and check capabilities off the UI thread
+                resolvedItem = instance.COF.ResolveInventoryLink(itemTag) ?? itemTag;
+
+                try
                 {
-                    InventoryFolder folder = (InventoryFolder)node.Tag;
-                    ctxInv.Items.Clear();
-
-                    ToolStripMenuItem ctxItem;
-
-                    if (folder.PreferredType >= FolderType.EnsembleStart &&
-                        folder.PreferredType <= FolderType.EnsembleEnd)
+                    if (IsAttached(resolvedItem))
                     {
-                        ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) { Name = "fix_type" };
-                        ctxInv.Items.Add(ctxItem);
-                        ctxInv.Items.Add(new ToolStripSeparator());
+                        canDetach = await instance.COF.CanDetachItem(resolvedItem).ConfigureAwait(false);
                     }
 
-                    ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) { Name = "new_folder" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) { Name = "new_notecard" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) { Name = "new_script" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) { Name = "refresh" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) { Name = "backup" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxInv.Items.Add(new ToolStripSeparator());
-
-                    ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) { Name = "expand" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) { Name = "expand_all" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) { Name = "collapse" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (folder.PreferredType == FolderType.Trash)
+                    if (!IsAttached(resolvedItem) &&
+                        (resolvedItem.InventoryType == InventoryType.Object || resolvedItem.InventoryType == InventoryType.Attachment))
                     {
-                        ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) { Name = "empty_trash" };
-                        ctxInv.Items.Add(ctxItem);
+                        canAttach = await instance.COF.CanAttachItem(resolvedItem).ConfigureAwait(false);
                     }
-
-                    if (folder.PreferredType == FolderType.LostAndFound)
-                    {
-                        ctxItem = new ToolStripMenuItem("Empty Lost and Found", null, OnInvContextClick)
-                        {
-                            Name = "empty_lost_found"
-                        };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (folder.PreferredType == FolderType.None ||
-                        folder.PreferredType == FolderType.Outfit)
-                    {
-                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxInv.Items.Add(new ToolStripSeparator());
-
-                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_folder" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (instance.InventoryClipboard != null)
-                    {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.InventoryClipboard.Item is InventoryItem)
-                        {
-                            ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
-                            {
-                                Name = "paste_folder_link"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (folder.PreferredType == FolderType.None ||
-                        folder.PreferredType == FolderType.Outfit)
-                    {
-                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_folder" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxInv.Items.Add(new ToolStripSeparator());
-                    }
-
-                    if (folder.PreferredType == FolderType.None || folder.PreferredType == FolderType.Outfit)
-                    {
-                        var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
-
-                        ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
-                        {
-                            Name = "outfit_take_off",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
-                        {
-                            Name = "outfit_add",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
-                        {
-                            Name = "outfit_replace",
-                            Enabled = !isAppearanceManagerBusy
-                        };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    instance.ContextActionManager.AddContributions(ctxInv, folder);
-                    #endregion Folder context menu
                 }
-                else if (node.Tag is InventoryItem tag)
+                catch (Exception ex)
                 {
-                    #region Item context menu
-                    var item = instance.COF.ResolveInventoryLink(tag) ?? tag;
+                    Logger.Error("Error checking attach/detach capabilities: " + ex.Message, Client);
+                }
+            }
+
+            // Build the menu on UI thread and show it at the current cursor position
+            RunOnUi(() =>
+            {
+                try
+                {
                     ctxInv.Items.Clear();
 
-                    ToolStripMenuItem ctxItem;
-
-
-                    if (item.InventoryType == InventoryType.LSL)
+                    if (folder != null)
                     {
-                        ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) { Name = "edit_script" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
+                        #region Folder context menu
+                        InventoryFolder folderLocal = folder;
 
-                    if (item.AssetType == AssetType.Texture)
-                    {
-                        ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) { Name = "view_image" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
+                        ToolStripMenuItem ctxItem;
 
-                    if (item.InventoryType == InventoryType.Landmark)
-                    {
-                        ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) { Name = "lm_teleport" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "lm_info" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item.InventoryType == InventoryType.Notecard)
-                    {
-                        ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) { Name = "notecard_open" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item.InventoryType == InventoryType.Gesture)
-                    {
-                        ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "gesture_play" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "gesture_info" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.Client.Self.ActiveGestures.ContainsKey(item.UUID))
+                        if (folderLocal.PreferredType >= FolderType.EnsembleStart &&
+                            folderLocal.PreferredType <= FolderType.EnsembleEnd)
                         {
-                            ctxItem = new ToolStripMenuItem("Deactivate", null, OnInvContextClick)
+                            ctxItem = new ToolStripMenuItem("Fix type", null, OnInvContextClick) { Name = "fix_type" };
+                            ctxInv.Items.Add(ctxItem);
+                            ctxInv.Items.Add(new ToolStripSeparator());
+                        }
+
+                        ctxItem = new ToolStripMenuItem("New Folder", null, OnInvContextClick) { Name = "new_folder" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("New Note", null, OnInvContextClick) { Name = "new_notecard" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("New Script", null, OnInvContextClick) { Name = "new_script" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Refresh", null, OnInvContextClick) { Name = "refresh" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Backup...", null, OnInvContextClick) { Name = "backup" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxInv.Items.Add(new ToolStripSeparator());
+
+                        ctxItem = new ToolStripMenuItem("Expand", null, OnInvContextClick) { Name = "expand" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Expand All", null, OnInvContextClick) { Name = "expand_all" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Collapse", null, OnInvContextClick) { Name = "collapse" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (folderLocal.PreferredType == FolderType.Trash)
+                        {
+                            ctxItem = new ToolStripMenuItem("Empty Trash", null, OnInvContextClick) { Name = "empty_trash" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (folderLocal.PreferredType == FolderType.LostAndFound)
+                        {
+                            ctxItem = new ToolStripMenuItem("Empty Lost and Found", null, OnInvContextClick)
                             {
-                                Name = "gesture_deactivate"
+                                Name = "empty_lost_found"
                             };
                             ctxInv.Items.Add(ctxItem);
                         }
-                        else
+
+                        if (folderLocal.PreferredType == FolderType.None ||
+                            folderLocal.PreferredType == FolderType.Outfit)
                         {
-                            ctxItem = new ToolStripMenuItem("Activate", null, OnInvContextClick)
+                            ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxInv.Items.Add(new ToolStripSeparator());
+
+                            ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_folder" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (instance.InventoryClipboard != null)
+                        {
+                            ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.InventoryClipboard.Item is InventoryItem)
                             {
-                                Name = "gesture_activate"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (item.InventoryType == InventoryType.Animation)
-                    {
-                        if (!Client.Self.SignaledAnimations.ContainsKey(item.AssetUUID))
-                        {
-                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "animation_play" };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                        else
-                        {
-                            ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) { Name = "animation_stop" };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    if (item.InventoryType == InventoryType.Object)
-                    {
-                        ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) { Name = "rez_inworld" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxInv.Items.Add(new ToolStripSeparator());
-
-                    ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_item" };
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (instance.InventoryClipboard != null)
-                    {
-                        ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_item" };
-                        ctxInv.Items.Add(ctxItem);
-
-                        if (instance.InventoryClipboard.Item is InventoryItem)
-                        {
-                            ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
-                            {
-                                Name = "paste_item_link"
-                            };
-                            ctxInv.Items.Add(ctxItem);
-                        }
-                    }
-
-                    ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_item" };
-
-                    if (IsAttached(item) || IsWorn(item))
-                    {
-                        ctxItem.Enabled = false;
-                    }
-                    ctxInv.Items.Add(ctxItem);
-
-                    if (item.InventoryType == InventoryType.Object && IsAttached(item))
-                    {
-                        ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
-                        //TODO: add RLV support
-                        var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
-                            p => p.Value.ParentID == Client.Self.LocalID
-                                 && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
-                        if (kvp.Value != null)
-                        {
-                            var attached = kvp.Value;
-                            ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
-                        }
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (IsAttached(item) && await instance.COF.CanDetachItem(item))
-                    {
-                        ctxItem =
-                            new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (!IsAttached(item) &&
-                        (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
-                        await instance.COF.CanAttachItem(item))
-                    {
-                        ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
-                        ctxInv.Items.Add(ctxItemAttach);
-
-                        ToolStripMenuItem ctxItemAttachHUD = new ToolStripMenuItem("Attach to HUD");
-                        ctxInv.Items.Add(ctxItemAttachHUD);
-
-                        foreach (AttachmentPoint pt in Enum.GetValues(typeof(AttachmentPoint)))
-                        {
-                            if (!pt.ToString().StartsWith("HUD"))
-                            {
-                                string name = Utils.EnumToText(pt);
-
-                                InventoryItem alreadyAttached = null;
-                                if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
                                 {
-                                    name += $" ({alreadyAttached.Name})";
-                                }
+                                    Name = "paste_folder_link"
+                                };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                        }
 
-                                ToolStripMenuItem ptItem =
-                                    new ToolStripMenuItem(name, null, OnInvContextClick)
-                                    {
-                                        Name = "attach_to",
-                                        Tag = pt
-                                    };
-                                ptItem.Name = "attach_to";
-                                ctxItemAttach.DropDownItems.Add(ptItem);
+                        if (folderLocal.PreferredType == FolderType.None ||
+                            folderLocal.PreferredType == FolderType.Outfit)
+                        {
+                            ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_folder" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxInv.Items.Add(new ToolStripSeparator());
+                        }
+
+                        if (folderLocal.PreferredType == FolderType.None || folderLocal.PreferredType == FolderType.Outfit)
+                        {
+                            var isAppearanceManagerBusy = Client.Appearance.ManagerBusy;
+
+                            ctxItem = new ToolStripMenuItem("Take off Items", null, OnInvContextClick)
+                            {
+                                Name = "outfit_take_off",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Add to Outfit", null, OnInvContextClick)
+                            {
+                                Name = "outfit_add",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Replace Outfit", null, OnInvContextClick)
+                            {
+                                Name = "outfit_replace",
+                                Enabled = !isAppearanceManagerBusy
+                            };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        instance.ContextActionManager.AddContributions(ctxInv, folderLocal);
+                        #endregion
+                    }
+                    else if (resolvedItem != null)
+                    {
+                        #region Item context menu
+                        var item = resolvedItem;
+                        ToolStripMenuItem ctxItem;
+
+
+                        if (item.InventoryType == InventoryType.LSL)
+                        {
+                            ctxItem = new ToolStripMenuItem("Edit script", null, OnInvContextClick) { Name = "edit_script" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.AssetType == AssetType.Texture)
+                        {
+                            ctxItem = new ToolStripMenuItem("View", null, OnInvContextClick) { Name = "view_image" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Landmark)
+                        {
+                            ctxItem = new ToolStripMenuItem("Teleport", null, OnInvContextClick) { Name = "lm_teleport" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "lm_info" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Notecard)
+                        {
+                            ctxItem = new ToolStripMenuItem("Open", null, OnInvContextClick) { Name = "notecard_open" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item.InventoryType == InventoryType.Gesture)
+                        {
+                            ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "gesture_play" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Info", null, OnInvContextClick) { Name = "gesture_info" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.Client.Self.ActiveGestures.ContainsKey(item.UUID))
+                            {
+                                ctxItem = new ToolStripMenuItem("Deactivate", null, OnInvContextClick)
+                                {
+                                    Name = "gesture_deactivate"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                             else
                             {
-                                string name = Utils.EnumToText(pt).Substring(3);
-
-                                InventoryItem alreadyAttached = null;
-                                if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                ctxItem = new ToolStripMenuItem("Activate", null, OnInvContextClick)
                                 {
-                                    name += $" ({alreadyAttached.Name})";
-                                }
-
-                                ToolStripMenuItem ptItem =
-                                    new ToolStripMenuItem(name, null, OnInvContextClick)
-                                    {
-                                        Name = "attach_to",
-                                        Tag = pt
-                                    };
-                                ptItem.Name = "attach_to";
-                                ctxItemAttachHUD.DropDownItems.Add(ptItem);
+                                    Name = "gesture_activate"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                         }
 
-                        ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick)
+                        if (item.InventoryType == InventoryType.Animation)
                         {
-                            Name = "wear_attachment_add"
-                        };
-                        ctxInv.Items.Add(ctxItem);
+                            if (!Client.Self.SignaledAnimations.ContainsKey(item.AssetUUID))
+                            {
+                                ctxItem = new ToolStripMenuItem("Play", null, OnInvContextClick) { Name = "animation_play" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                            else
+                            {
+                                ctxItem = new ToolStripMenuItem("Stop", null, OnInvContextClick) { Name = "animation_stop" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                        }
 
-                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wear_attachment" };
-                        ctxInv.Items.Add(ctxItem);
-                    }
-
-                    if (item is InventoryWearable wearable)
-                    {
-                        ctxInv.Items.Add(new ToolStripSeparator());
-
-                        if (IsWorn(wearable))
+                        if (item.InventoryType == InventoryType.Object)
                         {
-                            ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
+                            ctxItem = new ToolStripMenuItem("Rez inworld", null, OnInvContextClick) { Name = "rez_inworld" };
                             ctxInv.Items.Add(ctxItem);
                         }
-                        else
+
+                        ctxItem = new ToolStripMenuItem("Rename", null, OnInvContextClick) { Name = "rename_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxInv.Items.Add(new ToolStripSeparator());
+
+                        ctxItem = new ToolStripMenuItem("Cut", null, OnInvContextClick) { Name = "cut_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        ctxItem = new ToolStripMenuItem("Copy", null, OnInvContextClick) { Name = "copy_item" };
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (instance.InventoryClipboard != null)
                         {
-                            switch (wearable.WearableType)
+                            ctxItem = new ToolStripMenuItem("Paste", null, OnInvContextClick) { Name = "paste_item" };
+                            ctxInv.Items.Add(ctxItem);
+
+                            if (instance.InventoryClipboard.Item is InventoryItem)
                             {
-                                case WearableType.Invalid:
-                                    break;
-                                case WearableType.Alpha:
-                                case WearableType.Gloves:
-                                case WearableType.Jacket:
-                                case WearableType.Pants:
-                                case WearableType.Physics:
-                                case WearableType.Shirt:
-                                case WearableType.Shoes:
-                                case WearableType.Socks:
-                                case WearableType.Skirt:
-                                case WearableType.Tattoo:
-                                case WearableType.Underpants:
-                                case WearableType.Undershirt:
-                                case WearableType.Universal:
-                                    ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick) { Name = "wearable_add" };
-                                    ctxInv.Items.Add(ctxItem);
-                                    goto default;
-                                default:
-                                    ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wearable_wear" };
-                                    ctxInv.Items.Add(ctxItem);
-                                    break;
+                                ctxItem = new ToolStripMenuItem("Paste as Link", null, OnInvContextClick)
+                                {
+                                    Name = "paste_item_link"
+                                };
+                                ctxInv.Items.Add(ctxItem);
                             }
                         }
+
+                        ctxItem = new ToolStripMenuItem("Delete", null, OnInvContextClick) { Name = "delete_item" };
+
+                        if (IsAttached(item) || IsWorn(item))
+                        {
+                            ctxItem.Enabled = false;
+                        }
+                        ctxInv.Items.Add(ctxItem);
+
+                        if (item.InventoryType == InventoryType.Object && IsAttached(item))
+                        {
+                            ctxItem = new ToolStripMenuItem("Touch", null, OnInvContextClick) { Name = "touch" };
+                            //TODO: add RLV support
+                            var kvp = Client.Network.CurrentSim.ObjectsPrimitives.FirstOrDefault(
+                                p => p.Value.ParentID == Client.Self.LocalID
+                                     && OutfitManager.GetAttachmentItemID(p.Value) == item.UUID);
+                            if (kvp.Value != null)
+                            {
+                                var attached = kvp.Value;
+                                ctxItem.Enabled = (attached.Flags & PrimFlags.Touch) != 0;
+                            }
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (IsAttached(item) && canDetach)
+                        {
+                            ctxItem =
+                                new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (!IsAttached(item) &&
+                            (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
+                            canAttach)
+                        {
+                            ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
+                            ctxInv.Items.Add(ctxItemAttach);
+
+                            ToolStripMenuItem ctxItemAttachHUD = new ToolStripMenuItem("Attach to HUD");
+                            ctxInv.Items.Add(ctxItemAttachHUD);
+
+                            foreach (AttachmentPoint pt in Enum.GetValues(typeof(AttachmentPoint)))
+                            {
+                                if (!pt.ToString().StartsWith("HUD"))
+                                {
+                                    string name = Utils.EnumToText(pt);
+
+                                    InventoryItem alreadyAttached = null;
+                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    {
+                                        name += $" ({alreadyAttached.Name})";
+                                    }
+
+                                    ToolStripMenuItem ptItem =
+                                        new ToolStripMenuItem(name, null, OnInvContextClick)
+                                        {
+                                            Name = "attach_to",
+                                            Tag = pt
+                                        };
+                                    ptItem.Name = "attach_to";
+                                    ctxItemAttach.DropDownItems.Add(ptItem);
+                                }
+                                else
+                                {
+                                    string name = Utils.EnumToText(pt).Substring(3);
+
+                                    InventoryItem alreadyAttached = null;
+                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    {
+                                        name += $" ({alreadyAttached.Name})";
+                                    }
+
+                                    ToolStripMenuItem ptItem =
+                                        new ToolStripMenuItem(name, null, OnInvContextClick)
+                                        {
+                                            Name = "attach_to",
+                                            Tag = pt
+                                        };
+                                    ptItem.Name = "attach_to";
+                                    ctxItemAttachHUD.DropDownItems.Add(ptItem);
+                                }
+                            }
+
+                            ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick)
+                            {
+                                Name = "wear_attachment_add"
+                            };
+                            ctxInv.Items.Add(ctxItem);
+
+                            ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wear_attachment" };
+                            ctxInv.Items.Add(ctxItem);
+                        }
+
+                        if (item is InventoryWearable wearable)
+                        {
+                            ctxInv.Items.Add(new ToolStripSeparator());
+
+                            if (IsWorn(wearable))
+                            {
+                                ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
+                                ctxInv.Items.Add(ctxItem);
+                            }
+                            else
+                            {
+                                switch (wearable.WearableType)
+                                {
+                                    case WearableType.Invalid:
+                                        break;
+                                    case WearableType.Alpha:
+                                    case WearableType.Gloves:
+                                    case WearableType.Jacket:
+                                    case WearableType.Pants:
+                                    case WearableType.Physics:
+                                    case WearableType.Shirt:
+                                    case WearableType.Shoes:
+                                    case WearableType.Socks:
+                                    case WearableType.Skirt:
+                                    case WearableType.Tattoo:
+                                    case WearableType.Underpants:
+                                    case WearableType.Undershirt:
+                                    case WearableType.Universal:
+                                        ctxItem = new ToolStripMenuItem("Add to Worn", null, OnInvContextClick) { Name = "wearable_add" };
+                                        ctxInv.Items.Add(ctxItem);
+                                        goto default;
+                                    default:
+                                        ctxItem = new ToolStripMenuItem("Wear", null, OnInvContextClick) { Name = "wearable_wear" };
+                                        ctxInv.Items.Add(ctxItem);
+                                        break;
+                                }
+                            }
+                        }
+
+                        instance.ContextActionManager.AddContributions(ctxInv, item);
+                        #endregion
                     }
 
-                    instance.ContextActionManager.AddContributions(ctxInv, item);
-                    #endregion Item context menu
+                    // Show menu at mouse cursor position. Use guard to avoid recursive Opening handling.
+                    try
+                    {
+                        ctxInvBuilding = true;
+                        var pos = invTree.PointToClient(Cursor.Position);
+                        ctxInv.Show(invTree, pos.X, pos.Y);
+                    }
+                    catch { ctxInvBuilding = false; }
                 }
-            }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error building inventory context menu: " + ex.Message, Client);
+                }
+            });
         }
 
         private void RunBackgroundTask(Func<CancellationToken, Task> work, Action uiCallback = null, int timeoutSeconds = 120)
@@ -1926,9 +1988,9 @@ namespace Radegast
                     case "outfit_take_off":
                         var removeFromOutfit = GetInventoryItemsForOutFit(folder);
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
-                        RunBackgroundTask(async (cancellationToken) =>
+                        RunBackgroundTask(async (cancellationtoken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationToken);
+                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationtoken);
                         }, UpdateWornLabels);
                         break;
                 }
