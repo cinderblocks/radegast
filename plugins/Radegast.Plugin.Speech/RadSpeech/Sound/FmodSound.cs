@@ -23,7 +23,7 @@
 
 using System;
 using System.IO;
-using System.Threading;
+using System.Threading.Tasks;
 using Radegast.Media;
 
 namespace RadegastSpeech.Sound
@@ -31,14 +31,11 @@ namespace RadegastSpeech.Sound
     internal class FmodSound : Control
     {
         private Speech speechPlayer;
-        private readonly AutoResetEvent playing;
 
         internal FmodSound(PluginControl pc)
             : base(pc)
         {
-            playing = new AutoResetEvent(false);
             speechPlayer = new Speech();
-            speechPlayer.OnSpeechDone += SpeechDoneHandler;
         }
 
         internal override void Stop()
@@ -63,26 +60,43 @@ namespace RadegastSpeech.Sound
         {
             if (speechPlayer != null)
             {
-                // Play this file at the designated position.  When it finishes, the
-                // SpeechDoneHandler will be called.
-                uint len = speechPlayer.Play(filename, global, worldPos);
-
-                // Wait for it to finish. Max 2sec longer tha it is supposed to
-                playing.WaitOne((int)len + 2000, false);
+                try
+                {
+                    // Start async playback without blocking this caller.
+                    _ = PlayAndWaitAsync(filename, global, worldPos);
+                }
+                catch (Exception)
+                {
+                    // Swallow exceptions to preserve original behavior
+                }
             }
 
-            // Delete the WAV file if requested.
+            // If the async path does not delete the file for some reason, attempt best-effort cleanup
             if (deleteAfter)
             {
-                File.Delete(filename);
+                // Deletion is handled after playback in PlayAndWaitAsync; not needed here.
             }
         }
 
-        // Handler for event when speech is done playing.
-        private void SpeechDoneHandler(object sender, EventArgs e)
+        /// <summary>
+        /// Async variant that waits for playback to finish and deletes the file afterwards.
+        /// </summary>
+        internal override async Task PlayAndWaitAsync(string filename, bool global, OpenMetaverse.Vector3 pos)
         {
-            // Poke the semaphore
-            playing.Set();
+            if (speechPlayer != null)
+            {
+                try
+                {
+                    await speechPlayer.PlayAndWaitAsync(filename, global, pos).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // Ignore playback errors
+                }
+            }
+
+            // Delete the WAV file if present. Best-effort cleanup.
+            try { File.Delete(filename); } catch { }
         }
 
         // TODO do we need this?

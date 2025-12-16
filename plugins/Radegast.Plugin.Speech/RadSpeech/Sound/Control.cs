@@ -18,6 +18,9 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+using System;
+using System.Threading.Tasks;
+
 namespace RadegastSpeech.Sound
 {
     internal abstract class Control : AreaControl
@@ -30,13 +33,47 @@ namespace RadegastSpeech.Sound
         /// <summary>
         /// Play a sound once at a specific location.
         /// </summary>
-        /// <param name="?"></param>
+        /// <param name="filename"></param>
+        /// <param name="sps"></param>
+        /// <param name="pos"></param>
+        /// <param name="deleteAfter"></param>
+        /// <param name="spatialized"></param>
         internal abstract void Play(
             string filename,
             int sps,
             OpenMetaverse.Vector3 pos,
             bool deleteAfter,
             bool spatialized);
+
+        /// <summary>
+        /// Async variant of Play. Default implementation offloads to a thread-pool thread
+        /// to preserve compatibility while allowing callers to await playback without
+        /// blocking the calling thread.
+        /// </summary>
+        internal virtual Task PlayAsync(
+            string filename,
+            int sps,
+            OpenMetaverse.Vector3 pos,
+            bool deleteAfter,
+            bool spatialized)
+        {
+            // Default behavior: run the blocking Play on threadpool
+            return Task.Run(() => Play(filename, sps, pos, deleteAfter, spatialized));
+        }
+
+        /// <summary>
+        /// Async variant that waits for playback to finish. Default implementation
+        /// delegates to PlayAsync and does not guarantee completion of playback.
+        /// Override in implementations that can await playback completion.
+        /// </summary>
+        internal virtual Task PlayAndWaitAsync(
+            string filename,
+            bool global,
+            OpenMetaverse.Vector3 pos)
+        {
+            // Default: call PlayAsync and return its Task
+            return PlayAsync(filename, 16000, pos, true, true);
+        }
 
         internal abstract void Stop();
         internal override void Start()

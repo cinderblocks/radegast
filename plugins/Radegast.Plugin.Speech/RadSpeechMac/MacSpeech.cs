@@ -19,6 +19,7 @@
  */
 
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using RadegastSpeech.Talk;
 
 namespace RadegastSpeech
@@ -30,33 +31,31 @@ namespace RadegastSpeech
         #pragma warning disable 67
         public event SpeechEventHandler OnRecognition;
 
-        public void SpeechStart( PluginControl pc, string[] beeps)
+        public Task SpeechStart( PluginControl pc, string[] beeps)
         {
             synth = new MacSynth( pc, beeps);
-            if (OnRecognition != null)
-            {
-            }
+            return Task.CompletedTask;
         }
 
-        public void SpeechStop()
+        public Task SpeechStop()
         {
             synth.Stop();
+            return Task.CompletedTask;
         }
 
-        public void SpeechHalt()
+        public Task SpeechHalt()
         {
             synth.Halt();
+            return Task.CompletedTask;
         }
         public Dictionary<string, AvailableVoice> GetVoices()
         {
             return synth.GetVoices();
         }
 
-        public void Speak(
-            QueuedSpeech utterance,
-            string filename)
+        public async Task Speak(QueuedSpeech utterance, string filename)
         {
-            synth.Speak(utterance, filename);
+            await Task.Run(() => synth.Speak(utterance, filename)).ConfigureAwait(false);
         }
 
         public void RecogStart()

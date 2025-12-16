@@ -19,9 +19,10 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Threading.Channels;
 using OpenMetaverse;
 
 
@@ -32,7 +33,7 @@ namespace RadegastSpeech.Talk
     /// </summary>
     internal class Control : AreaControl
     {
-		private int seq = 0;
+        private int seq = 0;
         /// <summary>
         /// Interface to the platform-specific synthesizer
         /// </summary>
@@ -40,12 +41,10 @@ namespace RadegastSpeech.Talk
         /// <summary>
         /// Queue of utterances waiting to be said
         /// </summary>
-        private Queue<QueuedSpeech> queue;
+        private Channel<QueuedSpeech> queue;
+        private CancellationTokenSource speakingCts;
+        private Task speakingTask;
         private bool running = true;
-        /// <summary>
-        /// Background thread to service the queue
-        /// </summary>
-        private Thread speakingThread;
 
         private readonly Substitutions subs;
 
@@ -71,9 +70,9 @@ namespace RadegastSpeech.Talk
             : base(pc)
         {
             AUDIOFILE = Path.Combine(control.instance.UserDir, "ChatTemp");
-            
+
             // Substitutions from chat-ese to English.
-            subs = new Substitutions( control );
+            subs = new Substitutions(control);
             syn = new Synthesizer(control);
             if (syn == null)
                 return;
@@ -86,28 +85,22 @@ namespace RadegastSpeech.Talk
         /// </summary>
         internal override void Start()
         {
-            if (syn==null) return;
+            if (syn == null) return;
 
             // Fire up the synth subsystem.
             syn.Start();
 
             // Get the list of installed voices.  This is done in a
             // platform-specific way.
-            voices.Populate( syn.GetVoices());
+            voices.Populate(syn.GetVoices());
             voices.Start();
 
             // Create the work queue if we can deal with it
             if (control.osLayer != null)
             {
-                queue = new Queue<QueuedSpeech>();
-
-                // Start the background thread that does all the text-to-speech.
-                speakingThread = new Thread(SpeakLoop)
-                {
-                    IsBackground = true,
-                    Name = "SpeakingThread"
-                };
-                speakingThread.Start();
+                queue = Channel.CreateUnbounded<QueuedSpeech>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
+                speakingCts = new CancellationTokenSource();
+                speakingTask = Task.Run(() => SpeakLoopAsync(speakingCts.Token), speakingCts.Token);
             }
         }
 
@@ -116,14 +109,18 @@ namespace RadegastSpeech.Talk
         /// </summary>
         internal override void Shutdown()
         {
-            // If the background thread is alive, send it the special
-            // empty utterance that will make it shut down gracefully.
-            if (speakingThread != null && speakingThread.IsAlive)
+            // Stop queue and wait for the worker to finish
+            if (queue != null)
             {
-                Say( null, null, new Vector3(0, 0, 0), null);
-                Thread.Sleep(600);
+                try
+                {
+                    running = false;
+                    queue.Writer.TryComplete();
+                    speakingCts?.Cancel();
+                    speakingTask?.Wait(1000);
+                }
+                catch { }
             }
-            speakingThread = null;
 
             // Shut down the synthesizer.
             syn.Shutdown();
@@ -134,7 +131,7 @@ namespace RadegastSpeech.Talk
         /// </summary>
         private void FirstCheck()
         {
-            if (!firstTime || control.osLayer==null) return;
+            if (!firstTime || control.osLayer == null) return;
 
             firstTime = false;
             // Initialize the library of installed voices.
@@ -147,16 +144,16 @@ namespace RadegastSpeech.Talk
         /// </summary>
         /// <param name="a"></param>
         /// <param name="b"></param>
-        internal void AddSubstitution( string a, string b )
+        internal void AddSubstitution(string a, string b)
         {
-            subs.Add(a,b);
+            subs.Add(a, b);
         }
 
         /// <summary>
         /// Add a rule removing a word from the utterance
         /// </summary>
         /// <param name="a"></param>
-        internal void AddRemoval( string a)
+        internal void AddRemoval(string a)
         {
             subs.Add(a);
         }
@@ -166,12 +163,12 @@ namespace RadegastSpeech.Talk
         /// </summary>
         internal void Flush()
         {
-            lock (queue)
-            {
-                control.sound.Stop();  // Abort any playing speech.
-                syn.Stop();
-                queue.Clear();  // Remove any pending speech.
-            }
+            if (queue == null) return;
+            // Cancel any playing speech and clear queue by recreating it
+            control.sound.Stop();  // Abort any playing speech.
+            syn.Stop();
+            var old = queue;
+            queue = Channel.CreateUnbounded<QueuedSpeech>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
         }
 
         #region WaysOfSpeaking
@@ -179,7 +176,7 @@ namespace RadegastSpeech.Talk
         /// Say something in the System voice.
         /// </summary>
         /// <param name="message"></param>
-        internal void Say( string message )
+        internal void Say(string message)
         {
             FirstCheck();
             Say("Notice", message, SYSTEMPOSITION, SystemVoice, false, BeepType.None);
@@ -193,7 +190,7 @@ namespace RadegastSpeech.Talk
         internal void Say(string message, BeepType beep)
         {
             FirstCheck();
-            Say("Notice", message, SYSTEMPOSITION, SystemVoice, false, beep );
+            Say("Notice", message, SYSTEMPOSITION, SystemVoice, false, beep);
         }
 
         /// <summary>
@@ -201,9 +198,9 @@ namespace RadegastSpeech.Talk
         /// </summary>
         /// <param name="who"></param>
         /// <param name="message"></param>
-        internal void Say( string who, string message )
+        internal void Say(string who, string message)
         {
-            Say( who, message, SYSTEMPOSITION, voices.VoiceFor(who), false, BeepType.None );
+            Say(who, message, SYSTEMPOSITION, voices.VoiceFor(who), false, BeepType.None);
         }
 
 
@@ -254,7 +251,7 @@ namespace RadegastSpeech.Talk
             SayPersonSpatial(who, message, position, av, true);
         }
 
-        private void SayPersonSpatial( string who, string message, Vector3 position, AssignedVoice av, bool spatial )
+        private void SayPersonSpatial(string who, string message, Vector3 position, AssignedVoice av, bool spatial)
         {
             // Fix up any chat-ese symbols and pronounciations.
             message = subs.FixExpressions(message);
@@ -316,12 +313,7 @@ namespace RadegastSpeech.Talk
                 v,
                 false);
 
-            // Put that on the queue and wake up the background thread.
-            lock (queue)
-            {
-                queue.Enqueue(e);
-                Monitor.Pulse(queue);
-            }
+            queue.Writer.TryWrite(e);
         }
 
         internal void Say(
@@ -339,12 +331,7 @@ namespace RadegastSpeech.Talk
                 subs.FixExpressions(what),
                 where, v, false, doRotate, beep);
 
-            // Put that on the queue and wake up the background thread.
-            lock (queue)
-            {
-                queue.Enqueue(e);
-                Monitor.Pulse(queue);
-            }
+            queue.Writer.TryWrite(e);
         }
         /// <summary>
         /// Queue up an action to say.
@@ -366,11 +353,7 @@ namespace RadegastSpeech.Talk
                 subs.FixExpressions(who),
                 subs.FixExpressions(what),
                 where, v, true, spatial, BeepType.None);
-            lock (queue)
-            {
-                queue.Enqueue(e);
-                Monitor.Pulse(queue);
-            }
+            queue.Writer.TryWrite(e);
         }
         #endregion
 
@@ -380,52 +363,49 @@ namespace RadegastSpeech.Talk
         /// </summary>
         /// <remarks>This loops on the queue of things to say, and speaks them
         /// one at a time.</remarks>
-        private void SpeakLoop()
+        private async Task SpeakLoopAsync(CancellationToken token)
         {
-            QueuedSpeech utterance;
-
             try
             {
-                while (running)
+                var reader = queue.Reader;
+                while (await reader.WaitToReadAsync(token).ConfigureAwait(false))
                 {
-                    // Wait for something to show up in the queue.
-                    lock (queue)
+                    while (reader.TryRead(out var utterance))
                     {
-                        while (queue.Count == 0)
+                        if (!running) break;
+
+                        // Watch for the special "shutdown" message.
+                        if (utterance.message == null && utterance.speaker == null)
                         {
-                            Monitor.Wait(queue);
+                            running = false;
+                            break;
                         }
 
-                        utterance = queue.Dequeue();
+                        string thisfile = AUDIOFILE + string.Format("{0}", seq++) + ".wav";
+                        if (seq > 4) seq = 0;
+
+                        // Synthesize it into a file.
+                        await syn.SpeakAsync(utterance, thisfile).ConfigureAwait(false);
+
+                        // Play back the file. Use PlayAndWaitAsync so we await completion.
+                        if (System.Environment.OSVersion.Platform != PlatformID.MacOSX)
+                        {
+                            try
+                            {
+                                await control.sound.PlayAndWaitAsync(thisfile, true, utterance.position).ConfigureAwait(false);
+                            }
+                            catch (MissingMethodException)
+                            {
+                                // Fallback to PlayAsync if PlayAndWaitAsync not available
+                                await control.sound.PlayAsync(thisfile, 16000, utterance.position, true, utterance.isSpatial).ConfigureAwait(false);
+                            }
+                        }
                     }
 
-                    // Watch for the special "shutdown" message.
-                    if (utterance.message == null &&
-                        utterance.speaker == null)
-                    {
-                        running = false;
-                        continue;
-                    }
-
-                    string thisfile = AUDIOFILE + string.Format("{0}", seq++) + ".wav";
-                    if (seq > 4) seq = 0;
-
-                    // Synthesize it into a file.
-                    syn.Speak(utterance, thisfile);
-
-                    // TODO Get FMOD working on Mac
-                    if (System.Environment.OSVersion.Platform != PlatformID.MacOSX)
-                    {
-                        // Play back the file
-                        control.sound.Play(
-                            thisfile,              // Name of the file
-                            16000,                  // Same rate
-                            utterance.position,     // Location
-                            true,                   // Delete the file when done
-                            utterance.isSpatial);   // Whether it is inworld or moves with listener
-                    }
+                    if (!running) break;
                 }
             }
+            catch (OperationCanceledException) { }
             catch (Exception e)
             {
                 Console.WriteLine("Synth shutdown " + e.Message);
