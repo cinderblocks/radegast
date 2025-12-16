@@ -1363,7 +1363,7 @@ namespace Radegast
             }
         }
 
-        private void ctxInv_Opening(object sender, CancelEventArgs e)
+        private async void ctxInv_Opening(object sender, CancelEventArgs e)
         {
             e.Cancel = false;
             TreeNode node = invTree.SelectedNode;
@@ -1629,7 +1629,7 @@ namespace Radegast
                         ctxInv.Items.Add(ctxItem);
                     }
 
-                    if (IsAttached(item) && instance.COF.CanDetachItem(item).Result)
+                    if (IsAttached(item) && await instance.COF.CanDetachItem(item))
                     {
                         ctxItem =
                             new ToolStripMenuItem("Detach from yourself", null, OnInvContextClick) { Name = "detach" };
@@ -1638,7 +1638,7 @@ namespace Radegast
 
                     if (!IsAttached(item) &&
                         (item.InventoryType == InventoryType.Object || item.InventoryType == InventoryType.Attachment) &&
-                        instance.COF.CanAttachItem(item).Result)
+                        await instance.COF.CanAttachItem(item))
                     {
                         ToolStripMenuItem ctxItemAttach = new ToolStripMenuItem("Attach to");
                         ctxInv.Items.Add(ctxItemAttach);
