@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
+using System.Threading.Tasks;
 
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
@@ -71,7 +72,7 @@ namespace Radegast.Automation
             {
                 OSDMap map = new OSDMap(2)
                 {
-                    ["enabled"] = Enabled, 
+                    ["enabled"] = Enabled,
                     ["allowed_owner"] = string.Join(";", AllowedOwners)
                 };
                 instance.ClientSettings["LSLHelper"] = map;
@@ -139,11 +140,19 @@ namespace Radegast.Automation
                                     if (!(client.Inventory.Store[invItemID] is InventoryItem item))
                                         return false;
                                     client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, sendTo, true);
-                                    ThreadPool.QueueUserWorkItem(sync =>
-                                        instance.ShowNotificationInChat(
-                                            $"Gave {item.Name} to {instance.Names.GetAsync(sendTo).GetAwaiter().GetResult()}",
-                                            ChatBufferTextStyle.ObjectChat)
-                                    );
+
+                                    Task.Run(async () =>
+                                    {
+                                        try
+                                        {
+                                            var name = await instance.Names.GetAsync(sendTo).ConfigureAwait(false);
+                                            instance.ShowNotificationInChat(
+                                                $"Gave {item.Name} to {name}",
+                                                ChatBufferTextStyle.ObjectChat);
+                                        }
+                                        catch { }
+                                    });
+
                                     return true;
                                 }
                             case "say": /* This one doesn't work yet. I don't know why. TODO. - Nico */
@@ -187,7 +196,7 @@ namespace Radegast.Automation
             if (args == null || args.Length < 4)
                 return;
 
-            ThreadPool.QueueUserWorkItem(sync =>
+            Task.Run(async () =>
             {
                 try
                 {
@@ -200,32 +209,49 @@ namespace Radegast.Automation
 
                     if (instance.Groups.ContainsKey(groupID))
                     {
-                        AutoResetEvent gotMembers = new AutoResetEvent(false);
-                        Dictionary<UUID, GroupMember> Members = null;
+                        var tcs = new TaskCompletionSource<Dictionary<UUID, GroupMember>>();
+
                         EventHandler<GroupMembersReplyEventArgs> handler = (sender, e) =>
                         {
-                            if (e.GroupID != groupID)
-                                return;
-                            Members = e.Members;
-                            gotMembers.Set();
+                            if (e.GroupID != groupID) return;
+                            tcs.TrySetResult(e.Members);
                         };
 
                         client.Groups.GroupMembersReply += handler;
                         client.Groups.RequestGroupMembers(groupID);
-                        gotMembers.WaitOne(30 * 1000, false);
+
+                        // Wait up to 30s
+                        var completed = await Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).ConfigureAwait(false);
                         client.Groups.GroupMembersReply -= handler;
+
+                        Dictionary<UUID, GroupMember> Members = null;
+                        if (completed == tcs.Task)
+                        {
+                            Members = tcs.Task.Result;
+                        }
 
                         if (Members != null && Members.ContainsKey(invitee))
                         {
-                            instance.ShowNotificationInChat(
-                                $"Not inviting {instance.Names.GetAsync(invitee).GetAwaiter().GetResult()} ({invitee}) to {instance.Groups[groupID].Name} ({groupID}), already member",
-                                ChatBufferTextStyle.ObjectChat);
+                            try
+                            {
+                                var name = await instance.Names.GetAsync(invitee).ConfigureAwait(false);
+                                instance.ShowNotificationInChat(
+                                    $"Not inviting {name} ({invitee}) to {instance.Groups[groupID].Name} ({groupID}), already member",
+                                    ChatBufferTextStyle.ObjectChat);
+                            }
+                            catch { }
                         }
                         else
                         {
-                            instance.ShowNotificationInChat(
-                                $"Inviting {instance.Names.GetAsync(invitee).GetAwaiter().GetResult()} ({invitee}) to {instance.Groups[groupID].Name} ({groupID})",
-                                ChatBufferTextStyle.ObjectChat);
+                            try
+                            {
+                                var name = await instance.Names.GetAsync(invitee).ConfigureAwait(false);
+                                instance.ShowNotificationInChat(
+                                    $"Inviting {name} ({invitee}) to {instance.Groups[groupID].Name} ({groupID})",
+                                    ChatBufferTextStyle.ObjectChat);
+                            }
+                            catch { }
+
                             client.Groups.Invite(groupID, new List<UUID>(1) { roleID }, invitee);
                         }
                     }

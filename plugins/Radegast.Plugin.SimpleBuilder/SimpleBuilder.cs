@@ -40,6 +40,9 @@ using System.Windows.Forms;
 using Radegast;
 using OpenMetaverse;
 using Radegast.Core;
+using System.Threading;
+using System.Threading.Tasks;
+using LibreMetaverse;
 #endregion
 
 namespace SimpleBuilderNamespace
@@ -51,7 +54,7 @@ namespace SimpleBuilderNamespace
     [Plugin(Name = "SimpleBuilder Plugin", Description = "Allows you to build some basic prims, like boxes, cylinder, tubes, ... (requires permission!)", Version = "1.0")]
     public partial class SimpleBuilder : RadegastTabControl, IRadegastPlugin
     {
-        private readonly System.Threading.AutoResetEvent primDone = new System.Threading.AutoResetEvent(false);
+        private TaskCompletionSource<bool> primDoneTcs;
 
         private readonly string pluginName = "SimpleBuilder";
         // Methods needed for proper registration of a GUI tab
@@ -209,22 +212,19 @@ namespace SimpleBuilderNamespace
                     PrimFlags.ObjectGroupOwned == (prim.Flags & PrimFlags.ObjectGroupOwned) &&
                     UUID.Zero != prim.Properties.GroupID)
                 {
-                    System.Threading.AutoResetEvent nameReceivedSignal = new System.Threading.AutoResetEvent(false);
-                    EventHandler<GroupNamesEventArgs> cbGroupName = delegate(object sender, GroupNamesEventArgs e)
+                    try
                     {
-                        if (e.GroupNames.ContainsKey(prim.Properties.GroupID))
-                        {
-                            e.GroupNames.TryGetValue(prim.Properties.GroupID, out ownerName);
-                            if (string.IsNullOrEmpty(ownerName))
-                                ownerName = "Loading...";
-                            nameReceivedSignal.Set();
-                        }
-                    };
-                    client.Groups.GroupNamesReply += cbGroupName;
-                    client.Groups.RequestGroupName(prim.Properties.GroupID);
-                    nameReceivedSignal.WaitOne(5000, false);
-                    nameReceivedSignal.Close();
-                    client.Groups.GroupNamesReply -= cbGroupName;
+                        var groupName = EventSubscriptionHelper.WaitForEvent<GroupNamesEventArgs, string>(
+                            h => client.Groups.GroupNamesReply += h,
+                            h => client.Groups.GroupNamesReply -= h,
+                            e => e.GroupNames != null && e.GroupNames.ContainsKey(prim.Properties.GroupID),
+                            e => { e.GroupNames.TryGetValue(prim.Properties.GroupID, out var v); return v; },
+                            5000,
+                            null);
+
+                        ownerName = string.IsNullOrEmpty(groupName) ? "Loading..." : groupName;
+                    }
+                    catch { ownerName = "Loading..."; }
                 }
                 else
                     ownerName = instance.Names.Get(prim.Properties.OwnerID);
@@ -356,7 +356,7 @@ namespace SimpleBuilderNamespace
             BuildAndRez(primType);
         }
 
-        private void BuildAndRez(PrimType primType)
+        private async void BuildAndRez(PrimType primType)
         {
             float size, distance;
 
@@ -369,12 +369,19 @@ namespace SimpleBuilderNamespace
             rezpos = client.Self.SimPosition + rezpos * client.Self.Movement.BodyRotation;
 
             ObjectName = txt_ObjectName.Text;
+            primDoneTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
             client.Objects.ObjectUpdate += Objects_OnNewPrim;
             client.Objects.AddPrim(client.Network.CurrentSim, primData, UUID.Zero, rezpos, new Vector3(size), Quaternion.Identity);
-            if (!primDone.WaitOne(10000, false))
-                throw new Exception("Rez failed, timed out while creating the prim.");
 
-            txt_ObjectName.Text = ObjectName;
+            var completed = await Task.WhenAny(primDoneTcs.Task, Task.Delay(10000)).ConfigureAwait(false);
+            if (completed != primDoneTcs.Task)
+            {
+                client.Objects.ObjectUpdate -= Objects_OnNewPrim;
+                throw new Exception("Rez failed, timed out while creating the prim.");
+            }
+
+            ThreadingHelper.SafeInvoke(this, () => txt_ObjectName.Text = ObjectName, instance.MonoRuntime);
         }
 
         private void Objects_OnNewPrim(object sender, PrimEventArgs e)
@@ -391,7 +398,7 @@ namespace SimpleBuilderNamespace
 
             client.Objects.ObjectUpdate -= Objects_OnNewPrim;
 
-            primDone.Set();
+            try { primDoneTcs?.TrySetResult(true); } catch { }
 
             instance.MainForm.TabConsole.DisplayNotificationInChat(pluginName + ": Object '"+ txt_ObjectName.Text +"' has been successfully built and rezzed", ChatBufferTextStyle.Normal);
 

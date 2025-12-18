@@ -166,17 +166,17 @@ namespace Radegast
                 return;
             }
 
-            ThreadPool.QueueUserWorkItem(sync =>
+            Task.Run(async () =>
             {
                 if (ExportTextures)
                 {
-                    SaveTextures();
+                    await SaveTexturesAsync().ConfigureAwait(false);
                 }
                 foreach (var prim in Prims)
                 {
                     if (!CanExport(prim)) continue;
 
-                    FacetedMesh mesh = MeshPrim(prim);
+                    FacetedMesh mesh = await MeshPrimAsync(prim).ConfigureAwait(false);
                     if (mesh == null) continue;
 
                     for (int j = 0; j < mesh.Faces.Count; j++)
@@ -210,7 +210,7 @@ namespace Radegast
             });
         }
 
-        private void SaveTextures()
+        private async Task SaveTexturesAsync()
         {
             OnProgress("Exporting textures...");
             for (int i = 0; i < Textures.Count; i++)
@@ -257,11 +257,10 @@ namespace Radegast
                         }
                     });
 
-                    // Wait synchronously up to timeout
-                    var completed = Task.WhenAny(tcs.Task, Task.Delay(120 * 1000)).GetAwaiter().GetResult();
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(120))).ConfigureAwait(false);
                     if (completed == tcs.Task)
                     {
-                        var res = tcs.Task.GetAwaiter().GetResult();
+                        var res = await tcs.Task.ConfigureAwait(false);
                         jpegData = res.jpeg;
                         bitmap = res.bmp;
                     }
@@ -361,7 +360,7 @@ namespace Radegast
             return false;
         }
 
-        private FacetedMesh MeshPrim(Primitive prim)
+        private async Task<FacetedMesh> MeshPrimAsync(Primitive prim)
         {
             FacetedMesh mesh = null;
             if (prim.Sculpt == null || prim.Sculpt.SculptTexture == UUID.Zero)
@@ -370,8 +369,8 @@ namespace Radegast
             }
             else if (prim.Sculpt.Type != SculptType.Mesh)
             {
-                SKBitmap img = null;
-                if (LoadTexture(prim.Sculpt.SculptTexture, ref img, true))
+                SKBitmap img = await LoadTextureAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
+                if (img != null)
                 {
                     mesh = Mesher.GenerateFacetedSculptMesh(prim, img, DetailLevel.Highest);
                 }
@@ -400,19 +399,18 @@ namespace Radegast
                     }
                 });
 
-                var completed = Task.WhenAny(tcs.Task, Task.Delay(20 * 1000)).GetAwaiter().GetResult();
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(false);
                 if (completed == tcs.Task)
                 {
-                    mesh = tcs.Task.GetAwaiter().GetResult();
+                    mesh = await tcs.Task.ConfigureAwait(false);
                 }
             }
             return mesh;
         }
 
-        private bool LoadTexture(UUID textureID, ref SKBitmap texture, bool removeAlpha)
+        private async Task<SKBitmap> LoadTextureAsync(UUID textureID)
         {
             var tcs = new TaskCompletionSource<SKBitmap>();
-            SKBitmap img = null;
 
             try
             {
@@ -421,30 +419,25 @@ namespace Radegast
                     try
                     {
                         if (state != TextureRequestState.Finished || assetTexture == null) { return; }
+                        SKBitmap img = null;
                         try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
-                    }
-                    finally
-                    {
                         tcs.TrySetResult(img);
+                    }
+                    catch
+                    {
+                        tcs.TrySetResult(null);
                     }
                 });
 
-                if (Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).GetAwaiter().GetResult() != tcs.Task)
-                {
-                    return false;
-                }
-                var res = tcs.Task.GetAwaiter().GetResult();
-                if (res != null)
-                {
-                    texture = res;
-                    return true;
-                }
-                return false;
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+                if (completed != tcs.Task) return null;
+
+                return await tcs.Task.ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Logger.Error(ex.Message, ex, Client);
-                return false;
+                return null;
             }
         }
 
@@ -465,8 +458,7 @@ namespace Radegast
 
                 asset.AppendChild(Doc.CreateElement("created")).InnerText =
                     DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
-                asset.AppendChild(Doc.CreateElement("modified")).InnerText =
-                    DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+                asset.AppendChild(Doc.CreateElement("modified")).InnerText = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
 
                 var unit = asset.AppendChild(Doc.CreateElement("unit"));
                 if (unit.Attributes != null)
@@ -511,8 +503,7 @@ namespace Radegast
                 {
                     acc.Attributes.Append(Doc.CreateAttribute("source")).InnerText =
                         $"#{src_id}-array";
-                    acc.Attributes.Append(Doc.CreateAttribute("count")).InnerText =
-                        ((int)(vals.Count / param.Length)).ToString();
+                    acc.Attributes.Append(Doc.CreateAttribute("count")).InnerText = ((int)(vals.Count / param.Length)).ToString();
                     acc.Attributes.Append(Doc.CreateAttribute("stride")).InnerText = param.Length.ToString();
 
                     foreach (char c in param)
@@ -854,7 +845,7 @@ namespace Radegast
                         node.Attributes.Append(Doc.CreateAttribute("id")).InnerText = geomID;
                         node.Attributes.Append(Doc.CreateAttribute("name")).InnerText = geomID;
 
-                        // Set tranform matrix (node position, rotation and scale)
+                        // Set transform matrix (node position, rotation and scale)
                         var matrix = node.AppendChild(Doc.CreateElement("matrix"));
 
                         var srt = Math3D.CreateSRTMatrix(obj.Prim.Scale, obj.Prim.Rotation,
