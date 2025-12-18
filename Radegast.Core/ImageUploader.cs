@@ -21,6 +21,7 @@
 using System;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 using OpenMetaverse;
 
 namespace Radegast
@@ -32,7 +33,6 @@ namespace Radegast
 	{
         private readonly GridClient Client;
         private DateTime start;
-        private readonly AutoResetEvent UploadCompleteEvent = new AutoResetEvent(false);
 		public UUID TextureID = UUID.Zero;
 		public TimeSpan Duration;
 		public string Status;
@@ -42,30 +42,75 @@ namespace Radegast
 		{
 			Client = client;
 		}
-		
+
+        /// <summary>
+        /// Asynchronously upload an image. Returns true on success.
+        /// </summary>
+        public async Task<bool> UploadImageAsync(string filename, string desc, UUID folder, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+        {
+            TextureID = UUID.Zero;
+            string inventoryName = Path.GetFileNameWithoutExtension(filename);
+            byte[] data = File.ReadAllBytes(filename);
+            start = DateTime.Now;
+
+            var tcs = new TaskCompletionSource<bool>();
+
+            // Register the callback to complete the task source
+            Client.Inventory.RequestCreateItemFromAsset(data, inventoryName, desc, AssetType.Texture, InventoryType.Texture, folder,
+                (success, status, itemID, assetID) =>
+                {
+                    TextureID = assetID;
+                    Success = success;
+                    Status = status;
+                    Duration = DateTime.Now - start;
+                    tcs.TrySetResult(success);
+                });
+
+            try
+            {
+                Task delayTask = (timeout.HasValue) ? Task.Delay(timeout.Value, cancellationToken) : Task.Delay(Timeout.Infinite, cancellationToken);
+
+                var completed = await Task.WhenAny(tcs.Task, delayTask).ConfigureAwait(false);
+
+                if (completed == tcs.Task)
+                {
+                    return await tcs.Task.ConfigureAwait(false);
+                }
+
+                // If we get here, either timeout or cancellation occurred
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    Status = "Texture upload cancelled";
+                    throw new OperationCanceledException(cancellationToken);
+                }
+
+                Status = "Texture upload timed out";
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                Status = "Texture upload cancelled";
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Status = "Texture upload failed: " + ex.Message;
+                return false;
+            }
+        }
+
 		public bool UploadImage(string filename, string desc, UUID folder)
 		{
-			TextureID = UUID.Zero;
-			string inventoryName = Path.GetFileNameWithoutExtension(filename);
-			uint timeout = 180 * 1000;
-			byte[] data = File.ReadAllBytes(filename);
-			start = DateTime.Now;
-			
-			Client.Inventory.RequestCreateItemFromAsset(data,inventoryName,desc,AssetType.Texture,InventoryType.Texture,folder,
-			                                            delegate(bool success, string status, UUID itemID, UUID assetID)
-			                                            {
-			                                            	TextureID = assetID;
-			                                            	Success = success;
-			                                            	Status = status;
-			                                            	UploadCompleteEvent.Set();
-			                                            });
-			if (UploadCompleteEvent.WaitOne((int)timeout, false))
-            {
-                return TextureID != UUID.Zero;
-            }
-
-            Status = "Texture upload timed out";
-            return false;
-        }
+			// Maintain existing synchronous API by calling the async method with a 180s timeout
+			try
+			{
+				return UploadImageAsync(filename, desc, folder, TimeSpan.FromSeconds(180)).GetAwaiter().GetResult();
+			}
+			catch (AggregateException ae)
+			{
+				// Unwrap and rethrow inner exception if cancellation occurred
+				throw ae.Flatten();
+			}
+		}
 	}
 }

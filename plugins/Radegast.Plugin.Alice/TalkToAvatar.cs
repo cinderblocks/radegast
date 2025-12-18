@@ -30,7 +30,7 @@ namespace Radegast.Plugin.Alice
 
         private bool IsEnabledInRadegast => Instance.GlobalSettings["plugin.alice.enabled"].AsBoolean();
 
-        public override void OnInvoke(object sender, System.EventArgs e, object target)
+        public override async void OnInvoke(object sender, System.EventArgs e, object target)
         {
             ListViewItem ali = target as ListViewItem;
             string username = null;
@@ -38,12 +38,12 @@ namespace Radegast.Plugin.Alice
             if (ali != null)
             {
                 uuid = (UUID)ali.Tag;
-                username = instance.Names.GetAsync(uuid).GetAwaiter().GetResult();
+                username = await instance.Names.GetAsync(uuid);
             }
             else
             {
                 if (target is FriendInfo fi) { uuid = fi.UUID; }
-                username = instance.Names.GetAsync(uuid).GetAwaiter().GetResult();
+                username = await instance.Names.GetAsync(uuid);
 
             }
             if (username==null)

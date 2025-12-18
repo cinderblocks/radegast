@@ -20,6 +20,8 @@
 
 using System.Collections.Generic;
 using OpenMetaverse;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -27,9 +29,14 @@ namespace Radegast
     {
         private readonly GridClient Client;
         private readonly List<Vector3> Waypoints = new List<Vector3>();
-        private readonly System.Timers.Timer Ticker = new System.Timers.Timer(500);
+        private CancellationTokenSource tickerCts;
+        private Task tickerTask;
+
         private Vector3 AgentPosition;
         private int nwp = 0;
+
+        // Cancellation source for the delayed AutoPilotLocal invocation
+        private CancellationTokenSource moveDelayCts;
 
         private int NextWaypoint
         {
@@ -39,8 +46,31 @@ namespace Radegast
                 System.Console.WriteLine($"Way point {nwp} {Waypoints[nwp]}");
                 Client.Self.AutoPilotCancel();
                 Client.Self.Movement.TurnToward(Waypoints[nwp]);
-                System.Threading.Thread.Sleep(500);
-                Client.Self.AutoPilotLocal((int)Waypoints[nwp].X, (int)Waypoints[nwp].Y, (int)Waypoints[nwp].Z);
+
+                // Cancel any pending delayed move and start a new one
+                try
+                {
+                    moveDelayCts?.Cancel();
+                    moveDelayCts?.Dispose();
+                }
+                catch { }
+
+                moveDelayCts = new CancellationTokenSource();
+                var token = moveDelayCts.Token;
+
+                // Fire-and-forget task to wait without blocking the caller thread
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Task.Delay(500, token);
+                        if (token.IsCancellationRequested) return;
+
+                        Client.Self.AutoPilotLocal((int)Waypoints[nwp].X, (int)Waypoints[nwp].Y, (int)Waypoints[nwp].Z);
+                    }
+                    catch (TaskCanceledException) { }
+                    catch { }
+                }, token);
             }
             get => nwp;
         }
@@ -48,8 +78,6 @@ namespace Radegast
         public AutoPilot(GridClient client)
         {
             Client = client;
-            Ticker.Enabled = false;
-            Ticker.Elapsed += Ticker_Elapsed;
             Client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
         }
 
@@ -57,14 +85,32 @@ namespace Radegast
         {
             if (e.Update.Avatar && e.Update.LocalID == Client.Self.LocalID) {
                 AgentPosition = e.Update.Position;
+                if (Waypoints.Count == 0) { return; }
+
                 if (Vector3.Distance(AgentPosition, Waypoints[NextWaypoint]) < 2f) {
                     NextWaypoint++;
                 }
             }
         }
 
-        private void Ticker_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        private void Ticker_Elapsed()
         {
+            // Placeholder for periodic work. Keep minimal to preserve previous behavior.
+        }
+
+        private async Task TickerLoop(CancellationToken token)
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(500, token);
+                    if (token.IsCancellationRequested) break;
+                    try { Ticker_Elapsed(); } catch { }
+                }
+            }
+            catch (TaskCanceledException) { }
+            catch { }
         }
 
         public int InsertWaypoint(Vector3 wp)
@@ -81,10 +127,41 @@ namespace Radegast
 
             //Client.Self.Teleport(Client.Network.CurrentSim.Handle, Waypoints[0]);
             NextWaypoint++;
+
+            if (tickerTask == null || tickerTask.IsCompleted)
+            {
+                try
+                {
+                    tickerCts?.Cancel();
+                    tickerCts?.Dispose();
+                }
+                catch { }
+
+                tickerCts = new CancellationTokenSource();
+                tickerTask = Task.Run(() => TickerLoop(tickerCts.Token), tickerCts.Token);
+            }
         }
 
         public void Stop()
         {
+            // Cancel any pending delayed move and stop autopilot
+            try
+            {
+                moveDelayCts?.Cancel();
+                moveDelayCts?.Dispose();
+                moveDelayCts = null;
+            }
+            catch { }
+
+            try
+            {
+                tickerCts?.Cancel();
+                tickerCts?.Dispose();
+                tickerCts = null;
+                tickerTask = null;
+            }
+            catch { }
+
             Client.Self.AutoPilotCancel();
         }
     }

@@ -69,10 +69,10 @@ namespace Radegast.Media
             InitFMOD();
 
             // Start the background thread that does the audio calls.
-            commandLoop = Task.Factory.StartNew(CommandLoop, 
+            commandLoop = Task.Factory.StartNew(() => CommandLoop(soundCancelToken.Token),
                 soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             // Start the background thread that updates listener position.
-            listenerLoop = Task.Factory.StartNew(ListenerUpdate, 
+            listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
                 soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
             Instance.ClientChanged += Instance_ClientChanged;
@@ -112,32 +112,33 @@ namespace Radegast.Media
         /// <summary>
         /// Thread that processes FMOD calls.
         /// </summary>
-        private void CommandLoop()
+        private void CommandLoop(CancellationToken token)
         {
-
             if (!SoundSystemAvailable) { return; }
 
-            while (true)
+            while (!token.IsCancellationRequested)
             {
-                if (soundCancelToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                // Wait for something to show up in the queue.
-                SoundDelegate action;
+                // Wait for something to show up in the queue; use a short timeout
+                // so we can observe cancellation periodically.
+                SoundDelegate action = null;
                 lock (queue)
                 {
-                    while (queue.Count == 0)
+                    while (queue.Count == 0 && !token.IsCancellationRequested)
                     {
-                        Monitor.Wait(queue);
+                        // Use a timed wait to allow cancellation to be observed.
+                        Monitor.Wait(queue, 100);
                     }
-                    action = queue.Dequeue();
+
+                    if (queue.Count > 0)
+                    {
+                        action = queue.Dequeue();
+                    }
                 }
 
-                if (soundCancelToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                if (token.IsCancellationRequested) break;
+
+                if (action == null) continue;
+
                 // We have an action, so call it.
                 try
                 {
@@ -289,8 +290,18 @@ namespace Radegast.Media
                 system.clearHandle();
             }
 
-            soundCancelToken.Cancel();
-            soundCancelToken.Dispose();
+            // Request cancellation of background loops and wait briefly for them to exit.
+            try
+            {
+                soundCancelToken.Cancel();
+                Task.WaitAll(new[] { commandLoop, listenerLoop }, 2000);
+            }
+            catch (AggregateException) { }
+            catch (Exception) { }
+            finally
+            {
+                soundCancelToken.Dispose();
+            }
 
             base.Dispose();
         }
@@ -299,20 +310,16 @@ namespace Radegast.Media
         /// Thread to update listener position and generally keep
         /// FMOD up to date.
         /// </summary>
-        private void ListenerUpdate()
+        private void ListenerUpdate(CancellationToken token)
         {
             // Notice changes in position or direction.
             Vector3 lastpos = new Vector3(0.0f, 0.0f, 0.0f);
             float lastface = 0.0f;
 
-            while (true)
+            while (!token.IsCancellationRequested)
             {
-                if (soundCancelToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                // Two updates per second.
-                System.Threading.Thread.Sleep(500);
+                // Two updates per second. Use wait handle so cancellation is observed quickly.
+                if (token.WaitHandle.WaitOne(500)) break;
 
                 if (!system.hasHandle()) continue;
 
@@ -361,15 +368,6 @@ namespace Radegast.Media
                 };
                 // South
                 // East
-
-                //Logger.Log(
-                //    String.Format(
-                //        "Standing at <{0:0.0},{1:0.0},{2:0.0}> facing {3:d}",
-                //            listenerpos.x,
-                //            listenerpos.y,
-                //            listenerpos.z,
-                //            (int)(angle * 180.0 / 3.141592)),
-                //    Helpers.LogLevel.Debug);
 
                 // Tell FMOD the new orientation.
                 invoke(delegate
