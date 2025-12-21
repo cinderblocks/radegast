@@ -125,7 +125,7 @@ namespace Radegast.Rendering
                         {
                             canvas.DrawBitmap(detailTexture[i], new SKRect(0, 0, targetWidth, targetHeight), new SKPaint
                             {
-                                FilterQuality = SKFilterQuality.High
+                                // use default sampling options
                             });
                         }
                         
@@ -322,7 +322,7 @@ namespace Radegast.Rendering
             {
                 canvas.DrawBitmap(b, new SKRect(0, 0, nWidth, nHeight), new SKPaint
                 {
-                    FilterQuality = SKFilterQuality.High
+                    // use default sampling options
                 });
             }
             b.Dispose();

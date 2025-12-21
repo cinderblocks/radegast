@@ -183,13 +183,16 @@ namespace Radegast.Rendering
             using (var skBitmap = new SKBitmap(item.ImgWidth, item.ImgHeight, SKColorType.Bgra8888, SKAlphaType.Premul))
             using (var canvas = new SKCanvas(skBitmap))
             using (var paint = CreatePaint(item.Font))
+            using (var tf = SKTypeface.FromFamilyName(item.Font.Name))
+            using (var skFont = new SKFont(tf, item.Font.Size))
             {
+                skFont.Subpixel = true;
                 canvas.Clear(SKColors.Transparent);
 
                 paint.Color = item.Color;
 
                 // Compute baseline and line height
-                paint.GetFontMetrics(out var metrics);
+                skFont.GetFontMetrics(out var metrics);
                 float baseline = -metrics.Ascent;
                 float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
                 if (lineHeight <= 0f) lineHeight = baseline + metrics.Descent;
@@ -198,13 +201,13 @@ namespace Radegast.Rendering
                 var lines = item.Text.Split(new[] { "\n" }, StringSplitOptions.None);
                 float totalHeight = lineHeight * lines.Length;
                 // Start Y such that text block is vertically centered
-                float y = ((float)item.ImgHeight - totalHeight) * 0.5f + baseline;
+                float y = (item.ImgHeight - totalHeight) * 0.5f + baseline;
                 foreach (var line in lines)
                 {
                     // Measure line width to center horizontally
-                    float lineWidth = paint.MeasureText(line ?? string.Empty);
-                    float x = ((float)item.ImgWidth - lineWidth) * 0.5f;
-                    canvas.DrawText(line, x, y, paint);
+                    float lineWidth = skFont.MeasureText(line);
+                    float x = (item.ImgWidth - lineWidth) * 0.5f;
+                    canvas.DrawText(line, x, y, SKTextAlign.Left, skFont, paint);
                     y += lineHeight;
                 }
 
@@ -215,9 +218,11 @@ namespace Radegast.Rendering
         private static Size MeasureSkia(string text, Font font)
         {
             using (var paint = CreatePaint(font))
+            using (var tf = SKTypeface.FromFamilyName(font.Name))
+            using (var skFont = new SKFont(tf, font.Size))
             {
                 // Height via metrics
-                paint.GetFontMetrics(out var metrics);
+                skFont.GetFontMetrics(out var metrics);
                 float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
                 if (lineHeight <= 0f) lineHeight = (-metrics.Ascent) + metrics.Descent;
 
@@ -228,7 +233,7 @@ namespace Radegast.Rendering
                 float maxWidth = 0f;
                 foreach (var line in lines)
                 {
-                    float w = paint.MeasureText(line ?? string.Empty);
+                    float w = skFont.MeasureText(line ?? string.Empty);
                     if (w > maxWidth) maxWidth = w;
                 }
                 float totalHeight = lineHeight * lines.Length;
@@ -239,16 +244,10 @@ namespace Radegast.Rendering
 
         private static SKPaint CreatePaint(Font font)
         {
-            // Create typeface from font family name
-            var typeface = SKTypeface.FromFamilyName(font.Name);
             var paint = new SKPaint
             {
-                Typeface = typeface,
-                TextSize = font.Size,
                 IsAntialias = true,
-                SubpixelText = true,
-                IsStroke = false,
-                FilterQuality = SKFilterQuality.High
+                IsStroke = false
             };
             return paint;
         }
