@@ -1575,8 +1575,8 @@ namespace Radegast
         }
 
         private void setMaturityLevel(string level)
-        {
-            client.Self.SetAgentAccess(level, res =>
+        { 
+            _ = client.Self.SetAgentAccessAsync(level, res =>
             {
                 if (res.Success)
                 {
