@@ -212,44 +212,92 @@ namespace Radegast
             client.Network.SimChanged -= Network_SimChanged;
         }
 
+        private bool _disposed;
+
         public void Dispose()
         {
-            Netcom.ClientConnected -= Netcom_ClientConnected;
-            Netcom.ClientDisconnected -= Netcom_ClientDisconnected;
-            Netcom.ChatReceived -= Netcom_ChatReceived;
-            UnregisterClientEvents(Client);
-            beamTimer.Dispose();
-            beamTimer = null;
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
 
-            if (lookAtTimer != null)
+        /// <summary>
+        /// Core dispose logic. If disposing is true, dispose managed resources.
+        /// </summary>
+        /// <param name="disposing">True when called from Dispose(), false from finalizer.</param>
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed) return;
+
+            if (disposing)
             {
-                lookAtTimer.Dispose();
-                lookAtTimer = null;
+                try
+                {
+                    // Unsubscribe from Netcom events
+                    try { Netcom.ClientConnected -= Netcom_ClientConnected; } catch { }
+                    try { Netcom.ClientDisconnected -= Netcom_ClientDisconnected; } catch { }
+                    try { Netcom.ChatReceived -= Netcom_ChatReceived; } catch { }
+
+                    // Unregister client-specific events
+                    try { UnregisterClientEvents(Client); } catch { }
+
+                    // Dispose timers and helpers
+                    try { beamTimer?.Dispose(); } catch { }
+                    beamTimer = null;
+
+                    try { lookAtTimer?.Dispose(); } catch { }
+                    lookAtTimer = null;
+
+                    try { walkTimer?.Dispose(); } catch { }
+                    walkTimer = null;
+
+                    if (AutoSit != null)
+                    {
+                        try { AutoSit.Dispose(); } catch { }
+                        AutoSit = null;
+                    }
+
+                    if (LSLHelper != null)
+                    {
+                        try { LSLHelper.Dispose(); } catch { }
+                        LSLHelper = null;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log and swallow to avoid exceptions during finalization
+                    try { Logger.Warn("StateManager.Dispose failed", ex); } catch { }
+                }
             }
 
-            if (walkTimer != null)
-            {
-                walkTimer.Dispose();
-                walkTimer = null;
-            }
+            // TODO: free unmanaged resources here if any
 
-            if (AutoSit != null)
-            {
-                AutoSit.Dispose();
-                AutoSit = null;
-            }
+            _disposed = true;
+        }
 
-            if (LSLHelper != null)
-            {
-                LSLHelper.Dispose();
-                LSLHelper = null;
-            }
+        ~StateManager()
+        {
+            Dispose(false);
         }
 
         private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
-            UnregisterClientEvents(e.OldClient);
-            RegisterClientEvents(Client);
+            try
+            {
+                UnregisterClientEvents(e.OldClient);
+            }
+            catch (Exception ex)
+            {
+                try { Logger.Warn("Failed to unregister old client events", ex); } catch { }
+            }
+
+            try
+            {
+                RegisterClientEvents(e.Client);
+            }
+            catch (Exception ex)
+            {
+                try { Logger.Warn("Failed to register new client events", ex); } catch { }
+            }
         }
 
         private void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
