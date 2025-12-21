@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Threading;
 using OpenMetaverse;
 
 namespace Radegast
@@ -29,7 +30,7 @@ namespace Radegast
     /// NetCom is a class built on top of libsecondlife that provides a way to
     /// raise events on the proper thread (for GUI apps especially).
     /// </summary>
-    public partial class NetCom : INetCom
+    public partial class NetCom : INetCom, IDisposable
     {
         private readonly GridClient Client;
         public LoginOptions LoginOptions { get; set; } = new LoginOptions();
@@ -37,31 +38,46 @@ namespace Radegast
         public bool AgreeToTos { get; set; } = false;
         public Grid Grid { get; private set; }
 
-        // Duplicate suppression caches (short lived)
+        // Duplicate suppression caches (short-lived)
         private readonly ConcurrentDictionary<string, DateTime> _recentChatHashes = new ConcurrentDictionary<string, DateTime>();
         private readonly ConcurrentDictionary<string, DateTime> _recentIMHashes = new ConcurrentDictionary<string, DateTime>();
         private readonly TimeSpan _duplicateWindow = TimeSpan.FromSeconds(2);
+        private readonly Timer _cleanupTimer;
 
         private void CleanupRecentCaches()
         {
-            var cutoff = DateTime.UtcNow - _duplicateWindow;
-            foreach (var k in _recentChatHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
-                _recentChatHashes.TryRemove(k, out _);
-            foreach (var k in _recentIMHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
-                _recentIMHashes.TryRemove(k, out _);
+            try
+            {
+                var cutoff = DateTime.UtcNow - _duplicateWindow;
+                foreach (var k in _recentChatHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
+                    _recentChatHashes.TryRemove(k, out _);
+                foreach (var k in _recentIMHashes.Where(kv => kv.Value < cutoff).Select(kv => kv.Key).ToList())
+                    _recentIMHashes.TryRemove(k, out _);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("CleanupRecentCaches failed", ex);
+            }
         }
 
         private bool IsDuplicateChat(ChatEventArgs e)
         {
             try
             {
-                CleanupRecentCaches();
-                var key = $"{e.SourceID}:{e.FromName}:{e.Message}";
+                // Normalize to avoid trivial differences bypassing suppression
+                var key = $"{e.SourceID}:{e.FromName}:{e.Message}".Trim().ToLowerInvariant();
                 var now = DateTime.UtcNow;
+
                 if (_recentChatHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
-                _recentChatHashes[key] = now;
+
+                // record/refresh timestamp
+                _recentChatHashes.AddOrUpdate(key, now, (k, old) => now);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn("IsDuplicateChat failed", ex);
+            }
+
             return false;
         }
 
@@ -69,14 +85,19 @@ namespace Radegast
         {
             try
             {
-                CleanupRecentCaches();
                 var im = e.IM;
-                var key = $"{im.FromAgentID}:{im.IMSessionID}:{im.Message}";
+                var key = $"{im.FromAgentID}:{im.IMSessionID}:{im.Message}".Trim().ToLowerInvariant();
                 var now = DateTime.UtcNow;
+
                 if (_recentIMHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
-                _recentIMHashes[key] = now;
+
+                _recentIMHashes.AddOrUpdate(key, now, (k, old) => now);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn("IsDuplicateIM failed", ex);
+            }
+
             return false;
         }
 
@@ -115,44 +136,102 @@ namespace Radegast
         {
             Client = client;
             RegisterClientEvents(Client);
+
+            // start periodic cleanup to remove stale entries from duplicate caches
+            _cleanupTimer = new Timer(_ => CleanupRecentCaches(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
         }
 
         public void Dispose()
         {
-            if (Client != null)
+            try
             {
-                UnregisterClientEvents(Client);
+                _cleanupTimer?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Dispose cleanup timer failed", ex);
+            }
+
+            try
+            {
+                if (Client != null)
+                {
+                    UnregisterClientEvents(Client);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Dispose unregister client events failed", ex);
             }
         }
 
         private void RegisterClientEvents(GridClient client)
         {
-            client.Self.ChatFromSimulator += Self_ChatFromSimulator;
-            client.Self.IM += Self_IM;
-            client.Self.MoneyBalance += Self_MoneyBalance;
-            client.Self.TeleportProgress += Self_TeleportProgress;
-            client.Self.AlertMessage += Self_AlertMessage;
-            client.Network.Disconnected += Network_Disconnected;
-            client.Network.LoginProgress += Network_LoginProgress;
-            client.Network.LoggedOut += Network_LoggedOut;
+            if (client == null) return;
+
+            try
+            {
+                if (client.Self != null)
+                {
+                    client.Self.ChatFromSimulator += Self_ChatFromSimulator;
+                    client.Self.IM += Self_IM;
+                    client.Self.MoneyBalance += Self_MoneyBalance;
+                    client.Self.TeleportProgress += Self_TeleportProgress;
+                    client.Self.AlertMessage += Self_AlertMessage;
+                }
+
+                if (client.Network != null)
+                {
+                    client.Network.Disconnected += Network_Disconnected;
+                    client.Network.LoginProgress += Network_LoginProgress;
+                    client.Network.LoggedOut += Network_LoggedOut;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("RegisterClientEvents failed", ex);
+            }
         }
 
         private void UnregisterClientEvents(GridClient client)
         {
-            client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
-            client.Self.IM -= Self_IM;
-            client.Self.MoneyBalance -= Self_MoneyBalance;
-            client.Self.TeleportProgress -= Self_TeleportProgress;
-            client.Self.AlertMessage -= Self_AlertMessage;
-            client.Network.Disconnected -= Network_Disconnected;
-            client.Network.LoginProgress -= Network_LoginProgress;
-            client.Network.LoggedOut -= Network_LoggedOut;
+            if (client == null) return;
+
+            try
+            {
+                if (client.Self != null)
+                {
+                    client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
+                    client.Self.IM -= Self_IM;
+                    client.Self.MoneyBalance -= Self_MoneyBalance;
+                    client.Self.TeleportProgress -= Self_TeleportProgress;
+                    client.Self.AlertMessage -= Self_AlertMessage;
+                }
+
+                if (client.Network != null)
+                {
+                    client.Network.Disconnected -= Network_Disconnected;
+                    client.Network.LoginProgress -= Network_LoginProgress;
+                    client.Network.LoggedOut -= Network_LoggedOut;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("UnregisterClientEvents failed", ex);
+            }
         }
 
         public void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
-            UnregisterClientEvents(e.OldClient);
-            RegisterClientEvents(Client);
+            try
+            {
+                UnregisterClientEvents(e.OldClient);
+                RegisterClientEvents(e.Client);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Instance_ClientChanged failed", ex);
+            }
         }
 
         public void Login()
@@ -175,6 +254,8 @@ namespace Radegast
             {
                 OnClientLoginStatus(
                     new LoginProgressEventArgs(LoginStatus.Failed, "One or more fields are blank.", string.Empty));
+                IsLoggingIn = false;
+                return;
             }
 
             string startLocation = string.Empty;
@@ -244,10 +325,13 @@ namespace Radegast
 
             try
             {
-                var key = $"out:{Client.Self.AgentID}:{chat}";
-                _recentChatHashes[key] = DateTime.UtcNow;
+                var key = $"out:{Client.Self.AgentID}:{chat}".Trim().ToLowerInvariant();
+                _recentChatHashes.AddOrUpdate(key, DateTime.UtcNow, (k, old) => DateTime.UtcNow);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn("ChatOut duplicate cache update failed", ex);
+            }
 
             OnChatSent(new ChatSentEventArgs(chat, type, channel));
         }
@@ -260,13 +344,16 @@ namespace Radegast
                 LoginOptions.FullName, target, message, session, InstantMessageDialog.MessageFromAgent,
                 InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim.ID, null);
 
-            var ev = new InstantMessageSentEventArgs(message, target, session, DateTime.Now, LoginOptions.FullName, Client.Self.AgentID);
+            var ev = new InstantMessageSentEventArgs(message, target, session, DateTime.UtcNow, LoginOptions.FullName, Client.Self.AgentID);
             try
             {
-                var key = $"outim:{ev.FromAgentID}:{ev.SessionID}:{ev.Message}";
-                _recentIMHashes[key] = DateTime.UtcNow;
+                var key = $"outim:{ev.FromAgentID}:{ev.SessionID}:{ev.Message}".Trim().ToLowerInvariant();
+                _recentIMHashes.AddOrUpdate(key, DateTime.UtcNow, (k, old) => DateTime.UtcNow);
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn("SendInstantMessage duplicate cache update failed", ex);
+            }
 
             OnInstantMessageSent(ev);
         }
@@ -306,11 +393,17 @@ namespace Radegast
                 IsLoggedIn = true;
                 Client.Self.RequestBalance();
                 OnClientConnected(EventArgs.Empty);
+                IsLoggingIn = false;
             }
 
             LoginProgressEventArgs ea = new LoginProgressEventArgs(e.Status, e.Message, string.Empty);
 
             OnClientLoginStatus(e);
+
+            if (e.Status == LoginStatus.Failed || e.Status == LoginStatus.Success)
+            {
+                IsLoggingIn = false;
+            }
         }
 
         private void Network_LoggedOut(object sender, LoggedOutEventArgs e)
