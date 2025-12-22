@@ -99,7 +99,23 @@ namespace Radegast
                 return;
             }
 
-            Task command = Task.Run(() => TryCatch(() => OnInvoke(sender, e, target)));                
+            // Run the async invoke in a fire-and-forget task with exception handling
+            _ = TryCatchAsync(() => OnInvokeAsync(sender, e, target));
+        }
+
+        protected Task TryCatchAsync(Func<Task> func)
+        {
+            return Task.Run(async () =>
+            {
+                try
+                {
+                    await func().ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    DebugLog("Exception: " + e);
+                }
+            });
         }
 
         protected void InvokeSync(MethodInvoker func)
@@ -148,7 +164,6 @@ namespace Radegast
 
         public virtual void OnInvoke(object sender, EventArgs e, object target)
         {
-
             object oneOf = target ?? sender;
             oneOf = GetValue(ContextType, oneOf);
             if (!ContextType.IsInstanceOfType(oneOf))
@@ -156,6 +171,16 @@ namespace Radegast
                 oneOf = GetValue(ContextType, DeRef(oneOf));
             }
             Handler?.Invoke(oneOf, e);
+        }
+
+        /// <summary>
+        /// Async variant of OnInvoke. Default implementation delegates to the synchronous OnInvoke.
+        /// Override in derived classes to implement async behavior.
+        /// </summary>
+        public virtual Task OnInvokeAsync(object sender, EventArgs e, object target)
+        {
+            // Run synchronous OnInvoke on a background thread to avoid blocking callers.
+            return Task.Run(() => TryCatch(() => OnInvoke(sender, e, target)));
         }
 
         public virtual void IContextAction(RadegastInstanceForms instance)

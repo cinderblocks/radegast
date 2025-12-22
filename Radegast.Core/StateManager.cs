@@ -23,10 +23,10 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
+using System.Threading.Tasks;
 using LibreMetaverse;
 using OpenMetaverse;
 using Radegast.Automation;
-using Radegast.Core;
 
 namespace Radegast
 {
@@ -35,12 +35,25 @@ namespace Radegast
         public string ID { get; set; }
         public string Name { get; set; }
         public Quaternion Heading { get; set; }
+        // Precomputed heading in degrees (0..359)
+        public int Degrees { get; private set; }
 
         public KnownHeading(string id, string name, Quaternion heading)
         {
             ID = id;
             Name = name;
             Heading = heading;
+            try
+            {
+                double z = StateManager.RotToEuler(heading).Z * 57.2957795d;
+                int facing = (int)z;
+                if (facing < 0) facing += 360;
+                Degrees = facing % 360;
+            }
+            catch
+            {
+                Degrees = 0;
+            }
         }
 
         public override string ToString()
@@ -65,7 +78,7 @@ namespace Radegast
         private UUID followID;
         private bool displayEndWalk = false;
 
-        internal static Random rnd = new Random();
+        internal static readonly ThreadLocal<Random> rnd = new ThreadLocal<Random>(() => new Random());
         private Timer lookAtTimer;
 
         private readonly UUID teleportEffect = UUID.Random();
@@ -88,34 +101,25 @@ namespace Radegast
         /// </summary>
         public event EventHandler<SitEventArgs> SitStateChanged;
 
-        private static List<KnownHeading> m_Headings;
-        public static List<KnownHeading> KnownHeadings => m_Headings ?? (m_Headings = new List<KnownHeading>(16)
-        {
+        private static ImmutableList<KnownHeading> m_Headings;
+        public static ImmutableList<KnownHeading> KnownHeadings => m_Headings ?? (m_Headings = ImmutableList.Create<KnownHeading>(
             new KnownHeading("E", "East", new Quaternion(0.00000f, 0.00000f, 0.00000f, 1.00000f)),
-            new KnownHeading("ENE", "East by Northeast",
-                new Quaternion(0.00000f, 0.00000f, 0.19509f, 0.98079f)),
+            new KnownHeading("ENE", "East by Northeast", new Quaternion(0.00000f, 0.00000f, 0.19509f, 0.98079f)),
             new KnownHeading("NE", "Northeast", new Quaternion(0.00000f, 0.00000f, 0.38268f, 0.92388f)),
-            new KnownHeading("NNE", "North by Northeast",
-                new Quaternion(0.00000f, 0.00000f, 0.55557f, 0.83147f)),
+            new KnownHeading("NNE", "North by Northeast", new Quaternion(0.00000f, 0.00000f, 0.55557f, 0.83147f)),
             new KnownHeading("N", "North", new Quaternion(0.00000f, 0.00000f, 0.70711f, 0.70711f)),
-            new KnownHeading("NNW", "North by Northwest",
-                new Quaternion(0.00000f, 0.00000f, 0.83147f, 0.55557f)),
-            new KnownHeading("NW", "Nortwest", new Quaternion(0.00000f, 0.00000f, 0.92388f, 0.38268f)),
-            new KnownHeading("WNW", "West by Northwest",
-                new Quaternion(0.00000f, 0.00000f, 0.98079f, 0.19509f)),
+            new KnownHeading("NNW", "North by Northwest", new Quaternion(0.00000f, 0.00000f, 0.83147f, 0.55557f)),
+            new KnownHeading("NW", "Northwest", new Quaternion(0.00000f, 0.00000f, 0.92388f, 0.38268f)),
+            new KnownHeading("WNW", "West by Northwest", new Quaternion(0.00000f, 0.00000f, 0.98079f, 0.19509f)),
             new KnownHeading("W", "West", new Quaternion(0.00000f, 0.00000f, 1.00000f, -0.00000f)),
-            new KnownHeading("WSW", "West by Southwest",
-                new Quaternion(0.00000f, 0.00000f, 0.98078f, -0.19509f)),
+            new KnownHeading("WSW", "West by Southwest", new Quaternion(0.00000f, 0.00000f, 0.98078f, -0.19509f)),
             new KnownHeading("SW", "Southwest", new Quaternion(0.00000f, 0.00000f, 0.92388f, -0.38268f)),
-            new KnownHeading("SSW", "South by Southwest",
-                new Quaternion(0.00000f, 0.00000f, 0.83147f, -0.55557f)),
+            new KnownHeading("SSW", "South by Southwest", new Quaternion(0.00000f, 0.00000f, 0.83147f, -0.55557f)),
             new KnownHeading("S", "South", new Quaternion(0.00000f, 0.00000f, 0.70711f, -0.70711f)),
-            new KnownHeading("SSE", "South by Southeast",
-                new Quaternion(0.00000f, 0.00000f, 0.55557f, -0.83147f)),
+            new KnownHeading("SSE", "South by Southeast", new Quaternion(0.00000f, 0.00000f, 0.55557f, -0.83147f)),
             new KnownHeading("SE", "Southeast", new Quaternion(0.00000f, 0.00000f, 0.38268f, -0.92388f)),
-            new KnownHeading("ESE", "East by Southeast",
-                new Quaternion(0.00000f, 0.00000f, 0.19509f, -0.98078f))
-        });
+            new KnownHeading("ESE", "East by Southeast", new Quaternion(0.00000f, 0.00000f, 0.19509f, -0.98078f))
+        ));
 
         public static Vector3 RotToEuler(Quaternion r)
         {
@@ -232,6 +236,8 @@ namespace Radegast
             {
                 try
                 {
+                    // Unsubscribe instance-level events to avoid leaks
+                    try { this.instance.ClientChanged -= Instance_ClientChanged; } catch { }
                     // Unsubscribe from Netcom events
                     try { Netcom.ClientConnected -= Netcom_ClientConnected; } catch { }
                     try { Netcom.ClientDisconnected -= Netcom_ClientDisconnected; } catch { }
@@ -272,11 +278,6 @@ namespace Radegast
             // TODO: free unmanaged resources here if any
 
             _disposed = true;
-        }
-
-        ~StateManager()
-        {
-            Dispose(false);
         }
 
         private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
@@ -477,17 +478,24 @@ namespace Radegast
 
         public void SetRandomHeading()
         {
-            Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.NextDouble(), true);
+            Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.Value.NextDouble(), true);
             LookInFront();
         }
 
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
-            ThreadPool.QueueUserWorkItem(sync =>
+            Task.Run(async () =>
             {
-                Thread.Sleep(15 * 1000);
-                AutoSit.TrySit();
-                PseudoHome.ETGoHome();
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+                    AutoSit.TrySit();
+                    PseudoHome.ETGoHome();
+                }
+                catch (Exception ex)
+                {
+                    try { Logger.Warn("Network_SimChanged delayed work failed", ex); } catch { }
+                }
             });
             Client.Self.Movement.SetFOVVerticalAngle(FOVVerticalAngle);
         }
@@ -517,12 +525,8 @@ namespace Radegast
         {
             IsTyping = Away = IsBusy = IsWalking = false;
 
-            if (lookAtTimer != null)
-            {
-                lookAtTimer.Dispose();
-                lookAtTimer = null;
-            }
-
+            lookAtTimer?.Dispose();
+            lookAtTimer = null;
         }
 
         private void Netcom_ClientConnected(object sender, EventArgs e)
@@ -743,19 +747,6 @@ namespace Radegast
         {
             WalkTo(GlobalPosition(prim));
         }
-        public double WaitUntilPosition(Vector3d pos, TimeSpan maxWait, double howClose)
-        {
-             
-            DateTime until = DateTime.Now + maxWait;
-            while (until > DateTime.Now)
-            {
-                double dist = Vector3d.Distance(Client.Self.GlobalPosition, pos);
-                if (howClose >= dist) return dist;
-                Thread.Sleep(250);
-            }
-            return Vector3d.Distance(Client.Self.GlobalPosition, pos);
-            
-        }
 
         public void WalkTo(Vector3d globalPos)
         {
@@ -787,7 +778,7 @@ namespace Radegast
             if (distance < 2d)
             {
                 // We're there
-                EndWalking();
+                _ = EndWalkingAsync();
             }
             else
             {
@@ -799,7 +790,7 @@ namespace Radegast
                 else if ((Environment.TickCount - lastDistanceChanged) > 10000)
                 {
                     // Our distance to the target has not changed in 10s, give up
-                    EndWalking();
+                    _ = EndWalkingAsync();
                     return;
                 }
                 walkTimer?.Change(walkChekInterval, Timeout.Infinite);
@@ -812,7 +803,7 @@ namespace Radegast
             {
                 if (IsWalking)
                 {
-                    EndWalking();
+                    _ = EndWalkingAsync();
                 }
             }
         }
@@ -821,21 +812,40 @@ namespace Radegast
         {
             if (OnWalkStateChanged != null)
             {
-                try { OnWalkStateChanged(IsWalking); }
-                catch (Exception) { }
+                try
+                {
+                    OnWalkStateChanged(IsWalking);
+                }
+                catch (Exception ex)
+                {
+                    try { Logger.Warn("OnWalkStateChanged handler threw", ex); } catch { }
+                }
             }
         }
 
         public void EndWalking()
         {
+            // Fire-and-forget the async implementation to avoid blocking callers
+            _ = EndWalkingAsync();
+        }
+
+        public async Task EndWalkingAsync()
+        {
             if (!IsWalking) { return; }
 
             IsWalking = false;
-            Logger.Debug("Finished walking.", Client);
-            walkTimer.Dispose();
-            walkTimer = null;
-            Client.Self.AutoPilotCancel();
-                
+            try { Logger.Debug("Finished walking.", Client); } catch { }
+
+            // Dispose and null the walk timer atomically
+            try
+            {
+                var timer = Interlocked.Exchange(ref walkTimer, null);
+                try { timer?.Dispose(); } catch { }
+            }
+            catch { }
+
+            try { Client.Self.AutoPilotCancel(); } catch { }
+
             if (displayEndWalk)
             {
                 displayEndWalk = false;
@@ -843,12 +853,12 @@ namespace Radegast
 
                 if (walkToTarget != Vector3d.Zero)
                 {
-                    Thread.Sleep(1000);
+                    try { await Task.Delay(1000).ConfigureAwait(false); } catch { }
                     msg += $" {Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget):0} meters from destination";
                     walkToTarget = Vector3d.Zero;
                 }
 
-                instance.ShowNotificationInChat(msg);
+                try { instance.ShowNotificationInChat(msg); } catch { }
             }
 
             FireWalkStateChanged();
@@ -970,7 +980,7 @@ namespace Radegast
 
         private System.Timers.Timer beamTimer;
         private List<Vector3d> beamTarget;
-        private readonly Random beamRandom = new Random();
+        private readonly ThreadLocal<Random> beamRandom = new ThreadLocal<Random>(() => new Random());
         private UUID pointID;
         private UUID sphereID;
         private List<UUID> beamID;
@@ -1010,7 +1020,7 @@ namespace Radegast
 
             try
             {
-                Client.Self.SphereEffect(GlobalPosition(targetPrim), beamColors[beamRandom.Next(0, 3)], 0.85f, sphereID);
+                Client.Self.SphereEffect(GlobalPosition(targetPrim), beamColors[beamRandom.Value.Next(0, 3)], 0.85f, sphereID);
                 int i = 0;
                 for (i = 0; i < numBeams; i++)
                 {
@@ -1027,7 +1037,7 @@ namespace Radegast
                         cross.Normalize();
                         scatter = GlobalPosition(targetPrim) + cross * (i * 0.2d) * (i % 2 == 0 ? 1 : -1);
                     }
-                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Next(0, 3)], 1.0f, beamID[i]);
+                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Value.Next(0, 3)], 1.0f, beamID[i]);
                 }
 
                 for (int j = 1; j < numBeams; j++)
@@ -1036,10 +1046,13 @@ namespace Radegast
                     cross.Normalize();
                     var scatter = GlobalPosition(targetPrim) + cross * (j * 0.2d) * (j % 2 == 0 ? 1 : -1);
 
-                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Next(0, 3)], 1.0f, beamID[j + i - 1]);
+                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Value.Next(0, 3)], 1.0f, beamID[j + i - 1]);
                 }
             }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                try { Logger.Warn("BeamTimer_Elapsed failed", ex); } catch { }
+            }
 
         }
 
@@ -1077,6 +1090,18 @@ namespace Radegast
 
             beamTimer.Interval = 1000;
             beamTimer.Enabled = true;
+        }
+
+        public async Task<double> WaitUntilPositionAsync(Vector3d pos, TimeSpan maxWait, double howClose, CancellationToken cancellationToken = default)
+        {
+             DateTime until = DateTime.UtcNow + maxWait;
+             while (DateTime.UtcNow < until)
+             {
+                 double dist = Vector3d.Distance(Client.Self.GlobalPosition, pos);
+                 if (howClose >= dist) return dist;
+                 try { await Task.Delay(250, cancellationToken).ConfigureAwait(false); } catch (TaskCanceledException) { break; }
+             }
+             return Vector3d.Distance(Client.Self.GlobalPosition, pos);
         }
 
         public bool IsTyping { get; private set; } = false;

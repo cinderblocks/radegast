@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Threading.Tasks;
 using OpenMetaverse;
 
 namespace Radegast
@@ -45,32 +46,52 @@ namespace Radegast
         }
         public override void OnInvoke(object sender, EventArgs e, object target)
         {
+            // Preserve synchronous behavior for callers that expect it by delegating to the async implementation
+            TryCatch(() => OnInvokeAsync(sender, e, target).GetAwaiter().GetResult());
+        }
+
+        public override async Task OnInvokeAsync(object sender, EventArgs e, object target)
+        {
             if (Client.Self.Movement.SitOnGround)
             {
-                instance.ShowNotificationInChat("Standing up");
-                Client.Self.Stand();
+                try { instance.ShowNotificationInChat("Standing up"); } catch { }
+                try { Client.Self.Stand(); } catch { }
                 return;
             }
+
             string pname = instance.Names.Get(ToUUID(target));
             if (pname == "(???) (???)") pname = "" + target;
 
             if (TryFindPos(target, out var sim, out var pos))
             {
-                instance.ShowNotificationInChat($"Walking to {pname}");
-                instance.State.MoveTo(sim, pos, false);
-                //TODO wait until we get there
+                try { instance.ShowNotificationInChat($"Walking to {pname}"); } catch { }
+                try { instance.State.MoveTo(sim, pos, false); } catch { }
 
-                double close = instance.State.WaitUntilPosition(StateManager.GlobalPosition(sim, pos), TimeSpan.FromSeconds(5), 1);
+                // Await arrival without blocking the thread
+                double close = 0;
+                try
+                {
+                    close = await instance.State.WaitUntilPositionAsync(StateManager.GlobalPosition(sim, pos), TimeSpan.FromSeconds(5), 1).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    try { Logger.Warn("WaitUntilPositionAsync failed", ex); } catch { }
+                }
+
                 if (close > 2)
                 {
-                    instance.ShowNotificationInChat(
-                        $"Couldn't quite make it to {pname}, now sitting");
+                    try
+                    {
+                        instance.ShowNotificationInChat($"Couldn't quite make it to {pname}, now sitting");
+                    }
+                    catch { }
                 }
-                Client.Self.SitOnGround();
+
+                try { Client.Self.SitOnGround(); } catch { }
             }
             else
             {
-                instance.ShowNotificationInChat($"Could not locate {target}");
+                try { instance.ShowNotificationInChat($"Could not locate {target}"); } catch { }
             }
         }
     }
