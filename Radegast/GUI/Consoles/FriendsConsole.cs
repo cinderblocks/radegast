@@ -27,6 +27,7 @@ using OpenMetaverse.StructuredData;
 using System.Threading;
 using OpenMetaverse;
 using System.Reflection;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -156,11 +157,21 @@ namespace Radegast
             {
                 if (e.Accepted)
                 {
-                    ThreadPool.QueueUserWorkItem(sync =>
+                    Task.Run(async () =>
                     {
-                        string name = instance.Names.GetAsync(e.AgentID).GetAwaiter().GetResult();
+                        string name = null;
+                        try
+                        {
+                            name = await instance.Names.GetAsync(e.AgentID).ConfigureAwait(false);
+                        }
+                        catch
+                        {
+                            // Fallback to synchronous get if async fails
+                            try { name = instance.Names.Get(e.AgentID); } catch { name = RadegastInstance.INCOMPLETE_NAME; }
+                        }
+
                         string text = $"{(!string.IsNullOrEmpty(e.AgentName) ? e.AgentName : name)} accepted your friendship offer";
-                        
+
                         ThreadingHelper.SafeInvoke(this, () =>
                         {
                             DisplayNotification(e.AgentID, text);
@@ -241,7 +252,7 @@ namespace Radegast
             // Try to get the best name from the names manager
             try
             {
-                string resolved = instance.Names.GetAsync(agentId).GetAwaiter().GetResult();
+                string resolved = instance.Names.Get(agentId);
                 if (!string.IsNullOrEmpty(resolved) && resolved != RadegastInstance.INCOMPLETE_NAME)
                     return resolved;
             }

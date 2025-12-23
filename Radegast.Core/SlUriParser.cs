@@ -406,48 +406,43 @@ namespace Radegast
         {
             string name = RadegastInstance.INCOMPLETE_NAME;
 
-            using (ManualResetEvent gotName = new ManualResetEvent(false))
+            if (nameType == ResolveType.AgentDefaultName)
             {
-                EventHandler<UUIDNameReplyEventArgs> handler = (sender, e) =>
-                {
-                    if (e.Names.ContainsKey(agentID))
-                    {
-                        name = e.Names[agentID];
-                        try
-                        {
-                            gotName.Set();
-                        }
-                        catch (ObjectDisposedException) { }
-                    }
-                };
-
-                instance.Names.NameUpdated += handler;
-
-                if (nameType == ResolveType.AgentDefaultName)
-                {
-                    name = instance.Names.Get(agentID);
-                }
-                else if (nameType == ResolveType.AgentUsername)
-                {
-                    name = instance.Names.GetUserName(agentID);
-                }
-                else if (nameType == ResolveType.AgentDisplayName)
-                {
-                    name = instance.Names.GetDisplayName(agentID);
-                }
-                else
-                {
-                    instance.Names.NameUpdated -= handler;
-                    return agentID.ToString();
-                }
-
-                if (name == RadegastInstance.INCOMPLETE_NAME)
-                {
-                    gotName.WaitOne(instance.GlobalSettings["resolve_uri_time"], false);
-                }
-
-                instance.Names.NameUpdated -= handler;
+                name = instance.Names.Get(agentID);
             }
+            else if (nameType == ResolveType.AgentUsername)
+            {
+                name = instance.Names.GetUserName(agentID);
+            }
+            else if (nameType == ResolveType.AgentDisplayName)
+            {
+                name = instance.Names.GetDisplayName(agentID);
+            }
+            else
+            {
+                return agentID.ToString();
+            }
+
+            if (name != RadegastInstance.INCOMPLETE_NAME)
+            {
+                return name;
+            }
+
+            // Wait synchronously for name update using EventSubscriptionHelper
+            try
+            {
+                var result = EventSubscriptionHelper.WaitForEvent<UUIDNameReplyEventArgs, string>(
+                    h => instance.Names.NameUpdated += h,
+                    h => instance.Names.NameUpdated -= h,
+                    e => e.Names != null && e.Names.ContainsKey(agentID),
+                    e => e.Names[agentID],
+                    (int)instance.GlobalSettings["resolve_uri_time"],
+                    RadegastInstance.INCOMPLETE_NAME);
+
+                if (!string.IsNullOrEmpty(result))
+                    name = result;
+            }
+            catch { }
 
             return name;
         }
@@ -497,34 +492,23 @@ namespace Radegast
         /// <returns>Name of the group on success, INCOMPLETE_NAME on failure or timeout</returns>
         private string GetGroupName(UUID groupID)
         {
-            string name = RadegastInstance.INCOMPLETE_NAME;
-
-            using (ManualResetEvent gotName = new ManualResetEvent(false))
+            // Wait synchronously for group name reply using EventSubscriptionHelper
+            try
             {
-                EventHandler<GroupNamesEventArgs> handler = (sender, e) =>
-                {
-                    if (e.GroupNames.ContainsKey(groupID))
-                    {
-                        name = e.GroupNames[groupID];
-                        try
-                        {
-                            gotName.Set();
-                        }
-                        catch (ObjectDisposedException) { }
-                    }
-                };
+                var result = EventSubscriptionHelper.WaitForEvent<GroupNamesEventArgs, string>(
+                    h => instance.Client.Groups.GroupNamesReply += h,
+                    h => instance.Client.Groups.GroupNamesReply -= h,
+                    e => e.GroupNames != null && e.GroupNames.ContainsKey(groupID),
+                    e => e.GroupNames[groupID],
+                    (int)instance.GlobalSettings["resolve_uri_time"],
+                    RadegastInstance.INCOMPLETE_NAME);
 
-                instance.Client.Groups.GroupNamesReply += handler;
-                instance.Client.Groups.RequestGroupName(groupID);
-                if (name == RadegastInstance.INCOMPLETE_NAME)
-                {
-                    gotName.WaitOne(instance.GlobalSettings["resolve_uri_time"], false);
-                }
-
-                instance.Client.Groups.GroupNamesReply -= handler;
+                if (result != RadegastInstance.INCOMPLETE_NAME)
+                    return result;
             }
+            catch { }
 
-            return name;
+            return RadegastInstance.INCOMPLETE_NAME;
         }
         private async Task<string> GetGroupNameAsync(UUID groupID)
         {
@@ -551,34 +535,23 @@ namespace Radegast
         /// <returns>Name of the parcel on success, INCOMPLETE_NAME on failure or timeout</returns>
         private string GetParcelName(UUID parcelID)
         {
-            string name = RadegastInstance.INCOMPLETE_NAME;
-            
-            using (ManualResetEvent gotName = new ManualResetEvent(false))
+            // Wait synchronously for parcel info reply using EventSubscriptionHelper
+            try
             {
-                EventHandler<ParcelInfoReplyEventArgs> handler = (sender, e) =>
-                {
-                    if (e.Parcel.ID == parcelID)
-                    {
-                        name = e.Parcel.Name;
-                        try
-                        {
-                            gotName.Set();
-                        }
-                        catch (ObjectDisposedException) { }
-                    }
-                };
+                var result = EventSubscriptionHelper.WaitForEvent<ParcelInfoReplyEventArgs, string>(
+                    h => instance.Client.Parcels.ParcelInfoReply += h,
+                    h => instance.Client.Parcels.ParcelInfoReply -= h,
+                    e => e.Parcel.ID == parcelID,
+                    e => e.Parcel.Name,
+                    (int)instance.GlobalSettings["resolve_uri_time"],
+                    RadegastInstance.INCOMPLETE_NAME);
 
-                instance.Client.Parcels.ParcelInfoReply += handler;
-                instance.Client.Parcels.RequestParcelInfo(parcelID);
-                if (name == RadegastInstance.INCOMPLETE_NAME)
-                {
-                    gotName.WaitOne(instance.GlobalSettings["resolve_uri_time"], false);
-                }
-
-                instance.Client.Parcels.ParcelInfoReply -= handler;
+                if (result != RadegastInstance.INCOMPLETE_NAME)
+                    return result;
             }
+            catch { }
 
-            return name;
+            return RadegastInstance.INCOMPLETE_NAME;
         }
         private async Task<string> GetParcelNameAsync(UUID parcelID, CancellationToken cancellationToken = default)
         {

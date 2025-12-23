@@ -221,12 +221,15 @@ namespace Radegast.Rendering
 
                 // Create paint for measuring and drawing
                 using (var paint = CreatePaint(ChatOverlay.ChatFont))
+                using (var tf = SKTypeface.FromFamilyName(ChatOverlay.ChatFont.Name))
+                using (var skFont = new SKFont(tf, ChatOverlay.ChatFont.Size))
                 {
+                    skFont.Subpixel = true;
                     // Word-wrap into lines not exceeding maxWidth
-                    var lines = WrapText(txt, paint, maxWidth);
+                    var lines = WrapText(txt, skFont, maxWidth);
 
                     // Measure height via font metrics
-                    paint.GetFontMetrics(out var metrics);
+                    skFont.GetFontMetrics(out var metrics);
                     float lineHeight = (metrics.Descent - metrics.Ascent) + metrics.Leading;
                     if (lineHeight <= 0f) lineHeight = (-metrics.Ascent) + metrics.Descent;
 
@@ -234,7 +237,7 @@ namespace Radegast.Rendering
                     float maxLineWidth = 0f;
                     foreach (var line in lines)
                     {
-                        float w = paint.MeasureText(line);
+                        float w = skFont.MeasureText(line);
                         if (w > maxLineWidth) maxLineWidth = w;
                     }
 
@@ -260,9 +263,9 @@ namespace Radegast.Rendering
                         float y = baseline;
                         foreach (var line in lines)
                         {
-                            float lw = paint.MeasureText(line);
-                            float x = ((float)ImgWidth - lw) * 0.0f; // Left align within box; HUD positions will handle centering
-                            canvas.DrawText(line, x, y, paint);
+                            float lw = skFont.MeasureText(line);
+                            float x = (ImgWidth - lw) * 0.0f; // Left align within box; HUD positions will handle centering
+                            canvas.DrawText(line, x, y, SKTextAlign.Left, skFont, paint);
                             y += lineHeight;
                         }
 
@@ -282,20 +285,15 @@ namespace Radegast.Rendering
 
         private static SKPaint CreatePaint(Font font)
         {
-            var typeface = SKTypeface.FromFamilyName(font.Name);
             return new SKPaint
             {
-                Typeface = typeface,
-                TextSize = font.Size,
                 IsAntialias = true,
-                SubpixelText = true,
                 IsStroke = false,
-                FilterQuality = SKFilterQuality.High,
                 Color = new SKColor(255, 255, 255, 255)
             };
         }
 
-        private static List<string> WrapText(string text, SKPaint paint, int maxWidth)
+        private static List<string> WrapText(string text, SKFont font, int maxWidth)
         {
             var result = new List<string>();
             if (string.IsNullOrEmpty(text)) { result.Add(string.Empty); return result; }
@@ -306,7 +304,7 @@ namespace Radegast.Rendering
             foreach (var word in words)
             {
                 var candidate = string.IsNullOrEmpty(line) ? word : line + " " + word;
-                float width = paint.MeasureText(candidate);
+                float width = font.MeasureText(candidate);
                 if (width <= maxWidth)
                 {
                     line = candidate;
@@ -315,7 +313,7 @@ namespace Radegast.Rendering
                 {
                     if (!string.IsNullOrEmpty(line)) result.Add(line);
                     // If single word exceeds maxWidth, force break
-                    if (paint.MeasureText(word) > maxWidth)
+                    if (font.MeasureText(word) > maxWidth)
                     {
                         result.Add(word);
                         line = string.Empty;

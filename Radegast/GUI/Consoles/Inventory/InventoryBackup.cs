@@ -118,9 +118,9 @@ namespace Radegast
                 sbrProgress.Style = ProgressBarStyle.Marquee;
                 fetched = 0;
 
-                Task backupTask = Task.Run(() =>
+                Task backupTask = Task.Run(async () =>
                 {
-                    TraverseDir(rootNode, Path.DirectorySeparatorChar.ToString());
+                    await TraverseDirAsync(rootNode, Path.DirectorySeparatorChar.ToString(), backupTaskCancelToken.Token).ConfigureAwait(false);
                     if (csvFile != null)
                     {
                         try
@@ -145,7 +145,7 @@ namespace Radegast
 
         }
 
-        private void TraverseDir(InventoryNode node, string path)
+        private async Task TraverseDirAsync(InventoryNode node, string path, CancellationToken ct)
         {
             var nodes = new List<InventoryNode>(node.Nodes.Values);
             foreach (InventoryNode n in nodes)
@@ -153,7 +153,7 @@ namespace Radegast
                 traversed++;
                 try
                 {
-                    backupTaskCancelToken.Token.ThrowIfCancellationRequested();
+                    ct.ThrowIfCancellationRequested();
                     if (IsHandleCreated && (traversed % 13 == 0))
                     {
                         BeginInvoke(new MethodInvoker(() =>
@@ -165,13 +165,13 @@ namespace Radegast
                     if (n.Data is InventoryFolder)
                     {
                         WriteCSVLine("Folder", path, n.Data.Name, "", "", "", "");
-                        TraverseDir(n, Path.Combine(path, RadegastInstance.SafeFileName(n.Data.Name)));
+                        await TraverseDirAsync(n, Path.Combine(path, RadegastInstance.SafeFileName(n.Data.Name)), ct).ConfigureAwait(false);
                     }
                     else
                     {
                         InventoryItem item = (InventoryItem)n.Data;
-                        string creator = item.CreatorID == UUID.Zero ? string.Empty : instance.Names.GetAsync(item.CreatorID).GetAwaiter().GetResult();
-                        string lastOwner = item.LastOwnerID == UUID.Zero ? string.Empty : instance.Names.GetAsync(item.LastOwnerID).GetAwaiter().GetResult();
+                        string creator = item.CreatorID == UUID.Zero ? string.Empty : await instance.Names.GetAsync(item.CreatorID, ct);
+                        string lastOwner = item.LastOwnerID == UUID.Zero ? string.Empty : await instance.Names.GetAsync(item.LastOwnerID, ct);
                         string type = item.AssetType.ToString();
                         if (item.InventoryType == InventoryType.Wearable) type = ((WearableType)item.Flags).ToString();
                         string created = item.CreationDate.ToString("yyyy-MM-dd HH:mm:ss");
@@ -213,14 +213,7 @@ namespace Radegast
                             ListViewItem.ListViewSubItem status = new ListViewItem.ListViewSubItem(lvi, "Fetching asset");
                             lvi.SubItems.Add(status);
 
-                            //bool cached = dateOK && File.Exists(fullName) && File.GetCreationTimeUtc(fullName) == item.CreationDate;
-
-                            //if (cached)
-                            //{
-                            //    status.Text = "Cached";
-                            //}
-
-                            backupTaskCancelToken.Token.ThrowIfCancellationRequested();
+                            ct.ThrowIfCancellationRequested();
 
                             BeginInvoke(new MethodInvoker(() =>
                             {
@@ -228,44 +221,69 @@ namespace Radegast
                                 lvwFiles.EnsureVisible(lvwFiles.Items.Count - 1);
                             }));
 
-                            //if (cached) continue;
-                            backupTaskCancelToken.Token.ThrowIfCancellationRequested();
+                            ct.ThrowIfCancellationRequested();
 
                             Asset receivedAsset = null;
-                            using (AutoResetEvent done = new AutoResetEvent(false))
+
+                            // Use TaskCompletionSource to await the asset callback instead of blocking AutoResetEvent
+                            var tcs = new TaskCompletionSource<Asset>();
+
+                            if (item.AssetType == AssetType.Texture)
                             {
-                                if (item.AssetType == AssetType.Texture)
+                                client.Assets.RequestImage(item.AssetUUID, (state, asset) =>
                                 {
-                                    client.Assets.RequestImage(item.AssetUUID, (state, asset) =>
+                                    try
                                     {
                                         if (state == TextureRequestState.Finished && asset != null && asset.Decode())
                                         {
-                                            receivedAsset = asset;
-                                            done.Set();
+                                            tcs.TrySetResult(asset);
+                                            return;
                                         }
-                                    });
-                                }
-                                else
-                                {
-                                    var transferID = UUID.Random();
-                                    client.Assets.RequestInventoryAsset(item, true, transferID, (transfer, asset) =>
-                                        {
-                                            if (transfer.Success && transfer.ID == transferID)
-                                            {
-                                                receivedAsset = asset;
-                                            }
-                                            done.Set();
-                                        }
-                                    );
-                                }
 
-                                backupTaskCancelToken.Token.ThrowIfCancellationRequested();
-                                done.WaitOne(30 * 1000, false);
+                                        if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
+                                        {
+                                            tcs.TrySetResult(null);
+                                        }
+                                    }
+                                    catch (Exception)
+                                    {
+                                        tcs.TrySetResult(null);
+                                    }
+                                });
+                            }
+                            else
+                            {
+                                var transferID = UUID.Random();
+                                client.Assets.RequestInventoryAsset(item, true, transferID, (transfer, asset) =>
+                                {
+                                    try
+                                    {
+                                        if (transfer.Success && transfer.ID == transferID)
+                                        {
+                                            tcs.TrySetResult(asset);
+                                        }
+                                        else
+                                        {
+                                            tcs.TrySetResult(null);
+                                        }
+                                    }
+                                    catch (Exception)
+                                    {
+                                        tcs.TrySetResult(null);
+                                    }
+                                });
+                            }
+
+                            // Wait for asset or timeout
+                            var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30), ct)).ConfigureAwait(false);
+                            if (completed == tcs.Task)
+                            {
+                                receivedAsset = await tcs.Task.ConfigureAwait(false);
                             }
 
                             client.Settings.USE_ASSET_CACHE = true;
 
-                            backupTaskCancelToken.Token.ThrowIfCancellationRequested();
+                            ct.ThrowIfCancellationRequested();
                             if (receivedAsset == null)
                             {
                                 BeginInvoke(new MethodInvoker(() => status.Text = "Failed to fetch asset"));
@@ -276,7 +294,7 @@ namespace Radegast
 
                                 try
                                 {
-                                    backupTaskCancelToken.Token.ThrowIfCancellationRequested();
+                                    ct.ThrowIfCancellationRequested();
                                     if (!Directory.Exists(dirName))
                                     {
                                         Directory.CreateDirectory(dirName);

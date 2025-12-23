@@ -21,6 +21,7 @@
 using System;
 using System.ComponentModel;
 using System.Threading.Tasks;
+using System.Threading;
 
 namespace Radegast
 {
@@ -114,9 +115,22 @@ namespace Radegast
         /// </summary>
         public static Task SafeInvokeAsync(ISynchronizeInvoke invoker, Action action)
         {
+            return SafeInvokeAsync(invoker, action, CancellationToken.None);
+        }
+
+        /// <summary>
+        /// Safely invoke an action asynchronously with cancellation support
+        /// </summary>
+        public static Task SafeInvokeAsync(ISynchronizeInvoke invoker, Action action, CancellationToken cancellationToken)
+        {
             if (invoker == null || action == null) return Task.CompletedTask;
 
             var tcs = new TaskCompletionSource<bool>();
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
 
             if (invoker.InvokeRequired)
             {
@@ -139,6 +153,11 @@ namespace Radegast
                 {
                     tcs.TrySetException(ex);
                 }
+
+                if (cancellationToken.CanBeCanceled)
+                {
+                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state).TrySetCanceled(), tcs, useSynchronizationContext: false);
+                }
             }
             else
             {
@@ -151,6 +170,66 @@ namespace Radegast
                 {
                     tcs.TrySetException(ex);
                 }
+            }
+
+            return tcs.Task;
+        }
+
+        /// <summary>
+        /// Safely invoke an async function on the control's thread and await its completion
+        /// </summary>
+        public static Task SafeInvokeAsync(ISynchronizeInvoke invoker, Func<Task> asyncAction, CancellationToken cancellationToken = default)
+        {
+            if (invoker == null || asyncAction == null) return Task.CompletedTask;
+
+            var tcs = new TaskCompletionSource<bool>();
+
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return Task.FromCanceled(cancellationToken);
+            }
+
+            if (invoker.InvokeRequired)
+            {
+                try
+                {
+                    invoker.BeginInvoke(new Action(async () =>
+                    {
+                        try
+                        {
+                            await asyncAction().ConfigureAwait(false);
+                            tcs.TrySetResult(true);
+                        }
+                        catch (Exception ex)
+                        {
+                            tcs.TrySetException(ex);
+                        }
+                    }), null);
+                }
+                catch (Exception ex)
+                {
+                    tcs.TrySetException(ex);
+                }
+
+                if (cancellationToken.CanBeCanceled)
+                {
+                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state).TrySetCanceled(), tcs, useSynchronizationContext: false);
+                }
+            }
+            else
+            {
+                Task.Run(async () =>
+                {
+                    try
+                    {
+                        await asyncAction().ConfigureAwait(false);
+                        tcs.TrySetResult(true);
+                    }
+                    catch (Exception ex)
+                    {
+                        tcs.TrySetException(ex);
+                    }
+                });
             }
 
             return tcs.Task;

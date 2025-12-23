@@ -209,7 +209,7 @@ namespace Radegast.Rendering
                 var numVerts = RenderData.Vertices.Length / 3;
                 // interleaved: pos(3) norm(3) tex(2) = 8 floats
                 var interleaved = new float[numVerts * 8];
-                for (int i = 0, vi = 0, ti = 0, ni = 0; i < numVerts; i++)
+                for (int i = 0, vi = 0; i < numVerts; i++)
                 {
                     // position
                     interleaved[vi++] = RenderData.Vertices[i * 3];
@@ -262,7 +262,6 @@ namespace Radegast.Rendering
                     Compat.BindBuffer(BufferTarget.ElementArrayBuffer, IndexVBO);
 
                     // position (3 floats), normal (3), texcoord (2) stride 8 floats
-                    int posLoc = 0; // fallback attribute location for fixed-function
                     // If shader attributes are available, use those at render time
                     GL.EnableVertexAttribArray(0);
                     GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
@@ -2391,8 +2390,6 @@ namespace Radegast.Rendering
         public Dictionary<WearableType, AppearanceManager.WearableData> Wearables = new Dictionary<WearableType, AppearanceManager.WearableData>();
         public static readonly BoundingVolume AvatarBoundingVolume;
         
-        // Track if avatar meshes have been properly set up for rendering
-        private bool renderDataReady = false;
         // Track if we've computed size at least once
         private bool sizeComputed = false;
 
@@ -2422,8 +2419,6 @@ namespace Radegast.Rendering
                 {
                     avatar = (Avatar)value;
                     AvatarBoundingVolume.CalcScaled(avatar.Scale);
-                    // Invalidate ready state when avatar changes
-                    renderDataReady = false;
                 }
             }
         }
@@ -2431,7 +2426,6 @@ namespace Radegast.Rendering
         public override void Initialize()
         {
             base.Initialize();
-            renderDataReady = false;
             sizeComputed = false;
         }
 
@@ -2585,7 +2579,6 @@ namespace Radegast.Rendering
             {
                 if (mesh.RenderData.Vertices != null && mesh.RenderData.Vertices.Length > 0)
                 {
-                    renderDataReady = true;
                     return true;
                 }
             }
@@ -2608,8 +2601,6 @@ namespace Radegast.Rendering
                 mesh.IndexVBO = -1;
                 mesh.Vao = -1;
             }
-            
-            renderDataReady = false;
         }
 
         public override void Dispose()
@@ -2651,7 +2642,6 @@ namespace Radegast.Rendering
                 }
             }
             
-            renderDataReady = false;
             sizeComputed = false;
             
             base.Dispose();
