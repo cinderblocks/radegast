@@ -100,7 +100,7 @@ deploy:
     name: github_releases
     description: Radegast v$(TAG_VERSION)
     auth_token:
-      secure: KPXQ74CJ+1aD3/H12JeVwMedPvcyr4aL9O/CFL8sGJHN/WZCYjKw92m8CodgO90D
+      secure: cDXEU6DWtnF8+XWP+dte1BDiv/HdftWYSgHRrngG7E7XzUdsbuly24lygeRU1DJM
     artifact: /.*Radegast(Setup_|_).*(exe|msi|tbz)/
     skip_symbols: false
     draft: true
