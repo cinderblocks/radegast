@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -1627,7 +1627,8 @@ namespace Radegast
         private void HoverHeightControl_HoverHeightChanged(object sender, HoverHeightChangedEventArgs e)
         {
             instance.GlobalSettings["AvatarHoverOffsetZ"] = e.HoverHeight;
-            Client.Self.SetHoverHeight(e.HoverHeight);
+            // Fire-and-forget the async API to avoid blocking the UI thread
+            _ = Client.Self.SetHoverHeightAsync(e.HoverHeight);
         }
 
         private void Caps_CapabilitiesReceived(object sender, CapabilitiesReceivedEventArgs e)
@@ -1642,10 +1643,8 @@ namespace Radegast
 
         private void SetHoverHeightFromSettings()
         {
-            if (!instance.GlobalSettings.ContainsKey("AvatarHoverOffsetZ")) return;
-
-            var hoverHeight = instance.GlobalSettings["AvatarHoverOffsetZ"];
-            Client.Self.SetHoverHeight(hoverHeight);
+            if (!instance.GlobalSettings.TryGetValue("AvatarHoverOffsetZ", out var hoverHeight)) { return; }
+            _ = Client.Self.SetHoverHeightAsync(hoverHeight);
         }
 
         private void openMiniMapToolStripMenuItem_Click(object sender, EventArgs e)

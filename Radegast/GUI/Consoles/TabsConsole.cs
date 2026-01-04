@@ -203,7 +203,7 @@ namespace Radegast
             }
         }
 
-        private void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
+        private async void Network_EventQueueRunning(object sender, EventQueueRunningEventArgs e)
         {
             if (InvokeRequired)
             {
@@ -214,7 +214,45 @@ namespace Radegast
             if (TabExists("friends")) return;
             if (e.Simulator == client.Network.CurrentSim)
             {
-                client.Self.UpdateAgentLanguage("en", true); // FIXME: This should user set.
+                // Read user-configured language and privacy setting from GlobalSettings.
+                // Defaults: "en" and share public = true.
+                string language = "en";
+                bool isPublic = true;
+
+                try
+                {
+                    if (instance.GlobalSettings.TryGetValue("agent_language", out var agent_lang))
+                    {
+                        if (agent_lang != null) { language = agent_lang.ToString(); }
+                    }
+
+                    if (instance.GlobalSettings.ContainsKey("agent_language_public"))
+                    {
+                        // Some settings expose an AsBoolean() helper; try to use it when available
+                        try
+                        {
+                            isPublic = instance.GlobalSettings["agent_language_public"].AsBoolean();
+                        }
+                        catch
+                        {
+                            // Fallback to string/boolean conversion
+                            var vp = instance.GlobalSettings["agent_language_public"];
+                            if (vp != null && bool.TryParse(vp.ToString(), out var parsed))
+                                isPublic = parsed;
+                        }
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    await client.Self.UpdateAgentLanguageAsync(language, isPublic);
+                }
+                catch (Exception ex)
+                {
+                    try { DisplayNotificationInChat($"Failed to update agent language: {ex.Message}", ChatBufferTextStyle.Error); } catch { }
+                }
+
                 InitializeOnlineTabs();
             }
         }
