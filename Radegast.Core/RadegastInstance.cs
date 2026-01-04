@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -336,7 +336,7 @@ namespace Radegast
 
         private void InitializeClient(GridClient client)
         {
-            client.Settings.MULTIPLE_SIMS = false;
+            client.Settings.MULTIPLE_SIMS = true;
 
             client.Settings.USE_INTERPOLATION_TIMER = false;
             client.Settings.ALWAYS_REQUEST_OBJECTS = true;

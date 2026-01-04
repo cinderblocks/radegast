@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -93,9 +93,33 @@ namespace Radegast
             if (requestedPrim.ParentID != 0)
             {
                 Primitive parent;
-                if (sim.ObjectsPrimitives.TryGetValue(requestedPrim.ParentID, out parent))
+                // Search for parent on the correct simulator
+                var foundSim = sim;
+                if (!sim.ObjectsPrimitives.TryGetValue(requestedPrim.ParentID, out parent))
+                {
+                    // Parent not on the specified sim, search other connected simulators
+                    try
+                    {
+                        lock (Client.Network.Simulators)
+                        {
+                            foreach (var s in Client.Network.Simulators)
+                            {
+                                if (s == null) continue;
+                                if (s.ObjectsPrimitives.TryGetValue(requestedPrim.ParentID, out parent))
+                                {
+                                    foundSim = s;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                if (parent != null)
                 {
                     RootPrim = parent;
+                    sim = foundSim;
                 }
             }
 

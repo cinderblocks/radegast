@@ -402,11 +402,6 @@ namespace Radegast
 
         private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
-            if (e.Simulator.Handle != client.Network.CurrentSim.Handle)
-            {
-                return;
-            }
-
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(delegate() { Objects_ObjectProperties(sender, e); }));
@@ -418,11 +413,8 @@ namespace Radegast
 
         private void Objects_ObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
         {
-            if (e.Simulator.Handle != client.Network.CurrentSim.Handle)
-            {
-                return;
-            }
-
+            // Accept property updates from any connected simulator, not just CurrentSim
+            // This allows tracking objects near sim boundaries
             if (InvokeRequired)
             {
                 BeginInvoke(new MethodInvoker(delegate() { Objects_ObjectPropertiesFamily(sender, e); }));
@@ -709,7 +701,8 @@ namespace Radegast
                 cbNextOwnModify.Enabled = cbNextOwnCopy.Enabled = cbNextOwnTransfer.Enabled = false;
             }
 
-            var prims = (from p in client.Network.CurrentSim.ObjectsPrimitives
+            var sim = instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID);
+            var prims = (from p in sim.ObjectsPrimitives
                 where p.Value != null
                 where p.Value.ParentID == CurrentPrim.LocalID || p.Value.LocalID == CurrentPrim.LocalID
                 select p.Value).ToList();
@@ -1073,7 +1066,9 @@ namespace Radegast
         private void UpdateChildren()
         {
             if (CurrentPrim == null) { return; }
-            var prims = (from p in client.Network.CurrentSim.ObjectsPrimitives
+            
+            var sim = instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID);
+            var prims = (from p in sim.ObjectsPrimitives
                 where p.Value != null where p.Value.ParentID == CurrentPrim.LocalID select p.Value).ToList();
             if (!prims.Any()) { return; }
 
@@ -1106,7 +1101,7 @@ namespace Radegast
             lstChildren.Visible = true;
             if (toGetNames.Count > 0)
             {
-                client.Objects.SelectObjects(client.Network.CurrentSim, toGetNames.ToArray(), true);
+                client.Objects.SelectObjects(sim, toGetNames.ToArray(), true);
             }
         }
 
@@ -1604,15 +1599,32 @@ namespace Radegast
                 for (int i = 0; i < 25 && props.Count > 0; i++)
                 {
                     Primitive prim = props.Dequeue();
+                    
+                    // Find the correct simulator for this prim
+                    Simulator sim = instance.Client.Network.CurrentSim;
+                    if (prim.RegionHandle != 0)
+                    {
+                        // Try to find by region handle first
+                        lock (instance.Client.Network.Simulators)
+                        {
+                            foreach (var s in instance.Client.Network.Simulators)
+                            {
+                                if (s?.Handle == prim.RegionHandle)
+                                {
+                                    sim = s;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
                     if (prim.ParentID == 0)
                     {
-                        instance.Client.Objects.RequestObjectPropertiesFamily(
-                            instance.Client.Network.CurrentSim, prim.ID, true);
+                        instance.Client.Objects.RequestObjectPropertiesFamily(sim, prim.ID, true);
                     }
                     else
                     {
-                        instance.Client.Objects.SelectObject(instance.Client.Network.CurrentSim,
-                            prim.LocalID, true);
+                        instance.Client.Objects.SelectObject(sim, prim.LocalID, true);
                     }
                 }
 

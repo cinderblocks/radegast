@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -55,7 +55,7 @@ namespace Radegast
                 where p.Value.LocalID == localID || p.Value.ParentID == localID
                 select p.Value).ToList();
 
-            RequestObjectProperties(prims, 500);
+            RequestObjectProperties(prims, 500, sim);
 
             int i = prims.FindIndex(
                 prim => (prim.LocalID == localID)
@@ -83,12 +83,12 @@ namespace Radegast
                 where p.Value.LocalID == rootPrim || p.Value.ParentID == rootPrim
                 select p.Value).ToList();
 
-            RequestObjectProperties(prims, 500);
+            RequestObjectProperties(prims, 500, sim);
 
             return OSDParser.SerializeLLSDXmlString(ClientHelpers.PrimListToOSD(prims));
         }
 
-        private bool RequestObjectProperties(IReadOnlyList<Primitive> objects, int msPerRequest)
+        private bool RequestObjectProperties(IReadOnlyList<Primitive> objects, int msPerRequest, Simulator sim = null)
         {
             // Create an array of the local IDs of all the prims we are requesting properties for
             uint[] localids = new uint[objects.Count];
@@ -105,7 +105,9 @@ namespace Radegast
 
             if (localids.Length > 0)
             {
-                Client.Objects.SelectObjects(Client.Network.CurrentSim, localids, false);
+                // If no simulator provided, fall back to current
+                var targetSim = sim ?? Client.Network.CurrentSim;
+                Client.Objects.SelectObjects(targetSim, localids, false);
                 // Wait for ObjectProperties events until all requested prims have been removed from PrimsWaiting.
                 var timeout = 2000 + msPerRequest * localids.Length;
                 EventSubscriptionHelper.WaitForCondition<ObjectPropertiesEventArgs>(
@@ -127,7 +129,7 @@ namespace Radegast
                     Logger.Warn($"Failed to retrieve object properties for {PrimsWaiting.Count} prims out of {localids.Length}", Client);
                 }
 
-                Client.Objects.DeselectObjects(Client.Network.CurrentSim, localids);
+                Client.Objects.DeselectObjects(targetSim, localids);
                 return PrimsWaiting.Count == 0;
             }
             return true;

@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -301,15 +301,97 @@ namespace Radegast
             }
         }
 
+        private Simulator FindSimulatorForLocalID(uint localID)
+        {
+            try
+            {
+                lock (Client.Network.Simulators)
+                {
+                    foreach (var s in Client.Network.Simulators)
+                    {
+                        if (s == null) continue;
+                        if (localID != 0 && (s.ObjectsPrimitives.ContainsKey(localID) || s.ObjectsAvatars.ContainsKey(localID))) { return s; }
+                    }
+                }
+            }
+            catch { }
+            return Client.Network.CurrentSim;
+        }
+
+        /// <summary>
+        /// Find simulator containing a specific prim by UUID or LocalID
+        /// </summary>
+        /// <param name="primID">UUID of the prim (optional)</param>
+        /// <param name="localID">Local ID of the prim (optional)</param>
+        /// <returns>Simulator containing the prim, or CurrentSim if not found</returns>
+        public Simulator FindSimulatorForPrim(UUID primID = default, uint localID = 0)
+        {
+            try
+            {
+                lock (Client.Network.Simulators)
+                {
+                    foreach (var s in Client.Network.Simulators)
+                    {
+                        if (s == null) continue;
+                        
+                        if (primID != UUID.Zero)
+                        {
+                            if (s.ObjectsPrimitives.Values.Any(p => p?.ID == primID) ||
+                                s.ObjectsAvatars.Values.Any(a => a?.ID == primID))
+                                return s;
+                        }
+                        
+                        if (localID != 0)
+                        {
+                            if (s.ObjectsPrimitives.ContainsKey(localID) || 
+                                s.ObjectsAvatars.ContainsKey(localID))
+                                return s;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return Client.Network.CurrentSim;
+        }
+
+        /// <summary>
+        /// Find simulator containing a specific avatar by UUID
+        /// </summary>
+        /// <param name="avatarID">UUID of the avatar</param>
+        /// <returns>Simulator containing the avatar, or CurrentSim if not found</returns>
+        public Simulator FindSimulatorForAvatar(UUID avatarID)
+        {
+            try
+            {
+                lock (Client.Network.Simulators)
+                {
+                    foreach (var s in Client.Network.Simulators)
+                    {
+                        if (s == null) continue;
+                        if (s.ObjectsAvatars.Any(a => a.Value?.ID == avatarID))
+                            return s;
+                        if (s.AvatarPositions.ContainsKey(avatarID))
+                            return s;
+                    }
+                }
+            }
+            catch { }
+            return Client.Network.CurrentSim;
+        }
+
         private void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
         {
             if (e.Avatar.LocalID != Client.Self.LocalID) return;
 
             Sitting = e.SittingOn != 0;
 
-            if (Client.Self.SittingOn != 0 && !Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
+            if (Client.Self.SittingOn != 0)
             {
-                Client.Objects.RequestObject(Client.Network.CurrentSim, Client.Self.SittingOn);
+                var sim = FindSimulatorForLocalID(Client.Self.SittingOn);
+                if (!sim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
+                {
+                    Client.Objects.RequestObject(sim, Client.Self.SittingOn);
+                }
             }
 
             SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
@@ -555,7 +637,7 @@ namespace Radegast
         private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
             if (!e.Update.Avatar) { return; }
-            
+
             if (e.Prim.LocalID == Client.Self.LocalID)
             {
                 SetDefaultCamera();
@@ -563,12 +645,44 @@ namespace Radegast
 
             if (!IsFollowing) { return; }
 
-            Client.Network.CurrentSim.ObjectsAvatars.TryGetValue(e.Update.LocalID, out var av);
-            if (av == null) { return; }
-
-            if (av.ID == followID)
+            // Locate the avatar object by local ID across known simulators
+            Avatar foundAv = null;
+            Simulator foundSim = null;
+            try
             {
-                FollowUpdate(AvatarPosition(Client.Network.CurrentSim, av));
+                lock (Client.Network.Simulators)
+                {
+                    foreach (var s in Client.Network.Simulators)
+                    {
+                        if (s == null) continue;
+                        if (s.ObjectsAvatars.TryGetValue(e.Update.LocalID, out var av))
+                        {
+                            foundAv = av;
+                            foundSim = s;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            if (foundAv == null)
+            {
+                // Not found in tracked avatars; nothing we can do here
+                return;
+            }
+
+            // If this is the avatar we're following, compute its position and update follow
+            if (foundAv.ID == followID)
+            {
+                var pos = AvatarPosition(foundSim, foundAv);
+                // Convert to current sim local coordinates if avatar is on another simulator
+                if (foundSim != Client.Network.CurrentSim)
+                {
+                    try { pos = PositionHelper.ToLocalPosition(foundSim.Handle, pos); } catch { }
+                }
+
+                FollowUpdate(pos);
             }
         }
 
@@ -592,20 +706,22 @@ namespace Radegast
         {
             if (!CameraTracksOwnAvatar) { return; }
 
-            if (Client.Self.SittingOn != 0 && !Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
+            if (Client.Self.SittingOn != 0)
             {
-                // We are sitting but don't have the information about the object we are sitting on
-                // Sim seems to ignore RequestMultipleObjects message
-                // client.Objects.RequestObject(client.Network.CurrentSim, client.Self.SittingOn);
+                var sim = FindSimulatorForLocalID(Client.Self.SittingOn);
+                if (!sim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
+                {
+                    // We are sitting but don't have the information about the object we are sitting on
+                    // Request the object from the simulator that should own it
+                    try { Client.Objects.RequestObject(sim, Client.Self.SittingOn); } catch { }
+                }
             }
-            else
-            {
-                Vector3 pos = Client.Self.SimPosition + DefaultCameraOffset * Client.Self.Movement.BodyRotation;
-                //Logger.Log("Setting camera position to " + pos.ToString(), Helpers.LogLevel.Debug);
-                Client.Self.Movement.Camera.LookAt(
-                    pos, Client.Self.SimPosition
-                );
-            }
+
+            Vector3 pos = Client.Self.SimPosition + DefaultCameraOffset * Client.Self.Movement.BodyRotation;
+            //Logger.Log("Setting camera position to " + pos.ToString(), Helpers.LogLevel.Debug);
+            Client.Self.Movement.Camera.LookAt(
+                pos, Client.Self.SimPosition
+            );
         }
 
         public Quaternion AvatarRotation(Simulator sim, UUID avID)
@@ -677,8 +793,7 @@ namespace Radegast
             {
                 IsWalking = false;
 
-                Vector3 target = AvatarPosition(Client.Network.CurrentSim, id);
-                if (Vector3.Zero != target)
+                if (TryFindAvatar(id, out Vector3 target))
                 {
                     Client.Self.Movement.TurnToward(target);
                     FollowUpdate(target);
