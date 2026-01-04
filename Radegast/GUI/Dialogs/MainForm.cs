@@ -242,8 +242,6 @@ namespace Radegast
             InitializeTabsConsole();
             uriParser = new SlUriParser(instance);
 
-            if (!instance.MediaManager.SoundSystemAvailable) return;
-
             MediaConsole = new MediaConsole(instance);
             tbtnMedia.Visible = true;
         }
