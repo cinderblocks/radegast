@@ -96,7 +96,12 @@ namespace Radegast
             ChannelReader<UUID> reader = backlog.Reader;
             while (!cancellationToken.IsCancellationRequested)
             {
-                await reader.WaitToReadAsync(cancellationToken);
+                // Check if there's data available before processing
+                if (!await reader.WaitToReadAsync(cancellationToken))
+                {
+                    // Channel closed
+                    break;
+                }
 
                 using (RateLimitLease lease = await rateLimiter.AcquireAsync(1, cancellationToken))
                 {
@@ -118,13 +123,11 @@ namespace Radegast
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             // Wait for the first item (blocking asynchronously)
-            UUID firstAvatar;
-            try
+            if (!reader.TryRead(out UUID firstAvatar))
             {
-                firstAvatar = await reader.ReadAsync(cancellationToken);
+                // No items available (shouldn't happen if WaitToReadAsync returned true)
+                return;
             }
-            catch (OperationCanceledException) { return; }
-            catch (ChannelClosedException) { return; }
 
             batchedNamesBuffer.Add(firstAvatar);
 
@@ -141,27 +144,30 @@ namespace Radegast
 
                 int remaining = (int)Math.Max(1, 100 - stopwatch.ElapsedMilliseconds);
 
-                // Wait either for a new item or timeout
-                var readTask = reader.ReadAsync(cancellationToken).AsTask();
-                var delayTask = Task.Delay(remaining, cancellationToken);
-
-                var completed = await Task.WhenAny(readTask, delayTask).ConfigureAwait(false);
-
-                if (completed == readTask)
+                // Create a linked cancellation token with timeout
+                using (var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
                 {
+                    timeoutCts.CancelAfter(remaining);
+
                     try
                     {
-                        UUID got = await readTask; // propagate exceptions/cancellation
+                        UUID got = await reader.ReadAsync(timeoutCts.Token);
                         batchedNamesBuffer.Add(got);
                     }
-                    catch (OperationCanceledException) { break; }
-                    catch (ChannelClosedException) { break; }
-                    catch { break; }
-                }
-                else
-                {
-                    // timeout elapsed
-                    break;
+                    catch (OperationCanceledException)
+                    {
+                        // Either timeout or main cancellation - check which one
+                        if (cancellationToken.IsCancellationRequested)
+                        {
+                            return;
+                        }
+                        // Timeout occurred, break and process what we have
+                        break;
+                    }
+                    catch (ChannelClosedException)
+                    {
+                        break;
+                    }
                 }
             }
 
