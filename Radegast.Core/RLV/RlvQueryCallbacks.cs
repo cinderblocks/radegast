@@ -44,10 +44,27 @@ namespace Radegast.Core.RLV
 
         public Task<bool> ObjectExistsAsync(Guid objectId, CancellationToken cancellationToken)
         {
-            var objectExistsInWorld = instance.Client.Network.CurrentSim.ObjectsPrimitives
-                .Any(n => n.Value.ID.Guid == objectId);
+            // Search across all connected simulators for the object
+            try
+            {
+                Simulator[] sims = null;
+                lock (instance.Client.Network.Simulators)
+                {
+                    sims = instance.Client.Network.Simulators.ToArray();
+                }
+                
+                foreach (var sim in sims)
+                {
+                    if (sim == null) continue;
+                    if (sim.ObjectsPrimitives.Any(n => n.Value?.ID.Guid == objectId))
+                    {
+                        return Task.FromResult(true);
+                    }
+                }
+            }
+            catch { }
 
-            return Task.FromResult(objectExistsInWorld);
+            return Task.FromResult(false);
         }
 
         public async Task<(bool Success, string ActiveGroupName)> TryGetActiveGroupNameAsync(CancellationToken cancellationToken)
@@ -94,32 +111,48 @@ namespace Radegast.Core.RLV
         private Dictionary<UUID, UUID> GetAttachedItemIdToPrimitiveIdMap()
         {
             var attachedItemMap = new Dictionary<UUID, UUID>();
-            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
-
-            foreach (var item in objectPrimitivesSnapshot)
+            
+            // Scan all connected simulators for attachments
+            try
             {
-                if (!item.IsAttachment)
+                Simulator[] sims = null;
+                lock (instance.Client.Network.Simulators)
                 {
-                    continue;
+                    sims = instance.Client.Network.Simulators.ToArray();
                 }
-
-                var attachItemID = item.NameValues
-                    .Where(n => n.Name == "AttachItemID")
-                    .Select(n => n.Value)
-                    .FirstOrDefault();
-
-                if (attachItemID == null)
+                
+                foreach (var sim in sims)
                 {
-                    continue;
-                }
+                    if (sim == null) continue;
+                    
+                    var objectPrimitivesSnapshot = sim.ObjectsPrimitives.Values.ToList();
+                    foreach (var item in objectPrimitivesSnapshot)
+                    {
+                        if (!item.IsAttachment)
+                        {
+                            continue;
+                        }
 
-                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
-                {
-                    continue;
-                }
+                        var attachItemID = item.NameValues
+                            .Where(n => n.Name == "AttachItemID")
+                            .Select(n => n.Value)
+                            .FirstOrDefault();
 
-                attachedItemMap[attachmentId] = item.ID;
+                        if (attachItemID == null)
+                        {
+                            continue;
+                        }
+
+                        if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                        {
+                            continue;
+                        }
+
+                        attachedItemMap[attachmentId] = item.ID;
+                    }
+                }
             }
+            catch { }
 
             return attachedItemMap;
         }
@@ -138,10 +171,25 @@ namespace Radegast.Core.RLV
         {
             if (instance.Client.Self.SittingOn != 0)
             {
-                if (instance.Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(instance.Client.Self.SittingOn, out var objectWeAreSittingOn))
+                // Search across all connected simulators for the sit object
+                try
                 {
-                    return Task.FromResult((true, objectWeAreSittingOn.ID.Guid));
+                    Simulator[] sims = null;
+                    lock (instance.Client.Network.Simulators)
+                    {
+                        sims = instance.Client.Network.Simulators.ToArray();
+                    }
+                    
+                    foreach (var sim in sims)
+                    {
+                        if (sim == null) continue;
+                        if (sim.ObjectsPrimitives.TryGetValue(instance.Client.Self.SittingOn, out var objectWeAreSittingOn))
+                        {
+                            return Task.FromResult((true, objectWeAreSittingOn.ID.Guid));
+                        }
+                    }
                 }
+                catch { }
             }
 
             return Task.FromResult((false, Guid.Empty));
