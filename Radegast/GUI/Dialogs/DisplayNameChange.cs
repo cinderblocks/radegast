@@ -1,7 +1,7 @@
 ﻿/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -71,28 +71,36 @@ namespace Radegast
 
         }
 
-        private void StartDisplayNameChange(string name)
+        private async Task StartDisplayNameChange(string name)
         {
-            Task.Run(async () =>
+            var tcs = new TaskCompletionSource<bool>();
+
+            // Request current display name, callback will perform the update
+            Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID }, async (success, names, badIDs) =>
+            {
+                if (!success || names.Length < 1)
                 {
-                    await Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID },
-                        (success, names, badIDs) =>
-                        {
-                            if (!success || names.Length < 1)
-                            {
-                                UpdateStatus("Failed to get current name");
-                            }
-                            else
-                            {
-                                Client.Self.SetDisplayName(names[0].DisplayName, name);
-                            }
-                        }
-                    );
+                    UpdateStatus("Failed to get current name");
+                    tcs.TrySetResult(false);
+                    return;
                 }
-            );
+
+                try
+                {
+                    await Client.Self.SetDisplayNameAsync(names[0].DisplayName, name).ConfigureAwait(false);
+                    tcs.TrySetResult(true);
+                }
+                catch (Exception ex)
+                {
+                    UpdateStatus($"Failed to set display name: {ex.Message}");
+                    tcs.TrySetResult(false);
+                }
+            });
+
+            await tcs.Task.ConfigureAwait(false);
         }
 
-        private void button1_Click(object sender, EventArgs e)
+        private async void button1_Click(object sender, EventArgs e)
         {
             if (txtDN1.Text != txtDN2.Text)
             {
@@ -107,7 +115,7 @@ namespace Radegast
             }
 
             UpdateStatus("Requested display name update...");
-            StartDisplayNameChange(txtDN1.Text);
+            await StartDisplayNameChange(txtDN1.Text);
 
         }
 
@@ -116,10 +124,10 @@ namespace Radegast
             Close();
         }
 
-        private void button2_Click(object sender, EventArgs e)
+        private async void button2_Click(object sender, EventArgs e)
         {
             UpdateStatus("Requested display name reset...");
-            StartDisplayNameChange(string.Empty);
+            await StartDisplayNameChange(string.Empty);
         }
     }
 }
