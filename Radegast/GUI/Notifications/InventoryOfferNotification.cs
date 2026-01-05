@@ -82,6 +82,22 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                foreach (var b in new[] { btnAccept, btnDiscard, btnIgnore })
+                {
+                    if (b == null) continue;
+                    if (string.IsNullOrEmpty(b.AccessibleName)) b.AccessibleName = b.Text;
+                    if (string.IsNullOrEmpty(b.AccessibleDescription)) b.AccessibleDescription = $"Press Enter to activate {b.Text}";
+                }
+                try { btnAccept.Focus(); } catch { }
+            }
+            catch { }
+        }
+
         private void ntfInventoryOffer_Disposed(object sender, EventArgs e)
         {
             instance.Names.NameUpdated -= Avatars_UUIDNameReply;

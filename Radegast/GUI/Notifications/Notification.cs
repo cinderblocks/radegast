@@ -20,14 +20,13 @@
 
 using System;
 using System.Collections.Generic;
-using System.Threading;
-using OpenMetaverse;
-
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using OpenMetaverse;
 
 namespace Radegast
 {
-
     /// <summary>
     /// Base class for all notifications (blue dialogs)
     /// </summary>
@@ -38,22 +37,17 @@ namespace Radegast
         /// </summary>
         public NotificationType Type;
 
-        // Add accessible name/description support to Notification base class
         private string accessibleDescription = string.Empty;
         private string accessibleName = string.Empty;
 
         /// <summary>
         /// Callback when blue dialog notification is displayed or closed
         /// </summary>
-        /// <param name="sender">Notification dialog</param>
-        /// <param name="e">Notification parameters</param>
         public delegate void NotificationCallback(object sender, NotificationEventArgs e);
 
         /// <summary>
         /// Callback when blue dialog notification button is clicked
         /// </summary>
-        /// <param name="sender">Notification dialog</param>
-        /// <param name="e">Notification parameters</param>
         public delegate void NotificationClickedCallback(object sender, EventArgs e, NotificationEventArgs notice);
 
         /// <summary>
@@ -66,24 +60,82 @@ namespace Radegast
         public Notification()
         {
             Type = NotificationType.Generic;
+            InitializeAccessibility();
         }
 
         public Notification(NotificationType type)
         {
             Type = type;
+            InitializeAccessibility();
+        }
+
+        private void InitializeAccessibility()
+        {
+            // Set default accessibility role for notifications
+            AccessibleRole = AccessibleRole.Alert;
+        }
+
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+
+            try
+            {
+                // Recursively set accessible metadata for any buttons inside this notification
+                Button firstButton = null;
+                foreach (var btn in GetAllButtons(this))
+                {
+                    try
+                    {
+                        if (firstButton == null) firstButton = btn;
+
+                        if (string.IsNullOrEmpty(btn.AccessibleName))
+                            btn.AccessibleName = btn.Text ?? string.Empty;
+
+                        if (string.IsNullOrEmpty(btn.AccessibleDescription))
+                            btn.AccessibleDescription = $"Press Enter to activate {btn.Text}";
+
+                        // Do not attach a MouseDown disabling handler — that can prevent Click handlers from firing
+                        // Duplicate click protection is handled in NotificationEventArgs.Notification_Click.
+                    }
+                    catch { }
+                }
+
+                // Set focus to first button for keyboard users
+                if (firstButton != null && !firstButton.IsDisposed && firstButton.CanFocus)
+                {
+                    try { firstButton.Focus(); } catch { }
+                }
+            }
+            catch { }
+        }
+
+        protected static IEnumerable<Button> GetAllButtons(Control root)
+        {
+            if (root == null) yield break;
+            foreach (Control c in root.Controls)
+            {
+                if (c is Button b)
+                {
+                    yield return b;
+                }
+                foreach (var child in GetAllButtons(c))
+                    yield return child;
+            }
         }
 
         protected void FireNotificationCallback(NotificationEventArgs e)
         {
             if (OnNotificationDisplayed == null) return;
+            
             try
             {
                 e.Type = Type;
-                ThreadPool.QueueUserWorkItem(o => Notification_Displayed(this, e));
+                // Use Task.Run instead of ThreadPool to avoid blocking and get better exception handling
+                _ = Task.Run(() => Notification_Displayed(this, e));
             }
             catch (Exception ex)
             {
-                Console.WriteLine("" + ex);
                 Logger.Warn("Error executing notification callback", ex);
             }
         }
@@ -97,7 +149,6 @@ namespace Radegast
             }
             catch (Exception ex)
             {
-                Console.WriteLine("" + ex);
                 Logger.Warn("Error executing notification displayed", ex);
             }
         }
@@ -105,48 +156,57 @@ namespace Radegast
         /// <summary>
         /// Accessible description of the notification
         /// </summary>
-        public string AccessibleDescription
+        public new string AccessibleDescription
         {
             get => accessibleDescription;
             set
             {
+                if (accessibleDescription == value) return;
                 accessibleDescription = value;
-                UpdateAccessibleProperties();
+                UpdateAccessiblePropertiesAsync();
             }
         }
 
         /// <summary>
         /// Accessible name of the notification
         /// </summary>
-        public string AccessibleName
+        public new string AccessibleName
         {
             get => accessibleName;
             set
             {
+                if (accessibleName == value) return;
                 accessibleName = value;
-                UpdateAccessibleProperties();
+                UpdateAccessiblePropertiesAsync();
             }
         }
 
-        private void UpdateAccessibleProperties()
+        private void UpdateAccessiblePropertiesAsync()
         {
-            // Update accessible properties of the notification's handle
-            if (this.IsHandleCreated)
+            // Use BeginInvoke for non-blocking UI updates
+            if (!IsHandleCreated || IsDisposed) return;
+
+            try
             {
-                this.Invoke((MethodInvoker)delegate
+                BeginInvoke(new Action(() =>
                 {
-                    // Write directly to the base Control implementation to avoid
-                    // calling these property setters again and causing recursion.
-                    base.AccessibleDescription = accessibleDescription;
-                    base.AccessibleName = accessibleName;
-                });
+                    try
+                    {
+                        if (!IsDisposed)
+                        {
+                            base.AccessibleDescription = accessibleDescription;
+                            base.AccessibleName = accessibleName;
+                        }
+                    }
+                    catch (ObjectDisposedException) { }
+                }));
             }
+            catch (InvalidOperationException) { }
         }
 
         /// <summary>
         /// Initialize accessible metadata for this notification.
-        /// Sets AccessibleName and AccessibleDescription in a single call and
-        /// updates the underlying control accessibility properties on the UI thread.
+        /// Sets AccessibleName and AccessibleDescription and updates the control.
         /// </summary>
         /// <param name="name">Short name for the notification (announced by screen readers)</param>
         /// <param name="description">Longer description / body text for assistive tech</param>
@@ -154,9 +214,10 @@ namespace Radegast
         {
             accessibleName = name ?? string.Empty;
             accessibleDescription = description ?? string.Empty;
-            UpdateAccessibleProperties();
+            UpdateAccessiblePropertiesAsync();
         }
     }
+
     /// <summary>
     /// What kind of notification this is (blue dialog)
     /// </summary>
@@ -182,7 +243,6 @@ namespace Radegast
     public class NotificationEventArgs : EventArgs, IDisposable
     {
         public event Notification.NotificationCallback OnNotificationClosed;
-
         public event Notification.NotificationClickedCallback OnNotificationClicked;
 
         /// <summary>
@@ -196,7 +256,7 @@ namespace Radegast
         public NotificationType Type;
 
         /// <summary>
-        /// Instance of Radegast where the event occured
+        /// Instance of Radegast where the event occurred
         /// </summary>
         public RadegastInstanceForms Instance;
 
@@ -210,15 +270,10 @@ namespace Radegast
         /// </summary>
         public List<Button> Buttons = new List<Button>();
 
-        /// <summary>
-        /// When set true the Dialog Can send the Close Event
-        /// </summary>
-        public bool CanClose = false;
-
-        /// <summary>
-        /// The button has been pushed once
-        /// </summary>        
-        public bool ButtonSelected = false;
+        private bool canClose = false;
+        private bool buttonSelected = false;
+        private bool isDisposed = false;
+        private readonly object syncLock = new object();
 
         /// <summary>
         /// Create new event args object
@@ -239,19 +294,21 @@ namespace Radegast
         /// </summary>
         internal void Notification_Close()
         {
-            if (ButtonSelected)
+            lock (syncLock)
             {
+                if (isDisposed || !buttonSelected) return;
+
                 try
                 {
                     OnNotificationClosed?.Invoke(this, this);
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"Error executing OnNotificationClosed {Text}", ex);
+                    Logger.Error($"Error executing OnNotificationClosed {Text}: ", ex);
                 }
-                if (!CanClose) Dispose();
+
+                canClose = true;
             }
-            CanClose = true;
         }
 
         /// <summary>
@@ -259,8 +316,19 @@ namespace Radegast
         /// </summary>
         internal void Notification_Click(object sender, EventArgs e)
         {
-            if (ButtonSelected) throw new InvalidOperationException($"Clicked twice {Text} item: {sender}");
-            ButtonSelected = true;
+            lock (syncLock)
+            {
+                if (isDisposed) return;
+                
+                // Allow the same button to be clicked multiple times (removed the exception)
+                if (buttonSelected && !canClose)
+                {
+                    return;
+                }
+
+                buttonSelected = true;
+            }
+
             try
             {
                 OnNotificationClicked?.Invoke(sender, e, this);
@@ -269,45 +337,92 @@ namespace Radegast
             {
                 Logger.Warn("Error executing OnNotificationClicked", ex);
             }
-            if (CanClose)
+
+            lock (syncLock)
             {
-                Notification_Close();
+                if (canClose)
+                {
+                    Notification_Close();
+                }
             }
         }
 
         public void HookNotification(Notification notification)
         {
-            Notice = notification;
-            int hooked = 0;
-            lock (notification)
+            if (notification == null) return;
+
+            lock (syncLock)
             {
-                notification.HandleDestroyed += Notification_Closing;
-                lock (Buttons)
+                if (isDisposed) return;
+
+                Notice = notification;
+                
+                try
+                {
+                    notification.HandleDestroyed += Notification_Closing;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error hooking HandleDestroyed: ", ex);
+                }
+
+                int hooked = 0;
+                if (Buttons != null)
+                {
                     foreach (var button in Buttons)
                     {
-                        button.Click += Notification_Click;
-                        hooked++;
+                        try
+                        {
+                            button.Click += Notification_Click;
+                            hooked++;
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Error("Error hooking button click", ex);
+                        }
                     }
-            }
-            if (hooked == 0)
-                throw new InvalidOperationException("No buttons found on Dialog " + Text);
+                }
 
+                if (hooked == 0)
+                {
+                    Logger.Debug($"No buttons found on Dialog {Text}");
+                }
+            }
         }
 
         public void Dispose()
         {
-            if (!CanClose)
+            lock (syncLock)
             {
-                CanClose = true;
-                ButtonSelected = true;
-                Notification_Close();
-            }
-            lock (Notice)
-            {
-                Notice.HandleDestroyed -= Notification_Closing;
-                lock (Buttons)
+                if (isDisposed) return;
+                isDisposed = true;
+
+                if (!canClose && buttonSelected)
+                {
+                    canClose = true;
+                    Notification_Close();
+                }
+
+                if (Notice != null)
+                {
+                    try
+                    {
+                        Notice.HandleDestroyed -= Notification_Closing;
+                    }
+                    catch { }
+                }
+
+                if (Buttons != null)
+                {
                     foreach (var button in Buttons)
-                        button.Click -= Notification_Click;
+                    {
+                        try
+                        {
+                            button.Click -= Notification_Click;
+                        }
+                        catch { }
+                    }
+                }
             }
         }
     }
