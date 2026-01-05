@@ -59,13 +59,41 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                foreach (var b in new[] { btnHome, btnElsewhere, btnIgnore })
+                {
+                    if (b == null) continue;
+                    if (string.IsNullOrEmpty(b.AccessibleName)) b.AccessibleName = b.Text;
+                    if (string.IsNullOrEmpty(b.AccessibleDescription)) b.AccessibleDescription = $"Press Enter to activate {b.Text}";
+                }
+
+                try { btnHome.Focus(); } catch { }
+            }
+            catch { }
+        }
+
         private void OnCountdownTimerEvent(object sender, System.Timers.ElapsedEventArgs e)
         {
-            Invoke(new Action(() =>
+            if (IsHandleCreated && !IsDisposed)
             {
-                var ts = TimeSpan.FromSeconds(--CountdownSeconds);
-                txtCountdown.Text = ts.ToString(@"mm\:ss");
-            }));
+                try
+                {
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            var ts = TimeSpan.FromSeconds(--CountdownSeconds);
+                            txtCountdown.Text = ts.ToString(@"mm\:ss");
+                        }
+                        catch { }
+                    }));
+                }
+                catch { }
+            }
         }
 
         // TODO: we need a notification closed event to hook up to...

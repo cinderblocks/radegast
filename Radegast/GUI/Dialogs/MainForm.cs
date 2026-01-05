@@ -82,6 +82,7 @@ namespace Radegast
         private readonly TransparentButton btnDialogNextControl;
         private SlUriParser uriParser;
         private NetSparkleUpdater.SparkleUpdater SparkleUpdater;
+        private NotificationManager toastManager;
 
         #endregion
 
@@ -859,20 +860,55 @@ namespace Radegast
 
         private readonly CircularList<Notification> notifications = new CircularList<Notification>();
 
+        // Flow-based container for notifications to avoid manual absolute positioning
+        private FlowLayoutPanel notificationFlowPanel;
+
         public Color NotificationBackground => pnlDialog.BackColor;
 
         private void ResizeNotificationByControl(Control active)
         {
-            int width = active.Size.Width + 6;
-            int height = notifications.Count > 1 ? active.Size.Height + 3 + btnDialogNextControl.Size.Height : active.Size.Height + 3;
-            pnlDialog.Size = new Size(width, height);
-            pnlDialog.Top = 0;
-            pnlDialog.Left = pnlDialog.Parent.ClientSize.Width - width;
+            // If we have a flow panel, prefer to size the dialog to its preferred size
+            if (notificationFlowPanel != null && notificationFlowPanel.Controls.Count > 0)
+            {
+                var preferred = notificationFlowPanel.GetPreferredSize(pnlDialog.Parent.ClientSize);
+                int width = Math.Min(preferred.Width + 6, pnlDialog.Parent.ClientSize.Width);
+                int height = Math.Min(preferred.Height + (notifications.Count > 1 ? btnDialogNextControl.Size.Height : 0) + 6, pnlDialog.Parent.ClientSize.Height);
+                pnlDialog.Size = new Size(Math.Max(100, width), Math.Max(30, height));
+            }
+            else if (active != null)
+            {
+                int width = active.Size.Width + 6;
+                int height = notifications.Count > 1 ? active.Size.Height + 3 + btnDialogNextControl.Size.Height : active.Size.Height + 3;
+                pnlDialog.Size = new Size(width, height);
+            }
 
-            btnDialogNextControl.Top = btnDialogNextControl.Parent.ClientSize.Height - btnDialogNextControl.Size.Height;
-            btnDialogNextControl.Left = btnDialogNextControl.Parent.ClientSize.Width - btnDialogNextControl.Size.Width;
+            // Keep the panel docked to the top-right of parent
+            pnlDialog.Top = 0;
+            pnlDialog.Left = Math.Max(0, pnlDialog.Parent.ClientSize.Width - pnlDialog.Width);
+
+            btnDialogNextControl.Top = Math.Max(0, btnDialogNextControl.Parent.ClientSize.Height - btnDialogNextControl.Size.Height);
+            btnDialogNextControl.Left = Math.Max(0, btnDialogNextControl.Parent.ClientSize.Width - btnDialogNextControl.Size.Width);
 
             btnDialogNextControl.BringToFront();
+        }
+
+        private void InitNotificationManager()
+        {
+            try
+            {
+                if (toastManager == null)
+                {
+                    toastManager = new NotificationManager(this, instance, 5);
+                }
+            }
+            catch { }
+        }
+
+        public void ShowToast(Notification note, int timeoutSeconds = 5)
+        {
+            if (note == null) return;
+            InitNotificationManager();
+            toastManager?.ShowToast(note, timeoutSeconds);
         }
 
         public void AddNotification(INotification notification)
@@ -883,7 +919,22 @@ namespace Radegast
                 return;
             }
 
-            
+            // If user prefers toasts, use toast manager
+            if (instance.GlobalSettings.TryGetValue("notification_toast_enabled", out var toastEnabled) && toastEnabled.AsBoolean())
+            {
+                // notifications that are not full dialogs should be shown as toasts
+                if (notification is Notification note)
+                {
+                    int timeout = 5;
+                    if (instance.GlobalSettings.TryGetValue("notification_toast_timeout", out var to))
+                    {
+                        int.TryParse(to.ToString(), out timeout);
+                    }
+                    ShowToast(note, timeout);
+                    return;
+                }
+            }
+
             var active = TabsConsole.FindFocusedControl(this);
 
             FormFlash.StartFlash(this);
@@ -909,9 +960,37 @@ namespace Radegast
             notifications.Add(control);
             control.Visible = true;
             control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            control.Top = 3;
-            control.Left = 3;
-            pnlDialog.Controls.Add(control);
+            control.Margin = new Padding(3);
+            control.Dock = DockStyle.None;
+
+            // Ensure we have a FlowLayoutPanel to host notifications
+            if (notificationFlowPanel == null)
+            {
+                notificationFlowPanel = new FlowLayoutPanel()
+                {
+                    Dock = DockStyle.Fill,
+                    FlowDirection = FlowDirection.TopDown,
+                    WrapContents = false,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Padding = new Padding(3),
+                    BackColor = Color.Transparent
+                };
+
+                // If next button already in pnlDialog keep it on top
+                if (pnlDialog.Controls.Contains(btnDialogNextControl))
+                {
+                    pnlDialog.Controls.Remove(btnDialogNextControl);
+                }
+
+                pnlDialog.Controls.Add(notificationFlowPanel);
+                pnlDialog.Controls.Add(btnDialogNextControl);
+                btnDialogNextControl.BringToFront();
+            }
+
+            notificationFlowPanel.Controls.Add(control);
+
+            // Update size and position to fit new content
             ResizeNotificationByControl(control);
 
             btnDialogNextControl.Visible = notifications.Count > 1;
@@ -922,9 +1001,18 @@ namespace Radegast
         public void RemoveNotification(INotification notification)
         {
             var control = (Notification)notification;
-            pnlDialog.Controls.Remove(control);
+
+            if (notificationFlowPanel != null)
+            {
+                notificationFlowPanel.Controls.Remove(control);
+            }
+            else
+            {
+                pnlDialog.Controls.Remove(control);
+            }
+
             notifications.Remove(control);
-            control.Dispose();
+            try { control.Dispose(); } catch { }
 
             if (notifications.HasNext)
             {

@@ -55,6 +55,23 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                foreach (var b in new[] { btnRequest, btnCancel })
+                {
+                    if (b == null) continue;
+                    if (string.IsNullOrEmpty(b.AccessibleName)) b.AccessibleName = b.Text;
+                    if (string.IsNullOrEmpty(b.AccessibleDescription)) b.AccessibleDescription = $"Press Enter to activate {b.Text}";
+                }
+
+                try { btnRequest.Focus(); } catch { }
+            }
+            catch { }
+        }
+
         private void btnTeleport_Click(object sender, EventArgs e)
         {
             if (!instance.Client.Network.Connected) return;

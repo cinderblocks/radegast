@@ -86,6 +86,26 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(System.EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                if (btnSave != null)
+                {
+                    if (string.IsNullOrEmpty(btnSave.AccessibleName)) btnSave.AccessibleName = btnSave.Text;
+                    if (string.IsNullOrEmpty(btnSave.AccessibleDescription)) btnSave.AccessibleDescription = $"Press Enter to activate {btnSave.Text}";
+                }
+                if (btnOK != null)
+                {
+                    if (string.IsNullOrEmpty(btnOK.AccessibleName)) btnOK.AccessibleName = btnOK.Text;
+                    if (string.IsNullOrEmpty(btnOK.AccessibleDescription)) btnOK.AccessibleDescription = $"Press Enter to activate {btnOK.Text}";
+                    try { btnOK.Focus(); } catch { }
+                }
+            }
+            catch { }
+        }
+
         private void ShowNotice()
         {
             if (group.ID == UUID.Zero) return;

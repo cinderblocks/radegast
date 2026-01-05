@@ -87,6 +87,50 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                // Ensure keyboard hints for all buttons (including dynamically created ones)
+                var btns = new List<Button>();
+                btns.AddRange(GetAllButtons(this));
+
+                foreach (var b in btns)
+                {
+                    if (b == null) continue;
+                    if (string.IsNullOrEmpty(b.AccessibleName)) b.AccessibleName = b.Text;
+                    if (string.IsNullOrEmpty(b.AccessibleDescription)) b.AccessibleDescription = $"Press Enter to activate {b.Text}";
+                }
+
+                // Also set accessible properties for textbox/send button if present
+                try
+                {
+                    if (txtTextBox != null && txtTextBox.Visible)
+                    {
+                        if (string.IsNullOrEmpty(txtTextBox.AccessibleName)) txtTextBox.AccessibleName = "Input";
+                        if (string.IsNullOrEmpty(txtTextBox.AccessibleDescription)) txtTextBox.AccessibleDescription = "Enter text to send to the script";
+                    }
+
+                    if (sendBtn != null && sendBtn.Visible)
+                    {
+                        if (string.IsNullOrEmpty(sendBtn.AccessibleName)) sendBtn.AccessibleName = sendBtn.Text;
+                        if (string.IsNullOrEmpty(sendBtn.AccessibleDescription)) sendBtn.AccessibleDescription = $"Press Enter to activate {sendBtn.Text}";
+                    }
+                }
+                catch { }
+
+                // Set tab order and focus first button if available
+                this.TabIndex = 0;
+                var first = btns.Count > 0 ? btns[0] : ignoreBtn;
+                if (first != null && !first.IsDisposed)
+                {
+                    try { first.Select(); } catch { }
+                }
+            }
+            catch { }
+        }
+
         private void b_Click(object sender, EventArgs e)
         {
             string label = ((Button)sender).Text;

@@ -52,6 +52,22 @@ namespace Radegast
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        protected override void OnLoad(EventArgs e)
+        {
+            base.OnLoad(e);
+            try
+            {
+                // Ensure button accessibility
+                if (btnOk != null)
+                {
+                    if (string.IsNullOrEmpty(btnOk.AccessibleName)) btnOk.AccessibleName = btnOk.Text;
+                    if (string.IsNullOrEmpty(btnOk.AccessibleDescription)) btnOk.AccessibleDescription = $"Press Enter to activate {btnOk.Text}";
+                    try { btnOk.Focus(); } catch { }
+                }
+            }
+            catch { }
+        }
+
         private void btnOk_Click(object sender, EventArgs e)
         {
             Instance.MainForm.RemoveNotification(this);
