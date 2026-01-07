@@ -112,7 +112,8 @@ namespace Radegast
                 {
                     Logger.Debug($"Reading inventory cache from {instance.InventoryCacheFileName}", Client);
                     Inventory.RestoreFromDisk(instance.InventoryCacheFileName);
-                    Init();
+                    // Marshal Init to UI thread so Init won't run on a disposed control
+                    RunOnUi(() => Init());
                 }
                 catch (Exception ex)
                 {
@@ -140,6 +141,12 @@ namespace Radegast
                 return;
             }
 
+            if (this.IsDisposed || this.Disposing)
+            {
+                Logger.Debug("Init aborted: control is disposing/disposed.", Client);
+                return;
+            }
+            
             AddFolderFromStore(invRootNode, Inventory.RootFolder);
 
             sorter = new InvNodeSorter();
@@ -881,6 +888,12 @@ namespace Radegast
         /// </summary>
         private async Task StartTraverseNodes(CancellationToken token)
         {
+            if (this.IsDisposed || this.Disposing)
+            {
+                Logger.Debug("StartTraverseNodes aborted: control is disposing/disposed.", Client);
+                return;
+            }
+
             if (!Client.Network.CurrentSim.IsEventQueueRunning(true))
             {
                 Logger.Warn("Could not traverse inventory. Event Queue is not running.", Client);
@@ -889,7 +902,9 @@ namespace Radegast
 
             UpdateStatus("Loading...");
             TreeUpdateInProgress = true;
-            TreeUpdateTimer.Start();
+            
+            var localTimer = TreeUpdateTimer;
+            localTimer?.Start();
 
             instance.GestureManager.BeginMonitoring();
 
@@ -900,7 +915,7 @@ namespace Radegast
             catch (OperationCanceledException)
             {
                 Logger.Info("Inventory traversal cancelled.", Client);
-                TreeUpdateTimer.Stop();
+                localTimer?.Stop();
                 TreeUpdateInProgress = false;
                 UpdateStatus("Reading cache");
                 return;
@@ -910,7 +925,7 @@ namespace Radegast
                 Logger.Error("Error during inventory traversal: " + ex.Message, ex);
             }
 
-            TreeUpdateTimer.Stop();
+            localTimer?.Stop();
             RunOnUi(() => TreeUpdateTimerTick(null, null));
             TreeUpdateInProgress = false;
             UpdateStatus("OK");
@@ -958,7 +973,8 @@ namespace Radegast
         {
             if (TreeUpdateInProgress)
             {
-                TreeUpdateTimer.Stop();
+                var t = TreeUpdateTimer;
+                t?.Stop();
                 // Cancel the running traversal and replace the token for the next run
                 try { inventoryUpdateCancelToken.Cancel(); } catch { }
                 try { inventoryUpdateCancelToken.Dispose(); } catch { }
@@ -2608,7 +2624,7 @@ namespace Radegast
                         if (invTree.SelectedNode.Tag is InventoryFolder folder)
                         {
                             // Start async fetch but don't block UI thread
-                            _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?.Token ?? CancellationToken.None);
+                            _ = FetchFolder(folder.UUID, folder.OwnerID, true, inventoryUpdateCancelToken?. Token ?? CancellationToken.None);
                         }
 
                         break;
