@@ -302,7 +302,7 @@ namespace Radegast
             progressBar1.Value = pct;
         }
 
-        private void DisplayPartialImage(AssetTexture assetTexture)
+        private async void DisplayPartialImage(AssetTexture assetTexture)
         {
             if (SynchronizationContext.Current != uiContext && uiContext != null)
             {
@@ -331,69 +331,73 @@ namespace Radegast
 
             // Decode off the UI thread and then marshal the bitmap back to the UI
             byte[] data = assetTexture.AssetData;
-            Task.Run(async () =>
+
+            Image newBmp;
+            try
             {
-                // Ensure semaphore exists
                 SemaphoreSlim sem;
                 lock (settingsLock) { sem = instanceDecodeSemaphore ?? new SemaphoreSlim(Math.Max(1, decodeConcurrency)); }
-                await sem.WaitAsync().ConfigureAwait(false);
-                try
+
+                newBmp = await Task.Run(async () =>
                 {
+                    await sem.WaitAsync().ConfigureAwait(false);
                     try
-                    {
-                        var bmp = J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
-                        return bmp;
-                    }
-                    catch (Exception)
-                    {
-                        return null;
-                    }
-                }
-                finally
-                {
-                    try { sem.Release(); } catch { }
-                }
-            }).ContinueWith(t =>
-            {
-                if (t.IsCanceled || t.Result == null)
-                {
-                    // decoding failed; hide the control on UI thread
-                    try { Hide(); } catch { }
-                    return;
-                }
-
-                try
-                {
-                    // replace image on UI thread
-                    var newBmp = t.Result;
-
-                    // Store in cache for future reuse if enabled. Use configured sliding expiration.
-                    if (cacheEnabled)
                     {
                         try
                         {
-                            DecodedImageCache.Set(cacheKey, newBmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                            return J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
                         }
-                        catch { /* cache failures shouldn't break the UI update */ }
+                        catch (Exception)
+                        {
+                            return null;
+                        }
                     }
-
-                    var old = pictureBox1.Image as Image;
-                    pictureBox1.Image = newBmp;
-                    pictureBox1.Enabled = true;
-                    if (old != null && old != newBmp)
+                    finally
                     {
-                        try { old.Dispose(); } catch { }
+                        try { sem.Release(); } catch { }
                     }
-                }
-                catch (Exception e)
+                }).ConfigureAwait(false);
+            }
+            catch
+            {
+                try { Hide(); } catch { }
+                return;
+            }
+
+            if (newBmp == null)
+            {
+                try { Hide(); } catch { }
+                return;
+            }
+
+            try
+            {
+                // Store in cache for future reuse if enabled. Use configured sliding expiration.
+                if (cacheEnabled)
                 {
-                    Hide();
-                    Console.WriteLine("Error decoding image: " + e.Message);
+                    try
+                    {
+                        DecodedImageCache.Set(cacheKey, newBmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                    }
+                    catch { /* cache failures shouldn't break the UI update */ }
                 }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
+
+                var old = pictureBox1.Image as Image;
+                pictureBox1.Image = newBmp;
+                pictureBox1.Enabled = true;
+                if (old != null && old != newBmp)
+                {
+                    try { old.Dispose(); } catch { }
+                }
+            }
+            catch (Exception e)
+            {
+                Hide();
+                Console.WriteLine("Error decoding image: " + e.Message);
+            }
         }
 
-        private void Assets_OnImageReceived(AssetTexture assetTexture)
+        private async void Assets_OnImageReceived(AssetTexture assetTexture)
         {
             if (assetTexture.AssetID != imageID)
             {
@@ -441,74 +445,79 @@ namespace Radegast
                     }
                 }
 
-                // Decode off the UI thread and then update UI
-                Task.Run(async () =>
+                Image bmp;
+                try
                 {
-                    // Ensure semaphore exists
                     SemaphoreSlim sem;
                     lock (settingsLock) { sem = instanceDecodeSemaphore ?? new SemaphoreSlim(Math.Max(1, decodeConcurrency)); }
-                    await sem.WaitAsync().ConfigureAwait(false);
-                    try
+
+                    bmp = await Task.Run(async () =>
                     {
+                        await sem.WaitAsync().ConfigureAwait(false);
                         try
-                        {
-                            return J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
-                        }
-                        catch (Exception)
-                        {
-                            return null;
-                        }
-                    }
-                    finally
-                    {
-                        try { sem.Release(); } catch { }
-                    }
-                }).ContinueWith(t =>
-                {
-                    if (t.IsCanceled || t.Result == null)
-                    {
-                        try { Hide(); } catch { }
-                        return;
-                    }
-
-                    try
-                    {
-                        var bmp = t.Result;
-
-                        // Attempt to cache decoded image for reuse
-                        if (cacheEnabled)
                         {
                             try
                             {
-                                DecodedImageCache.Set(cacheKey, bmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                                return J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
                             }
-                            catch { }
+                            catch (Exception)
+                            {
+                                return null;
+                            }
                         }
-
-                        // dispose previous image if present and not the same as cached one
-                        var old = image as Image;
-                        image = bmp;
-                        Text = Text; // yeah, really ;)
-
-                        pictureBox1.Image = image;
-                        pictureBox1.Enabled = true;
-                        j2kdata = data;
-                        if (Detached)
+                        finally
                         {
-                            ClientSize = pictureBox1.Size = new Size(image.Width, image.Height);
+                            try { sem.Release(); } catch { }
                         }
+                    }).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    try { Hide(); } catch { }
+                    return;
+                }
 
-                        if (old != null && old != image)
-                        {
-                            try { old.Dispose(); } catch { }
-                        }
-                    }
-                    catch (Exception e)
+                if (bmp == null)
+                {
+                    try { Hide(); } catch { }
+                    return;
+                }
+
+                try
+                {
+                    // Attempt to cache decoded image for reuse
+                    if (cacheEnabled)
                     {
-                        Hide();
-                        Console.WriteLine("Error decoding image: " + e.Message);
+                        try
+                        {
+                            DecodedImageCache.Set(cacheKey, bmp, new CacheItemPolicy { SlidingExpiration = cacheSlidingExpiration });
+                        }
+                        catch { }
                     }
-                }, TaskScheduler.FromCurrentSynchronizationContext());
+
+                    // dispose previous image if present and not the same as cached one
+                    var old = image as Image;
+                    image = bmp;
+                    Text = Text; // yeah, really ;)
+
+                    pictureBox1.Image = image;
+                    pictureBox1.Enabled = true;
+                    j2kdata = data;
+                    if (Detached)
+                    {
+                        ClientSize = pictureBox1.Size = new Size(image.Width, image.Height);
+                    }
+
+                    if (old != null && old != image)
+                    {
+                        try { old.Dispose(); } catch { }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Hide();
+                    Console.WriteLine("Error decoding image: " + e.Message);
+                }
             }
             catch (Exception e)
             {

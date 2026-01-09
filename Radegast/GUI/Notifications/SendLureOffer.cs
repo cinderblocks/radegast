@@ -27,8 +27,8 @@ namespace Radegast
     {
         private readonly RadegastInstanceForms instance;
         private readonly UUID agentID;
-        private readonly string agentName;
-
+        private readonly string agentNamePlaceholder = "(loading...)";
+        
         public ntfSendLureOffer(RadegastInstanceForms instance, UUID agentID)
             : base(NotificationType.SendLureOffer)
         {
@@ -38,11 +38,51 @@ namespace Radegast
 
             txtHead.BackColor = instance.MainForm.NotificationBackground;
 
-            agentName = instance.Names.GetAsync(agentID).GetAwaiter().GetResult();
-            txtHead.Text = $"Offer a teleport to {agentName} with the following message: ";
+            // Show a placeholder until we resolve the name asynchronously
+            txtHead.Text = $"Offer a teleport to {agentNamePlaceholder} with the following message: ";
             txtMessage.Text = $"Join me in {instance.Client.Network.CurrentSim.Name}!";
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnOffer.Focus();
+
+            // Accessible metadata with placeholder
+            InitializeAccessibleMetadata($"Offer teleport to {agentNamePlaceholder}", txtHead.Text + " " + txtMessage.Text);
+
+            // Fire off async name resolution and final initialization
+            _ = InitializeAsync();
+
+            GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private async System.Threading.Tasks.Task InitializeAsync()
+        {
+            string agentName = agentID.ToString();
+            try
+            {
+                agentName = await instance.Names.GetAsync(agentID).ConfigureAwait(false) ?? agentName;
+            }
+            catch { /* swallow name resolution errors and keep id string */ }
+
+            // Update UI and fire notification on UI thread
+            try
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(() => FinishInitialization(agentName)));
+                }
+                else
+                {
+                    FinishInitialization(agentName);
+                }
+            }
+            catch { FinishInitialization(agentName); }
+        }
+
+        private void FinishInitialization(string agentName)
+        {
+            txtHead.Text = $"Offer a teleport to {agentName} with the following message: ";
+            txtMessage.Text = $"Join me in {instance.Client.Network.CurrentSim.Name}!";
+            txtMessage.BackColor = instance.MainForm.NotificationBackground;
+            try { btnOffer.Focus(); } catch { }
 
             // Accessible metadata
             InitializeAccessibleMetadata($"Offer teleport to {agentName}", txtHead.Text + " " + txtMessage.Text);
@@ -55,8 +95,6 @@ namespace Radegast
             args.Buttons.Add(btnOffer);
             args.Buttons.Add(btnCancel);
             FireNotificationCallback(args);
-
-            GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
         protected override void OnLoad(EventArgs e)

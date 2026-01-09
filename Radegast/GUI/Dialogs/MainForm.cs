@@ -307,7 +307,7 @@ namespace Radegast
 
                 if (instance.GlobalSettings.TryGetValue("AvatarHoverOffsetZ", out var hoverHeight))
                 {
-                    Client.Self.SetHoverHeight(hoverHeight);
+                    _ = Client.Self.SetHoverHeightAsync(hoverHeight);
                 }
             }
         }

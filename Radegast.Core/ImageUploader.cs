@@ -98,19 +98,5 @@ namespace Radegast
                 return false;
             }
         }
-
-		public bool UploadImage(string filename, string desc, UUID folder)
-		{
-			// Maintain existing synchronous API by calling the async method with a 180s timeout
-			try
-			{
-				return UploadImageAsync(filename, desc, folder, TimeSpan.FromSeconds(180)).GetAwaiter().GetResult();
-			}
-			catch (AggregateException ae)
-			{
-				// Unwrap and rethrow inner exception if cancellation occurred
-				throw ae.Flatten();
-			}
-		}
 	}
 }

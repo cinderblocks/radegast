@@ -738,11 +738,15 @@ namespace Radegast
                 {
                     Client.Parcels.RequestParcelInfo(parcelID);
 
-                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30)));
-                    if (completed == tcs.Task && tcs.Task.Result != null)
+                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
+                    if (completed == tcs.Task)
                     {
-                        targetParcelName = tcs.Task.Result.Parcel.Name;
-                        needRepaint = true;
+                        var reply = await tcs.Task.ConfigureAwait(false);
+                        if (reply != null)
+                        {
+                            targetParcelName = reply.Parcel.Name;
+                            needRepaint = true;
+                        }
                     }
                 }
                 catch { }
@@ -750,7 +754,7 @@ namespace Radegast
                 {
                     Client.Parcels.ParcelInfoReply -= handler;
                 }
-            });
+            }).ConfigureAwait(false);
         }
 
         private void MapControl_MouseUp(object sender, MouseEventArgs e)
