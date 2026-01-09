@@ -207,6 +207,7 @@ namespace Radegast.Rendering
         {
             byte[] imageBytes = null;
             SKBitmap skBitmap = null;
+            InterleavedImage j2kImage = null;
 
             if (item.TextureData != null || item.LoadAssetFromCache)
             {
@@ -216,7 +217,6 @@ namespace Radegast.Rendering
                 }
                 if (item.TextureData == null) { return; }
 
-                InterleavedImage j2kImage = null;
                 try
                 {
                     j2kImage = J2kImage.FromBytes(item.TextureData);
@@ -265,7 +265,7 @@ namespace Radegast.Rendering
             {
                 if (skBitmap == null)
                 {
-                    try { var decoded = J2kImage.FromBytes(imageBytes); skBitmap = decoded?.As<SKBitmap>(); } catch { skBitmap = null; }
+                    try { skBitmap = j2kImage.As<SKBitmap>(); } catch { skBitmap = null; }
                 }
 
                 if (skBitmap != null)
