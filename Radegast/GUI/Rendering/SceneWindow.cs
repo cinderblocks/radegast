@@ -172,6 +172,10 @@ namespace Radegast.Rendering
         private readonly RenderTerrain terrain;
         private RenderSky sky;
 
+        // Adjacent simulator rendering
+        private readonly Dictionary<ulong, RenderTerrain> adjacentTerrains = new Dictionary<ulong, RenderTerrain>();
+        private readonly object adjacentSimsLock = new object();
+
         private readonly GridClient Client;
         private readonly RadegastInstanceForms Instance;
 
@@ -256,6 +260,16 @@ namespace Radegast.Rendering
 
             SafeDispose(sky, "RenderSky", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             sky = null;
+
+            // Dispose adjacent simulator terrains
+            lock (adjacentSimsLock)
+            {
+                foreach (var adjTerrain in adjacentTerrains.Values)
+                {
+                    SafeDispose(adjTerrain, "AdjacentTerrain", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                }
+                adjacentTerrains.Clear();
+            }
 
             Client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
             Client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
@@ -479,6 +493,17 @@ namespace Radegast.Rendering
 
             lock (Prims) Prims.Clear();
             lock (Avatars) Avatars.Clear();
+            
+            // Clear adjacent simulator terrains
+            lock (adjacentSimsLock)
+            {
+                foreach (var adjTerrain in adjacentTerrains.Values)
+                {
+                    adjTerrain.Dispose();
+                }
+                adjacentTerrains.Clear();
+            }
+            
             SetWaterPlanes();
             LoadCurrentPrims();
             InitCamera();
@@ -2196,89 +2221,9 @@ namespace Radegast.Rendering
 
             if (picking)
             {
-                GL.ClearColor(1f, 1f, 1f, 1f);
-            }
-            else
-            {
-                if (RenderSettings.WaterReflections)
-                {
-                    framesSinceReflection++;
-                    timeSinceReflection += lastFrameTime;
-
-                    if (Camera.Modified || (framesSinceReflection > 4 && timeSinceReflection > 0.1f))
-                    {
-                        GL.ClearColor(0, 0, 0, 0);
-                        CreateReflectionTexture(Client.Network.CurrentSim.WaterHeight, 512);
-                        CreateRefractionDepthTexture(Client.Network.CurrentSim.WaterHeight, 512);
-                        glControl_Resize(null, null);
-                        framesSinceReflection = 0;
-                        timeSinceReflection = 0f;
-                    }
-                }
-
-                GL.ClearColor(0.39f, 0.58f, 0.93f, 1.0f);
-            }
-
-            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit | ClearBufferMask.StencilBufferBit);
-            GL.LoadIdentity();
-
-            // Setup wireframe or solid fill drawing mode
-            if (Wireframe && !picking)
-            {
-                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
-            }
-            else
-            {
-                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
-            }
-
-            Camera.LookAt();
-
-            GL.Light(LightName.Light0, LightParameter.Position, sunPos);
-
-            // Push the world matrix
-            GL.PushMatrix();
-
-            if (!Camera.Manual && trackedObject != null)
-            {
-                // If camera is locked onto our avatar, follow us
-                if (trackedObject == myself)
-                {
-                    var camPos = myself.RenderPosition + new Vector3(-4, 0, 1) * Client.Self.Movement.BodyRotation;
-                    Camera.Position = camPos;
-                    Camera.FocalPoint = myself.RenderPosition + new Vector3(5, 0, 0) * Client.Self.Movement.BodyRotation;
-                }
-                else
-                {
-                    if (lastTrackedObjectPos == RHelp.InvalidPosition)
-                    {
-                        lastTrackedObjectPos = trackedObject.RenderPosition;
-                    }
-                    else if (lastTrackedObjectPos != trackedObject.RenderPosition)
-                    {
-                        var diffPos = (trackedObject.RenderPosition - lastTrackedObjectPos);
-                        Camera.Position += diffPos;
-                        Camera.FocalPoint += diffPos;
-                        lastTrackedObjectPos = trackedObject.RenderPosition;
-                    }
-                }
-            }
-
-            if (Camera.Modified)
-            {
-                GL.GetFloat(GetPName.ProjectionMatrix, out ProjectionMatrix);
-                GL.GetFloat(GetPName.ModelviewMatrix, out ModelMatrix);
-                GL.GetInteger(GetPName.Viewport, Viewport);
-                Frustum.CalculateFrustum(ProjectionMatrix, ModelMatrix);
-                UpdateCamera();
-                Camera.Modified = false;
-                Camera.Step(lastFrameTime);
-            }
-
-            if (picking)
-            {
                 GL.Disable(EnableCap.Lighting);
                 terrain.Render(RenderPass.Picking, 0, this, lastFrameTime);
+                RenderAdjacentTerrains(RenderPass.Picking, lastFrameTime);
                 RenderObjects(RenderPass.Picking);
                 RenderAvatars(RenderPass.Picking);
                 GLHUDBegin();
@@ -2308,8 +2253,13 @@ namespace Radegast.Rendering
                 // ensures attributes are set or shader is not used where not supported.
                 terrain.Render(RenderPass.Simple, 0, this, lastFrameTime);
 
+                // Render adjacent simulator terrains
+                UpdateAdjacentSimulators();
+                RenderAdjacentTerrains(RenderPass.Simple, lastFrameTime);
+
                 // Alpha mask elements, no blending, alpha test for A > 0.5
                 GL.Enable(EnableCap.AlphaTest);
+
                 RenderObjects(RenderPass.Simple);
                 RenderAvatarsSkeleton(RenderPass.Simple);
                 RenderObjects(RenderPass.Invisible);
@@ -2349,6 +2299,16 @@ namespace Radegast.Rendering
             byte[] color = PickingHelper.ExecutePicking(x, y, glControl.Height, () => Render(true));
 
             var depth = PickingHelper.ReadPixelDepth(x, y, glControl.Height);
+
+            // Ensure we have up-to-date GL matrices and viewport before unprojecting
+            try
+            {
+                GL.GetFloat(GetPName.ModelviewMatrix, out ModelMatrix);
+                GL.GetFloat(GetPName.ProjectionMatrix, out ProjectionMatrix);
+                GL.GetInteger(GetPName.Viewport, Viewport);
+            }
+            catch { }
+
             GLU.UnProject(x, glControl.Height - y, depth, ModelMatrix, ProjectionMatrix, Viewport, out var worldPosTK);
             worldPos = RHelp.OMVVector3(worldPosTK);
 
@@ -2605,6 +2565,106 @@ namespace Radegast.Rendering
                     break;
             }
         }
+        
+        #region Adjacent Simulator Rendering
+
+        /// <summary>
+        /// Calculate the offset of a simulator relative to the current simulator based on region handles
+        /// </summary>
+        /// <param name="simHandle">Handle of the simulator to calculate offset for</param>
+        /// <returns>Offset vector in meters</returns>
+        private Vector3 CalculateSimOffset(ulong simHandle)
+        {
+            if (Client.Network.CurrentSim == null)
+                return Vector3.Zero;
+
+            ulong currentHandle = Client.Network.CurrentSim.Handle;
+            
+            // Extract region coordinates from handles
+            uint currentX, currentY, simX, simY;
+            Utils.LongToUInts(currentHandle, out currentX, out currentY);
+            Utils.LongToUInts(simHandle, out simX, out simY);
+
+            // Calculate offset in region coordinates (256m per region)
+            float offsetX = (simX - currentX);
+            float offsetY = (simY - currentY);
+
+            return new Vector3(offsetX, offsetY, 0);
+        }
+
+        /// <summary>
+        /// Update the list of adjacent simulators and their terrains
+        /// </summary>
+        private void UpdateAdjacentSimulators()
+        {
+            if (Client.Network.CurrentSim == null || !RenderSettings.PrimitiveRenderingEnabled)
+                return;
+
+            lock (adjacentSimsLock)
+            {
+                // Get all connected simulators except the current one
+                var simulators = Client.Network.Simulators.Where(s => s.Handle != Client.Network.CurrentSim.Handle).ToList();
+                
+                // Remove terrains for sims we're no longer connected to
+                var handlesToRemove = adjacentTerrains.Keys.Where(h => !simulators.Any(s => s.Handle == h)).ToList();
+                foreach (var handle in handlesToRemove)
+                {
+                    if (adjacentTerrains.TryGetValue(handle, out var terrain))
+                    {
+                        terrain.Dispose();
+                        adjacentTerrains.Remove(handle);
+                    }
+                }
+
+                // Add or update terrains for connected sims
+                foreach (var sim in simulators)
+                {
+                    if (!adjacentTerrains.ContainsKey(sim.Handle))
+                    {
+                        // Create a new terrain renderer for this adjacent sim
+                        adjacentTerrains[sim.Handle] = new RenderTerrain(Instance) { Modified = true };
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Render terrain from adjacent simulators with appropriate offset
+        /// </summary>
+        private void RenderAdjacentTerrains(RenderPass pass, float time)
+        {
+            if (Client.Network.CurrentSim == null)
+                return;
+
+            lock (adjacentSimsLock)
+            {
+                foreach (var kvp in adjacentTerrains)
+                {
+                    var simHandle = kvp.Key;
+                    var terrain = kvp.Value;
+
+                    // Calculate offset for this sim
+                    Vector3 offset = CalculateSimOffset(simHandle);
+
+                    // Push matrix and translate to sim position
+                    GL.PushMatrix();
+                    GL.Translate(offset.X, offset.Y, offset.Z);
+
+                    try
+                    {
+                        terrain.Render(pass, 0, this, time);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Error rendering adjacent terrain for handle {simHandle}: {ex.Message}", ex, Client);
+                    }
+
+                    GL.PopMatrix();
+                }
+            }
+        }
+
+        #endregion Adjacent Simulator Rendering
         #endregion Private methods (the meat)
     }
 }

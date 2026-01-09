@@ -385,7 +385,15 @@ namespace Radegast.Rendering
 
             var finalMatrix = OpenTK.Matrix4.Mult(modelMatrix, projMatrix);
 
-            finalMatrix.Invert();
+            try
+            {
+                finalMatrix.Invert();
+            }
+            catch (InvalidOperationException)
+            {
+                pos = OpenTK.Vector3.Zero;
+                return false;
+            }
 
             _in.X = winx;
             _in.Y = winy;
