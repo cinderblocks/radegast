@@ -21,6 +21,9 @@
 using System;
 using System.IO;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Radegast
 {
@@ -177,13 +180,19 @@ namespace Radegast
                 }
                 catch { }
 
-                if (RadegastInstanceForms.Initialized
-                    && RadegastInstanceForms.Instance.GlobalLogFile != null
-                    && (!RadegastInstanceForms.Instance.GlobalSettings.ContainsKey("log_to_file")
-                        || RadegastInstanceForms.Instance.GlobalSettings["log_to_file"]))
+                // Write to file using background writer to avoid blocking UI threads
+                try
                 {
-                    File.AppendAllText(RadegastInstanceForms.Instance.GlobalLogFile, entry + Environment.NewLine);
+                    if (RadegastInstanceForms.Initialized
+                        && RadegastInstanceForms.Instance.GlobalLogFile != null
+                        && (!RadegastInstanceForms.Instance.GlobalSettings.ContainsKey("log_to_file")
+                            || RadegastInstanceForms.Instance.GlobalSettings["log_to_file"]))
+                    {
+                        string line = entry + Environment.NewLine;
+                        FileLogWriter.Instance?.Enqueue(RadegastInstanceForms.Instance.GlobalLogFile, line);
+                    }
                 }
+                catch { }
             }
             catch (Exception) { }
         }
@@ -255,6 +264,87 @@ namespace Radegast
             public static readonly NullScope Instance = new NullScope();
             public void Dispose() { }
             private NullScope() { }
+        }
+
+        // Background file writer to avoid blocking threads on disk I/O
+        private class FileLogWriter
+        {
+            private static readonly Lazy<FileLogWriter> _instance = new Lazy<FileLogWriter>(() => new FileLogWriter());
+            public static FileLogWriter Instance => _instance.Value;
+
+            private readonly BlockingCollection<(string path, string line)> _queue = new BlockingCollection<(string, string)>();
+            private readonly CancellationTokenSource _cts = new CancellationTokenSource();
+            private Task _writerTask;
+
+            private FileLogWriter()
+            {
+                _writerTask = Task.Factory.StartNew(ProcessQueue, TaskCreationOptions.LongRunning);
+            }
+
+            public void Enqueue(string path, string line)
+            {
+                try
+                {
+                    _queue.Add((path, line));
+                }
+                catch { }
+            }
+
+            private void ProcessQueue()
+            {
+                // Keep a cache of open StreamWriters per path to avoid reopening file for each line
+                var writers = new ConcurrentDictionary<string, StreamWriter>(StringComparer.OrdinalIgnoreCase);
+
+                try
+                {
+                    foreach (var item in _queue.GetConsumingEnumerable(_cts.Token))
+                    {
+                        try
+                        {
+                            var writer = writers.GetOrAdd(item.path, p =>
+                            {
+                                try
+                                {
+                                    var dir = Path.GetDirectoryName(p);
+                                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                                    var fs = new FileStream(p, FileMode.Append, FileAccess.Write, FileShare.Read);
+                                    var sw = new StreamWriter(fs) { AutoFlush = true };
+                                    return sw;
+                                }
+                                catch
+                                {
+                                    return null;
+                                }
+                            });
+
+                            if (writer != null)
+                            {
+                                writer.Write(item.line);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    foreach (var kv in writers)
+                    {
+                        try { kv.Value.Dispose(); } catch { }
+                    }
+                }
+            }
+
+            public void Dispose()
+            {
+                try
+                {
+                    _queue.CompleteAdding();
+                    _cts.Cancel();
+                    _writerTask?.Wait(2000);
+                }
+                catch { }
+            }
         }
     }
 }
