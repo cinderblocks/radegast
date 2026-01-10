@@ -2251,6 +2251,17 @@ namespace Radegast.Rendering
             // Update camera render positions and set view
             Camera.Step(lastFrameTime);
             Camera.LookAt();
+            
+            // Setup wireframe or solid fill drawing mode
+            if (Wireframe && !picking)
+            {
+                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Line);
+            }
+            else
+            {
+                GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
+            }
+            
             // Push a matrix so Render can Pop at the end
             GL.PushMatrix();
 
