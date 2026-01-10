@@ -38,6 +38,8 @@ namespace Radegast
         private FriendInfo selectedFriend;
         private bool settingFriend = false;
         private readonly object lockOneAtaTime = new object();
+        private System.Windows.Forms.Timer refreshTimer;
+        private readonly object refreshTimerLock = new object();
 
         public FriendsConsole(RadegastInstanceForms instance)
         {
@@ -45,6 +47,19 @@ namespace Radegast
             Disposed += FriendsConsole_Disposed;
 
             this.instance = instance;
+
+            // Timer used to debounce frequent friend list refreshes to avoid UI stalls
+            refreshTimer = new System.Windows.Forms.Timer();
+            refreshTimer.Interval = 200; // milliseconds
+            refreshTimer.Tick += (s, e) =>
+            {
+                try
+                {
+                    refreshTimer.Stop();
+                    RefreshFriendsList();
+                }
+                catch { }
+            };
 
             if (instance.GlobalSettings["show_friends_online_notifications"].Type == OSDType.Unknown)
             {
@@ -85,6 +100,10 @@ namespace Radegast
             client.Friends.FriendshipTerminated -= Friends_FriendshipTerminated;
             client.Friends.FriendshipResponse -= Friends_FriendshipResponse;
             client.Friends.FriendNames -= Friends_FriendNames;
+
+            try { refreshTimer?.Stop(); } catch { }
+            try { refreshTimer?.Dispose(); } catch { }
+            refreshTimer = null;
         }
 
         private void FriendsConsole_Load(object sender, EventArgs e)
@@ -146,9 +165,26 @@ namespace Radegast
             SetControls();
         }
 
+        /// <summary>
+        /// Schedule a debounced refresh to avoid flooding the UI thread with many immediate updates.
+        /// </summary>
+        private void QueueRefresh()
+        {
+            if (this.IsDisposed) return;
+            try
+            {
+                lock (refreshTimerLock)
+                {
+                    refreshTimer.Stop();
+                    refreshTimer.Start();
+                }
+            }
+            catch { }
+        }
+
         private void Friends_FriendNames(object sender, FriendNamesEventArgs e)
         {
-            ThreadingHelper.SafeInvoke(this, () => RefreshFriendsList(), instance.MonoRuntime);
+            ThreadingHelper.SafeInvoke(this, () => QueueRefresh(), instance.MonoRuntime);
         }
 
         private void Friends_FriendshipResponse(object sender, FriendshipResponseEventArgs e)
@@ -180,7 +216,8 @@ namespace Radegast
                     });
                 }
 
-                RefreshFriendsList();
+                // Debounce frequent updates to avoid UI stalls
+                QueueRefresh();
             }, instance.MonoRuntime);
         }
 
@@ -294,7 +331,7 @@ namespace Radegast
                 {
                     DisplayNotification(e.Friend.UUID, text);
                     AnnounceForScreenReader(text);
-                    RefreshFriendsList();
+                    QueueRefresh();
                 }, instance.MonoRuntime);
             });
         }
@@ -312,7 +349,7 @@ namespace Radegast
                 {
                     DisplayNotification(e.Friend.UUID, text);
                     AnnounceForScreenReader(text);
-                    RefreshFriendsList();
+                    QueueRefresh();
                 }, instance.MonoRuntime);
             });
         }
@@ -328,7 +365,7 @@ namespace Radegast
                 {
                     DisplayNotification(e.AgentID, text);
                     AnnounceForScreenReader(text);
-                    RefreshFriendsList();
+                    QueueRefresh();
                 }, instance.MonoRuntime);
             });
         }
@@ -409,7 +446,7 @@ namespace Radegast
                             }
                             client.Self.GroupChatJoined -= handler;
                             
-                            ThreadingHelper.SafeInvoke(this, RefreshFriendsList, instance.MonoRuntime);
+                            ThreadingHelper.SafeInvoke(this, QueueRefresh, instance.MonoRuntime);
                         }
                     }
                 );
@@ -468,7 +505,7 @@ namespace Radegast
             if (selectedFriend == null) return;
 
             client.Friends.TerminateFriendship(selectedFriend.UUID);
-            RefreshFriendsList();
+            QueueRefresh();
         }
 
         public void ShowContextMenu()
