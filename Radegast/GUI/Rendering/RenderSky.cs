@@ -535,29 +535,6 @@ namespace Radegast.Rendering
             if (!initialized) Initialize();
             if (pass == RenderPass.Picking) return; // Don't render sky in picking pass
 
-            // DEBUG: Verify GL state at sky render start
-            bool textureWasEnabled = GL.IsEnabled(EnableCap.Texture2D);
-            bool lightingWasEnabled = GL.IsEnabled(EnableCap.Lighting);
-            
-            if (textureWasEnabled || lightingWasEnabled)
-            {
-                // Log warning - these should be off when sky renders
-                var sceneWindow = scene;
-                if (sceneWindow != null)
-                {
-                    var client = sceneWindow.GetType().GetField("Client", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(sceneWindow);
-                    if (client != null)
-                    {
-                        var loggerType = client.GetType().Assembly.GetType("Radegast.Logger");
-                        if (loggerType != null)
-                        {
-                            var debugMethod = loggerType.GetMethod("Debug", new[] { typeof(string), typeof(object) });
-                            debugMethod?.Invoke(null, new object[] { $"Sky render: Texture2D={textureWasEnabled}, Lighting={lightingWasEnabled} (should both be false)", client });
-                        }
-                    }
-                }
-            }
-
             // Update cloud rotations
             int nowMs = Environment.TickCount;
             float dt = Math.Max(0f, (nowMs - lastCloudUpdateMs) / 1000f);
@@ -576,22 +553,35 @@ namespace Radegast.Rendering
             bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
             bool wasTextureEnabled = GL.IsEnabled(EnableCap.Texture2D);
             bool wasColorMaterialEnabled = GL.IsEnabled(EnableCap.ColorMaterial);
+            bool wasCullFaceEnabled = GL.IsEnabled(EnableCap.CullFace);
             
-            // Configure GL state for sky rendering
-            GL.DepthMask(false); // Write to depth but don't update it (sky is always behind)
+            // ABSOLUTELY CRITICAL: Configure GL state for sky rendering with vertex colors
+            GL.DepthMask(false); // Don't write to depth buffer (sky is always behind everything)
             GL.DepthFunc(DepthFunction.Lequal);
             
-            // Disable lighting - sky uses vertex colors (caller should have already disabled it)
-            GL.Disable(EnableCap.Lighting);
-            GL.Disable(EnableCap.Texture2D);
+            // Disable face culling so we see the sky from inside the dome
+            GL.Disable(EnableCap.CullFace);
             
-            // Enable blending for smooth sky
+            // Disable everything that could interfere with vertex colors
+            GL.Disable(EnableCap.Lighting);      // No lighting calculations
+            GL.Disable(EnableCap.Texture2D);     // No textures on sky dome itself
+            GL.UseProgram(0);                     // No shaders - use fixed function
+            
+            // Enable alpha blending for smooth colors
             GL.Enable(EnableCap.Blend);
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             
-            // CRITICAL: Enable color material mode so vertex colors work
+            // CRITICAL: Enable color material so vertex colors are actually used
             GL.Enable(EnableCap.ColorMaterial);
             GL.ColorMaterial(MaterialFace.FrontAndBack, ColorMaterialParameter.AmbientAndDiffuse);
+            
+            // Set material to white so it doesn't tint vertex colors
+            float[] white = { 1.0f, 1.0f, 1.0f, 1.0f };
+            GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Ambient, white);
+            GL.Material(MaterialFace.FrontAndBack, MaterialParameter.Diffuse, white);
+            GL.Color4(1.0f, 1.0f, 1.0f, 1.0f);
+            
+            // Use smooth shading for gradient
             GL.ShadeModel(ShadingModel.Smooth);
             
             GL.PushMatrix();
@@ -692,6 +682,11 @@ namespace Radegast.Rendering
             // Restore GL state
             GL.DepthMask(wasDepthWriteEnabled);
             GL.DepthFunc(DepthFunction.Less);
+            
+            if (wasCullFaceEnabled)
+                GL.Enable(EnableCap.CullFace);
+            else
+                GL.Disable(EnableCap.CullFace);
             
             if (!wasBlendEnabled)
                 GL.Disable(EnableCap.Blend);
