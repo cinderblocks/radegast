@@ -173,7 +173,8 @@ namespace Radegast.Rendering
         private RenderSky sky;
 
         // Adjacent simulator rendering
-        private readonly Dictionary<ulong, RenderTerrain> adjacentTerrains = new Dictionary<ulong, RenderTerrain>();
+        private readonly Dictionary<ulong, RenderAdjacentTerrain> adjacentTerrains = new Dictionary<ulong, RenderAdjacentTerrain>();
+        private readonly Dictionary<ulong, Simulator> adjacentSimulators = new Dictionary<ulong, Simulator>();
         private readonly object adjacentSimsLock = new object();
 
         private readonly GridClient Client;
@@ -2219,6 +2220,41 @@ namespace Radegast.Rendering
 
             SortCullInterpolate();
 
+            // Prepare GL frame: clear buffers and set up camera/modelview
+            GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+            
+            // CRITICAL: ABSOLUTELY RESET ALL GL STATE AT FRAME START
+            // This prevents ANY cross-frame pollution
+            GL.LoadIdentity();
+            
+            // Reset ALL texture units to ensure no stale texture state
+            for (int i = 0; i < 8; i++)
+            {
+                GL.ActiveTexture(TextureUnit.Texture0 + i);
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.Disable(EnableCap.Texture2D);
+            }
+            GL.ActiveTexture(TextureUnit.Texture0); // Back to default unit
+            
+            // Explicitly disable everything that could interfere
+            GL.Disable(EnableCap.Texture2D);
+            GL.Disable(EnableCap.Lighting);
+            GL.Disable(EnableCap.ColorMaterial);
+            GL.Disable(EnableCap.Blend);
+            
+            // Reset color to white
+            GL.Color4(1f, 1f, 1f, 1f);
+            
+            // Reset to default shader (fixed-function)
+            GL.UseProgram(0);
+            
+            // Update camera render positions and set view
+            Camera.Step(lastFrameTime);
+            Camera.LookAt();
+            // Push a matrix so Render can Pop at the end
+            GL.PushMatrix();
+
+
             if (picking)
             {
                 GL.Disable(EnableCap.Lighting);
@@ -2239,18 +2275,22 @@ namespace Radegast.Rendering
 
                 CheckKeyboard(lastFrameTime);
 
+                // CRITICAL: Guarantee clean state before sky rendering
+                GL.Disable(EnableCap.Lighting);
+                GL.Disable(EnableCap.Texture2D);
+                GL.BindTexture(TextureTarget.Texture2D, 0);
+                GL.UseProgram(0); // Ensure no shader active
+                
                 // Render vibrant sky dome first, before anything else
                 if (sky != null)
                 {
                     sky.Render(RenderPass.Simple, Camera.RenderPosition);
                 }
+                
+                // Re-enable lighting for objects that need it
+                GL.Enable(EnableCap.Lighting);
 
-                // If programmable shaders are available and enabled, start the shiny shader
-                // Note: Do not bind shiny shader globally here. Shaders are enabled per-face
-                // by RenderPrimitive when needed (scene.StartShiny()). Binding the shader
-                // globally causes it to be active during fixed-function draws where attribute
-                // pointers are not set, resulting in incorrect rendering. Per-face binding
-                // ensures attributes are set or shader is not used where not supported.
+                // Terrain rendering
                 terrain.Render(RenderPass.Simple, 0, this, lastFrameTime);
 
                 // Render adjacent simulator terrains
@@ -2580,14 +2620,15 @@ namespace Radegast.Rendering
 
             ulong currentHandle = Client.Network.CurrentSim.Handle;
             
-            // Extract region coordinates from handles
+            // Extract region coordinates from handles (these are in 256m grid units)
             uint currentX, currentY, simX, simY;
             Utils.LongToUInts(currentHandle, out currentX, out currentY);
             Utils.LongToUInts(simHandle, out simX, out simY);
 
-            // Calculate offset in region coordinates (256m per region)
-            float offsetX = (simX - currentX);
-            float offsetY = (simY - currentY);
+            // Calculate offset in meters (each grid unit is 256m)
+            // The coordinates are already in meters, so we just need the difference
+            float offsetX = (float)(simX - currentX);
+            float offsetY = (float)(simY - currentY);
 
             return new Vector3(offsetX, offsetY, 0);
         }
@@ -2614,6 +2655,7 @@ namespace Radegast.Rendering
                         terrain.Dispose();
                         adjacentTerrains.Remove(handle);
                     }
+                    adjacentSimulators.Remove(handle);
                 }
 
                 // Add or update terrains for connected sims
@@ -2622,7 +2664,8 @@ namespace Radegast.Rendering
                     if (!adjacentTerrains.ContainsKey(sim.Handle))
                     {
                         // Create a new terrain renderer for this adjacent sim
-                        adjacentTerrains[sim.Handle] = new RenderTerrain(Instance) { Modified = true };
+                        adjacentTerrains[sim.Handle] = new RenderAdjacentTerrain(Instance, sim) { Modified = true };
+                        adjacentSimulators[sim.Handle] = sim;
                     }
                 }
             }

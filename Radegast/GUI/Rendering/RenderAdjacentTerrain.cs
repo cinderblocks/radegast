@@ -1,7 +1,6 @@
-﻿/**
+/**
  * Radegast Metaverse Client
- * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -27,10 +26,14 @@ using SkiaSharp;
 
 namespace Radegast.Rendering
 {
-    public class RenderTerrain : SceneObject
+    /// <summary>
+    /// Terrain renderer for adjacent simulators
+    /// </summary>
+    public class RenderAdjacentTerrain : SceneObject
     {
         private readonly RadegastInstanceForms Instance;
         private GridClient Client => Instance.Client;
+        private readonly Simulator targetSim;
 
         public bool Modified = true;
         private readonly float[,] heightTable = new float[256, 256];
@@ -45,13 +48,13 @@ namespace Radegast.Rendering
         private bool terrainVBOFailed = false;
         private bool terrainInProgress = false;
         private bool terrainTextureNeedsUpdate = false;
-        private float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f; // Update terrain om first run
+        private float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f;
         private readonly MeshmerizerR renderer;
-        private Simulator sim => Instance.Client.Network.CurrentSim;
 
-        public RenderTerrain(RadegastInstanceForms instance)
+        public RenderAdjacentTerrain(RadegastInstanceForms instance, Simulator simulator)
         {
             Instance = instance;
+            targetSim = simulator;
             renderer = new MeshmerizerR();
         }
 
@@ -95,7 +98,7 @@ namespace Radegast.Rendering
 
         private void UpdateTerrain()
         {
-            if (sim == null || sim.Terrain == null) return;
+            if (targetSim == null || targetSim.Terrain == null) return;
 
             ThreadPool.QueueUserWorkItem(sync =>
             {
@@ -107,10 +110,10 @@ namespace Radegast.Rendering
                     {
                         float z = 0;
                         int patchNr = ((int)x / 16) * 16 + (int)y / 16;
-                        if (sim.Terrain[patchNr] != null
-                            && sim.Terrain[patchNr].Data != null)
+                        if (targetSim.Terrain[patchNr] != null
+                            && targetSim.Terrain[patchNr].Data != null)
                         {
-                            float[] data = sim.Terrain[patchNr].Data;
+                            float[] data = targetSim.Terrain[patchNr].Data;
                             z = data[(int)x % 16 * 16 + (int)y % 16];
                         }
                         heightTable[x, y] = z;
@@ -148,32 +151,20 @@ namespace Radegast.Rendering
 
         private void UpdateTerrainTexture()
         {
-            if (!fetchingTerrainTexture)
+            if (!fetchingTerrainTexture && targetSim != null)
             {
                 fetchingTerrainTexture = true;
                 ThreadPool.QueueUserWorkItem(sync =>
                 {
-                    Simulator currentSim = Client.Network.CurrentSim;
                     terrainImage = TerrainSplat.Splat(Instance, heightTable,
-                        new UUID[] { currentSim.TerrainDetail0, currentSim.TerrainDetail1, currentSim.TerrainDetail2, currentSim.TerrainDetail3 },
-                        new float[] { currentSim.TerrainStartHeight00, currentSim.TerrainStartHeight01, currentSim.TerrainStartHeight10, currentSim.TerrainStartHeight11 },
-                        new float[] { currentSim.TerrainHeightRange00, currentSim.TerrainHeightRange01, currentSim.TerrainHeightRange10, currentSim.TerrainHeightRange11 });
+                        new UUID[] { targetSim.TerrainDetail0, targetSim.TerrainDetail1, targetSim.TerrainDetail2, targetSim.TerrainDetail3 },
+                        new float[] { targetSim.TerrainStartHeight00, targetSim.TerrainStartHeight01, targetSim.TerrainStartHeight10, targetSim.TerrainStartHeight11 },
+                        new float[] { targetSim.TerrainHeightRange00, targetSim.TerrainHeightRange01, targetSim.TerrainHeightRange10, targetSim.TerrainHeightRange11 });
 
                     fetchingTerrainTexture = false;
                     terrainTextureNeedsUpdate = false;
                 });
             }
-        }
-
-        public bool TryGetVertex(int indeex, out ColorVertex picked)
-        {
-            if (indeex < terrainVertices.Length)
-            {
-                picked = terrainVertices[indeex];
-                return true;
-            }
-            picked = new ColorVertex();
-            return false;
         }
 
         public override void Render(RenderPass pass, int pickingID, SceneWindow scene, float time)

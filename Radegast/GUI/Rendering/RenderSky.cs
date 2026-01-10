@@ -195,11 +195,11 @@ namespace Radegast.Rendering
                     
                     // Interpolate between zenith and horizon based on Z (altitude)
                     float altitude = z; // 0 at horizon, 1 at zenith
-                    
+                  
                     // Sun influence
                     float sunInfluence = Math.Max(0.0f, Vector3.Dot(vertPos, sunDirection));
                     sunInfluence = (float)Math.Pow(sunInfluence, 4.0); // Sharp falloff
-                    
+                  
                     // Base sky color
                     OpenTK.Graphics.Color4 skyColor = InterpolateColor(HORIZON_COLOR, ZENITH_COLOR, altitude);
                     
@@ -479,337 +479,6 @@ namespace Radegast.Rendering
         }
 
         /// <summary>
-        /// Render the sky dome
-        /// </summary>
-        public void Render(RenderPass pass, Vector3 cameraPosition)
-        {
-            if (!initialized) Initialize();
-            if (pass == RenderPass.Picking) return; // Don't render sky in picking pass
-
-            // Update cloud rotations
-            int nowMs = Environment.TickCount;
-            float dt = Math.Max(0f, (nowMs - lastCloudUpdateMs) / 1000f);
-            lastCloudUpdateMs = nowMs;
-
-            if (cloudTextures != null)
-            {
-                for (int i = 0; i < cloudLayerCount; i++)
-                {
-                    cloudRotation[i] += cloudSpeed[i] * dt;
-                }
-            }
-
-            // Save state
-            GL.PushAttrib(AttribMask.EnableBit | AttribMask.DepthBufferBit | AttribMask.LightingBit);
-            
-            // Disable depth writes but keep depth test so sky is behind everything
-            GL.DepthMask(false);
-            GL.Disable(EnableCap.Lighting);
-            GL.Disable(EnableCap.Texture2D);
-            GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            
-            GL.PushMatrix();
-            
-            // Center sky dome on camera so it always surrounds the viewer
-            GL.Translate(cameraPosition.X, cameraPosition.Y, cameraPosition.Z);
-            
-            bool usedShader = false;
-            
-            // Try shader path if available
-            if (RenderSettings.HasShaders && RenderSettings.EnableSkyShader && scene != null)
-            {
-                try
-                {
-                    var shaderManager = scene.GetType().GetField("shaderManager", 
-                        BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(scene);
-                    
-                    if (shaderManager != null)
-                    {
-                        var startMethod = shaderManager.GetType().GetMethod("StartShader");
-                        var getMethod = shaderManager.GetType().GetMethod("GetProgram");
-                        
-                        if (startMethod != null && getMethod != null)
-                        {
-                            bool started = (bool)startMethod.Invoke(shaderManager, new object[] { "sky" });
-                            if (started)
-                            {
-                                var prog = getMethod.Invoke(shaderManager, new object[] { "sky" });
-                                if (prog != null)
-                                {
-                                    usedShader = RenderWithShader(prog);
-                                    
-                                    // Stop shader
-                                    var stopMethod = shaderManager.GetType().GetMethod("StopShader");
-                                    stopMethod?.Invoke(shaderManager, null);
-                                }
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    usedShader = false;
-                }
-            }
-            
-            if (!usedShader)
-            {
-                // Fixed-function rendering path
-                if (RenderSettings.UseVBO && !vboFailed && skyVBO != -1 && skyIndexVBO != -1)
-                {
-                    RenderWithVBO();
-                }
-                else
-                {
-                    RenderWithClientArrays();
-                }
-
-                // Render cloud layers as large textured quads above the camera
-                if (cloudTextures != null && cloudHeights != null)
-                {
-                    GL.Enable(EnableCap.Texture2D);
-                    GL.EnableClientState(ArrayCap.TextureCoordArray);
-                    
-                    for (int i = 0; i < cloudLayerCount; i++)
-                    {
-                        int tex = i < cloudTextures.Length ? cloudTextures[i] : 0;
-                        if (tex <= 0) continue;
-
-                        GL.PushMatrix();
-                        
-                        // Position cloud layer above camera
-                        GL.Translate(0f, 0f, cloudHeights[i]);
-                        GL.Rotate(cloudRotation[i], 0f, 0f, 1f);
-                        
-                        float size = SKY_RADIUS * 1.5f * cloudScaleFactors[i];
-                        float cloudAlpha = 0.8f - i * 0.15f;
-                        
-                        GL.BindTexture(TextureTarget.Texture2D, tex);
-                        GL.Color4(1f, 1f, 1f, cloudAlpha);
-
-                        // Draw textured quad
-                        GL.Begin(PrimitiveType.Quads);
-                        {
-                            GL.TexCoord2(0f, 0f);
-                            GL.Vertex3(-size, -size, 0f);
-                            
-                            GL.TexCoord2(2f, 0f);  // Tile texture 2x for more cloud detail
-                            GL.Vertex3(size, -size, 0f);
-                            
-                            GL.TexCoord2(2f, 2f);
-                            GL.Vertex3(size, size, 0f);
-                            
-                            GL.TexCoord2(0f, 2f);
-                            GL.Vertex3(-size, size, 0f);
-                        }
-                        GL.End();
-
-                        GL.BindTexture(TextureTarget.Texture2D, 0);
-                        GL.PopMatrix();
-                    }
-                    
-                    GL.DisableClientState(ArrayCap.TextureCoordArray);
-                    GL.Disable(EnableCap.Texture2D);
-                    GL.Color4(1f, 1f, 1f, 1f);
-                }
-            }
-            else
-            {
-                // Shader path handled cloud composition inside the fragment shader; nothing else to do here.
-            }
-            
-            GL.PopMatrix();
-            
-            // Restore state
-            GL.DepthMask(true);
-            GL.PopAttrib();
-        }
-
-        /// <summary>
-        /// Render using shader program
-        /// </summary>
-        private bool RenderWithShader(object prog)
-        {
-            try
-            {
-                var progType = prog.GetType();
-                var uniMethod = progType.GetMethod("Uni");
-                var attrMethod = progType.GetMethod("Attr");
-
-                if (uniMethod == null || attrMethod == null) return false;
-
-                // Get uniform locations
-                int uMVP = (int)uniMethod.Invoke(prog, new object[] { "uMVP" });
-                int uAtmosphere = (int)uniMethod.Invoke(prog, new object[] { "atmosphereStrength" });
-                int uSunDir = (int)uniMethod.Invoke(prog, new object[] { "sunDirection" });
-                int uSunColor = (int)uniMethod.Invoke(prog, new object[] { "sunColor" });
-                int uSunInfluence = (int)uniMethod.Invoke(prog, new object[] { "sunInfluence" });
-                int uRayleigh = (int)uniMethod.Invoke(prog, new object[] { "rayleighScale" });
-                int uMie = (int)uniMethod.Invoke(prog, new object[] { "mieScale" });
-                int uMieG = (int)uniMethod.Invoke(prog, new object[] { "mieG" });
-                int uSunI = (int)uniMethod.Invoke(prog, new object[] { "sunIntensity" });
-                int uExposure = (int)uniMethod.Invoke(prog, new object[] { "exposure" });
-
-                // Get attribute locations
-                int aPosition = (int)attrMethod.Invoke(prog, new object[] { "aPosition" });
-                int aColor = (int)attrMethod.Invoke(prog, new object[] { "aColor" });
-
-                if (aPosition == -1 || aColor == -1) return false;
-
-                // Set uniforms
-                if (uMVP != -1)
-                {
-                    GL.GetFloat(GetPName.ModelviewMatrix, out OpenTK.Matrix4 mv);
-                    GL.GetFloat(GetPName.ProjectionMatrix, out OpenTK.Matrix4 proj);
-                    var mvp = mv * proj;
-                    GL.UniformMatrix4(uMVP, false, ref mvp);
-                }
-
-                if (uAtmosphere != -1)
-                {
-                    GL.Uniform1(uAtmosphere, 0.3f); // Subtle atmospheric effect
-                }
-
-                if (uSunDir != -1)
-                {
-                    GL.Uniform3(uSunDir, sunDirection.X, sunDirection.Y, sunDirection.Z);
-                }
-
-                if (uSunColor != -1)
-                {
-                    GL.Uniform4(uSunColor, SUN_CORE_COLOR.R, SUN_CORE_COLOR.G, SUN_CORE_COLOR.B, SUN_CORE_COLOR.A);
-                }
-
-                if (uSunInfluence != -1)
-                {
-                    GL.Uniform1(uSunInfluence, 0.5f);
-                }
-
-                // Additional scattering uniforms with defaults
-                if (uRayleigh != -1) GL.Uniform1(uRayleigh, 0.0025f);
-                if (uMie != -1) GL.Uniform1(uMie, 0.0010f);
-                if (uMieG != -1) GL.Uniform1(uMieG, 0.76f);
-                if (uSunI != -1) GL.Uniform1(uSunI, 20.0f);
-                if (uExposure != -1) GL.Uniform1(uExposure, 1.0f);
-
-                // Gamma uniform via reflection
-                int ugu = (int)uniMethod.Invoke(prog, new object[] { "gamma" });
-                if (ugu != -1) GL.Uniform1(ugu, RenderSettings.Gamma);
-
-                // Bind cloud textures and set cloud uniforms if present
-                try
-                {
-                    int baseUnit = 4;
-
-                    int uCloud0 = (int)uniMethod.Invoke(prog, new object[] { "cloud0" });
-                    int uCloud1 = (int)uniMethod.Invoke(prog, new object[] { "cloud1" });
-                    int uCloud2 = (int)uniMethod.Invoke(prog, new object[] { "cloud2" });
-
-                    int uCloud0Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud0Scale" });
-                    int uCloud1Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud1Scale" });
-                    int uCloud2Scale = (int)uniMethod.Invoke(prog, new object[] { "cloud2Scale" });
-
-                    int uCloud0Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud0Alpha" });
-                    int uCloud1Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud1Alpha" });
-                    int uCloud2Alpha = (int)uniMethod.Invoke(prog, new object[] { "cloud2Alpha" });
-
-                    int uCloud0Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud0Offset" });
-                    int uCloud1Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud1Offset" });
-                    int uCloud2Offset = (int)uniMethod.Invoke(prog, new object[] { "cloud2Offset" });
-
-                    if (cloudTextures != null)
-                    {
-                        for (int i = 0; i < cloudLayerCount && i < cloudTextures.Length; i++)
-                        {
-                            int tex = cloudTextures[i];
-                            if (tex <= 0) continue;
-
-                            GL.ActiveTexture(TextureUnit.Texture0 + (baseUnit + i));
-                            GL.Enable(EnableCap.Texture2D);
-                            GL.BindTexture(OpenTK.Graphics.OpenGL.TextureTarget.Texture2D, tex);
-
-                            if (i == 0 && uCloud0 != -1) GL.Uniform1(uCloud0, baseUnit + i);
-                            if (i == 1 && uCloud1 != -1) GL.Uniform1(uCloud1, baseUnit + i);
-                            if (i == 2 && uCloud2 != -1) GL.Uniform1(uCloud2, baseUnit + i);
-
-                            if (i == 0)
-                            {
-                                if (uCloud0Scale != -1) GL.Uniform1(uCloud0Scale, cloudScaleFactors[i]);
-                                if (uCloud0Alpha != -1) GL.Uniform1(uCloud0Alpha, 0.6f - i * 0.12f);
-                                if (uCloud0Offset != -1) GL.Uniform1(uCloud0Offset, cloudRotation[i] / 360.0f);
-                            }
-                            else if (i == 1)
-                            {
-                                if (uCloud1Scale != -1) GL.Uniform1(uCloud1Scale, cloudScaleFactors[i]);
-                                if (uCloud1Alpha != -1) GL.Uniform1(uCloud1Alpha, 0.6f - i * 0.12f);
-                                if (uCloud1Offset != -1) GL.Uniform1(uCloud1Offset, cloudRotation[i] / 360.0f);
-                            }
-                            else if (i == 2)
-                            {
-                                if (uCloud2Scale != -1) GL.Uniform1(uCloud2Scale, cloudScaleFactors[i]);
-                                if (uCloud2Alpha != -1) GL.Uniform1(uCloud2Alpha, 0.6f - i * 0.12f);
-                                if (uCloud2Offset != -1) GL.Uniform1(uCloud2Offset, cloudRotation[i] / 360.0f);
-                            }
-                        }
-
-                        GL.ActiveTexture(TextureUnit.Texture0);
-                    }
-                }
-                catch { }
-
-                // Render with VBO and shader attributes
-                if (RenderSettings.UseVBO && !vboFailed && skyVBO != -1 && skyIndexVBO != -1)
-                {
-                    Compat.BindBuffer(BufferTarget.ArrayBuffer, skyVBO);
-                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, skyIndexVBO);
-
-                    int stride = 7 * sizeof(float);
-                    GL.EnableVertexAttribArray(aPosition);
-                    GL.EnableVertexAttribArray(aColor);
-
-                    GL.VertexAttribPointer(aPosition, 3, VertexAttribPointerType.Float, false, stride, IntPtr.Zero);
-                    GL.VertexAttribPointer(aColor, 4, VertexAttribPointerType.Float, false, stride, (IntPtr)(3 * sizeof(float)));
-
-                    GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, IntPtr.Zero);
-
-                    GL.DisableVertexAttribArray(aPosition);
-                    GL.DisableVertexAttribArray(aColor);
-
-                    Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                    Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-                }
-                else
-                {
-                    // Shader with client arrays (fallback)
-                    GL.EnableVertexAttribArray(aPosition);
-                    GL.EnableVertexAttribArray(aColor);
-
-                    unsafe
-                    {
-                        fixed (float* vPtr = skyVertices)
-                        fixed (float* cPtr = skyColors)
-                        fixed (ushort* iPtr = skyIndices)
-                        {
-                            GL.VertexAttribPointer(aPosition, 3, VertexAttribPointerType.Float, false, 0, (IntPtr)vPtr);
-                            GL.VertexAttribPointer(aColor, 4, VertexAttribPointerType.Float, false, 0, (IntPtr)cPtr);
-                            GL.DrawElements(PrimitiveType.Triangles, indexCount, DrawElementsType.UnsignedShort, (IntPtr)iPtr);
-                        }
-                    }
-
-                    GL.DisableVertexAttribArray(aPosition);
-                    GL.DisableVertexAttribArray(aColor);
-                }
-
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
         /// Render using VBO
         /// </summary>
         private void RenderWithVBO()
@@ -848,7 +517,196 @@ namespace Radegast.Rendering
             GL.DisableClientState(ArrayCap.VertexArray);
             GL.DisableClientState(ArrayCap.ColorArray);
         }
-        #endregion
+
+        /// <summary>
+        /// Render using shader (currently not implemented - returns false to use fixed-function)
+        /// </summary>
+        private bool RenderWithShader(object prog)
+        {
+            // Sky shader not implemented yet, return false to use fixed-function fallback
+            return false;
+        }
+
+        /// <summary>
+        /// Render the sky dome
+        /// </summary>
+        public void Render(RenderPass pass, Vector3 cameraPosition)
+        {
+            if (!initialized) Initialize();
+            if (pass == RenderPass.Picking) return; // Don't render sky in picking pass
+
+            // DEBUG: Verify GL state at sky render start
+            bool textureWasEnabled = GL.IsEnabled(EnableCap.Texture2D);
+            bool lightingWasEnabled = GL.IsEnabled(EnableCap.Lighting);
+            
+            if (textureWasEnabled || lightingWasEnabled)
+            {
+                // Log warning - these should be off when sky renders
+                var sceneWindow = scene;
+                if (sceneWindow != null)
+                {
+                    var client = sceneWindow.GetType().GetField("Client", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)?.GetValue(sceneWindow);
+                    if (client != null)
+                    {
+                        var loggerType = client.GetType().Assembly.GetType("Radegast.Logger");
+                        if (loggerType != null)
+                        {
+                            var debugMethod = loggerType.GetMethod("Debug", new[] { typeof(string), typeof(object) });
+                            debugMethod?.Invoke(null, new object[] { $"Sky render: Texture2D={textureWasEnabled}, Lighting={lightingWasEnabled} (should both be false)", client });
+                        }
+                    }
+                }
+            }
+
+            // Update cloud rotations
+            int nowMs = Environment.TickCount;
+            float dt = Math.Max(0f, (nowMs - lastCloudUpdateMs) / 1000f);
+            lastCloudUpdateMs = nowMs;
+
+            if (cloudTextures != null)
+            {
+                for (int i = 0; i < cloudLayerCount; i++)
+                {
+                    cloudRotation[i] += cloudSpeed[i] * dt;
+                }
+            }
+
+            // Save current GL state that we will modify
+            bool wasDepthWriteEnabled = GL.GetBoolean(GetPName.DepthWritemask);
+            bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
+            bool wasTextureEnabled = GL.IsEnabled(EnableCap.Texture2D);
+            bool wasColorMaterialEnabled = GL.IsEnabled(EnableCap.ColorMaterial);
+            
+            // Configure GL state for sky rendering
+            GL.DepthMask(false); // Write to depth but don't update it (sky is always behind)
+            GL.DepthFunc(DepthFunction.Lequal);
+            
+            // Disable lighting - sky uses vertex colors (caller should have already disabled it)
+            GL.Disable(EnableCap.Lighting);
+            GL.Disable(EnableCap.Texture2D);
+            
+            // Enable blending for smooth sky
+            GL.Enable(EnableCap.Blend);
+            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            
+            // CRITICAL: Enable color material mode so vertex colors work
+            GL.Enable(EnableCap.ColorMaterial);
+            GL.ColorMaterial(MaterialFace.FrontAndBack, ColorMaterialParameter.AmbientAndDiffuse);
+            GL.ShadeModel(ShadingModel.Smooth);
+            
+            GL.PushMatrix();
+            
+            // Center sky dome on camera
+            GL.Translate(cameraPosition.X, cameraPosition.Y, cameraPosition.Z);
+            
+            bool usedShader = false;
+            
+            // Try shader path if available
+            if (RenderSettings.HasShaders && RenderSettings.EnableSkyShader && scene != null)
+            {
+                try
+                {
+                    var shaderManager = scene.GetType().GetField("shaderManager", 
+                        BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(scene);
+                    
+                    if (shaderManager != null)
+                    {
+                        var startMethod = shaderManager.GetType().GetMethod("StartShader");
+                        var getMethod = shaderManager.GetType().GetMethod("GetProgram");
+                        
+                        if (startMethod != null && getMethod != null)
+                        {
+                            bool started = (bool)startMethod.Invoke(shaderManager, new object[] { "sky" });
+                            if (started)
+                            {
+                                var prog = getMethod.Invoke(shaderManager, new object[] { "sky" });
+                                if (prog != null)
+                                {
+                                    usedShader = RenderWithShader(prog);
+                                    
+                                    var stopMethod = shaderManager.GetType().GetMethod("StopShader");
+                                    stopMethod?.Invoke(shaderManager, null);
+                                }
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    usedShader = false;
+                }
+            }
+            
+            if (!usedShader)
+            {
+                // Fixed-function rendering path
+                if (RenderSettings.UseVBO && !vboFailed && skyVBO != -1 && skyIndexVBO != -1)
+                {
+                    RenderWithVBO();
+                }
+                else
+                {
+                    RenderWithClientArrays();
+                }
+
+                // Render cloud layers
+                if (cloudTextures != null && cloudHeights != null)
+                {
+                    GL.Enable(EnableCap.Texture2D);
+                    GL.EnableClientState(ArrayCap.TextureCoordArray);
+                    
+                    for (int i = 0; i < cloudLayerCount; i++)
+                    {
+                        int tex = i < cloudTextures.Length ? cloudTextures[i] : 0;
+                        if (tex <= 0) continue;
+
+                        GL.PushMatrix();
+                        GL.Translate(0f, 0f, cloudHeights[i]);
+                        GL.Rotate(cloudRotation[i], 0f, 0f, 1f);
+                        
+                        float size = SKY_RADIUS * 1.5f * cloudScaleFactors[i];
+                        float cloudAlpha = 0.8f - i * 0.15f;
+                        
+                        GL.BindTexture(TextureTarget.Texture2D, tex);
+                        GL.Color4(1f, 1f, 1f, cloudAlpha);
+
+                        GL.Begin(PrimitiveType.Quads);
+                        GL.TexCoord2(0f, 0f); GL.Vertex3(-size, -size, 0f);
+                        GL.TexCoord2(2f, 0f); GL.Vertex3(size, -size, 0f);
+                        GL.TexCoord2(2f, 2f); GL.Vertex3(size, size, 0f);
+                        GL.TexCoord2(0f, 2f); GL.Vertex3(-size, size, 0f);
+                        GL.End();
+
+                        GL.BindTexture(TextureTarget.Texture2D, 0);
+                        GL.PopMatrix();
+                    }
+                    
+                    GL.DisableClientState(ArrayCap.TextureCoordArray);
+                    GL.Disable(EnableCap.Texture2D);
+                    GL.Color4(1f, 1f, 1f, 1f);
+                }
+            }
+            
+            GL.PopMatrix();
+            
+            // Restore GL state
+            GL.DepthMask(wasDepthWriteEnabled);
+            GL.DepthFunc(DepthFunction.Less);
+            
+            if (!wasBlendEnabled)
+                GL.Disable(EnableCap.Blend);
+            
+            if (wasTextureEnabled)
+                GL.Enable(EnableCap.Texture2D);
+            else
+                GL.Disable(EnableCap.Texture2D);
+                
+            if (!wasColorMaterialEnabled)
+                GL.Disable(EnableCap.ColorMaterial);
+                
+            GL.Color4(1f, 1f, 1f, 1f);
+        }
+        #endregion Rendering
 
         #region Helper Methods
         /// <summary>
