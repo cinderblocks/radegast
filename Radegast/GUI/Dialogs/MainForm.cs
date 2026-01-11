@@ -245,6 +245,9 @@ namespace Radegast
 
             MediaConsole = new MediaConsole(instance);
             tbtnMedia.Visible = true;
+            
+            // Initialize MediaManager after UI is ready
+            instance.MediaManager?.Initialize();
         }
 
         public bool InAutoReconnect { get; set; }

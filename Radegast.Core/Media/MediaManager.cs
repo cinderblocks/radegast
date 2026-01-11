@@ -1,7 +1,7 @@
 /*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -39,8 +39,8 @@ namespace Radegast.Media
         private readonly CancellationTokenSource soundCancelToken;
 
         private List<MediaObject> sounds = new List<MediaObject>();
-        private readonly Task commandLoop;
-        private readonly Task listenerLoop;
+        private Task commandLoop;
+        private Task listenerLoop;
 
         public MediaManager(IRadegastInstance instance)
         {
@@ -65,19 +65,36 @@ namespace Radegast.Media
             // Initialize the command queue.
             queue = new Queue<SoundDelegate>();
 
-            // Initialize the FMOD sound package
-            InitFMOD();
-
-            // Start the background thread that does the audio calls.
-            commandLoop = Task.Factory.StartNew(() => CommandLoop(soundCancelToken.Token),
-                soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-            // Start the background thread that updates listener position.
-            listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
-                soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-
             Instance.ClientChanged += Instance_ClientChanged;
 
-            // Wait for init to complete
+            // Defer FMOD initialization until UI is ready. Call Initialize() to start FMOD and threads.
+        }
+
+        /// <summary>
+        /// Attempt to initialize FMOD and start background threads. Safe to call multiple times.
+        /// </summary>
+        public void Initialize()
+        {
+            try
+            {
+                if (SoundSystemAvailable) return;
+
+                InitFMOD();
+
+                if (SoundSystemAvailable)
+                {
+                    // Start the background thread that does the audio calls.
+                    commandLoop = Task.Factory.StartNew(() => CommandLoop(soundCancelToken.Token),
+                        soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    // Start the background thread that updates listener position.
+                    listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
+                        soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to initialize MediaManager", ex);
+            }
         }
 
         private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
@@ -294,7 +311,13 @@ namespace Radegast.Media
             try
             {
                 soundCancelToken.Cancel();
-                Task.WaitAll(new[] { commandLoop, listenerLoop }, 2000);
+                var tasks = new List<Task>();
+                if (commandLoop != null) tasks.Add(commandLoop);
+                if (listenerLoop != null) tasks.Add(listenerLoop);
+                if (tasks.Count > 0)
+                {
+                    Task.WaitAll(tasks.ToArray(), 2000);
+                }
             }
             catch (AggregateException) { }
             catch (Exception) { }
