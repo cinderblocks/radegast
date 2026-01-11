@@ -415,21 +415,33 @@ namespace Radegast.Rendering
                     switch (Name)
                     {
                         case "upperBodyMesh":
-                            jointname = skeleton.mUpperMeshMapping[jointindex];
-                            jointindex++;
-                            jointname2 = skeleton.mUpperMeshMapping[jointindex];
+                            if (jointindex >= 0 && jointindex < skeleton.mUpperMeshMapping.Count)
+                            {
+                                jointname = skeleton.mUpperMeshMapping[jointindex];
+                                jointindex++;
+                                if (jointindex < skeleton.mUpperMeshMapping.Count)
+                                    jointname2 = skeleton.mUpperMeshMapping[jointindex];
+                            }
                             break;
 
                         case "lowerBodyMesh":
-                            jointname = skeleton.mLowerMeshMapping[jointindex];
-                            jointindex++;
-                            jointname2 = skeleton.mLowerMeshMapping[jointindex];
+                            if (jointindex >= 0 && jointindex < skeleton.mLowerMeshMapping.Count)
+                            {
+                                jointname = skeleton.mLowerMeshMapping[jointindex];
+                                jointindex++;
+                                if (jointindex < skeleton.mLowerMeshMapping.Count)
+                                    jointname2 = skeleton.mLowerMeshMapping[jointindex];
+                            }
                             break;
 
                         case "headMesh":
-                            jointname = skeleton.mHeadMeshMapping[jointindex];
-                            jointindex++;
-                            jointname2 = skeleton.mHeadMeshMapping[jointindex];
+                            if (jointindex >= 0 && jointindex < skeleton.mHeadMeshMapping.Count)
+                            {
+                                jointname = skeleton.mHeadMeshMapping[jointindex];
+                                jointindex++;
+                                if (jointindex < skeleton.mHeadMeshMapping.Count)
+                                    jointname2 = skeleton.mHeadMeshMapping[jointindex];
+                            }
                             break;
 
                         case "eyeBallRightMesh":
@@ -453,9 +465,13 @@ namespace Radegast.Rendering
 
                     }
 
+                    // Safety check for bone existence
+                    if (string.IsNullOrEmpty(jointname) || !av.skel.mBones.ContainsKey(jointname))
+                        continue;
+
                     ba = av.skel.mBones[jointname];
                     
-                    bb = jointname2 == "" ? null : av.skel.mBones[jointname2];
+                    bb = string.IsNullOrEmpty(jointname2) || !av.skel.mBones.ContainsKey(jointname2) ? null : av.skel.mBones[jointname2];
                 }
 
                 //Special cases 0 is not used
