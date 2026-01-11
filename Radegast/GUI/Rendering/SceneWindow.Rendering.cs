@@ -1,7 +1,7 @@
 // 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
-// Copyright (c) 2019-2025, Sjofn LLC
+// Copyright (c) 2019-2026, Sjofn LLC
 // All rights reserved.
 // 
 // Redistribution and use in source and binary forms, with or without
@@ -80,17 +80,40 @@ namespace Radegast.Rendering
 
                     byte[] faceColor = null;
 
-                    var tagPos = RHelp.TKVector3(avPos);
-                    tagPos.Z += 1.2f;
+                    // Calculate tag position in world space
+                    // Use avatar height if available, otherwise use default
+                    float avatarHeight = av.Height > 0 ? av.Height : 2.0f;
+                    
+                    // Position tag well above the head - add extra offset
+                    // Avatar height is measured from feet, so we need to go above that
+                    var tagWorldPos = avPos + new Vector3(0, 0, avatarHeight * 0.65f + 0.3f); // 65% of height plus 30cm above
+                    
+                    var tagPos = RHelp.TKVector3(tagWorldPos);
+                    
                     if (!GLU.Project(tagPos, ModelMatrix, ProjectionMatrix, Viewport, 
                             out var screenPos))
                     {
                         continue;
                     }
 
+                    // Get avatar name - try instance.Names first, fallback to avatar.Name
                     var tagText = instance.Names.Get(av.avatar.ID, av.avatar.Name);
+                    if (string.IsNullOrEmpty(tagText) || tagText.Trim().Length == 0)
+                    {
+                        // Fallback to the avatar's name property
+                        tagText = av.avatar.Name ?? "Loading...";
+                    }
+                    
+                    // Add group name above if present
                     if (!string.IsNullOrEmpty(av.avatar.GroupName))
                         tagText = av.avatar.GroupName + "\n" + tagText;
+
+                    // Add status indicators on a separate line below the name
+                    string statusIcons = GetAvatarStatusIcons(av.avatar);
+                    if (!string.IsNullOrEmpty(statusIcons))
+                    {
+                        tagText = tagText + "\n" + statusIcons;
+                    }
 
                     var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.Top;
                     var tSize = TextRendering.Measure(tagText, AvatarTagFont, flags);
@@ -119,19 +142,42 @@ namespace Radegast.Rendering
 
                     if (screenPos.Y > 0)
                     {
-                        // Render tag background
+                        // Calculate distance-based alpha fade for name tags
+                        float distanceFactor = 1.0f;
+                        if (av.DistanceSquared > 100f) // Start fading beyond 10 meters
+                        {
+                            float distance = (float)Math.Sqrt(av.DistanceSquared);
+                            distanceFactor = Math.Max(0.3f, 1.0f - ((distance - 10f) / 10f)); // Fade from 10m to 20m
+                        }
+                        
+                        // Render tag background with subtle gradient
                         float halfWidth = tSize.Width / 2 + 12;
                         float halfHeight = tSize.Height / 2 + 5;
+                        
                         // Ensure blending is enabled for semi-transparent background
                         GL.Enable(EnableCap.Blend);
                         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                        GL.Color4(0f, 0f, 0f, 0.7f);
+                        
+                        // Choose background color based on avatar status
+                        var bgColor = GetAvatarTagBackgroundColor(av.avatar);
+                        
+                        // Apply distance fade to background
+                        byte fadedAlpha = (byte)(bgColor.Alpha * distanceFactor);
+                        GL.Color4(bgColor.Red / 255f, bgColor.Green / 255f, bgColor.Blue / 255f, fadedAlpha / 255f);
+                        
                         RHelp.DrawRounded2DBox(quadPos.X - halfWidth, quadPos.Y - halfHeight, halfWidth * 2, halfHeight * 2, 8f, screenPos.Z);
 
                         if (pass == RenderPass.Simple)
                         {
                             textRendering.Begin();
-                            textRendering.Print(tagText, AvatarTagFont, SKColors.Yellow,
+                            
+                            // Choose text color based on avatar status
+                            var textColor = GetAvatarTagTextColor(av.avatar);
+                            
+                            // Apply distance fade to text color
+                            textColor = new SKColor(textColor.Red, textColor.Green, textColor.Blue, (byte)(255 * distanceFactor));
+                            
+                            textRendering.Print(tagText, AvatarTagFont, textColor,
                                  new Rectangle((int)screenPos.X, (int)screenPos.Y, tSize.Width + 2, tSize.Height + 2),
                                  flags);
                             textRendering.End();
@@ -207,6 +253,95 @@ namespace Radegast.Rendering
             }
         }
 
+        /// <summary>
+        /// Get status icon string for an avatar based on their current state
+        /// </summary>
+        private string GetAvatarStatusIcons(Avatar avatar)
+        {
+            var icons = new System.Collections.Generic.List<string>();
+            
+            // Check if this is a friend (show first as most important)
+            if (Client.Friends.FriendList.ContainsKey(avatar.ID))
+            {
+                icons.Add("[Friend]");
+            }
+            
+            // Check if avatar is sitting
+            if (avatar.ParentID != 0)
+            {
+                icons.Add("[Sitting]");
+            }
+            
+            // Check if avatar is flying
+            if (avatar.Animations != null)
+            {
+                var flyAnim = new UUID("aec4610c-757f-bc4e-c092-c6e9caf18daf");
+                if (avatar.Animations.Any(a => a.AnimationID == flyAnim))
+                {
+                    icons.Add("[Flying]");
+                }
+                
+                // Check for AFK animation
+                var afkAnim = new UUID("fd037134-85d4-f241-72c6-4f42164fedee");
+                if (avatar.Animations.Any(a => a.AnimationID == afkAnim))
+                {
+                    icons.Add("[Away]");
+                }
+                
+                // Check for busy animation (typing on a keyboard, etc.)
+                var busyAnim = new UUID("efcf670c-2d18-8128-973a-034ebc806b67");
+                if (avatar.Animations.Any(a => a.AnimationID == busyAnim))
+                {
+                    icons.Add("[Busy]");
+                }
+            }
+            
+            return icons.Count > 0 ? string.Join(" ", icons) : "";
+        }
+
+        /// <summary>
+        /// Get background color for avatar name tag based on status
+        /// </summary>
+        private SKColor GetAvatarTagBackgroundColor(Avatar avatar)
+        {
+            // Default: semi-transparent black
+            byte alpha = 180;
+            
+            // Highlight friends with a slightly different tint
+            if (Client.Friends.FriendList.ContainsKey(avatar.ID))
+            {
+                return new SKColor(0, 40, 80, alpha); // Dark blue tint for friends
+            }
+            
+            // Highlight yourself
+            if (avatar.ID == Client.Self.AgentID)
+            {
+                return new SKColor(0, 80, 0, alpha); // Dark green for self
+            }
+            
+            return new SKColor(0, 0, 0, alpha); // Standard black
+        }
+
+        /// <summary>
+        /// Get text color for avatar name tag based on status
+        /// </summary>
+        private SKColor GetAvatarTagTextColor(Avatar avatar)
+        {
+            // Friends - warm yellow
+            if (Client.Friends.FriendList.ContainsKey(avatar.ID))
+            {
+                return new SKColor(255, 220, 100); // Warm yellow
+            }
+            
+            // Yourself - bright green
+            if (avatar.ID == Client.Self.AgentID)
+            {
+                return new SKColor(100, 255, 100); // Bright green
+            }
+            
+            // Default - standard yellow
+            return SKColors.Yellow;
+        }
         #endregion
 
         #region Avatar management
@@ -450,6 +585,29 @@ namespace Radegast.Rendering
                 {
                     useShader = true;
                     StartAvatarShader();
+                    
+                    // Set avatar-specific shader parameters once at the start
+                    var prog = shaderManager?.GetProgram("avatar");
+                    if (prog != null)
+                    {
+                        // Set default avatar rendering parameters
+                        var uGlowStr = prog.Uni("glowStrength");
+                        if (uGlowStr != -1) GL.Uniform1(uGlowStr, 1.0f);
+                        
+                        var uEmissive = prog.Uni("emissiveStrength");
+                        if (uEmissive != -1) GL.Uniform1(uEmissive, 1.0f);
+                        
+                        // Avatars use softer specular highlighting
+                        var uShininess = prog.Uni("shininessExp");
+                        if (uShininess != -1) GL.Uniform1(uShininess, 16.0f); // Softer than prims
+                        
+                        var uSpecStr = prog.Uni("specularStrength");
+                        if (uSpecStr != -1) GL.Uniform1(uSpecStr, 0.5f); // Less shiny than prims
+                        
+                        // No glow by default for avatars
+                        var uGlow = prog.Uni("glow");
+                        if (uGlow != -1) GL.Uniform1(uGlow, 0.0f);
+                    }
                 }
 
                 var avatarNr = 0;
@@ -512,32 +670,57 @@ namespace Radegast.Rendering
                             }
                             else
                             {
+                                // Get the baked texture for this mesh part
                                 bool hasTexture = false;
-                                if (av.data[mesh.teFaceID] == null)
+                                int texturePointer = 0;
+                                
+                                // Try to get the appropriate baked texture
+                                if (mesh.teFaceID >= 0 && mesh.teFaceID < av.data.Length && av.data[mesh.teFaceID] != null)
                                 {
-                                    GL.Disable(EnableCap.Texture2D);
-                                    hasTexture = false;
+                                    texturePointer = av.data[mesh.teFaceID].TextureInfo.TexturePointer;
+                                    hasTexture = texturePointer > 0 && !av.data[mesh.teFaceID].TextureInfo.IsInvisible;
+                                }
+                                
+                                // Bind texture for both shader and fixed-function
+                                if (hasTexture)
+                                {
+                                    GL.Enable(EnableCap.Texture2D);
+                                    GL.ActiveTexture(TextureUnit.Texture0);
+                                    GL.BindTexture(TextureTarget.Texture2D, texturePointer);
+                                    
+                                    // Set texture parameters for better quality
+                                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+                                    GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
                                 }
                                 else
                                 {
-                                    if (mesh.teFaceID != 0 && av.data[mesh.teFaceID].TextureInfo.TexturePointer != 0)
-                                    {
-                                        GL.Enable(EnableCap.Texture2D);
-                                        GL.ActiveTexture(TextureUnit.Texture0);
-                                        GL.BindTexture(TextureTarget.Texture2D, av.data[mesh.teFaceID].TextureInfo.TexturePointer);
-                                        hasTexture = true;
-                                    }
-                                    else
-                                    {
-                                        GL.Disable(EnableCap.Texture2D);
-                                        hasTexture = false;
-                                    }
+                                    // No texture - render with a default gray color
+                                    GL.Disable(EnableCap.Texture2D);
+                                    GL.Color3(0.7f, 0.7f, 0.7f);
                                 }
                                 
                                 // Set hasTexture uniform for shader
                                 if (useShader)
                                 {
                                     SetShaderHasTexture(hasTexture);
+                                    
+                                    // Set material color to white so texture shows through properly
+                                    var prog = shaderManager?.GetProgram("avatar");
+                                    if (prog != null)
+                                    {
+                                        var uMatColor = prog.Uni("materialColor");
+                                        if (uMatColor != -1)
+                                        {
+                                            GL.Uniform4(uMatColor, 1.0f, 1.0f, 1.0f, 1.0f);
+                                        }
+                                        
+                                        // Ensure colorMap sampler points to texture unit 0
+                                        var uColorMap = prog.Uni("colorMap");
+                                        if (uColorMap != -1)
+                                        {
+                                            GL.Uniform1(uColorMap, 0);
+                                        }
+                                    }
                                 }
                             }
 
@@ -547,6 +730,7 @@ namespace Radegast.Rendering
                             {
                                 try
                                 {
+                                    // Prepare VBO once if not already done
                                     if (mesh.VertexVBO == -1 && mesh.IndexVBO == -1)
                                     {
                                         mesh.PrepareVBO();
@@ -555,120 +739,120 @@ namespace Radegast.Rendering
                                     if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed)
                                     {
                                         // Update VBO with animated vertex data each frame
-                                        try
-                                        {
-                                            var numVerts = mesh.RenderData.Vertices.Length / 3;
-                                            var interleaved = new float[numVerts * 8];
-                                            for (int i = 0, vi = 0; i < numVerts; i++)
-                                            {
-                                                // Animated position from RenderData.Vertices (updated by applyjointweights)
-                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3];
-                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 1];
-                                                interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 2];
-                                                // Animated normal from MorphRenderData.Normals
-                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3];
-                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 1];
-                                                interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 2];
-                                                // Texture coords (static)
-                                                interleaved[vi++] = mesh.RenderData.TexCoords[i * 2];
-                                                interleaved[vi++] = mesh.RenderData.TexCoords[i * 2 + 1];
-                                            }
-
-                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
-                                            Compat.BufferData(BufferTarget.ArrayBuffer, (IntPtr)(interleaved.Length * sizeof(float)), interleaved, BufferUsageHint.StreamDraw);
-                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                                        }
-                                        catch
-                                        {
-                                            // If VBO update fails, fall back to non-VBO rendering
-                                            mesh.VBOFailed = true;
-                                        }
-                                    }
-
-                                    if (mesh.VertexVBO != -1 && mesh.IndexVBO != -1 && !mesh.VBOFailed)
-                                    {
-                                        // Try shader attribute path for avatars
-                                        if (useShader && pass != RenderPass.Picking)
+                                        // Only update if skeleton has changed (optimization)
+                                        if (av.glavatar.skel.mNeedsMeshRebuild)
                                         {
                                             try
                                             {
-                                                var prog = shaderManager?.GetProgram("avatar");
-                                                if (prog != null)
+                                                var numVerts = mesh.RenderData.Vertices.Length / 3;
+                                                var interleaved = new float[numVerts * 8];
+                                                for (int i = 0, vi = 0; i < numVerts; i++)
                                                 {
-                                                    var posLoc = prog.Attr("aPosition");
-                                                    var normLoc = prog.Attr("aNormal");
-                                                    var texLoc = prog.Attr("aTexCoord");
+                                                    // Animated position from RenderData.Vertices (updated by applyjointweights)
+                                                    interleaved[vi++] = mesh.RenderData.Vertices[i * 3];
+                                                    interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 1];
+                                                    interleaved[vi++] = mesh.RenderData.Vertices[i * 3 + 2];
+                                                    // Animated normal from MorphRenderData.Normals
+                                                    interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3];
+                                                    interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 1];
+                                                    interleaved[vi++] = mesh.MorphRenderData.Normals[i * 3 + 2];
+                                                    // Texture coords (static)
+                                                    interleaved[vi++] = mesh.RenderData.TexCoords[i * 2];
+                                                    interleaved[vi++] = mesh.RenderData.TexCoords[i * 2 + 1];
+                                                }
 
-                                                    if (posLoc != -1 && normLoc != -1 && texLoc != -1)
+                                                Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                                                Compat.BufferData(BufferTarget.ArrayBuffer, (IntPtr)(interleaved.Length * sizeof(float)), interleaved, BufferUsageHint.StreamDraw);
+                                                Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
+                                            }
+                                            catch
+                                            {
+                                                // If VBO update fails, fall back to non-VBO rendering
+                                                mesh.VBOFailed = true;
+                                            }
+                                        }
+
+                                        if (!mesh.VBOFailed)
+                                        {
+                                            // Bind VBOs once
+                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
+                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
+
+                                            // Try shader attribute path for avatars
+                                            if (useShader && pass != RenderPass.Picking)
+                                            {
+                                                try
+                                                {
+                                                    var prog = shaderManager?.GetProgram("avatar");
+                                                    if (prog != null)
                                                     {
-                                                        // Verify shader program is active
-                                                        GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
-                                                        if (activeProgram != 0)
+                                                        var posLoc = prog.Attr("aPosition");
+                                                        var normLoc = prog.Attr("aNormal");
+                                                        var texLoc = prog.Attr("aTexCoord");
+
+                                                        if (posLoc != -1 && normLoc != -1 && texLoc != -1)
                                                         {
-                                                            // --- Shader Path for Avatars ---
-                                                            
-                                                            // Disable fixed-function client states
-                                                            GL.DisableClientState(ArrayCap.VertexArray);
-                                                            GL.DisableClientState(ArrayCap.NormalArray);
-                                                            GL.DisableClientState(ArrayCap.TextureCoordArray);
-
-                                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
-                                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
-
-                                                            GL.EnableVertexAttribArray(posLoc);
-                                                            GL.EnableVertexAttribArray(normLoc);
-                                                            GL.EnableVertexAttribArray(texLoc);
-
-                                                            GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
-                                                            GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 3 * sizeof(float));
-                                                            GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 * sizeof(float));
-
-                                                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
-
-                                                            GL.DisableVertexAttribArray(posLoc);
-                                                            GL.DisableVertexAttribArray(normLoc);
-                                                            GL.DisableVertexAttribArray(texLoc);
-
-                                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
-                                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-
-                                                            // Re-enable fixed-function states for subsequent rendering
-                                                            GL.EnableClientState(ArrayCap.VertexArray);
-                                                            GL.EnableClientState(ArrayCap.NormalArray);
-                                                            GL.EnableClientState(ArrayCap.TextureCoordArray);
-
-                                                            var err = GL.GetError();
-                                                            usedShaderPath = (err == ErrorCode.NoError);
-                                                            if (!usedShaderPath)
+                                                            // Verify shader program is active
+                                                            GL.GetInteger(GetPName.CurrentProgram, out int activeProgram);
+                                                            if (activeProgram != 0)
                                                             {
-                                                                System.Diagnostics.Debug.WriteLine($"GL error after avatar shader draw: {err}");
+                                                                // --- Shader Path for Avatars ---
+                                                                
+                                                                // Disable fixed-function client states
+                                                                GL.DisableClientState(ArrayCap.VertexArray);
+                                                                GL.DisableClientState(ArrayCap.NormalArray);
+                                                                GL.DisableClientState(ArrayCap.TextureCoordArray);
+
+                                                                GL.EnableVertexAttribArray(posLoc);
+                                                                GL.EnableVertexAttribArray(normLoc);
+                                                                GL.EnableVertexAttribArray(texLoc);
+
+                                                                GL.VertexAttribPointer(posLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 0);
+                                                                GL.VertexAttribPointer(normLoc, 3, VertexAttribPointerType.Float, false, 8 * sizeof(float), 3 * sizeof(float));
+                                                                GL.VertexAttribPointer(texLoc, 2, VertexAttribPointerType.Float, false, 8 * sizeof(float), 6 * sizeof(float));
+
+                                                                GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                                                GL.DisableVertexAttribArray(posLoc);
+                                                                GL.DisableVertexAttribArray(normLoc);
+                                                                GL.DisableVertexAttribArray(texLoc);
+
+                                                                // Re-enable fixed-function states for subsequent rendering
+                                                                GL.EnableClientState(ArrayCap.VertexArray);
+                                                                GL.EnableClientState(ArrayCap.NormalArray);
+                                                                GL.EnableClientState(ArrayCap.TextureCoordArray);
+
+                                                                var err = GL.GetError();
+                                                                usedShaderPath = (err == ErrorCode.NoError);
+                                                                if (!usedShaderPath)
+                                                                {
+                                                                    System.Diagnostics.Debug.WriteLine($"GL error after avatar shader draw: {err}");
+                                                                  }
                                                             }
                                                         }
                                                     }
                                                 }
+                                                catch (Exception ex)
+                                                {
+                                                    System.Diagnostics.Debug.WriteLine($"Avatar shader rendering failed: {ex.Message}");
+                                                }
                                             }
-                                            catch (Exception ex)
+
+                                            if (!usedShaderPath)
                                             {
-                                                System.Diagnostics.Debug.WriteLine($"Avatar shader rendering failed: {ex.Message}");
+                                                // Fixed-function VBO path with interleaved data
+                                                GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), IntPtr.Zero);
+                                                GL.NormalPointer(NormalPointerType.Float, 8 * sizeof(float), (IntPtr)(3 * sizeof(float)));
+                                                GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), (IntPtr)(6 * sizeof(float)));
+
+                                                GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
+
+                                                usedShaderPath = true; // Mark as handled
                                             }
-                                        }
 
-                                        if (!usedShaderPath)
-                                        {
-                                            // Fixed-function VBO path with interleaved data
-                                            Compat.BindBuffer(BufferTarget.ArrayBuffer, mesh.VertexVBO);
-                                            Compat.BindBuffer(BufferTarget.ElementArrayBuffer, mesh.IndexVBO);
-
-                                            GL.VertexPointer(3, VertexPointerType.Float, 8 * sizeof(float), IntPtr.Zero);
-                                            GL.NormalPointer(NormalPointerType.Float, 8 * sizeof(float), (IntPtr)(3 * sizeof(float)));
-                                            GL.TexCoordPointer(2, TexCoordPointerType.Float, 8 * sizeof(float), (IntPtr)(6 * sizeof(float)));
-
-                                            GL.DrawElements(PrimitiveType.Triangles, mesh.RenderData.Indices.Length, DrawElementsType.UnsignedShort, IntPtr.Zero);
-
+                                            // Unbind VBOs once
                                             Compat.BindBuffer(BufferTarget.ArrayBuffer, 0);
                                             Compat.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
-
-                                            usedShaderPath = true; // Mark as handled
                                         }
                                     }
                                 }

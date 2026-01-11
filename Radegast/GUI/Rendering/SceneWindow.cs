@@ -2321,6 +2321,12 @@ namespace Radegast.Rendering
             Camera.Step(lastFrameTime);
             Camera.LookAt();
             
+            // CAPTURE 3D VIEW MATRICES HERE for name tag positioning
+            // This must be done AFTER Camera.LookAt() but BEFORE any matrix modifications
+            GL.GetFloat(GetPName.ModelviewMatrix, out ModelMatrix);
+            GL.GetFloat(GetPName.ProjectionMatrix, out ProjectionMatrix);
+            GL.GetInteger(GetPName.Viewport, Viewport);
+            
             // Setup wireframe or solid fill drawing mode
             if (Wireframe && !picking)
             {
