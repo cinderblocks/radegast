@@ -1045,6 +1045,14 @@ namespace Radegast.Rendering
             }
             catch { return -1; }
         }
+        
+        /// <summary>
+        /// Get the shader manager for use by rendering sub-components
+        /// </summary>
+        public ShaderManager GetShaderManager()
+        {
+            return shaderManager;
+        }
 
         // Update shader matrix uniforms (call when modelview has been modified)
         public void UpdateShaderMatrices()
