@@ -89,7 +89,7 @@ namespace Radegast
 			this.toolTip1.SetToolTip(this.chckRezAtLoc, "Rez at a specific location.  If not checked, objects will be rezzed at .500 meter" +
 						"s above the Avatar\'s location.");
 			this.chckRezAtLoc.UseVisualStyleBackColor = true;
-			this.chckRezAtLoc.CheckedChanged += new System.EventHandler(this.ChckRezAtLocCheckedChanged);
+			this.chckRezAtLoc.CheckedChanged += new System.EventHandler(this.CheckRezAtLocCheckedChanged);
 			// 
 			// cmbImageOptions
 			// 

@@ -47,7 +47,21 @@ namespace Radegast
         public override void OnInvoke(object sender, EventArgs e, object target)
         {
             // Preserve synchronous behavior for callers that expect it by delegating to the async implementation
-            TryCatch(() => OnInvokeAsync(sender, e, target).GetAwaiter().GetResult());
+            try
+            {
+                var task = OnInvokeAsync(sender, e, target);
+                task.ContinueWith(t =>
+                {
+                    if (t.IsFaulted)
+                    {
+                        try { Logger.Warn("Error in SitOnGroundAction.OnInvokeAsync", t.Exception); } catch { }
+                    }
+                }, TaskScheduler.Default);
+            }
+            catch (Exception ex)
+            {
+                try { Logger.Warn("Error starting OnInvokeAsync", ex); } catch { }
+            }
         }
 
         public override async Task OnInvokeAsync(object sender, EventArgs e, object target)

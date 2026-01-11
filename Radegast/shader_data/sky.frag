@@ -1,23 +1,14 @@
 #version 120
 
-// Sky dome fragment shader implementing a simple Rayleigh + Mie scattering approximation
+// Sky dome fragment shader - simplified and balanced
 
 varying vec4 vColor;
 varying vec3 vDir;
-
-const float PI = 3.14159265358979323846;
 
 uniform float atmosphereStrength; // 0.0 to 1.0, controls atmospheric haze
 uniform vec3 sunDirection; // Normalized sun direction in world space
 uniform vec4 sunColor; // Color of the sun
 uniform float sunInfluence; // How much the sun affects the sky color
-
-// Additional scattering parameters (optional)
-uniform float rayleighScale; // multiplier for Rayleigh scattering
-uniform float mieScale;      // multiplier for Mie scattering
-uniform float mieG;          // anisotropy for Mie (0..0.99)
-uniform float sunIntensity; // intensity multiplier for sunlight
-uniform float exposure;      // simple exposure/tone control
 
 // Cloud samplers (up to 3 layers)
 uniform sampler2D cloud0;
@@ -33,7 +24,6 @@ uniform float cloud0Offset;
 uniform float cloud1Offset;
 uniform float cloud2Offset;
 
-// safe normalize helper
 vec3 safeNormalize(vec3 v)
 {
     float len = length(v);
@@ -43,109 +33,100 @@ vec3 safeNormalize(vec3 v)
 
 void main()
 {
-    // base vertex color (precomputed gradient + baked sun influence)
-    vec3 base = vColor.rgb;
-
+    // Start with the base vertex color (already has gradient and sun baked in)
+    vec3 color = vColor.rgb;
+    
     // Normalized direction to this point on the dome
     vec3 dir = safeNormalize(vDir);
-
-    // Use the z component as altitude indicator (0 at horizon, 1 at zenith for hemisphere)
+    
+    // Use the z component as altitude indicator (0 at horizon, 1 at zenith)
     float altitude = clamp(dir.z, 0.0, 1.0);
-
-    // Surface normal approximation (pointing outward from dome center)
-    vec3 normal = dir;
-
-    // Compute angle between sun and vertex direction
+    
+    // Add subtle atmospheric haze near horizon if enabled
+    if (atmosphereStrength > 0.0)
+    {
+        // Create a subtle whitening near the horizon
+        float horizonFade = 1.0 - altitude;
+        float hazeFactor = horizonFade * horizonFade * atmosphereStrength * 0.3;
+        vec3 hazeColor = vec3(0.9, 0.95, 1.0); // Slight blue-white
+        color = mix(color, hazeColor, hazeFactor);
+    }
+    
+    // Add sun glow
     vec3 sd = safeNormalize(sunDirection);
-    float mu = clamp(dot(normal, sd), -1.0, 1.0);
-
-    // Rayleigh scattering: wavelength dependent ~ 1/lambda^4
-    vec3 lambda = vec3(680e-9, 550e-9, 440e-9);
-    vec3 invWavelength4 = vec3(pow(lambda.x, -4.0), pow(lambda.y, -4.0), pow(lambda.z, -4.0));
-
-    // Default scales if uniforms not provided
-    float rScale = (rayleighScale > 0.0) ? rayleighScale : 0.0025;
-    float mScale = (mieScale > 0.0) ? mieScale : 0.0010;
-    float g = clamp(mieG, -0.99, 0.99);
-    float sunI = (sunIntensity > 0.0) ? sunIntensity : 20.0;
-    float expExposure = (exposure > 0.0) ? exposure : 1.0;
-
-    // Rayleigh phase function (approx)
-    float cosTheta = clamp(dot(dir, sd), -1.0, 1.0);
-    float rayleighPhase = (3.0 / (16.0 * PI)) * (1.0 + cosTheta * cosTheta);
-
-    // Mie phase function (Henyey-Greenstein)
-    float denom = 1.0 + g * g - 2.0 * g * cosTheta;
-    float miePhase = (1.0 - g * g) / (4.0 * PI * pow(denom, 1.5));
-
-    // Optical depth approximation using altitude
-    float optical = exp(- (1.0 - altitude) * atmosphereStrength * 4.0);
-
-    // Compute scattering contributions
-    vec3 rayleigh = rayleighPhase * invWavelength4 * rScale * sunI * optical;
-    vec3 mie = miePhase * mScale * sunI * optical * vec3(1.0);
-
-    // Combine scattering with base color
-    vec3 scattered = rayleigh + mie * sunInfluence;
-
-    // Blend base color with scattering
-    float scatterMix = clamp(atmosphereStrength * 0.7 + (1.0 - altitude) * 0.3, 0.0, 1.0);
-    vec3 color = mix(base, base + scattered, scatterMix);
-
-    // Add a soft sun core highlight
-    float sunDot = clamp(dot(dir, sd), 0.0, 1.0);
-    float sunCore = smoothstep(0.98, 1.0, sunDot);
-    color += sunCore * sunColor.rgb * sunI * 0.6;
-
-    // Cloud layers sampling - use planar projection from XY of direction
-    // Scale the XY by the inverse of Z to project onto a plane at z=1
-    // This creates a planar UV mapping that tiles across the dome
-    float projScale = 1.0 / max(0.1, altitude + 0.1); // avoid division by zero near horizon
-    vec2 baseUV = dir.xy * projScale * 0.5 + 0.5; // map to 0..1 range
+    float sunDot = max(0.0, dot(dir, sd));
     
-    // Apply per-layer scale and offset (offset animates rotation)
-    float scale0 = (cloud0Scale > 0.0) ? cloud0Scale : 1.0;
-    float scale1 = (cloud1Scale > 0.0) ? cloud1Scale : 1.8;
-    float scale2 = (cloud2Scale > 0.0) ? cloud2Scale : 2.6;
+    // Sun halo (already in vertex colors, but can enhance)
+    float sunHalo = pow(sunDot, 8.0) * sunInfluence;
+    color += sunColor.rgb * sunHalo * 0.3;
     
-    vec2 uv0 = baseUV * scale0 + vec2(cloud0Offset * 0.1, cloud0Offset * 0.1);
-    vec2 uv1 = baseUV * scale1 + vec2(cloud1Offset * 0.1, -cloud1Offset * 0.05);
-    vec2 uv2 = baseUV * scale2 + vec2(-cloud2Offset * 0.08, cloud2Offset * 0.08);
-
-    // Wrap UVs for tiling
-    uv0 = fract(uv0);
-    uv1 = fract(uv1);
-    uv2 = fract(uv2);
-
-    // Sample cloud textures
-    vec4 c0 = texture2D(cloud0, uv0);
-    vec4 c1 = texture2D(cloud1, uv1);
-    vec4 c2 = texture2D(cloud2, uv2);
-
-    // Get alpha values with defaults
-    float alpha0 = (cloud0Alpha > 0.0) ? cloud0Alpha : 0.6;
-    float alpha1 = (cloud1Alpha > 0.0) ? cloud1Alpha : 0.48;
-    float alpha2 = (cloud2Alpha > 0.0) ? cloud2Alpha : 0.36;
-
-    // Fade clouds near horizon (clouds more visible near zenith)
-    float cloudFade = smoothstep(0.05, 0.4, altitude);
-
-    // Combine clouds - use the texture's brightness (assume grayscale cloud texture)
-    float cloudAmount0 = c0.r * alpha0 * cloudFade;
-    float cloudAmount1 = c1.r * alpha1 * cloudFade;
-    float cloudAmount2 = c2.r * alpha2 * cloudFade;
-
-    // Blend clouds onto sky color (white clouds)
-    vec3 cloudColor = vec3(1.0, 1.0, 1.0);
-    color = mix(color, cloudColor, cloudAmount0 * 0.7);
-    color = mix(color, cloudColor, cloudAmount1 * 0.5);
-    color = mix(color, cloudColor, cloudAmount2 * 0.3);
-
-    // Apply exposure / simple tone mapping
-    color = 1.0 - exp(-color * expExposure);
-
+    // Bright sun core
+    float sunCore = smoothstep(0.995, 1.0, sunDot);
+    color += sunColor.rgb * sunCore * 2.0;
+    
+    // Cloud layers sampling - only render above horizon
+    if (altitude > 0.05)
+    {
+        // Use a simple cylindrical projection that wraps around the dome
+        // This avoids the stretching/striping near the horizon
+        
+        // Calculate angle around the dome (0 to 2*PI)
+        float angle = atan(dir.y, dir.x);
+        
+        // Use altitude for the V coordinate, but with less distortion
+        // Map altitude (0 to 1) to a range that tiles nicely
+        float v = altitude * 2.0; // Scale altitude for better tiling
+        
+        // For U coordinate, normalize angle to 0..1
+        float u = (angle + 3.14159265) / (2.0 * 3.14159265);
+        
+        vec2 cloudUV = vec2(u, v);
+        
+        // Apply per-layer scale and animated rotation offset
+        float scale0 = (cloud0Scale > 0.0) ? cloud0Scale : 1.0;
+        float scale1 = (cloud1Scale > 0.0) ? cloud1Scale : 1.3;
+        float scale2 = (cloud2Scale > 0.0) ? cloud2Scale : 1.6;
+        
+        // Apply scale and animated offset (offset acts as a scroll/rotation)
+        vec2 uv0 = cloudUV * scale0 + vec2(cloud0Offset * 0.001, 0.0);
+        vec2 uv1 = cloudUV * scale1 + vec2(cloud1Offset * 0.001, 0.0);
+        vec2 uv2 = cloudUV * scale2 + vec2(cloud2Offset * 0.001, 0.0);
+        
+        // Wrap UVs for seamless tiling
+        uv0 = fract(uv0);
+        uv1 = fract(uv1);
+        uv2 = fract(uv2);
+        
+        // Sample cloud textures (use alpha channel for cloud density)
+        float c0 = texture2D(cloud0, uv0).a;
+        float c1 = texture2D(cloud1, uv1).a;
+        float c2 = texture2D(cloud2, uv2).a;
+        
+        // Fade clouds near horizon for smooth transition
+        float cloudFade = smoothstep(0.05, 0.25, altitude);
+        
+        // Apply per-layer alpha and fade
+        float alpha0 = (cloud0Alpha > 0.0) ? cloud0Alpha : 0.65;
+        float alpha1 = (cloud1Alpha > 0.0) ? cloud1Alpha : 0.50;
+        float alpha2 = (cloud2Alpha > 0.0) ? cloud2Alpha : 0.35;
+        
+        c0 *= alpha0 * cloudFade;
+        c1 *= alpha1 * cloudFade;
+        c2 *= alpha2 * cloudFade;
+        
+        // Combine cloud layers with additive blending for soft, fluffy appearance
+        float totalCloud = c0 + c1 * 0.8 + c2 * 0.6;
+        totalCloud = clamp(totalCloud, 0.0, 1.0);
+        
+        // Clouds are white/slightly warm tinted
+        vec3 cloudColor = vec3(1.0, 0.98, 0.95);
+        
+        // Blend clouds onto sky
+        color = mix(color, cloudColor, totalCloud * 0.85);
+    }
+    
     // Ensure valid range
     color = clamp(color, 0.0, 1.0);
-
+    
     gl_FragColor = vec4(color, 1.0);
 }

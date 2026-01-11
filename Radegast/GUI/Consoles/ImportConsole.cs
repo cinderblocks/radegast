@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -21,7 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
 using OpenMetaverse;
@@ -120,7 +120,8 @@ namespace Radegast
 
         private UUID FindOrMakeInventoryFolder(string name)
 		{
-			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),Client.Self.AgentID,true,false,InventorySortOrder.ByName,TimeSpan.FromSeconds(15));
+			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),
+                Client.Self.AgentID, true, false, InventorySortOrder.ByName, TimeSpan.FromSeconds(15));
 			UUID dir = UUID.Zero;
 			foreach(InventoryBase item in folders)
 			{
@@ -133,7 +134,7 @@ namespace Radegast
 			return dir;
 		}
 
-        private void UploadImages()
+        private async Task UploadImagesAsync()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
@@ -159,11 +160,23 @@ namespace Radegast
 					continue;
 				}
 				LogMessage("Uploading texture {0}...",texture.ToString());
-				bool ret = upldr.UploadImage(file,"Import of " + Path.GetFileNameWithoutExtension(txtFileName.Text),uploaddir);
+				bool ret = false;
+				try
+				{
+					ret = await upldr.UploadImageAsync(file, $"Import of {Path.GetFileNameWithoutExtension(txtFileName.Text)}", 
+                        uploaddir, TimeSpan.FromSeconds(180)).ConfigureAwait(false);
+				}
+				catch (Exception ex)
+				{
+					LogMessage("Upload of texture {0} failed with exception: {1}", texture.ToString(), ex.Message);
+					FailedUploads.Add(texture);
+					continue;
+				}
+
 				if (ret)
 				{
 					LogMessage("Uploaded texture {0} with new UUID: {1}\r\nUpload took {2} seconds",
-					           texture.ToString(), upldr.TextureID.ToString(),upldr.Duration);
+							texture.ToString(), upldr.TextureID.ToString(),upldr.Duration);
 					if (Importer.TextureUse == PrimImporter.TextureSet.NewUUID)
 						Importer.Textures[texture] = upldr.TextureID;
 					else if (Importer.TextureUse == PrimImporter.TextureSet.SculptUUID)
@@ -177,7 +190,7 @@ namespace Radegast
 			}
 		}
 
-        private void UploadImagesRetry()
+        private async Task UploadImagesRetryAsync()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
@@ -193,16 +206,32 @@ namespace Radegast
 			{
 				string file = Path.Combine(path,texture + ".jp2");
 				LogMessage("Uploading texture {0}...",texture.ToString());
-				bool ret = upldr.UploadImage(file,"Import of " + Path.GetFileNameWithoutExtension(txtFileName.Text),uploaddir);
-				if (ret)
+				bool ret = false;
+				try
 				{
-					LogMessage("Uploaded texture {0} with new UUID: {1}\r\nUpload took {2} seconds",
-					           texture.ToString(), upldr.TextureID.ToString(), upldr.Duration);
-					if (Importer.TextureUse == PrimImporter.TextureSet.NewUUID)
-						Importer.Textures[texture] = upldr.TextureID;
-					else if (Importer.TextureUse == PrimImporter.TextureSet.SculptUUID)
-						Importer.SculptTextures[texture] = upldr.TextureID;
+					ret = await upldr.UploadImageAsync(file, $"Import of {Path.GetFileNameWithoutExtension(txtFileName.Text)}", 
+                        uploaddir, TimeSpan.FromSeconds(180)).ConfigureAwait(false);
 				}
+				catch (Exception ex)
+				{
+					LogMessage("Upload of texture {0} failed with exception: {1}", texture.ToString(), ex.Message);
+					FailedUploads.Add(texture);
+					continue;
+				}
+				if (ret)
+                {
+                    LogMessage("Uploaded texture {0} with new UUID: {1}\r\nUpload took {2} seconds",
+							texture.ToString(), upldr.TextureID.ToString(), upldr.Duration);
+                    switch (Importer.TextureUse)
+                    {
+                        case PrimImporter.TextureSet.NewUUID:
+                            Importer.Textures[texture] = upldr.TextureID;
+                            break;
+                        case PrimImporter.TextureSet.SculptUUID:
+                            Importer.SculptTextures[texture] = upldr.TextureID;
+                            break;
+                    }
+                }
 				else
 				{
 					LogMessage("Upload of texture {0} failed, reason: {1}",texture.ToString(),upldr.Status);
@@ -219,7 +248,7 @@ namespace Radegast
 		
 		#region Event Handlers
 
-        private void ChckRezAtLocCheckedChanged(object sender, EventArgs e)
+        private void CheckRezAtLocCheckedChanged(object sender, EventArgs e)
 		{
 			txtX.Enabled = chckRezAtLoc.Checked;
 			txtY.Enabled = chckRezAtLoc.Checked;
@@ -255,12 +284,13 @@ namespace Radegast
 			}
 		}
 
-        private void BtnUploadClick(object sender, EventArgs e)
+        private async void BtnUploadClick(object sender, EventArgs e)
 		{
 			Enabled = false;
 			if (cmbImageOptions.SelectedIndex == -1)
 			{
-				MessageBox.Show("You must select an Image Option before you can import an object.","Import Object Error",MessageBoxButtons.OK,MessageBoxIcon.Error);
+				MessageBox.Show("You must select an Image Option before you can import an object.","Import Object Error",
+                    MessageBoxButtons.OK, MessageBoxIcon.Error);
 				Enabled = true;
 				return;
 			}
@@ -281,24 +311,24 @@ namespace Radegast
 			}
 			if (chckRezAtLoc.Checked)
 			{
-				float x = 0.0f;
-				float y = 0.0f;
-				float z = 0.0f;
-				if (!float.TryParse(txtX.Text,out x))
+                if (!float.TryParse(txtX.Text,out var x))
 				{
-					MessageBox.Show("X Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",MessageBoxButtons.OK,MessageBoxIcon.Error);
+					MessageBox.Show("X Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
 					Enabled = true;
 					return;
 				}
-				if (!float.TryParse(txtY.Text,out y))
+				if (!float.TryParse(txtY.Text,out var y))
 				{
-					MessageBox.Show("Y Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",MessageBoxButtons.OK,MessageBoxIcon.Error);
+					MessageBox.Show("Y Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
 					Enabled = true;
 					return;
 				}
-				if (!float.TryParse(txtZ.Text,out z))
+				if (!float.TryParse(txtZ.Text,out var z))
 				{
-					MessageBox.Show("Z Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",MessageBoxButtons.OK,MessageBoxIcon.Error);
+					MessageBox.Show("Z Coordinate needs to be a Float position!  Example: 1.500","Import Object Error",
+                        MessageBoxButtons.OK, MessageBoxIcon.Error);
 					Enabled = true;
 					return;
 				}
@@ -310,52 +340,53 @@ namespace Radegast
 				Importer.RezAt.Z += 3.5f;
 			}
 
-            Thread t = new Thread(delegate()
+            try
             {
-                try
+                start = DateTime.Now;
+
+                if (Importer.TextureUse == PrimImporter.TextureSet.NewUUID ||
+                    Importer.TextureUse == PrimImporter.TextureSet.SculptUUID)
                 {
-                    start = DateTime.Now;
-                    // First upload Images that will be needed by the Importer, if required by user.
-                    if (Importer.TextureUse == PrimImporter.TextureSet.NewUUID ||
-                        Importer.TextureUse == PrimImporter.TextureSet.SculptUUID)
-                        UploadImages();
+                    await UploadImagesAsync();
+                }
 
-                    // Check to see if there are any failed uploads.
-                    if (FailedUploads.Count > 0)
+                if (FailedUploads.Count > 0)
+                {
+                    var res = MessageBox.Show(
+                        $"Failed to upload {FailedUploads.Count} textures, which to try again?",
+                        "Import - Upload Texture Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error);
+
+                    if (res == DialogResult.Yes)
                     {
-                        DialogResult res = MessageBox.Show(
-                            $"Failed to upload {FailedUploads.Count} textures, which to try again?",
-                            "Import - Upload Texture Error", MessageBoxButtons.YesNo, MessageBoxIcon.Error);
-                        if (res == DialogResult.Yes)
-                            UploadImagesRetry();
-
-                        if (FailedUploads.Count != 0)
-                        {
-                            MessageBox.Show(
-                                $"Failed to upload {FailedUploads.Count} textures on second try, aborting!",
-                                "Import - Upload Texture Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            LogMessage(
-                                "Failed to import object, due to texture error, review the log for further information");
-                            return;
-                        }
+                        await UploadImagesRetryAsync();
                     }
 
-                    LogMessage("Texture Upload completed");
-                    LogMessage("Importing Prims...");
-                    // If we get here, then we successfully uploaded the textures, continue with the upload of the Prims.
-                    Importer.ImportFromFile(txtFileName.Text);
-                    LogMessage("Import successful.");
-                    LogMessage("Total Time: {0}", DateTime.Now.Subtract(start));
-                }
-                catch (Exception ex)
-                {
-                    LogMessage("Import failed. Reason: {0}", ex.Message);
-                    MessageBox.Show(ex.Message, "Importing failed.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    if (FailedUploads.Count != 0)
+                    {
+                        MessageBox.Show(
+                            $"Failed to upload {FailedUploads.Count} textures on second try, aborting!",
+                            "Import - Upload Texture Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        LogMessage(
+                            "Failed to import object, due to texture error, review the log for further information");
+                        return;
+                    }
                 }
 
-                BeginInvoke(new MethodInvoker(EnableWindow));
-            }) {IsBackground = true};
-            t.Start();
+                LogMessage("Texture Upload completed");
+                LogMessage("Importing Prims...");
+                Importer.ImportFromFile(txtFileName.Text);
+                LogMessage("Import successful.");
+                LogMessage("Total Time: {0}", DateTime.Now.Subtract(start));
+            }
+            catch (Exception ex)
+            {
+                LogMessage("Import failed. Reason: {0}", ex.Message);
+                MessageBox.Show(ex.Message, "Importing failed.", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                Enabled = true;
+            }
 		}
 		#endregion
 	}

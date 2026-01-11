@@ -689,7 +689,7 @@
       <DependentUpon>SceneWindow.cs</DependentUpon>
       <SubType>DesignerType</SubType>
     </EmbeddedResource>
-    <Compile Update="GUI\Rendering\Water.cs" />
+    <Compile Update="GUI\Rendering\RenderWater.cs" />
       <Compile Update="Properties\Resources.Designer.cs">
       <AutoGen>True</AutoGen>
       <DependentUpon>Resources.resx</DependentUpon>

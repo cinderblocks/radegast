@@ -27,7 +27,8 @@ namespace Radegast
     {
         private readonly RadegastInstanceForms instance;
         private readonly UUID agentID;
-        private readonly string agentName;
+        private readonly string agentNamePlaceholder = "(loading...)";
+        private string agentName = string.Empty;
 
         public ntfSendLureRequest(RadegastInstanceForms instance, UUID agentID)
             : base(NotificationType.SendLureRequest)
@@ -38,10 +39,45 @@ namespace Radegast
 
             txtHead.BackColor = instance.MainForm.NotificationBackground;
 
-            agentName = instance.Names.GetAsync(agentID).GetAwaiter().GetResult();
-            txtHead.Text = $"Request a teleport to {agentName}'s location with the following message:";
+            // Placeholder until name resolution completes
+            txtHead.Text = $"Request a teleport to {agentNamePlaceholder}'s location with the following message:";
             txtMessage.BackColor = instance.MainForm.NotificationBackground;
             btnRequest.Focus();
+
+            // Fire off async name resolution and final initialization
+            _ = InitializeAsync();
+
+            GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private async System.Threading.Tasks.Task InitializeAsync()
+        {
+            agentName = agentID.ToString();
+            try
+            {
+                agentName = await instance.Names.GetAsync(agentID).ConfigureAwait(false) ?? agentName;
+            }
+            catch { }
+
+            try
+            {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(() => FinishInitialization(agentName)));
+                }
+                else
+                {
+                    FinishInitialization(agentName);
+                }
+            }
+            catch { FinishInitialization(agentName); }
+        }
+
+        private void FinishInitialization(string agentName)
+        {
+            txtHead.Text = $"Request a teleport to {agentName}'s location with the following message:";
+            txtMessage.BackColor = instance.MainForm.NotificationBackground;
+            try { btnRequest.Focus(); } catch { }
 
             // Fire off event
             NotificationEventArgs args = new NotificationEventArgs(instance)
