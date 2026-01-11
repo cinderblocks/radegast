@@ -554,13 +554,23 @@ namespace Radegast.Rendering
             bool wasTextureEnabled = GL.IsEnabled(EnableCap.Texture2D);
             bool wasColorMaterialEnabled = GL.IsEnabled(EnableCap.ColorMaterial);
             bool wasCullFaceEnabled = GL.IsEnabled(EnableCap.CullFace);
+            bool wasDepthTestEnabled = GL.IsEnabled(EnableCap.DepthTest);
             
             // ABSOLUTELY CRITICAL: Configure GL state for sky rendering with vertex colors
             GL.DepthMask(false); // Don't write to depth buffer (sky is always behind everything)
             GL.DepthFunc(DepthFunction.Lequal);
+
+            // Disable depth test to avoid far-plane clipping of the sky dome
+            GL.Disable(EnableCap.DepthTest);
             
             // Disable face culling so we see the sky from inside the dome
             GL.Disable(EnableCap.CullFace);
+            
+            // IMPORTANT: Sky should always render solid, never wireframe
+            // Save and override polygon mode to ensure sky is always solid
+            int[] polygonMode = new int[2];
+            GL.GetInteger(GetPName.PolygonMode, polygonMode);
+            GL.PolygonMode(MaterialFace.FrontAndBack, PolygonMode.Fill);
             
             // Disable everything that could interfere with vertex colors
             GL.Disable(EnableCap.Lighting);      // No lighting calculations
@@ -588,6 +598,20 @@ namespace Radegast.Rendering
             
             // Center sky dome on camera
             GL.Translate(cameraPosition.X, cameraPosition.Y, cameraPosition.Z);
+
+            // Scale dome to just inside camera draw distance to avoid far-plane clipping
+            try
+            {
+                float effectiveFar = 1000f;
+                try { effectiveFar = Math.Max(1000f, (float)scene.DrawDistance); } catch { }
+                float effectiveRadius = Math.Max(1000f, effectiveFar * 0.95f);
+                float scale = effectiveRadius / SKY_RADIUS;
+                if (scale > 0f && Math.Abs(scale - 1.0f) > 1e-6f)
+                {
+                    GL.Scale(scale, scale, scale);
+                }
+            }
+            catch { }
             
             bool usedShader = false;
             
@@ -682,6 +706,14 @@ namespace Radegast.Rendering
             // Restore GL state
             GL.DepthMask(wasDepthWriteEnabled);
             GL.DepthFunc(DepthFunction.Less);
+
+            if (wasDepthTestEnabled)
+                GL.Enable(EnableCap.DepthTest);
+            else
+                GL.Disable(EnableCap.DepthTest);
+            
+            // Restore polygon mode to what it was before (might be wireframe)
+            GL.PolygonMode(MaterialFace.FrontAndBack, (PolygonMode)polygonMode[0]);
             
             if (wasCullFaceEnabled)
                 GL.Enable(EnableCap.CullFace);

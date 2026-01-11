@@ -252,6 +252,34 @@ namespace Radegast.Rendering
             PendingTexturesAvailable?.Release();
             TextureThreadContextReady.WaitOne(TimeSpan.FromSeconds(5), false);
 
+            // Attempt to acquire a valid GL context early so we can safely delete GL resources.
+            // If we cannot make the context current, skip disposing objects that call GL to avoid
+            // AccessViolationException when the native context/handle is already gone.
+            bool glContextAcquired = false;
+            if (glControl != null)
+            {
+                try
+                {
+                    var ctx = glControl.Context;
+                    if (ctx != null && !glControl.IsDisposed && glControl.IsHandleCreated)
+                    {
+                        try
+                        {
+                            glControl.MakeCurrent();
+                            glContextAcquired = true;
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Debug($"MakeCurrent failed during early dispose: {ex.Message}", ex, Client);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug("Unexpected GL control state during early dispose: {ex.Message}", ex, Client);
+                }
+            }
+
             // Safely dispose overlays and render helpers
             SafeDispose(chatOverlay, "ChatOverlay", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             chatOverlay = null;
@@ -259,8 +287,17 @@ namespace Radegast.Rendering
             SafeDispose(textRendering, "TextRendering", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
             textRendering = null;
 
-            SafeDispose(sky, "RenderSky", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
-            sky = null;
+            if (glContextAcquired)
+            {
+                SafeDispose(sky, "RenderSky", (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                sky = null;
+            }
+            else
+            {
+                // Avoid calling GL from managed code when native context is not available;
+                // drop references so garbage collection can reclaim managed memory.
+                sky = null;
+            }
 
             // Dispose adjacent simulator terrains
             lock (adjacentSimsLock)
@@ -307,34 +344,58 @@ namespace Radegast.Rendering
             }
 
             // Deterministically dispose contained scene objects to free GL resources
-            lock (Prims)
+            if (glContextAcquired)
             {
-                SafeDisposeAll(Prims.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
-                Prims.Clear();
-            }
+                lock (Prims)
+                {
+                    SafeDisposeAll(Prims.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                    Prims.Clear();
+                }
 
-            lock (Avatars)
+                lock (Avatars)
+                {
+                    SafeDisposeAll(Avatars.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                    Avatars.Clear();
+                }
+            }
+            else
             {
-                SafeDisposeAll(Avatars.Values.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
-                Avatars.Clear();
+                lock (Prims)
+                {
+                    Prims.Clear();
+                }
+
+                lock (Avatars)
+                {
+                    Avatars.Clear();
+                }
             }
 
             // Also dispose any lists of scene objects
             if (SortedObjects != null)
             {
-                SafeDisposeAll(SortedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                if (glContextAcquired)
+                {
+                    SafeDisposeAll(SortedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                }
                 SortedObjects = null;
             }
 
             if (OccludedObjects != null)
             {
-                SafeDisposeAll(OccludedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                if (glContextAcquired)
+                {
+                    SafeDisposeAll(OccludedObjects.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                }
                 OccludedObjects = null;
             }
 
             if (VisibleAvatars != null)
             {
-                SafeDisposeAll(VisibleAvatars.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                if (glContextAcquired)
+                {
+                    SafeDisposeAll(VisibleAvatars.Cast<IDisposable>(), (m, ex) => Logger.Debug(m + (ex != null ? (": " + ex.Message) : ""), ex, Client));
+                }
                 VisibleAvatars = null;
             }
 
