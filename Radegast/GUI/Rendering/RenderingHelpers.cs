@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -304,35 +304,60 @@ namespace Radegast.Rendering
         {
             if (!RenderSettings.OcclusionCullingEnabled) return false;
 
+            // Never occlude invisible faces - they need to be rendered in invisible pass
             if (HasInvisibleFaces) return false;
 
-            if ((SimpleQueryID == -1 && AlphaQueryID == -1))
+            // Don't occlude if we haven't run any queries yet (both are -1 means uninitialized)
+            // This prevents treating new objects as occluded before they've been tested
+            if (SimpleQueryID == -1 && AlphaQueryID == -1)
             {
-                return false;
+                return false; // Not occluded - haven't tested yet
             }
 
-            if ((!HasAlphaFaces && !HasSimpleFaces)) return true;
+            // If the object has no renderable faces, don't treat it as occluded
+            // (This prevents edge cases where face flags aren't set yet)
+            if (!HasAlphaFaces && !HasSimpleFaces)
+            {
+                return false; // Can't be occluded if we don't know what faces we have yet
+            }
 
-            int samples = 1;
+            // Check simple pass query results
             if (HasSimpleFaces && SimpleQueryID > 0)
             {
-                Compat.GetQueryObject(SimpleQueryID, GetQueryObjectParam.QueryResult, out samples);
-            }
-            if (HasSimpleFaces && samples > 0)
-            {
-                return false;
+                try
+                {
+                    Compat.GetQueryObject(SimpleQueryID, GetQueryObjectParam.QueryResult, out int samples);
+                    if (samples > 0)
+                    {
+                        return false; // Visible in simple pass
+                    }
+                }
+                catch
+                {
+                    // If query fails, assume not occluded to be safe
+                    return false;
+                }
             }
 
-            samples = 1;
+            // Check alpha pass query results
             if (HasAlphaFaces && AlphaQueryID > 0)
             {
-                Compat.GetQueryObject(AlphaQueryID, GetQueryObjectParam.QueryResult, out samples);
-            }
-            if (HasAlphaFaces && samples > 0)
-            {
-                return false;
+                try
+                {
+                    Compat.GetQueryObject(AlphaQueryID, GetQueryObjectParam.QueryResult, out int samples);
+                    if (samples > 0)
+                    {
+                        return false; // Visible in alpha pass
+                    }
+                }
+                catch
+                {
+                    // If query fails, assume not occluded to be safe
+                    return false;
+                }
             }
 
+            // Only return true (occluded) if we actually ran queries and got zero samples
             return true;
         }
         #endregion Occlusion queries
