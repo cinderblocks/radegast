@@ -249,7 +249,9 @@ namespace Radegast
                 return;
             }
 
-            if (instance.RLV.Enabled && e.Type == ChatType.OwnerSay && e.Message.StartsWith("@"))
+            var rlv = instance.RLV;
+
+            if (rlv != null && rlv.Enabled && e.Type == ChatType.OwnerSay && e.Message.StartsWith("@"))
             {
                 Task.Run(async () =>
                 {
@@ -257,7 +259,7 @@ namespace Radegast
                     {
                         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
                         {
-                            await instance.RLV.ProcessCMD(e, cts.Token);
+                            await rlv.ProcessCMD(e, cts.Token).ConfigureAwait(false);
                         }
                     }
                     catch (TaskCanceledException ex)
@@ -266,11 +268,11 @@ namespace Radegast
                     }
                     catch (Exception ex)
                     {
-                        Logger.Error($"Timed out while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
+                        Logger.Error($"Error while processing RLV command '{e.Message}' from object '{e.FromName}' [{e.SourceID}]", ex);
                     }
                 });
 
-                if (!instance.RLV.EnabledDebugCommands)
+                if (!rlv.EnabledDebugCommands)
                 {
                     return;
                 }
@@ -302,7 +304,7 @@ namespace Radegast
 
             if (isEmote)
             {
-                if (instance.RLV.Enabled && !instance.RLV.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
+                if (rlv != null && rlv.Enabled && !rlv.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
                 {
                     sb.Append(" ...");
                 }
@@ -313,7 +315,7 @@ namespace Radegast
             }
             else
             {
-                if (instance.RLV.Enabled && !instance.RLV.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
+                if (rlv != null && rlv.Enabled && !rlv.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
                 {
                     sb.Append(": ...");
                 }
