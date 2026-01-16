@@ -19,8 +19,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup NuGet
-        uses: NuGet/setup-nuget@v1
+      - name: Setup DotNet
+        uses: actions/setup-dotnet@v3
 
       - name: Set TAG_VERSION
         shell: pwsh
