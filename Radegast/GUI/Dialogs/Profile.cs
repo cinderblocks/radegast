@@ -408,26 +408,27 @@ namespace Radegast
 
         private void Avatars_AvatarProfileReply(bool success, AgentProfileMessage profile)
         {
-            if (!success)
-            {
-                return;
-            }
+            if (!success) return;
 
-            AvatarProperties = new Avatar.AvatarProperties
+            ThreadingHelper.SafeInvokeSync(this, new Action(() =>
             {
-                AboutText = profile.SecondLifeAboutText,
-                FirstLifeText = profile.FirstLifeAboutText,
-                ProfileImage = profile.SecondLifeImageID,
-                FirstLifeImage = profile.FirstLifeImageID,
-                CharterMember = profile.CustomerType,
-                BornOn = profile.MemberSince.ToShortDateString(),
-                Partner = profile.PartnerID,
-                Flags = profile.Flags,
-            };
-            populateFields();
+                AvatarProperties = new Avatar.AvatarProperties
+                {
+                    AboutText = profile.SecondLifeAboutText,
+                    FirstLifeText = profile.FirstLifeAboutText,
+                    ProfileImage = profile.SecondLifeImageID,
+                    FirstLifeImage = profile.FirstLifeImageID,
+                    CharterMember = profile.CustomerType,
+                    BornOn = profile.MemberSince.ToShortDateString(),
+                    Partner = profile.PartnerID,
+                    Flags = profile.Flags,
+                };
 
-            // populate notes
-            rtbNotes.Text = profile.Notes;
+                populateFields();
+
+                // populate notes
+                rtbNotes.Text = profile.Notes;
+            }), Instance.MonoRuntime);
         }
 
         private void Avatars_AvatarPropertiesReply(object sender, AvatarPropertiesReplyEventArgs e)
