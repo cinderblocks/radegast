@@ -356,7 +356,7 @@ namespace Radegast
                     {
                         try { sem.Release(); } catch { }
                     }
-                }).ConfigureAwait(false);
+                });
             }
             catch
             {
@@ -470,7 +470,7 @@ namespace Radegast
                         {
                             try { sem.Release(); } catch { }
                         }
-                    }).ConfigureAwait(false);
+                    });
                 }
                 catch (Exception)
                 {
