@@ -404,9 +404,10 @@ namespace Radegast
                 return;
             }
 
-            if (SynchronizationContext.Current != uiContext && uiContext != null)
+            // Marshal to UI thread reliably
+            if (pictureBox1 != null && pictureBox1.InvokeRequired)
             {
-                uiContext.Post(_ => Assets_OnImageReceived(assetTexture), null);
+                pictureBox1.BeginInvoke(new Action(() => Assets_OnImageReceived(assetTexture)));
                 return;
             }
 
