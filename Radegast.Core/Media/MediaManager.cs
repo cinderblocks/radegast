@@ -48,6 +48,7 @@ namespace Radegast.Media
         private List<MediaObject> sounds = new List<MediaObject>();
         private Task commandLoop;
         private Task listenerLoop;
+        private Task deviceMonitorLoop;
 
         /// <summary>
         /// Currently selected audio driver index
@@ -73,6 +74,21 @@ namespace Radegast.Media
         /// Preferred audio driver index to use (set before Initialize)
         /// </summary>
         public int PreferredDriver { get; set; } = -1;
+
+        /// <summary>
+        /// Maximum allowed volume (safety limiter to prevent ear damage)
+        /// </summary>
+        public float MaxVolume { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Enable volume normalization (reduces sudden loud sounds)
+        /// </summary>
+        public bool VolumeNormalization { get; set; } = false;
+
+        /// <summary>
+        /// Performance statistics
+        /// </summary>
+        public AudioPerformanceStats PerformanceStats { get; } = new AudioPerformanceStats();
 
         public MediaManager(IRadegastInstance instance)
         {
@@ -120,6 +136,9 @@ namespace Radegast.Media
                         soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                     // Start the background thread that updates listener position.
                     listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
+                        soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    // Start device monitoring thread
+                    deviceMonitorLoop = Task.Factory.StartNew(() => MonitorAudioDevices(soundCancelToken.Token),
                         soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                 }
             }
@@ -172,6 +191,8 @@ namespace Radegast.Media
                 SoundDelegate action = null;
                 lock (queue)
                 {
+                    PerformanceStats.QueueDepth = queue.Count;
+                    
                     while (queue.Count == 0 && !token.IsCancellationRequested)
                     {
                         // Use a timed wait to allow cancellation to be observed.
@@ -189,13 +210,21 @@ namespace Radegast.Media
                 if (action == null) continue;
 
                 // We have an action, so call it.
+                var startTime = DateTime.UtcNow;
                 try
                 {
                     action();
+                    PerformanceStats.SuccessfulOperations++;
                 }
                 catch (Exception ex)
                 {
                     Logger.Error($"Error in sound action: {ex.Message}", ex);
+                    PerformanceStats.FailedOperations++;
+                }
+                finally
+                {
+                    var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+                    PerformanceStats.UpdateAverageProcessingTime(duration);
                 }
             }
         }
@@ -416,6 +445,7 @@ namespace Radegast.Media
                 var tasks = new List<Task>();
                 if (commandLoop != null) tasks.Add(commandLoop);
                 if (listenerLoop != null) tasks.Add(listenerLoop);
+                if (deviceMonitorLoop != null) tasks.Add(deviceMonitorLoop);
                 if (tasks.Count > 0)
                 {
                     Task.WaitAll(tasks.ToArray(), 2000);
@@ -508,6 +538,49 @@ namespace Radegast.Media
                 });
             }
         }
+
+        /// <summary>
+        /// Monitor for audio device changes (hotplug/unplug)
+        /// </summary>
+        private void MonitorAudioDevices(CancellationToken token)
+        {
+            int lastDriverCount = DriverCount;
+
+            while (!token.IsCancellationRequested)
+            {
+                // Check every 5 seconds
+                if (token.WaitHandle.WaitOne(5000)) break;
+
+                if (!SoundSystemAvailable || !system.hasHandle()) continue;
+
+                try
+                {
+                    invoke(delegate
+                    {
+                        system.getNumDrivers(out int currentDriverCount);
+                        
+                        if (currentDriverCount != lastDriverCount)
+                        {
+                            Logger.Info($"Audio device change detected: {lastDriverCount} -> {currentDriverCount} device(s)");
+                            DriverCount = currentDriverCount;
+                            lastDriverCount = currentDriverCount;
+                            
+                            // Fire event to notify UI
+                            AudioDevicesChanged?.Invoke(this, new AudioDevicesChangedEventArgs(currentDriverCount));
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"Error monitoring audio devices: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Event fired when audio devices are added or removed
+        /// </summary>
+        public event EventHandler<AudioDevicesChangedEventArgs> AudioDevicesChanged;
 
         /// <summary>
         /// Handle request to play a sound, which might (or might not) have been preloaded.
@@ -884,9 +957,16 @@ namespace Radegast.Media
                             soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                     }
                     
+                    
                     if (listenerLoop == null || listenerLoop.Status != TaskStatus.Running)
                     {
                         listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
+                            soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    }
+                    
+                    if (deviceMonitorLoop == null || deviceMonitorLoop.Status != TaskStatus.Running)
+                    {
+                        deviceMonitorLoop = Task.Factory.StartNew(() => MonitorAudioDevices(soundCancelToken.Token),
                             soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
                     }
                     
@@ -901,7 +981,131 @@ namespace Radegast.Media
             return false;
         }
 
+        /// <summary>
+        /// Get detailed performance information from FMOD
+        /// </summary>
+        public FMODPerformanceInfo GetPerformanceInfo()
+        {
+            var info = new FMODPerformanceInfo
+            {
+                Stats = PerformanceStats.ToString(),
+                SoundSystemAvailable = SoundSystemAvailable,
+                DriverCount = DriverCount,
+                SelectedDriver = SelectedDriver
+            };
 
+            if (!system.hasHandle())
+                return info;
+
+            try
+            {
+                invoke(delegate
+                {
+                    // Get CPU usage
+                    system.getCPUUsage(out float dsp, out float stream, out float geometry, out float update, out float total);
+                    info.DSPUsage = dsp;
+                    info.StreamUsage = stream;
+                    info.GeometryUsage = geometry;
+                    info.UpdateUsage = update;
+                    info.TotalUsage = total;
+
+                    // Get channel count
+                    system.getChannelsPlaying(out int channelsPlaying, out int realChannels);
+                    info.ChannelsPlaying = channelsPlaying;
+                    info.RealChannels = realChannels;
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Error getting FMOD performance info: {ex.Message}");
+            }
+
+            return info;
+        }
+
+
+    }
+
+    /// <summary>
+    /// FMOD performance information
+    /// </summary>
+    public class FMODPerformanceInfo
+    {
+        public string Stats { get; set; }
+        public bool SoundSystemAvailable { get; set; }
+        public int DriverCount { get; set; }
+        public int SelectedDriver { get; set; }
+        public float DSPUsage { get; set; }
+        public float StreamUsage { get; set; }
+        public float GeometryUsage { get; set; }
+        public float UpdateUsage { get; set; }
+        public float TotalUsage { get; set; }
+        public int ChannelsPlaying { get; set; }
+        public int RealChannels { get; set; }
+
+        public override string ToString()
+        {
+            return $"Available: {SoundSystemAvailable}, Drivers: {DriverCount}, " +
+                   $"Channels: {ChannelsPlaying}/{RealChannels}, " +
+                   $"CPU: {TotalUsage:F2}% (DSP: {DSPUsage:F2}%, Stream: {StreamUsage:F2}%), " +
+                   $"{Stats}";
+        }
+    }
+
+    /// <summary>
+    /// Event args for audio device changes
+    /// </summary>
+    public class AudioDevicesChangedEventArgs : EventArgs
+    {
+        public int DeviceCount { get; }
+        
+        public AudioDevicesChangedEventArgs(int deviceCount)
+        {
+            DeviceCount = deviceCount;
+        }
+    }
+
+    /// <summary>
+    /// Audio performance statistics
+    /// </summary>
+    public class AudioPerformanceStats
+    {
+        private readonly object lockObj = new object();
+        private double totalProcessingTime = 0;
+        private long operationCount = 0;
+
+        public int QueueDepth { get; set; }
+        public long SuccessfulOperations { get; set; }
+        public long FailedOperations { get; set; }
+        public double AverageProcessingTimeMs { get; private set; }
+        
+        public void UpdateAverageProcessingTime(double durationMs)
+        {
+            lock (lockObj)
+            {
+                totalProcessingTime += durationMs;
+                operationCount++;
+                AverageProcessingTimeMs = totalProcessingTime / operationCount;
+            }
+        }
+
+        public void Reset()
+        {
+            lock (lockObj)
+            {
+                QueueDepth = 0;
+                SuccessfulOperations = 0;
+                FailedOperations = 0;
+                totalProcessingTime = 0;
+                operationCount = 0;
+                AverageProcessingTimeMs = 0;
+            }
+        }
+
+        public override string ToString()
+        {
+            return $"Queue: {QueueDepth}, Success: {SuccessfulOperations}, Failed: {FailedOperations}, Avg Time: {AverageProcessingTimeMs:F2}ms";
+        }
     }
 
     /// <summary>

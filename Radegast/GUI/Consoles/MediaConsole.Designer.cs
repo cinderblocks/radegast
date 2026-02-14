@@ -82,6 +82,7 @@ namespace Radegast
             this.btnRefreshDevices = new System.Windows.Forms.Button();
             this.cmbAudioDevice = new System.Windows.Forms.ComboBox();
             this.label3 = new System.Windows.Forms.Label();
+            this.btnShowStats = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).BeginInit();
             this.pnlParcelAudio.SuspendLayout();
             this.ObjSoundGroup.SuspendLayout();
@@ -282,6 +283,7 @@ namespace Radegast
             // 
             this.AudioDeviceGroup.Controls.Add(this.lblAudioDeviceStatus);
             this.AudioDeviceGroup.Controls.Add(this.btnRetryInit);
+            this.AudioDeviceGroup.Controls.Add(this.btnShowStats);
             this.AudioDeviceGroup.Controls.Add(this.btnRefreshDevices);
             this.AudioDeviceGroup.Controls.Add(this.cmbAudioDevice);
             this.AudioDeviceGroup.Controls.Add(this.label3);
@@ -312,6 +314,17 @@ namespace Radegast
             this.toolTip1.SetToolTip(this.btnRetryInit, "Retry sound system initialization if it failed");
             this.btnRetryInit.UseVisualStyleBackColor = true;
             this.btnRetryInit.Click += new System.EventHandler(this.btnRetryInit_Click);
+            // 
+            // btnShowStats
+            // 
+            this.btnShowStats.Location = new System.Drawing.Point(9, 36);
+            this.btnShowStats.Name = "btnShowStats";
+            this.btnShowStats.Size = new System.Drawing.Size(90, 23);
+            this.btnShowStats.TabIndex = 5;
+            this.btnShowStats.Text = "Show Stats";
+            this.toolTip1.SetToolTip(this.btnShowStats, "Display audio performance statistics");
+            this.btnShowStats.UseVisualStyleBackColor = true;
+            this.btnShowStats.Click += new System.EventHandler(this.btnShowStats_Click);
             // 
             // btnRefreshDevices
             // 
@@ -393,6 +406,7 @@ namespace Radegast
         private System.Windows.Forms.Label label3;
         private System.Windows.Forms.Button btnRefreshDevices;
         private System.Windows.Forms.Button btnRetryInit;
+        private System.Windows.Forms.Button btnShowStats;
         private System.Windows.Forms.Label lblAudioDeviceStatus;
 
     }

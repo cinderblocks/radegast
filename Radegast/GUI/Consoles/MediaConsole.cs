@@ -110,6 +110,9 @@ namespace Radegast
             // Subscribe to sound system availability changes
             instance.MediaManager.SoundSystemAvailableChanged += MediaManager_SoundSystemAvailableChanged;
 
+            // Subscribe to audio device changes
+            instance.MediaManager.AudioDevicesChanged += MediaManager_AudioDevicesChanged;
+
             if (!instance.MediaManager.SoundSystemAvailable)
             {
                 foreach (Control c in pnlParcelAudio.Controls)
@@ -153,6 +156,29 @@ namespace Radegast
             if (e.IsAvailable)
             {
                 Logger.Info("Sound system became available - UI updated");
+            }
+        }
+
+        private void MediaManager_AudioDevicesChanged(object sender, Media.AudioDevicesChangedEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new MethodInvoker(() => MediaManager_AudioDevicesChanged(sender, e)));
+                return;
+            }
+
+            Logger.Info($"Audio devices changed: {e.DeviceCount} device(s) detected");
+            
+            // Refresh the device list
+            PopulateAudioDevices();
+            UpdateAudioDeviceStatus();
+            
+            // Optionally notify user
+            if (instance.GlobalSettings["audio_notify_device_changes"].AsBoolean())
+            {
+                instance.ShowNotificationInChat(
+                    $"Audio devices changed: {e.DeviceCount} device(s) detected. Check Media tab if sound stopped working.",
+                    ChatBufferTextStyle.Alert);
             }
         }
 
@@ -251,6 +277,7 @@ namespace Radegast
 
             // Unsubscribe from events
             instance.MediaManager.SoundSystemAvailableChanged -= MediaManager_SoundSystemAvailableChanged;
+            instance.MediaManager.AudioDevicesChanged -= MediaManager_AudioDevicesChanged;
             client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
 
             if (configTimer != null)
@@ -513,6 +540,43 @@ namespace Radegast
             {
                 btnRetryInit.Text = "Retry Init";
                 UpdateAudioDeviceStatus();
+            }
+        }
+
+        private void btnShowStats_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var perfInfo = instance.MediaManager.GetPerformanceInfo();
+                
+                string statsMessage = "=== Audio Performance Statistics ===\n\n" +
+                    $"Sound System: {(perfInfo.SoundSystemAvailable ? "Available" : "Not Available")}\n" +
+                    $"Audio Drivers: {perfInfo.DriverCount} detected\n" +
+                    $"Selected Driver: {perfInfo.SelectedDriver}\n\n" +
+                    $"Active Channels: {perfInfo.ChannelsPlaying} / {perfInfo.RealChannels}\n\n" +
+                    $"CPU Usage:\n" +
+                    $"  DSP: {perfInfo.DSPUsage:F2}%\n" +
+                    $"  Streaming: {perfInfo.StreamUsage:F2}%\n" +
+                    $"  Geometry: {perfInfo.GeometryUsage:F2}%\n" +
+                    $"  Update: {perfInfo.UpdateUsage:F2}%\n" +
+                    $"  Total: {perfInfo.TotalUsage:F2}%\n\n" +
+                    $"Queue Statistics:\n" +
+                    $"  {perfInfo.Stats}";
+
+                MessageBox.Show(
+                    statsMessage,
+                    "Audio Performance Statistics",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Error displaying audio stats", ex);
+                MessageBox.Show(
+                    $"Error retrieving audio statistics: {ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
 
