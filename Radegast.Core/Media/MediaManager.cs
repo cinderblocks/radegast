@@ -264,6 +264,7 @@ namespace Radegast.Media
                 RESULT result = system.init(32, INITFLAGS.NORMAL, (IntPtr)null);
                 if (result != RESULT.OK)
                 {
+                    Logger.Warn($"FMOD initialization failed with result: {result} - {Error.String(result)}");
                     throw(new Exception(result.ToString()));
                 }
 
@@ -344,7 +345,7 @@ namespace Radegast.Media
                 // Two updates per second. Use wait handle so cancellation is observed quickly.
                 if (token.WaitHandle.WaitOne(500)) break;
 
-                if (!system.hasHandle()) continue;
+                if (!SoundSystemAvailable || !system.hasHandle()) continue;
 
                 var my = Instance.Client.Self;
                 Vector3 newPosition = new Vector3(my.SimPosition);
@@ -408,12 +409,13 @@ namespace Radegast.Media
         }
 
         /// <summary>
-        /// Handle request to play a sound, which might (or mioght not) have been preloaded.
+        /// Handle request to play a sound, which might (or might not) have been preloaded.
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
         private void Sound_SoundTrigger(object sender, SoundTriggerEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
             if (e.SoundID == UUID.Zero) return;
 
             Logger.Debug($"Trigger sound {e.SoundID} in object {e.ObjectID}");
@@ -434,6 +436,8 @@ namespace Radegast.Media
         /// <param name="e"></param>
         private void Sound_AttachedSound(object sender, AttachedSoundEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
+            
             // This event tells us the Object ID, but not the Prim info directly.
             // So we look it up in our internal Object memory.
             Simulator sim = e.Simulator;
@@ -491,6 +495,7 @@ namespace Radegast.Media
         /// <param name="e"></param>
         private void Sound_PreloadSound(object sender, PreloadSoundEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
             if (e.SoundID == UUID.Zero) return;
 
             if (!Instance.Client.Assets.Cache.HasAsset(e.SoundID))
@@ -504,6 +509,7 @@ namespace Radegast.Media
         /// <param name="e"></param>
         private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
             HandleObjectSound(e.Prim, e.Simulator);
         }
 
@@ -514,6 +520,8 @@ namespace Radegast.Media
         /// <param name="e"></param>
         private void Objects_KillObject(object sender, KillObjectEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
+            
             Primitive p = null;
             if (!e.Simulator.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out  p)) return;
 
@@ -530,6 +538,8 @@ namespace Radegast.Media
         /// <param name="s"></param>
         private void HandleObjectSound(Primitive p, Simulator s)
         {
+            if (!SoundSystemAvailable) return;
+            
             // Objects without sounds are not interesting.
             if (p.Sound == UUID.Zero) return;
 
@@ -617,6 +627,8 @@ namespace Radegast.Media
 
         private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
+            
             if (e.Type == ChatType.StartTyping)
             {
                 new BufferSound(
@@ -636,6 +648,7 @@ namespace Radegast.Media
         /// <param name="e"></param>
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
+            if (!SoundSystemAvailable) return;
             BufferSound.KillAll();
         }
 
