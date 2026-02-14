@@ -1,7 +1,7 @@
 ﻿/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
- * Copyright(c) 2016-2025, Sjofn, LLC
+ * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
  *  
  * Radegast is free software: you can redistribute it and/or modify
@@ -96,7 +96,19 @@ namespace Radegast
             volAudioStream.Value = (int)(audioVolume * 50);
             instance.MediaManager.ObjectEnable = cbObjSoundEnable.Checked;
 
+            // Set preferred audio driver before initializing (if saved)
+            if (s["audio_driver_index"].Type != OSDType.Unknown)
+            {
+                instance.MediaManager.PreferredDriver = s["audio_driver_index"].AsInteger();
+            }
+
             configTimer = new System.Threading.Timer(SaveConfig, null, System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+
+            // Initialize audio device controls
+            InitializeAudioDeviceControls();
+
+            // Subscribe to sound system availability changes
+            instance.MediaManager.SoundSystemAvailableChanged += MediaManager_SoundSystemAvailableChanged;
 
             if (!instance.MediaManager.SoundSystemAvailable)
             {
@@ -115,16 +127,130 @@ namespace Radegast
             objVolume.Scroll += volObject_Scroll;
             cbObjSoundEnable.CheckedChanged += cbObjEnableChanged;
 
+            UIVolume.Scroll += UIVolume_Scroll;
+
             // Network callbacks
             client.Parcels.ParcelProperties += Parcels_ParcelProperties;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        private void MediaManager_SoundSystemAvailableChanged(object sender, Media.SoundSystemAvailableEventArgs e)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new MethodInvoker(() => MediaManager_SoundSystemAvailableChanged(sender, e)));
+                return;
+            }
+
+            // Refresh audio device controls when sound system becomes available or unavailable
+            InitializeAudioDeviceControls();
+
+            // Enable or disable parcel audio controls based on availability
+            foreach (Control c in pnlParcelAudio.Controls)
+                c.Enabled = e.IsAvailable;
+
+            if (e.IsAvailable)
+            {
+                Logger.Info("Sound system became available - UI updated");
+            }
+        }
+
+        private void InitializeAudioDeviceControls()
+        {
+            UpdateAudioDeviceStatus();
+            PopulateAudioDevices();
+
+            // Restore saved audio driver selection
+            if (s["audio_driver_index"].Type != OSDType.Unknown)
+            {
+                int savedDriverIndex = s["audio_driver_index"].AsInteger();
+                if (savedDriverIndex >= 0 && savedDriverIndex < cmbAudioDevice.Items.Count)
+                {
+                    cmbAudioDevice.SelectedIndex = savedDriverIndex;
+                }
+            }
+            else if (cmbAudioDevice.Items.Count > 0)
+            {
+                cmbAudioDevice.SelectedIndex = 0;
+            }
+        }
+
+        private void PopulateAudioDevices()
+        {
+            cmbAudioDevice.Items.Clear();
+
+            if (!instance.MediaManager.SoundSystemAvailable)
+            {
+                cmbAudioDevice.Items.Add("Sound system not available");
+                cmbAudioDevice.SelectedIndex = 0;
+                cmbAudioDevice.Enabled = false;
+                btnRefreshDevices.Enabled = false;
+                return;
+            }
+
+            try
+            {
+                var drivers = instance.MediaManager.GetAudioDrivers();
+                
+                if (drivers.Count == 0)
+                {
+                    cmbAudioDevice.Items.Add("No audio devices found");
+                    cmbAudioDevice.SelectedIndex = 0;
+                    cmbAudioDevice.Enabled = false;
+                }
+                else
+                {
+                    foreach (var driver in drivers)
+                    {
+                        cmbAudioDevice.Items.Add(driver);
+                    }
+                    
+                    // Select the current driver
+                    int currentDriver = instance.MediaManager.SelectedDriver;
+                    if (currentDriver >= 0 && currentDriver < cmbAudioDevice.Items.Count)
+                    {
+                        cmbAudioDevice.SelectedIndex = currentDriver;
+                    }
+                    else if (cmbAudioDevice.Items.Count > 0)
+                    {
+                        cmbAudioDevice.SelectedIndex = 0;
+                    }
+                    
+                    cmbAudioDevice.Enabled = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to populate audio devices", ex);
+                cmbAudioDevice.Items.Add("Error loading devices");
+                cmbAudioDevice.SelectedIndex = 0;
+                cmbAudioDevice.Enabled = false;
+            }
+        }
+
+        private void UpdateAudioDeviceStatus()
+        {
+            if (instance.MediaManager.SoundSystemAvailable)
+            {
+                lblAudioDeviceStatus.Text = $"Sound system ready ({instance.MediaManager.DriverCount} device(s))";
+                lblAudioDeviceStatus.ForeColor = System.Drawing.Color.Green;
+                btnRetryInit.Enabled = false;
+            }
+            else
+            {
+                lblAudioDeviceStatus.Text = "Sound system not available";
+                lblAudioDeviceStatus.ForeColor = System.Drawing.Color.Red;
+                btnRetryInit.Enabled = true;
+            }
+        }
+
         private void MediaConsole_Disposed(object sender, EventArgs e)
         {
             Stop();
 
+            // Unsubscribe from events
+            instance.MediaManager.SoundSystemAvailableChanged -= MediaManager_SoundSystemAvailableChanged;
             client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
 
             if (configTimer != null)
@@ -230,6 +356,12 @@ namespace Radegast
             s["object_audio_vol"] = OSD.FromReal(instance.MediaManager.ObjectVolume);
             s["object_audio_enable"] = OSD.FromBoolean(cbObjSoundEnable.Checked);
             s["ui_audio_vol"] = OSD.FromReal(instance.MediaManager.UIVolume);
+            
+            // Save selected audio driver
+            if (cmbAudioDevice.SelectedIndex >= 0 && instance.MediaManager.SoundSystemAvailable)
+            {
+                s["audio_driver_index"] = OSD.FromInteger(cmbAudioDevice.SelectedIndex);
+            }
         }
 
         #region GUI event handlers
@@ -300,6 +432,90 @@ namespace Radegast
             instance.MediaManager.UIVolume = UIVolume.Value / 50f;
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
         }
+
+        private void cmbAudioDevice_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (cmbAudioDevice.SelectedIndex < 0 || !instance.MediaManager.SoundSystemAvailable)
+                return;
+
+            try
+            {
+                var selectedDriver = cmbAudioDevice.SelectedItem as Media.AudioDriverInfo;
+                if (selectedDriver != null && selectedDriver.Index != instance.MediaManager.SelectedDriver)
+                {
+                    if (instance.MediaManager.SetAudioDriver(selectedDriver.Index))
+                    {
+                        Logger.Info($"Successfully switched to audio driver: {selectedDriver.Name}");
+                        configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
+                    }
+                    else
+                    {
+                        // Revert selection if failed
+                        Logger.Warn($"Failed to switch to audio driver: {selectedDriver.Name}");
+                        cmbAudioDevice.SelectedIndex = instance.MediaManager.SelectedDriver;
+                        MessageBox.Show(
+                            $"Failed to switch to audio driver: {selectedDriver.Name}\nCheck the log for details.",
+                            "Audio Device Error",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Error changing audio device", ex);
+            }
+        }
+
+        private void btnRefreshDevices_Click(object sender, EventArgs e)
+        {
+            PopulateAudioDevices();
+            UpdateAudioDeviceStatus();
+        }
+
+        private void btnRetryInit_Click(object sender, EventArgs e)
+        {
+            btnRetryInit.Enabled = false;
+            btnRetryInit.Text = "Retrying...";
+
+            try
+            {
+                if (instance.MediaManager.RetryInitialization())
+                {
+                    // Success! UI will be updated by the event handler
+                    // MediaManager_SoundSystemAvailableChanged will handle the UI refresh
+                    
+                    MessageBox.Show(
+                        "Sound system successfully initialized!",
+                        "Sound System",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "Failed to initialize sound system. Check the log for details.",
+                        "Sound System Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Error retrying sound initialization", ex);
+                MessageBox.Show(
+                    $"Error retrying sound initialization: {ex.Message}",
+                    "Sound System Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btnRetryInit.Text = "Retry Init";
+                UpdateAudioDeviceStatus();
+            }
+        }
+
         #endregion GUI event handlers
     }
 }

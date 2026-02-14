@@ -24,6 +24,7 @@ using System.Linq;
 using FMOD;
 using System.Threading;
 using OpenMetaverse;
+using OpenMetaverse.StructuredData;
 using System.Threading.Tasks;
 
 namespace Radegast.Media
@@ -34,6 +35,12 @@ namespace Radegast.Media
         /// Indicated whether sound system is ready for use
         /// </summary>
         public bool SoundSystemAvailable { get; private set; } = false;
+        
+        /// <summary>
+        /// Event fired when sound system availability changes
+        /// </summary>
+        public event EventHandler<SoundSystemAvailableEventArgs> SoundSystemAvailableChanged;
+        
         public IRadegastInstance Instance;
 
         private readonly CancellationTokenSource soundCancelToken;
@@ -41,6 +48,31 @@ namespace Radegast.Media
         private List<MediaObject> sounds = new List<MediaObject>();
         private Task commandLoop;
         private Task listenerLoop;
+
+        /// <summary>
+        /// Currently selected audio driver index
+        /// </summary>
+        public int SelectedDriver { get; private set; } = 0;
+
+        /// <summary>
+        /// Number of available audio drivers
+        /// </summary>
+        public int DriverCount { get; private set; } = 0;
+
+        /// <summary>
+        /// DSP buffer size for FMOD (affects latency vs stability)
+        /// </summary>
+        public int DSPBufferSize { get; set; } = 1024;
+
+        /// <summary>
+        /// Number of DSP buffers (affects latency vs stability)
+        /// </summary>
+        public int DSPBufferCount { get; set; } = 4;
+
+        /// <summary>
+        /// Preferred audio driver index to use (set before Initialize)
+        /// </summary>
+        public int PreferredDriver { get; set; } = -1;
 
         public MediaManager(IRadegastInstance instance)
         {
@@ -189,43 +221,74 @@ namespace Radegast.Media
                 if (Environment.OSVersion.Platform == PlatformID.Unix || Environment.OSVersion.Platform == PlatformID.MacOSX)
                 {
                     bool audioOK = false;
-                    var res = system.setOutput(OUTPUTTYPE.COREAUDIO);
-                    if (res == RESULT.OK)
-                    {
-                        audioOK = true;
-                    }
+                    OUTPUTTYPE[] outputsToTry = Environment.OSVersion.Platform == PlatformID.MacOSX
+                        ? new[] { OUTPUTTYPE.COREAUDIO, OUTPUTTYPE.AUTODETECT }
+                        : new[] { OUTPUTTYPE.PULSEAUDIO, OUTPUTTYPE.ALSA, OUTPUTTYPE.AUTODETECT };
 
-                    if (!audioOK)
+                    foreach (var output in outputsToTry)
                     {
-                        res = system.setOutput(OUTPUTTYPE.PULSEAUDIO);
+                        var res = system.setOutput(output);
                         if (res == RESULT.OK)
                         {
+                            Logger.Info($"Successfully set FMOD output to: {output}");
                             audioOK = true;
+                            break;
+                        }
+                        else
+                        {
+                            Logger.Debug($"Failed to set FMOD output to {output}: {res}");
                         }
                     }
 
                     if (!audioOK)
                     {
-                        res = system.setOutput(OUTPUTTYPE.ALSA);
-                        if (res == RESULT.OK)
-                        {
-                            audioOK = true;
-                        }
+                        Logger.Warn("Failed to set any audio output on Unix/Mac platform");
                     }
-
-                    if (!audioOK)
-                    {
-                        res = system.setOutput(OUTPUTTYPE.AUTODETECT);
-                        if (res == RESULT.OK)
-                        {
-                            audioOK = true;
-                        }
-                    }
-
                 }
 
                 OUTPUTTYPE outputType = OUTPUTTYPE.UNKNOWN;
                 FMODExec(system.getOutput(out outputType));
+
+                // Get driver information
+                FMODExec(system.getNumDrivers(out int numDrivers));
+                DriverCount = numDrivers;
+                Logger.Info($"FMOD detected {numDrivers} audio driver(s)");
+
+                // Apply preferred driver selection if set
+                if (PreferredDriver >= 0 && PreferredDriver < numDrivers)
+                {
+                    Logger.Info($"Applying preferred audio driver: {PreferredDriver}");
+                    var driverResult = system.setDriver(PreferredDriver);
+                    if (driverResult == RESULT.OK)
+                    {
+                        SelectedDriver = PreferredDriver;
+                        Logger.Info($"Successfully set preferred audio driver to index {PreferredDriver}");
+                    }
+                    else
+                    {
+                        Logger.Warn($"Failed to set preferred audio driver {PreferredDriver}: {driverResult}");
+                        PreferredDriver = -1; // Reset to default
+                    }
+                }
+                else if (PreferredDriver >= numDrivers)
+                {
+                    Logger.Warn($"Preferred driver index {PreferredDriver} is out of range (0-{numDrivers - 1})");
+                    PreferredDriver = -1; // Reset to default
+                }
+
+                // Log information about each driver
+                for (int i = 0; i < numDrivers && i < 10; i++) // Limit to first 10 to avoid spam
+                {
+                    try
+                    {
+                        FMODExec(system.getDriverInfo(i, out string name, 256, out Guid guid, out int systemRate, out SPEAKERMODE speakerMode, out int speakerModeChannels));
+                        Logger.Info($"Driver {i}: {name} - {systemRate}Hz, {speakerMode} ({speakerModeChannels} channels)");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Could not get info for driver {i}: {ex.Message}");
+                    }
+                }
 
 // *TODO: Investigate if this all is still needed under FMODStudio
 #if false
@@ -258,13 +321,44 @@ namespace Radegast.Media
                 }
                 catch {}
 #endif
-                // FMODExec(system.setDSPBufferSize(1024, 10));
+                // Apply DSP buffer settings if configured
+                if (DSPBufferSize > 0 && DSPBufferCount > 0)
+                {
+                    var bufferResult = system.setDSPBufferSize((uint)DSPBufferSize, DSPBufferCount);
+                    if (bufferResult == RESULT.OK)
+                    {
+                        Logger.Info($"Set DSP buffer: {DSPBufferSize} samples x {DSPBufferCount} buffers");
+                    }
+                    else
+                    {
+                        Logger.Debug($"Could not set DSP buffer size: {bufferResult}");
+                    }
+                }
 
                 // Try to initialize with all those settings, and Max 32 channels.
                 RESULT result = system.init(32, INITFLAGS.NORMAL, (IntPtr)null);
                 if (result != RESULT.OK)
                 {
-                    Logger.Warn($"FMOD initialization failed with result: {result} - {Error.String(result)}");
+                    string errorMsg = $"FMOD initialization failed with result: {result} - {Error.String(result)}";
+                    
+                    // Provide specific guidance based on error type
+                    switch (result)
+                    {
+                        case RESULT.ERR_OUTPUT_INIT:
+                            errorMsg += "\nPossible causes: No audio device available, audio device in use by another application, or audio drivers need updating.";
+                            break;
+                        case RESULT.ERR_OUTPUT_CREATEBUFFER:
+                            errorMsg += "\nPossible cause: Audio buffer creation failed. Try closing other audio applications.";
+                            break;
+                        case RESULT.ERR_OUTPUT_DRIVERCALL:
+                            errorMsg += "\nPossible cause: Audio driver error. Check your audio drivers are up to date.";
+                            break;
+                        case RESULT.ERR_INVALID_PARAM:
+                            errorMsg += "\nPossible cause: Invalid FMOD initialization parameters.";
+                            break;
+                    }
+                    
+                    Logger.Warn(errorMsg);
                     throw(new Exception(result.ToString()));
                 }
 
@@ -277,10 +371,17 @@ namespace Radegast.Media
 
                 SoundSystemAvailable = true;
                 Logger.Info($"Initialized FMOD interface: {outputType}");
+                
+                // Notify listeners that sound system is now available
+                SoundSystemAvailableChanged?.Invoke(this, new SoundSystemAvailableEventArgs(true));
             }
             catch (Exception ex)
             {
                 Logger.Warn("Failed to initialize the sound system", ex);
+                SoundSystemAvailable = false;
+                
+                // Notify listeners that sound system failed to initialize
+                SoundSystemAvailableChanged?.Invoke(this, new SoundSystemAvailableEventArgs(false));
             }
         }
 
@@ -669,7 +770,170 @@ namespace Radegast.Media
                 UIVolume);
         }
 
+        /// <summary>
+        /// Get information about available audio drivers
+        /// </summary>
+        /// <returns>List of driver information</returns>
+        public List<AudioDriverInfo> GetAudioDrivers()
+        {
+            var drivers = new List<AudioDriverInfo>();
+            
+            if (!system.hasHandle())
+                return drivers;
 
+            try
+            {
+                FMODExec(system.getNumDrivers(out int numDrivers));
+                
+                for (int i = 0; i < numDrivers; i++)
+                {
+                    try
+                    {
+                        FMODExec(system.getDriverInfo(i, out string name, 256, out Guid guid, out int systemRate, out SPEAKERMODE speakerMode, out int speakerModeChannels));
+                        
+                        drivers.Add(new AudioDriverInfo
+                        {
+                            Index = i,
+                            Name = name,
+                            Guid = guid,
+                            SampleRate = systemRate,
+                            SpeakerMode = speakerMode.ToString(),
+                            Channels = speakerModeChannels,
+                            IsDefault = (i == SelectedDriver)
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Could not get info for driver {i}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to enumerate audio drivers", ex);
+            }
+
+            return drivers;
+        }
+
+        /// <summary>
+        /// Set the audio driver to use
+        /// </summary>
+        /// <param name="driverIndex">Index of the driver to use</param>
+        /// <returns>True if successful</returns>
+        public bool SetAudioDriver(int driverIndex)
+        {
+            if (!system.hasHandle())
+                return false;
+
+            try
+            {
+                var result = system.setDriver(driverIndex);
+                if (result == RESULT.OK)
+                {
+                    SelectedDriver = driverIndex;
+                    Logger.Info($"Successfully set audio driver to index {driverIndex}");
+                    return true;
+                }
+                else
+                {
+                    Logger.Warn($"Failed to set audio driver to index {driverIndex}: {result} - {Error.String(result)}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Exception setting audio driver to index {driverIndex}", ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Retry FMOD initialization after a failure
+        /// </summary>
+        /// <returns>True if initialization succeeded</returns>
+        public bool RetryInitialization()
+        {
+            if (SoundSystemAvailable)
+            {
+                Logger.Info("Sound system already initialized");
+                return true;
+            }
+
+            Logger.Info("Retrying FMOD initialization...");
+            
+            try
+            {
+                // Clean up any partial initialization
+                if (system.hasHandle())
+                {
+                    system.release();
+                    system.clearHandle();
+                }
+
+                InitFMOD();
+
+                if (SoundSystemAvailable)
+                {
+                    Logger.Info("FMOD initialization retry successful");
+                    
+                    // Restart background threads if needed
+                    if (commandLoop == null || commandLoop.Status != TaskStatus.Running)
+                    {
+                        commandLoop = Task.Factory.StartNew(() => CommandLoop(soundCancelToken.Token),
+                            soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    }
+                    
+                    if (listenerLoop == null || listenerLoop.Status != TaskStatus.Running)
+                    {
+                        listenerLoop = Task.Factory.StartNew(() => ListenerUpdate(soundCancelToken.Token),
+                            soundCancelToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    }
+                    
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("FMOD initialization retry failed", ex);
+            }
+
+            return false;
+        }
+
+
+    }
+
+    /// <summary>
+    /// Event args for sound system availability changes
+    /// </summary>
+    public class SoundSystemAvailableEventArgs : EventArgs
+    {
+        public bool IsAvailable { get; }
+        
+        public SoundSystemAvailableEventArgs(bool isAvailable)
+        {
+            IsAvailable = isAvailable;
+        }
+    }
+
+    /// <summary>
+    /// Information about an audio driver
+    /// </summary>
+    public class AudioDriverInfo
+    {
+        public int Index { get; set; }
+        public string Name { get; set; }
+        public Guid Guid { get; set; }
+        public int SampleRate { get; set; }
+        public string SpeakerMode { get; set; }
+        public int Channels { get; set; }
+        public bool IsDefault { get; set; }
+
+        public override string ToString()
+        {
+            return $"{Name} ({SampleRate}Hz, {Channels}ch)";
+        }
     }
 
     public class MediaException : Exception

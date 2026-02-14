@@ -76,12 +76,19 @@ namespace Radegast
             this.objVolume = new System.Windows.Forms.TrackBar();
             this.UISoundsGroup = new System.Windows.Forms.GroupBox();
             this.UIVolume = new System.Windows.Forms.TrackBar();
+            this.AudioDeviceGroup = new System.Windows.Forms.GroupBox();
+            this.lblAudioDeviceStatus = new System.Windows.Forms.Label();
+            this.btnRetryInit = new System.Windows.Forms.Button();
+            this.btnRefreshDevices = new System.Windows.Forms.Button();
+            this.cmbAudioDevice = new System.Windows.Forms.ComboBox();
+            this.label3 = new System.Windows.Forms.Label();
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).BeginInit();
             this.pnlParcelAudio.SuspendLayout();
             this.ObjSoundGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.objVolume)).BeginInit();
             this.UISoundsGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.UIVolume)).BeginInit();
+            this.AudioDeviceGroup.SuspendLayout();
             this.SuspendLayout();
             // 
             // volAudioStream
@@ -271,15 +278,82 @@ namespace Radegast
             this.UIVolume.Value = 20;
             this.UIVolume.Scroll += new System.EventHandler(this.UIVolume_Scroll);
             // 
+            // AudioDeviceGroup
+            // 
+            this.AudioDeviceGroup.Controls.Add(this.lblAudioDeviceStatus);
+            this.AudioDeviceGroup.Controls.Add(this.btnRetryInit);
+            this.AudioDeviceGroup.Controls.Add(this.btnRefreshDevices);
+            this.AudioDeviceGroup.Controls.Add(this.cmbAudioDevice);
+            this.AudioDeviceGroup.Controls.Add(this.label3);
+            this.AudioDeviceGroup.Location = new System.Drawing.Point(4, 279);
+            this.AudioDeviceGroup.Name = "AudioDeviceGroup";
+            this.AudioDeviceGroup.Size = new System.Drawing.Size(358, 85);
+            this.AudioDeviceGroup.TabIndex = 4;
+            this.AudioDeviceGroup.TabStop = false;
+            this.AudioDeviceGroup.Text = "Audio Device";
+            // 
+            // lblAudioDeviceStatus
+            // 
+            this.lblAudioDeviceStatus.AutoSize = true;
+            this.lblAudioDeviceStatus.ForeColor = System.Drawing.Color.Green;
+            this.lblAudioDeviceStatus.Location = new System.Drawing.Point(9, 62);
+            this.lblAudioDeviceStatus.Name = "lblAudioDeviceStatus";
+            this.lblAudioDeviceStatus.Size = new System.Drawing.Size(99, 13);
+            this.lblAudioDeviceStatus.TabIndex = 4;
+            this.lblAudioDeviceStatus.Text = "Sound system ready";
+            // 
+            // btnRetryInit
+            // 
+            this.btnRetryInit.Location = new System.Drawing.Point(261, 36);
+            this.btnRetryInit.Name = "btnRetryInit";
+            this.btnRetryInit.Size = new System.Drawing.Size(90, 23);
+            this.btnRetryInit.TabIndex = 3;
+            this.btnRetryInit.Text = "Retry Init";
+            this.toolTip1.SetToolTip(this.btnRetryInit, "Retry sound system initialization if it failed");
+            this.btnRetryInit.UseVisualStyleBackColor = true;
+            this.btnRetryInit.Click += new System.EventHandler(this.btnRetryInit_Click);
+            // 
+            // btnRefreshDevices
+            // 
+            this.btnRefreshDevices.Location = new System.Drawing.Point(261, 14);
+            this.btnRefreshDevices.Name = "btnRefreshDevices";
+            this.btnRefreshDevices.Size = new System.Drawing.Size(90, 23);
+            this.btnRefreshDevices.TabIndex = 2;
+            this.btnRefreshDevices.Text = "Refresh";
+            this.toolTip1.SetToolTip(this.btnRefreshDevices, "Refresh the list of available audio devices");
+            this.btnRefreshDevices.UseVisualStyleBackColor = true;
+            this.btnRefreshDevices.Click += new System.EventHandler(this.btnRefreshDevices_Click);
+            // 
+            // cmbAudioDevice
+            // 
+            this.cmbAudioDevice.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbAudioDevice.FormattingEnabled = true;
+            this.cmbAudioDevice.Location = new System.Drawing.Point(56, 16);
+            this.cmbAudioDevice.Name = "cmbAudioDevice";
+            this.cmbAudioDevice.Size = new System.Drawing.Size(199, 21);
+            this.cmbAudioDevice.TabIndex = 1;
+            this.toolTip1.SetToolTip(this.cmbAudioDevice, "Select the audio output device to use");
+            this.cmbAudioDevice.SelectedIndexChanged += new System.EventHandler(this.cmbAudioDevice_SelectedIndexChanged);
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(9, 19);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(41, 13);
+            this.label3.TabIndex = 0;
+            this.label3.Text = "Device";
+            // 
             // MediaConsole
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.Controls.Add(this.AudioDeviceGroup);
             this.Controls.Add(this.UISoundsGroup);
             this.Controls.Add(this.ObjSoundGroup);
             this.Controls.Add(this.pnlParcelAudio);
             this.Name = "MediaConsole";
-            this.Size = new System.Drawing.Size(368, 275);
+            this.Size = new System.Drawing.Size(368, 370);
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).EndInit();
             this.pnlParcelAudio.ResumeLayout(false);
             this.pnlParcelAudio.PerformLayout();
@@ -289,6 +363,8 @@ namespace Radegast
             this.UISoundsGroup.ResumeLayout(false);
             this.UISoundsGroup.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.UIVolume)).EndInit();
+            this.AudioDeviceGroup.ResumeLayout(false);
+            this.AudioDeviceGroup.PerformLayout();
             this.ResumeLayout(false);
 
         }
@@ -312,6 +388,12 @@ namespace Radegast
         public System.Windows.Forms.TrackBar objVolume;
         private System.Windows.Forms.GroupBox UISoundsGroup;
         public System.Windows.Forms.TrackBar UIVolume;
+        private System.Windows.Forms.GroupBox AudioDeviceGroup;
+        private System.Windows.Forms.ComboBox cmbAudioDevice;
+        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.Button btnRefreshDevices;
+        private System.Windows.Forms.Button btnRetryInit;
+        private System.Windows.Forms.Label lblAudioDeviceStatus;
 
     }
 }
