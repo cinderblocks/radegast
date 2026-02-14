@@ -1,0 +1,53 @@
+name: Publish Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Set TAG_VERSION
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $tagVersion = $tag -replace 'v',''
+          $tagVersion = "$tagVersion.${{ github.run_number }}"
+          Write-Host "Setting TAG_VERSION to $tagVersion"
+          echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore NuGet packages
+        run: nuget restore radegast.sln
+
+      - name: Build solution
+        run: msbuild radegast.sln /m /p:Configuration=ReleaseWindows
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType directory -Path .\artifacts
+          & 7z a -ttar -so Radegast-${{ env.TAG_VERSION }}.tar .\bin\Release\ | & 7z a -si Radegast_${{ matrix.platform }}-${{ env.TAG_VERSION }}.tbz
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts\*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
