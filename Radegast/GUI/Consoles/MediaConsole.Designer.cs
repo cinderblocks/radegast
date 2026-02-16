@@ -76,12 +76,32 @@ namespace Radegast
             this.objVolume = new System.Windows.Forms.TrackBar();
             this.UISoundsGroup = new System.Windows.Forms.GroupBox();
             this.UIVolume = new System.Windows.Forms.TrackBar();
+            this.MasterVolumeGroup = new System.Windows.Forms.GroupBox();
+            this.btnMuteAll = new System.Windows.Forms.Button();
+            this.masterVolume = new System.Windows.Forms.TrackBar();
+            this.AudioProfileGroup = new System.Windows.Forms.GroupBox();
+            this.btnSaveProfile = new System.Windows.Forms.Button();
+            this.btnLoadProfile = new System.Windows.Forms.Button();
+            this.cmbAudioProfile = new System.Windows.Forms.ComboBox();
+            this.label4 = new System.Windows.Forms.Label();
+            this.AudioDeviceGroup = new System.Windows.Forms.GroupBox();
+            this.lblAudioDeviceStatus = new System.Windows.Forms.Label();
+            this.btnRetryInit = new System.Windows.Forms.Button();
+            this.btnRefreshDevices = new System.Windows.Forms.Button();
+            this.cmbAudioDevice = new System.Windows.Forms.ComboBox();
+            this.label3 = new System.Windows.Forms.Label();
+            this.btnShowStats = new System.Windows.Forms.Button();
+            this.btnClearCache = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).BeginInit();
             this.pnlParcelAudio.SuspendLayout();
             this.ObjSoundGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.objVolume)).BeginInit();
             this.UISoundsGroup.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.UIVolume)).BeginInit();
+            this.MasterVolumeGroup.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.masterVolume)).BeginInit();
+            this.AudioProfileGroup.SuspendLayout();
+            this.AudioDeviceGroup.SuspendLayout();
             this.SuspendLayout();
             // 
             // volAudioStream
@@ -271,15 +291,197 @@ namespace Radegast
             this.UIVolume.Value = 20;
             this.UIVolume.Scroll += new System.EventHandler(this.UIVolume_Scroll);
             // 
+            // MasterVolumeGroup
+            // 
+            this.MasterVolumeGroup.Controls.Add(this.btnMuteAll);
+            this.MasterVolumeGroup.Controls.Add(this.masterVolume);
+            this.MasterVolumeGroup.Location = new System.Drawing.Point(4, 279);
+            this.MasterVolumeGroup.Name = "MasterVolumeGroup";
+            this.MasterVolumeGroup.Size = new System.Drawing.Size(358, 65);
+            this.MasterVolumeGroup.TabIndex = 3;
+            this.MasterVolumeGroup.TabStop = false;
+            this.MasterVolumeGroup.Text = "Master Volume";
+            // 
+            // btnMuteAll
+            // 
+            this.btnMuteAll.Location = new System.Drawing.Point(9, 36);
+            this.btnMuteAll.Name = "btnMuteAll";
+            this.btnMuteAll.Size = new System.Drawing.Size(75, 23);
+            this.btnMuteAll.TabIndex = 1;
+            this.btnMuteAll.Text = "Mute All";
+            this.toolTip1.SetToolTip(this.btnMuteAll, "Mute or unmute all audio");
+            this.btnMuteAll.UseVisualStyleBackColor = true;
+            this.btnMuteAll.Click += new System.EventHandler(this.btnMuteAll_Click);
+            // 
+            // masterVolume
+            // 
+            this.masterVolume.AccessibleName = "Master volume";
+            this.masterVolume.LargeChange = 10;
+            this.masterVolume.Location = new System.Drawing.Point(4, 12);
+            this.masterVolume.Maximum = 100;
+            this.masterVolume.Name = "masterVolume";
+            this.masterVolume.Size = new System.Drawing.Size(347, 45);
+            this.masterVolume.SmallChange = 2;
+            this.masterVolume.TabIndex = 0;
+            this.masterVolume.Value = 100;
+            this.masterVolume.Scroll += new System.EventHandler(this.masterVolume_Scroll);
+            // 
+            // AudioProfileGroup
+            // 
+            this.AudioProfileGroup.Controls.Add(this.btnSaveProfile);
+            this.AudioProfileGroup.Controls.Add(this.btnLoadProfile);
+            this.AudioProfileGroup.Controls.Add(this.cmbAudioProfile);
+            this.AudioProfileGroup.Controls.Add(this.label4);
+            this.AudioProfileGroup.Location = new System.Drawing.Point(4, 350);
+            this.AudioProfileGroup.Name = "AudioProfileGroup";
+            this.AudioProfileGroup.Size = new System.Drawing.Size(358, 55);
+            this.AudioProfileGroup.TabIndex = 4;
+            this.AudioProfileGroup.TabStop = false;
+            this.AudioProfileGroup.Text = "Audio Profiles";
+            // 
+            // btnSaveProfile
+            // 
+            this.btnSaveProfile.Location = new System.Drawing.Point(261, 26);
+            this.btnSaveProfile.Name = "btnSaveProfile";
+            this.btnSaveProfile.Size = new System.Drawing.Size(45, 23);
+            this.btnSaveProfile.TabIndex = 3;
+            this.btnSaveProfile.Text = "Save";
+            this.toolTip1.SetToolTip(this.btnSaveProfile, "Save current settings as a profile");
+            this.btnSaveProfile.UseVisualStyleBackColor = true;
+            this.btnSaveProfile.Click += new System.EventHandler(this.btnSaveProfile_Click);
+            // 
+            // btnLoadProfile
+            // 
+            this.btnLoadProfile.Location = new System.Drawing.Point(306, 26);
+            this.btnLoadProfile.Name = "btnLoadProfile";
+            this.btnLoadProfile.Size = new System.Drawing.Size(45, 23);
+            this.btnLoadProfile.TabIndex = 2;
+            this.btnLoadProfile.Text = "Load";
+            this.toolTip1.SetToolTip(this.btnLoadProfile, "Load selected profile");
+            this.btnLoadProfile.UseVisualStyleBackColor = true;
+            this.btnLoadProfile.Click += new System.EventHandler(this.btnLoadProfile_Click);
+            // 
+            // cmbAudioProfile
+            // 
+            this.cmbAudioProfile.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbAudioProfile.FormattingEnabled = true;
+            this.cmbAudioProfile.Location = new System.Drawing.Point(56, 28);
+            this.cmbAudioProfile.Name = "cmbAudioProfile";
+            this.cmbAudioProfile.Size = new System.Drawing.Size(199, 21);
+            this.cmbAudioProfile.TabIndex = 1;
+            this.toolTip1.SetToolTip(this.cmbAudioProfile, "Select an audio profile");
+            // 
+            // label4
+            // 
+            this.label4.AutoSize = true;
+            this.label4.Location = new System.Drawing.Point(9, 31);
+            this.label4.Name = "label4";
+            this.label4.Size = new System.Drawing.Size(36, 13);
+            this.label4.TabIndex = 0;
+            this.label4.Text = "Profile";
+            // 
+            // AudioDeviceGroup
+            // 
+            this.AudioDeviceGroup.Controls.Add(this.lblAudioDeviceStatus);
+            this.AudioDeviceGroup.Controls.Add(this.btnClearCache);
+            this.AudioDeviceGroup.Controls.Add(this.btnRetryInit);
+            this.AudioDeviceGroup.Controls.Add(this.btnShowStats);
+            this.AudioDeviceGroup.Controls.Add(this.btnRefreshDevices);
+            this.AudioDeviceGroup.Controls.Add(this.cmbAudioDevice);
+            this.AudioDeviceGroup.Controls.Add(this.label3);
+            this.AudioDeviceGroup.Location = new System.Drawing.Point(4, 411);
+            this.AudioDeviceGroup.Name = "AudioDeviceGroup";
+            this.AudioDeviceGroup.Size = new System.Drawing.Size(358, 110);
+            this.AudioDeviceGroup.TabIndex = 5;
+            this.AudioDeviceGroup.TabStop = false;
+            this.AudioDeviceGroup.Text = "Audio Device";
+            // 
+            // lblAudioDeviceStatus
+            // 
+            this.lblAudioDeviceStatus.AutoSize = true;
+            this.lblAudioDeviceStatus.ForeColor = System.Drawing.Color.Green;
+            this.lblAudioDeviceStatus.Location = new System.Drawing.Point(9, 90);
+            this.lblAudioDeviceStatus.Name = "lblAudioDeviceStatus";
+            this.lblAudioDeviceStatus.Size = new System.Drawing.Size(99, 13);
+            this.lblAudioDeviceStatus.TabIndex = 4;
+            this.lblAudioDeviceStatus.Text = "Sound system ready";
+            // 
+            // btnClearCache
+            // 
+            this.btnClearCache.Location = new System.Drawing.Point(261, 62);
+            this.btnClearCache.Name = "btnClearCache";
+            this.btnClearCache.Size = new System.Drawing.Size(90, 23);
+            this.btnClearCache.TabIndex = 6;
+            this.btnClearCache.Text = "Clear Cache";
+            this.toolTip1.SetToolTip(this.btnClearCache, "Clear the audio cache");
+            this.btnClearCache.UseVisualStyleBackColor = true;
+            this.btnClearCache.Click += new System.EventHandler(this.btnClearCache_Click);
+            // 
+            // btnRetryInit
+            // 
+            this.btnRetryInit.Location = new System.Drawing.Point(261, 36);
+            this.btnRetryInit.Name = "btnRetryInit";
+            this.btnRetryInit.Size = new System.Drawing.Size(90, 23);
+            this.btnRetryInit.TabIndex = 3;
+            this.btnRetryInit.Text = "Retry Init";
+            this.toolTip1.SetToolTip(this.btnRetryInit, "Retry sound system initialization if it failed");
+            this.btnRetryInit.UseVisualStyleBackColor = true;
+            this.btnRetryInit.Click += new System.EventHandler(this.btnRetryInit_Click);
+            // 
+            // btnShowStats
+            // 
+            this.btnShowStats.Location = new System.Drawing.Point(9, 36);
+            this.btnShowStats.Name = "btnShowStats";
+            this.btnShowStats.Size = new System.Drawing.Size(90, 23);
+            this.btnShowStats.TabIndex = 5;
+            this.btnShowStats.Text = "Show Stats";
+            this.toolTip1.SetToolTip(this.btnShowStats, "Display audio performance statistics");
+            this.btnShowStats.UseVisualStyleBackColor = true;
+            this.btnShowStats.Click += new System.EventHandler(this.btnShowStats_Click);
+            // 
+            // btnRefreshDevices
+            // 
+            this.btnRefreshDevices.Location = new System.Drawing.Point(261, 14);
+            this.btnRefreshDevices.Name = "btnRefreshDevices";
+            this.btnRefreshDevices.Size = new System.Drawing.Size(90, 23);
+            this.btnRefreshDevices.TabIndex = 2;
+            this.btnRefreshDevices.Text = "Refresh";
+            this.toolTip1.SetToolTip(this.btnRefreshDevices, "Refresh the list of available audio devices");
+            this.btnRefreshDevices.UseVisualStyleBackColor = true;
+            this.btnRefreshDevices.Click += new System.EventHandler(this.btnRefreshDevices_Click);
+            // 
+            // cmbAudioDevice
+            // 
+            this.cmbAudioDevice.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbAudioDevice.FormattingEnabled = true;
+            this.cmbAudioDevice.Location = new System.Drawing.Point(56, 16);
+            this.cmbAudioDevice.Name = "cmbAudioDevice";
+            this.cmbAudioDevice.Size = new System.Drawing.Size(199, 21);
+            this.cmbAudioDevice.TabIndex = 1;
+            this.toolTip1.SetToolTip(this.cmbAudioDevice, "Select the audio output device to use");
+            this.cmbAudioDevice.SelectedIndexChanged += new System.EventHandler(this.cmbAudioDevice_SelectedIndexChanged);
+            // 
+            // label3
+            // 
+            this.label3.AutoSize = true;
+            this.label3.Location = new System.Drawing.Point(9, 19);
+            this.label3.Name = "label3";
+            this.label3.Size = new System.Drawing.Size(41, 13);
+            this.label3.TabIndex = 0;
+            this.label3.Text = "Device";
+            // 
             // MediaConsole
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.Controls.Add(this.AudioDeviceGroup);
+            this.Controls.Add(this.AudioProfileGroup);
+            this.Controls.Add(this.MasterVolumeGroup);
             this.Controls.Add(this.UISoundsGroup);
             this.Controls.Add(this.ObjSoundGroup);
             this.Controls.Add(this.pnlParcelAudio);
             this.Name = "MediaConsole";
-            this.Size = new System.Drawing.Size(368, 275);
+            this.Size = new System.Drawing.Size(368, 530);
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).EndInit();
             this.pnlParcelAudio.ResumeLayout(false);
             this.pnlParcelAudio.PerformLayout();
@@ -289,6 +491,13 @@ namespace Radegast
             this.UISoundsGroup.ResumeLayout(false);
             this.UISoundsGroup.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.UIVolume)).EndInit();
+            this.MasterVolumeGroup.ResumeLayout(false);
+            this.MasterVolumeGroup.PerformLayout();
+            ((System.ComponentModel.ISupportInitialize)(this.masterVolume)).EndInit();
+            this.AudioProfileGroup.ResumeLayout(false);
+            this.AudioProfileGroup.PerformLayout();
+            this.AudioDeviceGroup.ResumeLayout(false);
+            this.AudioDeviceGroup.PerformLayout();
             this.ResumeLayout(false);
 
         }
@@ -312,6 +521,22 @@ namespace Radegast
         public System.Windows.Forms.TrackBar objVolume;
         private System.Windows.Forms.GroupBox UISoundsGroup;
         public System.Windows.Forms.TrackBar UIVolume;
+        private System.Windows.Forms.GroupBox MasterVolumeGroup;
+        private System.Windows.Forms.TrackBar masterVolume;
+        private System.Windows.Forms.Button btnMuteAll;
+        private System.Windows.Forms.GroupBox AudioProfileGroup;
+        private System.Windows.Forms.ComboBox cmbAudioProfile;
+        private System.Windows.Forms.Label label4;
+        private System.Windows.Forms.Button btnLoadProfile;
+        private System.Windows.Forms.Button btnSaveProfile;
+        private System.Windows.Forms.GroupBox AudioDeviceGroup;
+        private System.Windows.Forms.ComboBox cmbAudioDevice;
+        private System.Windows.Forms.Label label3;
+        private System.Windows.Forms.Button btnRefreshDevices;
+        private System.Windows.Forms.Button btnRetryInit;
+        private System.Windows.Forms.Button btnShowStats;
+        private System.Windows.Forms.Button btnClearCache;
+        private System.Windows.Forms.Label lblAudioDeviceStatus;
 
     }
 }

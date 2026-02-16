@@ -130,12 +130,21 @@ namespace Radegast.Media
         /// </summary>
         public static void AdjustVolumes()
         {
+            AdjustVolumes(1.0f);
+        }
+
+        /// <summary>
+        /// Adjust volumes of all playing sounds with a multiplier (for master volume/mute)
+        /// </summary>
+        /// <param name="multiplier">Volume multiplier (0.0 to 1.0)</param>
+        public static void AdjustVolumes(float multiplier)
+        {
             // Make a list from the dictionary so we do not get a deadlock
             var list = new List<BufferSound>(allBuffers.Values);
 
             foreach (var s in list)
             {
-                s.AdjustVolume();
+                s.AdjustVolume(multiplier);
             }
         }
 
@@ -144,7 +153,15 @@ namespace Radegast.Media
         /// </summary>
         private void AdjustVolume()
         {
-            Volume = volumeSetting * AllObjectVolume;
+            AdjustVolume(1.0f);
+        }
+
+        /// <summary>
+        /// Adjust the volume of THIS sound with a multiplier
+        /// </summary>
+        private void AdjustVolume(float multiplier)
+        {
+            Volume = volumeSetting * AllObjectVolume * multiplier;
         }
 
         // A simpler constructor used by PreFetchSound.
@@ -154,11 +171,22 @@ namespace Radegast.Media
             ContainerId = UUID.Zero;
             Id = soundId;
 
-            manager.Instance.Client.Assets.RequestAsset(
-                Id,
-                AssetType.Sound,
-                false,
-                Assets_OnSoundReceived);
+            // Try to get from cache first
+            var cachedData = manager.Cache?.Get(soundId);
+            if (cachedData != null)
+            {
+                // Use cached data directly
+                ProcessSoundData(cachedData);
+            }
+            else
+            {
+                // Request from asset system
+                manager.Instance.Client.Assets.RequestAsset(
+                    Id,
+                    AssetType.Sound,
+                    false,
+                    Assets_OnSoundReceived);
+            }
         }
 
         /**
@@ -168,12 +196,6 @@ namespace Radegast.Media
         {
             if (transfer.Success)
             {
-                // If this was a Prefetch, just stop here.
-                if (prefetchOnly)
-                {
-                    return;
-                }
-
                 //                Logger.Log("Opening sound " + Id.ToString(), Helpers.LogLevel.Debug);
 
                 // Decode the Ogg Vorbis buffer.
@@ -182,74 +204,90 @@ namespace Radegast.Media
                 s.Decode();
                 var data = s.AssetData;
 
-                // Describe the data to FMOD
-                extraInfo.length = (uint)data.Length;
-                extraInfo.cbsize = Marshal.SizeOf(extraInfo);
+                // Add to cache
+                manager.Cache?.Add(Id, data);
 
-                invoke(delegate
+                // If this was a Prefetch, just stop here.
+                if (prefetchOnly)
                 {
-                    try
-                    {
-                        // Create an FMOD sound of this Ogg data.
-                        FMODExec(system.createSound(
-                            data,
-                            mode,
-                            ref extraInfo,
-                            out sound));
+                    return;
+                }
 
-                        // Register for callbacks.
-                        RegisterSound(sound);
-
-
-                        // If looping is requested, loop the entire thing.
-                        if (loopSound)
-                        {
-                            uint soundlen = 0;
-                            FMODExec(sound.getLength(out soundlen, TIMEUNIT.PCM));
-                            FMODExec(sound.setLoopPoints(0, TIMEUNIT.PCM, soundlen - 1, TIMEUNIT.PCM));
-                            FMODExec(sound.setLoopCount(-1));
-                        }
-
-                        // Allocate a channel and set initial volume.  Initially paused.
-                        ChannelGroup masterChannelGroup;
-                        system.getMasterChannelGroup(out masterChannelGroup);
-                        FMODExec(system.playSound(sound, masterChannelGroup, true, out channel));
-#if TRACE_SOUND
-                    Logger.Log(
-                        String.Format("Channel {0} for {1} assigned to {2}",
-                             channel.getRaw().ToString("X"),
-                             sound.getRaw().ToString("X"),
-                             Id),
-                        Helpers.LogLevel.Debug);
-#endif
-                        RegisterChannel(channel);
-
-                        FMODExec(channel.setVolume(volumeSetting * AllObjectVolume));
-
-                        // Take note of when the sound is finished playing.
-                        FMODExec(channel.setCallback(endCallback));
-
-                        // Set attenuation limits.
-                        FMODExec(sound.set3DMinMaxDistance(
-                            1.2f, // Any closer than this gets no louder
-                            100.0f)); // Further than this gets no softer.
-
-                        // Set the sound point of origin.  This is in SIM coordinates.
-                        FMODExec(channel.set3DAttributes(ref position, ref ZeroVector));
-
-                        // Turn off pause mode.  The sound will start playing now.
-                        FMODExec(channel.setPaused(false));
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Error("Error playing sound", ex);
-                    }
-                });
+                ProcessSoundData(data);
             }
-            else
+        }
+
+        /// <summary>
+        /// Process sound data (either from cache or freshly downloaded)
+        /// </summary>
+        private void ProcessSoundData(byte[] data)
+        {
+            if (data == null || data.Length == 0)
+                return;
+
+            // Describe the data to FMOD
+            extraInfo.length = (uint)data.Length;
+            extraInfo.cbsize = Marshal.SizeOf(extraInfo);
+
+            invoke(delegate
             {
-                Logger.Error($"Failed to download sound: {transfer.Status}");
-            }
+                try
+                {
+                    // Create an FMOD sound of this Ogg data.
+                    FMODExec(system.createSound(
+                        data,
+                        mode,
+                        ref extraInfo,
+                        out sound));
+
+                    // Register for callbacks.
+                    RegisterSound(sound);
+
+
+                    // If looping is requested, loop the entire thing.
+                    if (loopSound)
+                    {
+                        uint soundlen = 0;
+                        FMODExec(sound.getLength(out soundlen, TIMEUNIT.PCM));
+                        FMODExec(sound.setLoopPoints(0, TIMEUNIT.PCM, soundlen - 1, TIMEUNIT.PCM));
+                        FMODExec(sound.setLoopCount(-1));
+                    }
+
+                    // Allocate a channel and set initial volume.  Initially paused.
+                    ChannelGroup masterChannelGroup;
+                    system.getMasterChannelGroup(out masterChannelGroup);
+                    FMODExec(system.playSound(sound, masterChannelGroup, true, out channel));
+#if TRACE_SOUND
+                Logger.Log(
+                    String.Format("Channel {0} for {1} assigned to {2}",
+                         channel.getRaw().ToString("X"),
+                         sound.getRaw().ToString("X"),
+                         Id),
+                    Helpers.LogLevel.Debug);
+#endif
+                    RegisterChannel(channel);
+
+                    FMODExec(channel.setVolume(volumeSetting * AllObjectVolume));
+
+                    // Take note of when the sound is finished playing.
+                    FMODExec(channel.setCallback(endCallback));
+
+                    // Set attenuation limits.
+                    FMODExec(sound.set3DMinMaxDistance(
+                        1.2f, // Any closer than this gets no louder
+                        100.0f)); // Further than this gets no softer.
+
+                    // Set the sound point of origin.  This is in SIM coordinates.
+                    FMODExec(channel.set3DAttributes(ref position, ref ZeroVector));
+
+                    // Turn off pause mode.  The sound will start playing now.
+                    FMODExec(channel.setPaused(false));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error playing sound", ex);
+                }
+            });
         }
 
         /// <summary>
