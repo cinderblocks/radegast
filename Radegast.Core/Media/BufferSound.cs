@@ -130,12 +130,21 @@ namespace Radegast.Media
         /// </summary>
         public static void AdjustVolumes()
         {
+            AdjustVolumes(1.0f);
+        }
+
+        /// <summary>
+        /// Adjust volumes of all playing sounds with a multiplier (for master volume/mute)
+        /// </summary>
+        /// <param name="multiplier">Volume multiplier (0.0 to 1.0)</param>
+        public static void AdjustVolumes(float multiplier)
+        {
             // Make a list from the dictionary so we do not get a deadlock
             var list = new List<BufferSound>(allBuffers.Values);
 
             foreach (var s in list)
             {
-                s.AdjustVolume();
+                s.AdjustVolume(multiplier);
             }
         }
 
@@ -144,7 +153,15 @@ namespace Radegast.Media
         /// </summary>
         private void AdjustVolume()
         {
-            Volume = volumeSetting * AllObjectVolume;
+            AdjustVolume(1.0f);
+        }
+
+        /// <summary>
+        /// Adjust the volume of THIS sound with a multiplier
+        /// </summary>
+        private void AdjustVolume(float multiplier)
+        {
+            Volume = volumeSetting * AllObjectVolume * multiplier;
         }
 
         // A simpler constructor used by PreFetchSound.

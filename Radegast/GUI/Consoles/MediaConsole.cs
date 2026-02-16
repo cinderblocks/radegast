@@ -92,6 +92,11 @@ namespace Radegast
                 instance.MediaManager.UIVolume = (float)s["ui_audio_vol"].AsReal();
                 UIVolume.Value = (int)(50f * instance.MediaManager.UIVolume);
             }
+            if (s["master_volume"].Type != OSDType.Unknown)
+            {
+                instance.MediaManager.MasterVolume = (float)s["master_volume"].AsReal();
+                masterVolume.Value = (int)(100f * instance.MediaManager.MasterVolume);
+            }
 
             volAudioStream.Value = (int)(audioVolume * 50);
             instance.MediaManager.ObjectEnable = cbObjSoundEnable.Checked;
@@ -106,6 +111,9 @@ namespace Radegast
 
             // Initialize audio device controls
             InitializeAudioDeviceControls();
+
+            // Load audio profiles
+            PopulateAudioProfiles();
 
             // Subscribe to sound system availability changes
             instance.MediaManager.SoundSystemAvailableChanged += MediaManager_SoundSystemAvailableChanged;
@@ -131,11 +139,42 @@ namespace Radegast
             cbObjSoundEnable.CheckedChanged += cbObjEnableChanged;
 
             UIVolume.Scroll += UIVolume_Scroll;
+            masterVolume.Scroll += masterVolume_Scroll;
 
             // Network callbacks
             client.Parcels.ParcelProperties += Parcels_ParcelProperties;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
+        }
+
+        private void PopulateAudioProfiles()
+        {
+            cmbAudioProfile.Items.Clear();
+
+            // Add predefined profiles
+            foreach (var profile in Media.MediaManager.GetPredefinedProfiles())
+            {
+                cmbAudioProfile.Items.Add(profile);
+            }
+
+            // Add custom profiles from settings
+            if (s["audio_profiles"].Type == OSDType.Array)
+            {
+                var profilesArray = (OSDArray)s["audio_profiles"];
+                foreach (var profileOSD in profilesArray)
+                {
+                    var profile = Media.AudioProfile.FromOSD(profileOSD);
+                    if (profile != null)
+                    {
+                        cmbAudioProfile.Items.Add(profile);
+                    }
+                }
+            }
+
+            if (cmbAudioProfile.Items.Count > 0)
+            {
+                cmbAudioProfile.SelectedIndex = 0;
+            }
         }
 
         private void MediaManager_SoundSystemAvailableChanged(object sender, Media.SoundSystemAvailableEventArgs e)
@@ -383,6 +422,7 @@ namespace Radegast
             s["object_audio_vol"] = OSD.FromReal(instance.MediaManager.ObjectVolume);
             s["object_audio_enable"] = OSD.FromBoolean(cbObjSoundEnable.Checked);
             s["ui_audio_vol"] = OSD.FromReal(instance.MediaManager.UIVolume);
+            s["master_volume"] = OSD.FromReal(instance.MediaManager.MasterVolume);
             
             // Save selected audio driver
             if (cmbAudioDevice.SelectedIndex >= 0 && instance.MediaManager.SoundSystemAvailable)
@@ -458,6 +498,128 @@ namespace Radegast
         {
             instance.MediaManager.UIVolume = UIVolume.Value / 50f;
             configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
+        }
+
+        private void masterVolume_Scroll(object sender, EventArgs e)
+        {
+            instance.MediaManager.MasterVolume = masterVolume.Value / 100f;
+            UpdateMuteButtonText();
+            configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
+        }
+
+        private void btnMuteAll_Click(object sender, EventArgs e)
+        {
+            instance.MediaManager.MuteAll = !instance.MediaManager.MuteAll;
+            UpdateMuteButtonText();
+        }
+
+        private void UpdateMuteButtonText()
+        {
+            if (instance.MediaManager.MuteAll)
+            {
+                btnMuteAll.Text = "Unmute All";
+                masterVolume.Enabled = false;
+            }
+            else
+            {
+                btnMuteAll.Text = "Mute All";
+                masterVolume.Enabled = true;
+            }
+        }
+
+        private void btnLoadProfile_Click(object sender, EventArgs e)
+        {
+            if (cmbAudioProfile.SelectedItem is Media.AudioProfile profile)
+            {
+                try
+                {
+                    profile.ApplyTo(instance.MediaManager);
+
+                    // Update UI to reflect new values
+                    masterVolume.Value = (int)(profile.MasterVolume * 100);
+                    objVolume.Value = (int)(profile.ObjectVolume * 50);
+                    UIVolume.Value = (int)(profile.UIVolume * 50);
+                    volAudioStream.Value = (int)(profile.MusicVolume * 50);
+                    cbObjSoundEnable.Checked = profile.ObjectSoundsEnabled;
+
+                    Logger.Info($"Loaded audio profile: {profile.Name}");
+                    instance.ShowNotificationInChat($"Loaded audio profile: {profile.Name}", ChatBufferTextStyle.Normal);
+
+                    configTimer.Change(saveConfigTimeout, System.Threading.Timeout.Infinite);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Error loading profile: {profile.Name}", ex);
+                    MessageBox.Show(
+                        $"Error loading profile: {ex.Message}",
+                        "Profile Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void btnSaveProfile_Click(object sender, EventArgs e)
+        {
+            using (var inputForm = new Form())
+            {
+                inputForm.Text = "Save Audio Profile";
+                inputForm.Width = 300;
+                inputForm.Height = 120;
+                inputForm.FormBorderStyle = FormBorderStyle.FixedDialog;
+                inputForm.StartPosition = FormStartPosition.CenterParent;
+                inputForm.MaximizeBox = false;
+                inputForm.MinimizeBox = false;
+
+                var label = new Label { Left = 10, Top = 10, Text = "Profile Name:", Width = 270 };
+                var textBox = new TextBox { Left = 10, Top = 30, Width = 260, Text = "My Profile" };
+                var okButton = new Button { Text = "OK", Left = 110, Width = 70, Top = 60, DialogResult = DialogResult.OK };
+                var cancelButton = new Button { Text = "Cancel", Left = 190, Width = 70, Top = 60, DialogResult = DialogResult.Cancel };
+
+                inputForm.Controls.Add(label);
+                inputForm.Controls.Add(textBox);
+                inputForm.Controls.Add(okButton);
+                inputForm.Controls.Add(cancelButton);
+                inputForm.AcceptButton = okButton;
+                inputForm.CancelButton = cancelButton;
+
+                if (inputForm.ShowDialog() != DialogResult.OK || string.IsNullOrWhiteSpace(textBox.Text))
+                    return;
+
+                string profileName = textBox.Text;
+
+                try
+                {
+                    var profile = Media.AudioProfile.FromMediaManager(instance.MediaManager, profileName);
+                    profile.MusicVolume = volAudioStream.Value / 50f;
+
+                    // Add to combo box
+                    cmbAudioProfile.Items.Add(profile);
+                    cmbAudioProfile.SelectedItem = profile;
+
+                    // Save to settings
+                    var profilesArray = new OSDArray();
+                    if (s["audio_profiles"].Type == OSDType.Array)
+                    {
+                        profilesArray = (OSDArray)s["audio_profiles"];
+                    }
+
+                    profilesArray.Add(profile.ToOSD());
+                    s["audio_profiles"] = profilesArray;
+
+                    Logger.Info($"Saved audio profile: {profileName}");
+                    instance.ShowNotificationInChat($"Saved audio profile: {profileName}", ChatBufferTextStyle.Normal);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Error saving profile: {profileName}", ex);
+                    MessageBox.Show(
+                        $"Error saving profile: {ex.Message}",
+                        "Profile Error",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
         }
 
         private void cmbAudioDevice_SelectedIndexChanged(object sender, EventArgs e)

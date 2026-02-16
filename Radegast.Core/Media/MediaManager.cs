@@ -90,6 +90,125 @@ namespace Radegast.Media
         /// </summary>
         public AudioPerformanceStats PerformanceStats { get; } = new AudioPerformanceStats();
 
+        private float m_masterVolume = 1.0f;
+        /// <summary>
+        /// Master volume - affects all audio output (0.0 to 1.0)
+        /// </summary>
+        public float MasterVolume
+        {
+            get => m_masterVolume;
+            set
+            {
+                m_masterVolume = Math.Max(0.0f, Math.Min(1.0f, value));
+                UpdateAllVolumes();
+            }
+        }
+
+        private bool m_muteAll = false;
+        /// <summary>
+        /// Mute all audio output
+        /// </summary>
+        public bool MuteAll
+        {
+            get => m_muteAll;
+            set
+            {
+                m_muteAll = value;
+                UpdateAllVolumes();
+            }
+        }
+
+        /// <summary>
+        /// 3D audio distance model
+        /// </summary>
+        public DistanceModel CurrentDistanceModel { get; set; } = DistanceModel.Linear;
+
+        /// <summary>
+        /// Maximum distance for sound audibility (in meters)
+        /// </summary>
+        public float MaxSoundDistance { get; set; } = 100.0f;
+
+        /// <summary>
+        /// Rolloff factor for distance attenuation
+        /// </summary>
+        public float DistanceRolloff { get; set; } = 1.0f;
+
+        /// <summary>
+        /// Get predefined audio profiles
+        /// </summary>
+        public static List<AudioProfile> GetPredefinedProfiles()
+        {
+            return new List<AudioProfile>
+            {
+                new AudioProfile("Balanced")
+                {
+                    MasterVolume = 1.0f,
+                    ObjectVolume = 0.8f,
+                    UIVolume = 0.5f,
+                    MusicVolume = 0.5f,
+                    DistanceModel = DistanceModel.Linear,
+                    MaxDistance = 100.0f,
+                    Rolloff = 1.0f,
+                    ObjectSoundsEnabled = true
+                },
+                new AudioProfile("Headphones")
+                {
+                    MasterVolume = 0.7f,
+                    ObjectVolume = 0.6f,
+                    UIVolume = 0.4f,
+                    MusicVolume = 0.4f,
+                    DistanceModel = DistanceModel.Inverse,
+                    MaxDistance = 80.0f,
+                    Rolloff = 1.2f,
+                    ObjectSoundsEnabled = true
+                },
+                new AudioProfile("Speakers")
+                {
+                    MasterVolume = 1.0f,
+                    ObjectVolume = 0.9f,
+                    UIVolume = 0.6f,
+                    MusicVolume = 0.6f,
+                    DistanceModel = DistanceModel.Linear,
+                    MaxDistance = 120.0f,
+                    Rolloff = 0.8f,
+                    ObjectSoundsEnabled = true
+                },
+                new AudioProfile("Quiet Mode")
+                {
+                    MasterVolume = 0.3f,
+                    ObjectVolume = 0.2f,
+                    UIVolume = 0.3f,
+                    MusicVolume = 0.2f,
+                    DistanceModel = DistanceModel.Exponential,
+                    MaxDistance = 50.0f,
+                    Rolloff = 1.5f,
+                    ObjectSoundsEnabled = true
+                },
+                new AudioProfile("Music Focus")
+                {
+                    MasterVolume = 1.0f,
+                    ObjectVolume = 0.3f,
+                    UIVolume = 0.4f,
+                    MusicVolume = 0.8f,
+                    DistanceModel = DistanceModel.Exponential,
+                    MaxDistance = 60.0f,
+                    Rolloff = 1.5f,
+                    ObjectSoundsEnabled = true
+                },
+                new AudioProfile("Max Immersion")
+                {
+                    MasterVolume = 1.0f,
+                    ObjectVolume = 1.0f,
+                    UIVolume = 0.5f,
+                    MusicVolume = 0.7f,
+                    DistanceModel = DistanceModel.InverseSquare,
+                    MaxDistance = 150.0f,
+                    Rolloff = 1.0f,
+                    ObjectSoundsEnabled = true
+                }
+            };
+        }
+
         public MediaManager(IRadegastInstance instance)
         {
             Instance = instance;
@@ -395,7 +514,7 @@ namespace Radegast.Media
                 FMODExec(system.set3DSettings(
                     1.0f,   // Doppler scale
                     1.0f,   // Distance scale is meters
-                    1.0f)   // Rolloff factor
+                    DistanceRolloff)   // Rolloff factor
                 );
 
                 SoundSystemAvailable = true;
@@ -411,6 +530,23 @@ namespace Radegast.Media
                 
                 // Notify listeners that sound system failed to initialize
                 SoundSystemAvailableChanged?.Invoke(this, new SoundSystemAvailableEventArgs(false));
+            }
+        }
+
+        /// <summary>
+        /// Update all volume levels based on master volume and mute state
+        /// </summary>
+        private void UpdateAllVolumes()
+        {
+            if (MuteAll)
+            {
+                // Muted - set all to 0
+                BufferSound.AdjustVolumes(0);
+            }
+            else
+            {
+                // Apply master volume
+                BufferSound.AdjustVolumes(MasterVolume);
             }
         }
 
@@ -1050,6 +1186,125 @@ namespace Radegast.Media
                    $"CPU: {TotalUsage:F2}% (DSP: {DSPUsage:F2}%, Stream: {StreamUsage:F2}%), " +
                    $"{Stats}";
         }
+    }
+
+    /// <summary>
+    /// 3D audio distance attenuation models
+    /// </summary>
+    public enum DistanceModel
+    {
+        /// <summary>Linear rolloff (default)</summary>
+        Linear,
+        /// <summary>Inverse distance (realistic)</summary>
+        Inverse,
+        /// <summary>Inverse square (physics-based)</summary>
+        InverseSquare,
+        /// <summary>Exponential rolloff</summary>
+        Exponential,
+        /// <summary>No distance attenuation</summary>
+        None
+    }
+
+    /// <summary>
+    /// Audio profile for saving/loading audio configurations
+    /// </summary>
+    public class AudioProfile
+    {
+        public string Name { get; set; }
+        public float MasterVolume { get; set; } = 1.0f;
+        public float ObjectVolume { get; set; } = 0.8f;
+        public float UIVolume { get; set; } = 0.5f;
+        public float MusicVolume { get; set; } = 0.5f;
+        public int PreferredDriver { get; set; } = -1;
+        public DistanceModel DistanceModel { get; set; } = DistanceModel.Linear;
+        public float MaxDistance { get; set; } = 100.0f;
+        public float Rolloff { get; set; } = 1.0f;
+        public bool ObjectSoundsEnabled { get; set; } = true;
+
+        public AudioProfile() { }
+
+        public AudioProfile(string name)
+        {
+            Name = name;
+        }
+
+        /// <summary>
+        /// Apply this profile to a MediaManager
+        /// </summary>
+        public void ApplyTo(MediaManager manager)
+        {
+            manager.MasterVolume = MasterVolume;
+            manager.ObjectVolume = ObjectVolume;
+            manager.UIVolume = UIVolume;
+            manager.CurrentDistanceModel = DistanceModel;
+            manager.MaxSoundDistance = MaxDistance;
+            manager.DistanceRolloff = Rolloff;
+            manager.ObjectEnable = ObjectSoundsEnabled;
+        }
+
+        /// <summary>
+        /// Create a profile from current MediaManager settings
+        /// </summary>
+        public static AudioProfile FromMediaManager(MediaManager manager, string name)
+        {
+            return new AudioProfile
+            {
+                Name = name,
+                MasterVolume = manager.MasterVolume,
+                ObjectVolume = manager.ObjectVolume,
+                UIVolume = manager.UIVolume,
+                PreferredDriver = manager.SelectedDriver,
+                DistanceModel = manager.CurrentDistanceModel,
+                MaxDistance = manager.MaxSoundDistance,
+                Rolloff = manager.DistanceRolloff,
+                ObjectSoundsEnabled = manager.ObjectEnable
+            };
+        }
+
+        /// <summary>
+        /// Convert to OSD for storage
+        /// </summary>
+        public OSD ToOSD()
+        {
+            var map = new OSDMap
+            {
+                ["name"] = Name,
+                ["master_volume"] = MasterVolume,
+                ["object_volume"] = ObjectVolume,
+                ["ui_volume"] = UIVolume,
+                ["music_volume"] = MusicVolume,
+                ["preferred_driver"] = PreferredDriver,
+                ["distance_model"] = (int)DistanceModel,
+                ["max_distance"] = MaxDistance,
+                ["rolloff"] = Rolloff,
+                ["object_sounds_enabled"] = ObjectSoundsEnabled
+            };
+            return map;
+        }
+
+        /// <summary>
+        /// Create from OSD storage
+        /// </summary>
+        public static AudioProfile FromOSD(OSD osd)
+        {
+            if (!(osd is OSDMap map)) return null;
+
+            return new AudioProfile
+            {
+                Name = map["name"].AsString(),
+                MasterVolume = (float)map["master_volume"].AsReal(),
+                ObjectVolume = (float)map["object_volume"].AsReal(),
+                UIVolume = (float)map["ui_volume"].AsReal(),
+                MusicVolume = (float)map["music_volume"].AsReal(),
+                PreferredDriver = map["preferred_driver"].AsInteger(),
+                DistanceModel = (DistanceModel)map["distance_model"].AsInteger(),
+                MaxDistance = (float)map["max_distance"].AsReal(),
+                Rolloff = (float)map["rolloff"].AsReal(),
+                ObjectSoundsEnabled = map["object_sounds_enabled"].AsBoolean()
+            };
+        }
+
+        public override string ToString() => Name;
     }
 
     /// <summary>
