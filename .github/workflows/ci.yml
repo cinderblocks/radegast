@@ -26,6 +26,9 @@ jobs:
       - name: Setup DotNet
         uses: actions/setup-dotnet@v3
 
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Set TAG_VERSION
         shell: pwsh
         run: |
