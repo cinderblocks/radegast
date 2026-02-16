@@ -373,9 +373,9 @@ namespace Radegast
             {
                 Stop();
                 playing = true;
-                parcelStream = new Stream {Volume = audioVolume};
-                parcelStream.PlayStream(currentURL);
+                parcelStream = new Stream { Volume = audioVolume };
                 parcelStream.OnStreamInfo += ParcelMusic_OnStreamInfo;
+                parcelStream.PlayStream(currentURL);
             }
         }
 
