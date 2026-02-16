@@ -285,7 +285,7 @@ namespace Radegast
                 ? instance.Names.Get(e.SourceID, e.FromName)
                 : e.FromName;
 
-            bool isEmote = e.Message.StartsWith("/me ", StringComparison.OrdinalIgnoreCase);
+            bool isEmote = e.Message.StartsWith("/me ", StringComparison.OrdinalIgnoreCase) || e.Message.StartsWith("/me's ", StringComparison.OrdinalIgnoreCase);
 
             if (!isEmote)
             {

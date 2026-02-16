@@ -27,6 +27,7 @@ using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using System.Drawing.Text;
 using LibreMetaverse;
+using LibreMetaverse.RLV;
 using OpenMetaverse;
 
 namespace Radegast
@@ -515,6 +516,7 @@ namespace Radegast
 
         public void ProcessChatInput(string input, ChatType type)
         {
+            bool isEmote = false;
             if (string.IsNullOrEmpty(input)) return;
             chatHistory.Add(input);
             chatPointer = chatHistory.Count;
@@ -526,8 +528,11 @@ namespace Radegast
             if (instance.GlobalSettings["mu_emotes"].AsBoolean() && msg.StartsWith(":"))
             {
                 msg = "/me " + msg.Substring(1);
+                isEmote = true;
             }
-
+            else if (msg.StartsWith("/me",  StringComparison.OrdinalIgnoreCase))
+                isEmote = true;
+            
             int ch = 0;
             Match m = chatRegex.Match(msg);
 
@@ -546,6 +551,32 @@ namespace Radegast
                 #region RLV
                 if (instance.RLV.Enabled)
                 {
+                    RlvRestriction redir;
+                    if (isEmote)
+                    {
+                        if ((redir = instance.RLV.Restrictions.FindRestrictions("RedirEmote").FirstOrDefault()) != null)
+                        {
+                            int? channel = redir.Args.FirstOrDefault() as int?;
+                            if (channel.HasValue)
+                            {
+                                ch = channel.Value;
+
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if ((redir = instance.RLV.Restrictions.FindRestrictions("RedirChat").FirstOrDefault()) != null)
+                        {
+                            int? channel = redir.Args.FirstOrDefault() as int?;
+                            if (channel.HasValue)
+                            {
+                                ch = channel.Value;
+
+                            }
+                        }
+                    }
+
                     if ((type == ChatType.Normal || type == ChatType.Shout) && !instance.RLV.Permissions.CanChatNormal())
                     {
                         type = ChatType.Whisper;
