@@ -710,6 +710,7 @@ namespace Radegast
             try
             {
                 var perfInfo = instance.MediaManager.GetPerformanceInfo();
+                var cacheStats = instance.MediaManager.Cache.GetStatistics();
                 
                 string statsMessage = "=== Audio Performance Statistics ===\n\n" +
                     $"Sound System: {(perfInfo.SoundSystemAvailable ? "Available" : "Not Available")}\n" +
@@ -723,11 +724,17 @@ namespace Radegast
                     $"  Update: {perfInfo.UpdateUsage:F2}%\n" +
                     $"  Total: {perfInfo.TotalUsage:F2}%\n\n" +
                     $"Queue Statistics:\n" +
-                    $"  {perfInfo.Stats}";
+                    $"  {perfInfo.Stats}\n\n" +
+                    $"=== Sound Cache Statistics ===\n\n" +
+                    $"Cached Items: {cacheStats.ItemCount}\n" +
+                    $"Cache Size: {cacheStats.TotalSize / 1024}KB / {cacheStats.MaxSize / 1024}KB ({cacheStats.UsagePercent:F1}%)\n" +
+                    $"Cache Hits: {cacheStats.Hits}\n" +
+                    $"Cache Misses: {cacheStats.Misses}\n" +
+                    $"Hit Rate: {cacheStats.HitRate:F1}%";
 
                 MessageBox.Show(
                     statsMessage,
-                    "Audio Performance Statistics",
+                    "Audio Performance & Cache Statistics",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
             }
@@ -736,6 +743,36 @@ namespace Radegast
                 Logger.Warn("Error displaying audio stats", ex);
                 MessageBox.Show(
                     $"Error retrieving audio statistics: {ex.Message}",
+                    "Error",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnClearCache_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                var stats = instance.MediaManager.Cache.GetStatistics();
+                var result = MessageBox.Show(
+                    $"Clear {stats.ItemCount} cached items ({stats.TotalSize / 1024}KB)?\n\n" +
+                    "This will free memory but may cause slight delays when sounds play next time.",
+                    "Clear Sound Cache",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    instance.MediaManager.Cache.Clear();
+                    Logger.Info("Sound cache cleared by user");
+                    instance.ShowNotificationInChat("Sound cache cleared", ChatBufferTextStyle.Normal);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Error clearing cache", ex);
+                MessageBox.Show(
+                    $"Error clearing cache: {ex.Message}",
                     "Error",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);

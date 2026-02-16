@@ -25,6 +25,7 @@ using FMOD;
 using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
+using OpenMetaverse.Assets;
 using System.Threading.Tasks;
 
 namespace Radegast.Media
@@ -89,6 +90,11 @@ namespace Radegast.Media
         /// Performance statistics
         /// </summary>
         public AudioPerformanceStats PerformanceStats { get; } = new AudioPerformanceStats();
+
+        /// <summary>
+        /// Sound cache for preloading and caching audio assets
+        /// </summary>
+        public SoundCache Cache { get; private set; }
 
         private float m_masterVolume = 1.0f;
         /// <summary>
@@ -231,6 +237,9 @@ namespace Radegast.Media
 
             // Initialize the command queue.
             queue = new Queue<SoundDelegate>();
+
+            // Initialize sound cache
+            Cache = new SoundCache(Instance, 50 * 1024 * 1024); // 50MB default
 
             Instance.ClientChanged += Instance_ClientChanged;
 
@@ -520,6 +529,9 @@ namespace Radegast.Media
                 SoundSystemAvailable = true;
                 Logger.Info($"Initialized FMOD interface: {outputType}");
                 
+                // Preload UI sounds after initialization
+                Cache.PreloadUISounds();
+                
                 // Notify listeners that sound system is now available
                 SoundSystemAvailableChanged?.Invoke(this, new SoundSystemAvailableEventArgs(true));
             }
@@ -554,6 +566,9 @@ namespace Radegast.Media
         {
             if (Instance.Client != null)
                 UnregisterClientEvents(Instance.Client);
+
+            // Dispose cache
+            Cache?.Dispose();
 
             lock (sounds)
             {
@@ -1392,6 +1407,247 @@ namespace Radegast.Media
         public override string ToString()
         {
             return $"{Name} ({SampleRate}Hz, {Channels}ch)";
+        }
+    }
+
+    /// <summary>
+    /// Smart cache system for audio assets
+    /// </summary>
+    public class SoundCache : IDisposable
+    {
+        private readonly Dictionary<UUID, CachedSound> cache = new Dictionary<UUID, CachedSound>();
+        private readonly LinkedList<UUID> lruList = new LinkedList<UUID>();
+        private readonly object cacheLock = new object();
+        private long currentCacheSize = 0;
+        private readonly IRadegastInstance instance;
+
+        public long MaxCacheSize { get; set; }
+        public long CurrentCacheSize => currentCacheSize;
+        public int CachedItemCount => cache.Count;
+        public int CacheHits { get; private set; }
+        public int CacheMisses { get; private set; }
+        public bool EnablePersistentCache { get; set; } = true;
+
+        public SoundCache(IRadegastInstance instance, long maxSize)
+        {
+            this.instance = instance;
+            MaxCacheSize = maxSize;
+        }
+
+        /// <summary>
+        /// Get cached sound data, or null if not cached
+        /// </summary>
+        public byte[] Get(UUID soundId)
+        {
+            lock (cacheLock)
+            {
+                if (cache.TryGetValue(soundId, out var cached))
+                {
+                    // Update LRU - move to front
+                    lruList.Remove(cached.LruNode);
+                    cached.LruNode = lruList.AddFirst(soundId);
+                    cached.LastAccessed = DateTime.UtcNow;
+                    cached.AccessCount++;
+                    
+                    CacheHits++;
+                    Logger.Debug($"Cache HIT for sound {soundId}");
+                    return cached.Data;
+                }
+
+                CacheMisses++;
+                Logger.Debug($"Cache MISS for sound {soundId}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Add sound data to cache
+        /// </summary>
+        public void Add(UUID soundId, byte[] data)
+        {
+            if (data == null || data.Length == 0)
+                return;
+
+            lock (cacheLock)
+            {
+                // Check if already cached
+                if (cache.ContainsKey(soundId))
+                {
+                    Logger.Debug($"Sound {soundId} already in cache");
+                    return;
+                }
+
+                // Evict if necessary
+                while (currentCacheSize + data.Length > MaxCacheSize && lruList.Count > 0)
+                {
+                    EvictLRU();
+                }
+
+                // Add to cache
+                var cached = new CachedSound
+                {
+                    SoundId = soundId,
+                    Data = data,
+                    Size = data.Length,
+                    CachedTime = DateTime.UtcNow,
+                    LastAccessed = DateTime.UtcNow,
+                    LruNode = lruList.AddFirst(soundId)
+                };
+
+                cache[soundId] = cached;
+                currentCacheSize += data.Length;
+
+                Logger.Debug($"Cached sound {soundId}, size: {data.Length} bytes, total cache: {currentCacheSize}/{MaxCacheSize}");
+            }
+        }
+
+        /// <summary>
+        /// Preload commonly used UI sounds
+        /// </summary>
+        public void PreloadUISounds()
+        {
+            Logger.Info("Preloading UI sounds...");
+
+            var uiSounds = new[]
+            {
+                UISounds.Click,
+                UISounds.IM,
+                UISounds.IMWindow,
+                UISounds.Typing,
+                UISounds.MoneyIn,
+                UISounds.MoneyOut,
+                UISounds.Error,
+                UISounds.Alert,
+                UISounds.Snapshot
+            };
+
+            foreach (var soundId in uiSounds)
+            {
+                PreloadSound(soundId);
+            }
+        }
+
+        /// <summary>
+        /// Preload a specific sound
+        /// </summary>
+        public void PreloadSound(UUID soundId)
+        {
+            if (soundId == UUID.Zero)
+                return;
+
+            // Check if already cached
+            lock (cacheLock)
+            {
+                if (cache.ContainsKey(soundId))
+                    return;
+            }
+
+            // Request from asset system
+            instance.Client.Assets.RequestAsset(soundId, AssetType.Sound, false, (transfer, asset) =>
+            {
+                if (transfer.Success && asset is AssetSound soundAsset)
+                {
+                    Add(soundId, soundAsset.AssetData);
+                    Logger.Debug($"Preloaded sound {soundId}");
+                }
+            });
+        }
+
+        /// <summary>
+        /// Evict least recently used item
+        /// </summary>
+        private void EvictLRU()
+        {
+            if (lruList.Count == 0)
+                return;
+
+            var lruId = lruList.Last.Value;
+            lruList.RemoveLast();
+
+            if (cache.TryGetValue(lruId, out var cached))
+            {
+                currentCacheSize -= cached.Size;
+                cache.Remove(lruId);
+                Logger.Debug($"Evicted sound {lruId} from cache, freed {cached.Size} bytes");
+            }
+        }
+
+        /// <summary>
+        /// Clear all cached items
+        /// </summary>
+        public void Clear()
+        {
+            lock (cacheLock)
+            {
+                cache.Clear();
+                lruList.Clear();
+                currentCacheSize = 0;
+                CacheHits = 0;
+                CacheMisses = 0;
+                Logger.Info("Sound cache cleared");
+            }
+        }
+
+        /// <summary>
+        /// Get cache statistics
+        /// </summary>
+        public CacheStatistics GetStatistics()
+        {
+            lock (cacheLock)
+            {
+                var totalAccesses = CacheHits + CacheMisses;
+                var hitRate = totalAccesses > 0 ? (float)CacheHits / totalAccesses * 100f : 0f;
+
+                return new CacheStatistics
+                {
+                    ItemCount = cache.Count,
+                    TotalSize = currentCacheSize,
+                    MaxSize = MaxCacheSize,
+                    Hits = CacheHits,
+                    Misses = CacheMisses,
+                    HitRate = hitRate,
+                    UsagePercent = MaxCacheSize > 0 ? (float)currentCacheSize / MaxCacheSize * 100f : 0f
+                };
+            }
+        }
+
+        public void Dispose()
+        {
+            Clear();
+        }
+
+        /// <summary>
+        /// Cached sound data with metadata
+        /// </summary>
+        private class CachedSound
+        {
+            public UUID SoundId { get; set; }
+            public byte[] Data { get; set; }
+            public long Size { get; set; }
+            public DateTime CachedTime { get; set; }
+            public DateTime LastAccessed { get; set; }
+            public int AccessCount { get; set; }
+            public LinkedListNode<UUID> LruNode { get; set; }
+        }
+    }
+
+    /// <summary>
+    /// Cache statistics
+    /// </summary>
+    public class CacheStatistics
+    {
+        public int ItemCount { get; set; }
+        public long TotalSize { get; set; }
+        public long MaxSize { get; set; }
+        public int Hits { get; set; }
+        public int Misses { get; set; }
+        public float HitRate { get; set; }
+        public float UsagePercent { get; set; }
+
+        public override string ToString()
+        {
+            return $"Items: {ItemCount}, Size: {TotalSize / 1024}KB / {MaxSize / 1024}KB ({UsagePercent:F1}%), " +
+                   $"Hits: {Hits}, Misses: {Misses}, Hit Rate: {HitRate:F1}%";
         }
     }
 

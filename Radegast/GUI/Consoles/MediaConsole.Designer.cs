@@ -91,6 +91,7 @@ namespace Radegast
             this.cmbAudioDevice = new System.Windows.Forms.ComboBox();
             this.label3 = new System.Windows.Forms.Label();
             this.btnShowStats = new System.Windows.Forms.Button();
+            this.btnClearCache = new System.Windows.Forms.Button();
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).BeginInit();
             this.pnlParcelAudio.SuspendLayout();
             this.ObjSoundGroup.SuspendLayout();
@@ -382,6 +383,7 @@ namespace Radegast
             // AudioDeviceGroup
             // 
             this.AudioDeviceGroup.Controls.Add(this.lblAudioDeviceStatus);
+            this.AudioDeviceGroup.Controls.Add(this.btnClearCache);
             this.AudioDeviceGroup.Controls.Add(this.btnRetryInit);
             this.AudioDeviceGroup.Controls.Add(this.btnShowStats);
             this.AudioDeviceGroup.Controls.Add(this.btnRefreshDevices);
@@ -389,7 +391,7 @@ namespace Radegast
             this.AudioDeviceGroup.Controls.Add(this.label3);
             this.AudioDeviceGroup.Location = new System.Drawing.Point(4, 411);
             this.AudioDeviceGroup.Name = "AudioDeviceGroup";
-            this.AudioDeviceGroup.Size = new System.Drawing.Size(358, 85);
+            this.AudioDeviceGroup.Size = new System.Drawing.Size(358, 110);
             this.AudioDeviceGroup.TabIndex = 5;
             this.AudioDeviceGroup.TabStop = false;
             this.AudioDeviceGroup.Text = "Audio Device";
@@ -398,11 +400,22 @@ namespace Radegast
             // 
             this.lblAudioDeviceStatus.AutoSize = true;
             this.lblAudioDeviceStatus.ForeColor = System.Drawing.Color.Green;
-            this.lblAudioDeviceStatus.Location = new System.Drawing.Point(9, 62);
+            this.lblAudioDeviceStatus.Location = new System.Drawing.Point(9, 90);
             this.lblAudioDeviceStatus.Name = "lblAudioDeviceStatus";
             this.lblAudioDeviceStatus.Size = new System.Drawing.Size(99, 13);
             this.lblAudioDeviceStatus.TabIndex = 4;
             this.lblAudioDeviceStatus.Text = "Sound system ready";
+            // 
+            // btnClearCache
+            // 
+            this.btnClearCache.Location = new System.Drawing.Point(261, 62);
+            this.btnClearCache.Name = "btnClearCache";
+            this.btnClearCache.Size = new System.Drawing.Size(90, 23);
+            this.btnClearCache.TabIndex = 6;
+            this.btnClearCache.Text = "Clear Cache";
+            this.toolTip1.SetToolTip(this.btnClearCache, "Clear the audio cache");
+            this.btnClearCache.UseVisualStyleBackColor = true;
+            this.btnClearCache.Click += new System.EventHandler(this.btnClearCache_Click);
             // 
             // btnRetryInit
             // 
@@ -468,7 +481,7 @@ namespace Radegast
             this.Controls.Add(this.ObjSoundGroup);
             this.Controls.Add(this.pnlParcelAudio);
             this.Name = "MediaConsole";
-            this.Size = new System.Drawing.Size(368, 505);
+            this.Size = new System.Drawing.Size(368, 530);
             ((System.ComponentModel.ISupportInitialize)(this.volAudioStream)).EndInit();
             this.pnlParcelAudio.ResumeLayout(false);
             this.pnlParcelAudio.PerformLayout();
@@ -522,6 +535,7 @@ namespace Radegast
         private System.Windows.Forms.Button btnRefreshDevices;
         private System.Windows.Forms.Button btnRetryInit;
         private System.Windows.Forms.Button btnShowStats;
+        private System.Windows.Forms.Button btnClearCache;
         private System.Windows.Forms.Label lblAudioDeviceStatus;
 
     }
