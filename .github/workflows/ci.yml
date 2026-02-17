@@ -27,7 +27,12 @@ jobs:
         uses: actions/setup-dotnet@v3
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+        shell: pwsh
+        run: |
+          $msbuildPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
+          $msbuildDir = Split-Path $msbuildPath -Parent
+          echo "$msbuildDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Added MSBuild to PATH: $msbuildDir"
 
       - name: Set TAG_VERSION
         shell: pwsh
