@@ -51,6 +51,9 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore radegast.sln
 
+      - name: Restore for platform-specific build
+        run: msbuild radegast.sln /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+
       - name: Build solution
         run: msbuild radegast.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
