@@ -52,6 +52,20 @@ namespace Radegast
                 _recentIMHashes.TryRemove(k, out _);
         }
 
+        /// <summary>
+        /// Clears all duplicate detection caches. Called when disconnecting/reconnecting
+        /// to avoid stale state from previous sessions.
+        /// </summary>
+        public void ClearDuplicateCaches()
+        {
+            try
+            {
+                _recentChatHashes.Clear();
+                _recentIMHashes.Clear();
+            }
+            catch { }
+        }
+
         private bool IsDuplicateChat(ChatEventArgs e)
         {
             try
@@ -329,6 +343,7 @@ namespace Radegast
         private void Network_LoggedOut(object sender, LoggedOutEventArgs e)
         {
             IsLoggedIn = false;
+            ClearDuplicateCaches();
 
             if (CanSyncInvoke)
                 NetcomSync.BeginInvoke(new OnClientLogoutRaise(OnClientLoggedOut), EventArgs.Empty);
