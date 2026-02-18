@@ -36,6 +36,7 @@ namespace Radegast
         void SendInstantMessage(string message, UUID target, UUID session);
         void SendIMStartTyping(UUID target, UUID session);
         void SendIMStopTyping(UUID target, UUID session);
+        void ClearDuplicateCaches();
 
         event EventHandler<EventArgs> ClientConnected;
         event EventHandler<OverrideEventArgs> ClientLoggingIn;

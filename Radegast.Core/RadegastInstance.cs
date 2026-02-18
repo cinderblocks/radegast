@@ -397,8 +397,39 @@ namespace Radegast
             ShowNotificationInChat("Attempting to reconnect...", ChatBufferTextStyle.StatusDarkBlue);
             Logger.Info("Attempting to reconnect", Client);
             GridClient oldClient = Client;
+            
+            // Properly shutdown and dispose the old client before creating a new one
+            try
+            {
+                UnregisterClientEvents(oldClient);
+                
+                if (oldClient?.Network != null)
+                {
+                    try
+                    {
+                        oldClient.Network.Shutdown(NetworkManager.DisconnectType.ClientInitiated);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn("Failed to shutdown old client network", ex);
+                    }
+                }
+                
+                try
+                {
+                    oldClient?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn("Failed to dispose old client", ex);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to cleanup old client during reconnect", ex);
+            }
+            
             Client = new GridClient();
-            UnregisterClientEvents(oldClient);
             InitializeClient(Client);
             OnClientChanged(new ClientChangedEventArgs(oldClient, Client));
             NetCom.Login();
