@@ -851,7 +851,15 @@ namespace Radegast
             try
             {
                 QueuedFoldersNeedingUpdate.Clear();
-                TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+                if (Client?.Inventory?.Store?.RootNode != null)
+                {
+                    TraverseAndQueueNodes(Client.Inventory.Store.RootNode);
+                }
+                else
+                {
+                    Logger.Warn("Cannot fetch folders: Inventory.Store.RootNode is null or disposed.", Client);
+                    return;
+                }
 
                 while (!QueuedFoldersNeedingUpdate.IsEmpty)
                 {
@@ -891,6 +899,12 @@ namespace Radegast
             if (this.IsDisposed || this.Disposing)
             {
                 Logger.Debug("StartTraverseNodes aborted: control is disposing/disposed.", Client);
+                return;
+            }
+
+            if (Client?.Network?.CurrentSim == null)
+            {
+                Logger.Warn("Could not traverse inventory. Client or CurrentSim is null/disposed.", Client);
                 return;
             }
 
@@ -937,16 +951,19 @@ namespace Radegast
             UpdateWornLabels();
 
             // Update attachments now that we are done
-            foreach (var attachment in Client.Appearance.GetAttachments())
+            if (Client?.Appearance != null)
             {
-                if (Inventory.Contains(attachment))
+                foreach (var attachment in Client.Appearance.GetAttachments())
                 {
-                    UpdateNodeLabel(attachment.UUID);
-                }
-                else
-                {
-                    await Client.Inventory.RequestFetchInventoryAsync(attachment.UUID, Client.Self.AgentID, token);
-                    return;
+                    if (Inventory.Contains(attachment))
+                    {
+                        UpdateNodeLabel(attachment.UUID);
+                    }
+                    else
+                    {
+                        await Client.Inventory.RequestFetchInventoryAsync(attachment.UUID, Client.Self.AgentID, token);
+                        return;
+                    }
                 }
             }
 

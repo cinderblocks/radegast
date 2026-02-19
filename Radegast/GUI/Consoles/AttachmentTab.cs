@@ -52,6 +52,17 @@ namespace Radegast
 
         public void RefreshList()
         {
+            if (client?.Network?.CurrentSim == null)
+            {
+                var controlsToRemove = Controls.OfType<AttachmentDetail>().Cast<Control>().ToList();
+                foreach (var control in controlsToRemove)
+                {
+                    Controls.Remove(control);
+                    control.Dispose();
+                }
+                return;
+            }
+
             var attachments = (from p in client.Network.CurrentSim.ObjectsPrimitives
                 where p.Value != null
                 where p.Value.ParentID == av.LocalID

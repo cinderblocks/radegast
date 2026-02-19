@@ -64,7 +64,10 @@ namespace Radegast
 
             if (attachment.Properties == null)
             {
-                client.Objects.SelectObject(client.Network.CurrentSim, attachment.LocalID);
+                if (client?.Network?.CurrentSim != null)
+                {
+                    client.Objects.SelectObject(client.Network.CurrentSim, attachment.LocalID);
+                }
             }
             else
             {
@@ -94,12 +97,19 @@ namespace Radegast
             }
 
             // FIXME: Seems overkill
-            var parts = (from p in client.Network.CurrentSim.ObjectsPrimitives
-                where p.Value != null
-                where p.Value.LocalID == attachment.LocalID || p.Value.ParentID == attachment.LocalID
-                select p.Value).ToList();
+            if (client?.Network?.CurrentSim != null)
+            {
+                var parts = (from p in client.Network.CurrentSim.ObjectsPrimitives
+                    where p.Value != null
+                    where p.Value.LocalID == attachment.LocalID || p.Value.ParentID == attachment.LocalID
+                    select p.Value).ToList();
 
-            lblPrimCount.Text = $"Prims: {parts.Count}";
+                lblPrimCount.Text = $"Prims: {parts.Count}";
+            }
+            else
+            {
+                lblPrimCount.Text = "Prims: N/A";
+            }
         }
 
         private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
@@ -134,6 +144,13 @@ namespace Radegast
                 {
                     try
                     {
+                        if (client?.Network?.CurrentSim == null)
+                        {
+                            MessageBox.Show(mainWindow, "Not connected to a simulator.", "Saving failed", MessageBoxButtons.OK,
+                                MessageBoxIcon.Error);
+                            return;
+                        }
+
                         PrimSerializer s = new PrimSerializer(client);
                         string primsXmls =
                             s.GetSerializedAttachmentPrims(client.Network.CurrentSim, attachment.LocalID);
