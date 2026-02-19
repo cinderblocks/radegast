@@ -291,6 +291,8 @@ namespace Radegast.Media
             client.Objects.ObjectUpdate += Objects_ObjectUpdate;
             client.Objects.KillObject += Objects_KillObject;
             client.Network.SimChanged += Network_SimChanged;
+            client.Network.Disconnected += Network_Disconnected;
+            client.Network.LoggedOut += Network_LoggedOut;
             client.Self.ChatFromSimulator += Self_ChatFromSimulator;
         }
 
@@ -302,6 +304,8 @@ namespace Radegast.Media
             client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
             client.Objects.KillObject -= Objects_KillObject;
             client.Network.SimChanged -= Network_SimChanged;
+            client.Network.Disconnected -= Network_Disconnected;
+            client.Network.LoggedOut -= Network_LoggedOut;
             client.Self.ChatFromSimulator -= Self_ChatFromSimulator;
         }
 
@@ -975,6 +979,30 @@ namespace Radegast.Media
         {
             if (!SoundSystemAvailable) return;
             BufferSound.KillAll();
+        }
+
+        /// <summary>
+        /// Stop all sounds when disconnected from the grid
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void Network_Disconnected(object sender, DisconnectedEventArgs e)
+        {
+            if (!SoundSystemAvailable) return;
+            BufferSound.KillAll();
+            Logger.Debug("Stopped all sounds due to disconnection", Instance.Client);
+        }
+
+        /// <summary>
+        /// Stop all sounds when logged out
+        /// </summary>
+        /// <param name="sender"></param>
+        /// <param name="e"></param>
+        private void Network_LoggedOut(object sender, LoggedOutEventArgs e)
+        {
+            if (!SoundSystemAvailable) return;
+            BufferSound.KillAll();
+            Logger.Debug("Stopped all sounds due to logout", Instance.Client);
         }
 
         /// <summary>

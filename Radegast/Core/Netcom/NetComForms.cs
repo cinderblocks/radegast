@@ -32,7 +32,7 @@ namespace Radegast
     /// </summary>
     public partial class NetComForms : INetCom
     {
-        private readonly GridClient Client;
+        private GridClient Client;
 
         public bool AgreeToTos { get; set; } = false;
         public Grid Grid { get; private set; }
@@ -167,6 +167,7 @@ namespace Radegast
         public void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
+            Client = e.Client;
             RegisterClientEvents(Client);
         }
 
