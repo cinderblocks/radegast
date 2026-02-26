@@ -103,26 +103,7 @@ jobs:
             Write-Warning "Bundle installer not found at: $bundlePath"
           }
 
-      - name: Generate SHA256 checksums
-        shell: pwsh
-        run: |
-          $platform = "${{ matrix.platform }}"
-          $version = "${{ env.TAG_VERSION }}"
-          $artifactDir = "artifacts\$platform"
-
-          Write-Host "Generating SHA256 checksums for $platform..."
-          $checksumFile = "$artifactDir\SHA256SUMS.txt"
-          Remove-Item $checksumFile -ErrorAction SilentlyContinue
-
-          # Generate checksums for MSI and EXE
-          Get-ChildItem "$artifactDir" -Include *.msi,*.exe -File | ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)" | Out-File -Append -FilePath $checksumFile -Encoding utf8 -NoNewline
-            "`n" | Out-File -Append -FilePath $checksumFile -Encoding utf8 -NoNewline
-            Write-Host "$hash  $($_.Name)"
-          }
-
-          Write-Host "✓ Checksums saved to SHA256SUMS.txt"
+      
 
       - name: Generate NetSparkle Appcast
         shell: pwsh
@@ -192,16 +173,40 @@ jobs:
           $version = "${{ env.TAG_VERSION }}"
           $artifactDir = "artifacts\$platform"
 
-          # Create tar.gz of binaries
-          Write-Host "Creating Radegast_${platform}_${version}.tar.gz"
+          # Create tar.bz2 (tbz) of binaries (matching AppVeyor)
+          Write-Host "Creating Radegast_${platform}_${version}.tbz"
           Push-Location "$artifactDir"
-          & tar -czf "..\Radegast_${platform}_${version}.tar.gz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+          & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
           Pop-Location
 
           # Create zip of symbols
           if (Test-Path "$artifactDir\symbols") {
             Write-Host "Creating Radegast_${platform}_${version}_symbols.zip"
             Compress-Archive -Path "$artifactDir\symbols\*" -DestinationPath "artifacts\Radegast_${platform}_${version}_symbols.zip" -Force
+          }
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Write-Host "Generating SHA256 checksums for $platform..."
+          $checksumFile = "$artifactDir\SHA256SUMS.txt"
+          if (Test-Path $checksumFile) { Remove-Item $checksumFile -ErrorAction SilentlyContinue }
+
+          # Collect files to checksum (msi, exe, tbz)
+          $files = Get-ChildItem -Path $artifactDir -File | Where-Object { $_.Extension -in '.msi', '.exe', '.tbz' }
+          if ($files.Count -eq 0) {
+            Write-Warning "No MSI/EXE/TBZ files found to checksum in $artifactDir"
+          } else {
+            foreach ($f in $files) {
+              $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+              "${hash}  $($f.Name)" | Out-File -FilePath $checksumFile -Encoding utf8 -Append
+              Write-Host "$hash  $($f.Name)"
+            }
+            Write-Host "✓ Checksums saved to $checksumFile"
           }
 
       - name: Generate SBOM (Software Bill of Materials)
