@@ -77,22 +77,113 @@ jobs:
 
           # Copy main application binaries
           Write-Host "Copying application binaries..."
-          Copy-Item -Path "bin\Release\*" -Destination "$artifactDir\" -Recurse -Force -Exclude @("*.pdb", "*.xml", "*.vshost.*")
+          Copy-Item -Path "bin\ReleaseWindows\*" -Destination "$artifactDir\" -Recurse -Force -Exclude @("*.pdb", "*.xml", "*.vshost.*")
 
           # Collect PDB files separately for symbols package
           Write-Host "Collecting PDB files..."
           $pdbDir = "$artifactDir\symbols"
           New-Item -ItemType Directory -Path $pdbDir -Force | Out-Null
-          Get-ChildItem -Path "bin\Release" -Filter "*.pdb" -Recurse | Copy-Item -Destination $pdbDir -Force
+          Get-ChildItem -Path "bin\ReleaseWindows" -Filter "*.pdb" -Recurse | Copy-Item -Destination $pdbDir -Force
 
-          # Copy installer if it exists
-          $installerPath = "bin\Packages\RadegastSetup_$platform.msi"
-          if (Test-Path $installerPath) {
-            Write-Host "Copying installer: $installerPath"
-            Copy-Item -Path $installerPath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.msi" -Force
+          # Copy MSI installer if it exists (WiX outputs to en-US subdirectory)
+          $msiPath = "bin\Packages\en-US\RadegastSetup_$platform.msi"
+          if (Test-Path $msiPath) {
+            Write-Host "Copying MSI installer: $msiPath"
+            Copy-Item -Path $msiPath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.msi" -Force
           } else {
-            Write-Warning "Installer not found at: $installerPath"
+            Write-Warning "MSI installer not found at: $msiPath"
           }
+
+          # Copy Bundle exe if it exists
+          $bundlePath = "bin\Packages\RadegastBundle_$platform.exe"
+          if (Test-Path $bundlePath) {
+            Write-Host "Copying Bundle installer: $bundlePath"
+            Copy-Item -Path $bundlePath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.exe" -Force
+          } else {
+            Write-Warning "Bundle installer not found at: $bundlePath"
+          }
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Write-Host "Generating SHA256 checksums for $platform..."
+          $checksumFile = "$artifactDir\SHA256SUMS.txt"
+          Remove-Item $checksumFile -ErrorAction SilentlyContinue
+
+          # Generate checksums for MSI and EXE
+          Get-ChildItem "$artifactDir" -Include *.msi,*.exe -File | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)" | Out-File -Append -FilePath $checksumFile -Encoding utf8 -NoNewline
+            "`n" | Out-File -Append -FilePath $checksumFile -Encoding utf8 -NoNewline
+            Write-Host "$hash  $($_.Name)"
+          }
+
+          Write-Host "✓ Checksums saved to SHA256SUMS.txt"
+
+      - name: Generate NetSparkle Appcast
+        shell: pwsh
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          # Skip if SPARKLE_PRIVATE_KEY is not configured
+          if ([string]::IsNullOrEmpty($env:SPARKLE_PRIVATE_KEY)) {
+            Write-Host "NetSparkle private key not configured, skipping appcast generation"
+            exit 0
+          }
+
+          Write-Host "Generating NetSparkle appcast for $platform..."
+
+          # Install NetSparkle CLI tool
+          dotnet tool install --global NetSparkleUpdater.Tools.AppCastGenerator --version 2.0.0 2>$null
+
+          # Create temporary directory for appcast generation
+          $tempDir = "appcast_temp_$platform"
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+          # Copy MSI to temp directory for appcast generation
+          $msi = "$artifactDir\RadegastSetup_${platform}_${version}.msi"
+          if (Test-Path $msi) {
+            Copy-Item $msi -Destination $tempDir -Force
+
+            # Generate appcast (matching AppVeyor configuration)
+            try {
+              netsparkle-generate-appcast `
+                -n Radegast `
+                -e msi `
+                -a $tempDir `
+                --output-type json `
+                -o "windows-$platform" `
+                --file-version $version `
+                -u "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+              # Copy appcast files to artifacts
+              if (Test-Path "windows-$platform.json") {
+                Copy-Item "windows-$platform.json" "$artifactDir\appcast.json" -Force
+                Write-Host "✓ Generated appcast.json"
+              }
+              if (Test-Path "windows-$platform.json.signature") {
+                Copy-Item "windows-$platform.json.signature" "$artifactDir\appcast.json.signature" -Force
+                Write-Host "✓ Generated appcast.json.signature"
+              }
+            } catch {
+              Write-Warning "Failed to generate appcast: $_"
+              Write-Host "Continuing without appcast files..."
+            }
+          } else {
+            Write-Warning "MSI not found, skipping appcast generation"
+          }
+
+          # Cleanup temp directory
+          Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        continue-on-error: true
 
       - name: Create compressed archives
         shell: pwsh
@@ -193,7 +284,7 @@ jobs:
         with:
           name: radegast-${{ matrix.platform }}-${{ env.TAG_VERSION }}
           path: |
-            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tar.gz
+            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tbz
             artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols.zip
             artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
             artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
