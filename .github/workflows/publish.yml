@@ -47,8 +47,8 @@ jobs:
       - name: Restore NuGet packages
         shell: pwsh
         run: |
-          Write-Host "Restoring NuGet packages..."
-          nuget restore radegast.sln
+          Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
+          msbuild radegast.sln /t:Restore /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }}
 
       - name: Build solution
         shell: pwsh
