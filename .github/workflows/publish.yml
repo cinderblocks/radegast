@@ -174,9 +174,26 @@ jobs:
           $artifactDir = "artifacts\$platform"
 
           # Create tar.bz2 (tbz) of binaries (matching AppVeyor)
-          Write-Host "Creating Radegast_${platform}_${version}.tbz"
+          Write-Host "Creating Radegast_${platform}_${version}.tbz using 7z"
           Push-Location "$artifactDir"
-          & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+
+          # Use 7-Zip to create a tar stream and compress with bzip2 to avoid tar hangs on Windows
+          $tarName = "..\Radegast_${platform}_${version}.tar"
+          $tbzName = "..\Radegast_${platform}_${version}.tbz"
+
+          try {
+            & 7z a -ttar -so $tarName * -xr!symbols -xr!*.msi -xr!*.exe | & 7z a -si $tbzName -tbzip2 -mx=9
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Write-Warning "7z pipeline exited with code $code. Falling back to tar if available."
+              # Fallback: try native tar (may still fail on some runners)
+              & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+            }
+          } catch {
+            Write-Warning "7z pipeline failed: $_. Attempting native tar fallback."
+            & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+          }
+
           Pop-Location
 
           # Create zip of symbols
