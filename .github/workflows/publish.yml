@@ -304,7 +304,8 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: radegast-${{ matrix.platform }}-${{ env.TAG_VERSION }}
+          # Make artifact name unique per job/run to avoid 409 Conflict when multiple matrix jobs upload
+          name: radegast-${{ matrix.platform }}-${{ env.TAG_VERSION }}-${{ github.run_id }}
           path: |
             artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tbz
             artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols.zip
