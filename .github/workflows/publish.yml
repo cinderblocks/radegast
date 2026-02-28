@@ -432,6 +432,7 @@ jobs:
           }
 
       - name: Upload symbols to BugSplat
+        if: ${{ matrix.platform == 'x64' }}
         shell: pwsh
         env:
           BUGSPLAT_DATABASE: ${{ secrets.BUGSPLAT_DATABASE }}
