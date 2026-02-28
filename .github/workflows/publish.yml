@@ -501,6 +501,8 @@ jobs:
             exit 0
           }
 
+          # Collect per-platform upload results
+          $results = @()
           foreach ($zip in $zipFiles) {
             Write-Host "Processing $($zip.Name)"
             $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
@@ -509,7 +511,11 @@ jobs:
             New-Item -ItemType Directory -Path $temp | Out-Null
             Expand-Archive -Path $zip.FullName -DestinationPath $temp -Force
 
-            Write-Host "Uploading symbols for $platform from $temp"
+            $pdbCount = (Get-ChildItem -Path $temp -Filter "*.pdb" -Recurse -ErrorAction SilentlyContinue).Count
+
+            Write-Host "Uploading symbols for $platform from $temp (PDBs: $pdbCount)"
+            $status = 'unknown'
+            $message = ''
             try {
               $args = @(
                 '--database', $env:BUGSPLAT_DATABASE,
@@ -517,17 +523,46 @@ jobs:
                 '--version', "$($env:TAG_VERSION)-$platform",
                 '--directory', $temp,
                 '--clientId', $env:BUGSPLAT_CLIENT_ID,
-                '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET,
-                '--verbose'
+                '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET
               )
 
               $output = & symbol-upload @args 2>&1
-              Write-Host $output
-              if ($LASTEXITCODE -eq 0) { Write-Host "✓ Uploaded symbols for $platform" } else { Write-Warning "Upload exited with code $LASTEXITCODE for $platform" }
+              $message = $output -join "`n"
+              Write-Host $message
+              if ($LASTEXITCODE -eq 0) {
+                $status = 'success'
+                Write-Host "✓ Uploaded symbols for $platform"
+              } else {
+                $status = 'failed'
+                Write-Warning "Upload exited with code $LASTEXITCODE for $platform"
+              }
             } catch {
-              Write-Warning ([string]::Format("Exception uploading symbols for {0}: {1}", $platform, $_))
+              $status = 'error'
+              $message = $_.ToString()
+              Write-Warning ([string]::Format("Exception uploading symbols for {0}: {1}", $platform, $message))
+            }
+
+            $results += [pscustomobject]@{
+              Platform = $platform
+              Files = $pdbCount
+              Status = $status
+              ExitCode = $LASTEXITCODE
+              Message = $message
             }
           }
+
+          # Print summary
+          Write-Host "`n=== BugSplat Upload Summary ==="
+          $successCount = ($results | Where-Object { $_.Status -eq 'success' }).Count
+          $failedCount = ($results | Where-Object { $_.Status -ne 'success' }).Count
+          Write-Host "Successful uploads: $successCount"
+          Write-Host "Failed/Errored uploads: $failedCount"
+          foreach ($r in $results) {
+            Write-Host " - $($r.Platform): $($r.Status) ($($r.Files) PDBs)"
+            if ($r.Message) { Write-Host "   Message: $($r.Message)" }
+          }
+          # Ensure this step does not fail the workflow even if uploads had issues
+          exit 0
 
       - name: Generate release notes
         id: release_notes
