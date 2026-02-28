@@ -511,7 +511,21 @@ jobs:
             New-Item -ItemType Directory -Path $temp | Out-Null
             Expand-Archive -Path $zip.FullName -DestinationPath $temp -Force
 
+            # Remove any non-PDB files so symbol-upload only sees PDBs
+            Get-ChildItem -Path $temp -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.pdb' } | Remove-Item -Force -ErrorAction SilentlyContinue
+
             $pdbCount = (Get-ChildItem -Path $temp -Filter "*.pdb" -Recurse -ErrorAction SilentlyContinue).Count
+            if ($pdbCount -eq 0) {
+              Write-Host "No PDB files found for $platform, skipping upload"
+              $results += [pscustomobject]@{
+                Platform = $platform
+                Files = 0
+                Status = 'skipped'
+                ExitCode = 0
+                Message = 'No PDB files'
+              }
+              continue
+            }
 
             Write-Host "Uploading symbols for $platform from $temp (PDBs: $pdbCount)"
             $status = 'unknown'
@@ -635,12 +649,13 @@ jobs:
           name: Radegast ${{ env.TAG_VERSION }}
           tag_name: ${{ env.TAG }}
           body_path: release-notes.md
+          # include files in release-files and any nested directories
           files: |
-            release-files\*.exe
-            release-files\*.msi
-            release-files\*.tbz
-            release-files\*.zip
-            release-files\SHA256SUMS*.txt
+            release-files/**/*.exe
+            release-files/**/*.msi
+            release-files/**/*.tbz
+            release-files/**/*.zip
+            release-files/**/SHA256SUMS*.txt
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
