@@ -232,6 +232,7 @@ jobs:
           path: ./bin/ReleaseWindows
           format: spdx-json
           output-file: artifacts/${{ matrix.platform }}/sbom.spdx.json
+          upload-artifact: false
         continue-on-error: true
 
       - name: Verify all expected artifacts
@@ -431,72 +432,7 @@ jobs:
             echo "SYMBOLS_VALID=false" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           }
 
-      - name: Upload symbols to BugSplat
-        if: ${{ matrix.platform == 'x64' }}
-        shell: pwsh
-        env:
-          BUGSPLAT_DATABASE: ${{ secrets.BUGSPLAT_DATABASE }}
-          BUGSPLAT_CLIENT_ID: ${{ secrets.BUGSPLAT_CLIENT_ID }}
-          BUGSPLAT_CLIENT_SECRET: ${{ secrets.BUGSPLAT_CLIENT_SECRET }}
-        run: |
-          # Skip if BugSplat is not configured
-          if ([string]::IsNullOrEmpty($env:BUGSPLAT_DATABASE)) {
-            Write-Host "BugSplat not configured, skipping symbol upload"
-            exit 0
-          }
-
-          # Skip if symbols are not valid
-          if ($env:SYMBOLS_VALID -ne 'true' -and $env:SYMBOLS_VALID -ne 'partial') {
-            Write-Host "No valid symbols to upload (SYMBOLS_VALID=$env:SYMBOLS_VALID)"
-            exit 0
-          }
-
-          $platform = "${{ matrix.platform }}"
-          $version = "${{ env.TAG_VERSION }}"
-          $pdbDir = "artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols"
-
-          Write-Host "Installing BugSplat symbol upload tool..."
-          npm install -g @bugsplat/symbol-upload
-
-          Write-Host "`nUploading symbols to BugSplat..."
-          Write-Host "  Database: $env:BUGSPLAT_DATABASE"
-          Write-Host "  Application: Radegast"
-          Write-Host "  Version: $version-$platform"
-          Write-Host "  Directory: $pdbDir"
-
-          try {
-            $uploadResult = symbol-upload `
-              --database "$env:BUGSPLAT_DATABASE" `
-              --application "Radegast" `
-              --version "$version-$platform" `
-              --directory "$pdbDir" `
-              --clientId "$env:BUGSPLAT_CLIENT_ID" `
-              --clientSecret "$env:BUGSPLAT_CLIENT_SECRET" `
-              --verbose 2>&1
-
-            Write-Host $uploadResult
-
-            # Check if upload was successful
-            if ($LASTEXITCODE -eq 0) {
-              Write-Host "`n✓ Successfully uploaded symbols for $platform"
-
-              # Count uploaded files
-              $pdbCount = (Get-ChildItem -Path $pdbDir -Filter "*.pdb" -Recurse).Count
-              Write-Host "  Uploaded $pdbCount PDB file(s)"
-
-              # Provide BugSplat dashboard link
-              Write-Host "`n📊 View symbols in BugSplat:"
-              Write-Host "   https://app.bugsplat.com/$env:BUGSPLAT_DATABASE/symbols"
-            } else {
-              Write-Warning "Symbol upload may have failed (exit code: $LASTEXITCODE)"
-              Write-Warning "Check BugSplat dashboard to verify: https://app.bugsplat.com/$env:BUGSPLAT_DATABASE/symbols"
-            }
-          }
-          catch {
-            Write-Warning "Failed to upload symbols: $_"
-            Write-Host "Continuing workflow despite symbol upload failure..."
-            exit 0  # Don't fail the build
-          }
+      # (Symbol upload moved to release job)
 
   release:
     name: Create Release
@@ -541,6 +477,51 @@ jobs:
           Write-Host "`nFinal release files:"
           Get-ChildItem -Path "release-files" | ForEach-Object {
             Write-Host "  - $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)"
+          }
+
+      - name: Upload symbols to BugSplat (centralized)
+        shell: pwsh
+        continue-on-error: true
+        env:
+          BUGSPLAT_DATABASE: ${{ secrets.BUGSPLAT_DATABASE }}
+          BUGSPLAT_CLIENT_ID: ${{ secrets.BUGSPLAT_CLIENT_ID }}
+          BUGSPLAT_CLIENT_SECRET: ${{ secrets.BUGSPLAT_CLIENT_SECRET }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:BUGSPLAT_DATABASE)) {
+            Write-Host "BugSplat not configured, skipping centralized symbol upload"
+            exit 0
+          }
+
+          Write-Host "Installing BugSplat symbol upload tool..."
+          npm install -g @bugsplat/symbol-upload
+
+          $zipFiles = Get-ChildItem -Path "release-files" -Filter "*_symbols.zip" -File -ErrorAction SilentlyContinue
+          if (-not $zipFiles -or $zipFiles.Count -eq 0) {
+            Write-Host "No symbol zip files found in release-files, skipping upload"
+            exit 0
+          }
+
+          foreach ($zip in $zipFiles) {
+            Write-Host "Processing $($zip.Name)"
+            $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
+            $temp = Join-Path $env:TEMP ("symbols_" + $platform)
+            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $temp | Out-Null
+            Expand-Archive -Path $zip.FullName -DestinationPath $temp -Force
+
+            Write-Host "Uploading symbols for $platform from $temp"
+            try {
+              & symbol-upload \
+                --database "$env:BUGSPLAT_DATABASE" \
+                --application "Radegast" \
+                --version "$env:TAG_VERSION-$platform" \
+                --directory "$temp" \
+                --clientId "$env:BUGSPLAT_CLIENT_ID" \
+                --clientSecret "$env:BUGSPLAT_CLIENT_SECRET" --verbose 2>&1 | Write-Host
+              if ($LASTEXITCODE -eq 0) { Write-Host "✓ Uploaded symbols for $platform" } else { Write-Warning "Upload exited with code $LASTEXITCODE for $platform" }
+            } catch {
+              Write-Warning "Exception uploading symbols for $platform: $_"
+            }
           }
 
       - name: Generate release notes
