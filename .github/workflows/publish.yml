@@ -511,16 +511,21 @@ jobs:
 
             Write-Host "Uploading symbols for $platform from $temp"
             try {
-              & symbol-upload \
-                --database "$env:BUGSPLAT_DATABASE" \
-                --application "Radegast" \
-                --version "$env:TAG_VERSION-$platform" \
-                --directory "$temp" \
-                --clientId "$env:BUGSPLAT_CLIENT_ID" \
-                --clientSecret "$env:BUGSPLAT_CLIENT_SECRET" --verbose 2>&1 | Write-Host
+              $args = @(
+                '--database', $env:BUGSPLAT_DATABASE,
+                '--application', 'Radegast',
+                '--version', "$($env:TAG_VERSION)-$platform",
+                '--directory', $temp,
+                '--clientId', $env:BUGSPLAT_CLIENT_ID,
+                '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET,
+                '--verbose'
+              )
+
+              $output = & symbol-upload @args 2>&1
+              Write-Host $output
               if ($LASTEXITCODE -eq 0) { Write-Host "✓ Uploaded symbols for $platform" } else { Write-Warning "Upload exited with code $LASTEXITCODE for $platform" }
             } catch {
-              Write-Warning "Exception uploading symbols for $platform: $_"
+              Write-Warning ([string]::Format("Exception uploading symbols for {0}: {1}", $platform, $_))
             }
           }
 
