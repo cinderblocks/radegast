@@ -536,6 +536,7 @@ jobs:
                 '--application', 'Radegast',
                 '--version', "$($env:TAG_VERSION)-$platform",
                 '--directory', $temp,
+                '--files', '*.pdb',
                 '--clientId', $env:BUGSPLAT_CLIENT_ID,
                 '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET
               )
