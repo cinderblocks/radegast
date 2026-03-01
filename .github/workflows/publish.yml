@@ -495,6 +495,44 @@ jobs:
           Write-Host "Installing BugSplat symbol upload tool..."
           npm install -g @bugsplat/symbol-upload
 
+          # Enable debug logs for the uploader and capture help output for diagnosis
+          $env:DEBUG = '@bugsplat/symbol-upload:*'
+          New-Item -ItemType Directory -Path "release-files" -Force | Out-Null
+          Write-Host "Dumping symbol-upload --help to release-files/symbol-upload-help.txt"
+          & symbol-upload --help 2>&1 | Out-File -FilePath "release-files\symbol-upload-help.txt" -Encoding utf8
+
+          # Run a quick single-file diagnostic upload using the first symbols zip (if present)
+          if ($zipFiles -and $zipFiles.Count -gt 0) {
+            Write-Host "Preparing diagnostic upload from first symbols zip: $($zipFiles[0].Name)"
+            $tempTest = Join-Path $env:TEMP "symbols_test"
+            Remove-Item $tempTest -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $tempTest | Out-Null
+            Expand-Archive -Path $zipFiles[0].FullName -DestinationPath $tempTest -Force
+            $diagPdb = Get-ChildItem -Path $tempTest -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($diagPdb) {
+              $diagOut = "release-files\symbol-upload-test-$($diagPdb.BaseName).txt"
+              Write-Host "Running diagnostic single-file upload for $($diagPdb.Name) -> $diagOut"
+              $testArgs = @(
+                '--database', $env:BUGSPLAT_DATABASE,
+                '--application', 'Radegast',
+                '--version', "$($env:TAG_VERSION)-diagnostic",
+                '--directory', $tempTest,
+                '--files', $diagPdb.Name,
+                '--clientId', $env:BUGSPLAT_CLIENT_ID,
+                '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET
+              )
+              $testOutput = & symbol-upload @testArgs 2>&1
+              $testOutput | Out-File -FilePath $diagOut -Encoding utf8
+              Write-Host "Diagnostic upload finished; output saved to $diagOut"
+            } else {
+              Write-Host "No PDB found inside first symbols zip; skipping diagnostic single-file upload"
+            }
+            # Cleanup test temp
+            Remove-Item $tempTest -Recurse -Force -ErrorAction SilentlyContinue
+          } else {
+            Write-Host "No symbol zips found for diagnostic upload"
+          }
+
           $zipFiles = Get-ChildItem -Path "release-files" -Filter "*_symbols.zip" -File -ErrorAction SilentlyContinue
           if (-not $zipFiles -or $zipFiles.Count -eq 0) {
             Write-Host "No symbol zip files found in release-files, skipping upload"
@@ -578,6 +616,15 @@ jobs:
           }
           # Ensure this step does not fail the workflow even if uploads had issues
           exit 0
+
+      - name: Upload symbol-upload debug logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbol-upload-debug-logs
+          path: |
+            release-files/symbol-upload-help.txt
+            release-files/symbol-upload-test-*.txt
+          if-no-files-found: warn
 
       - name: Generate release notes
         id: release_notes
