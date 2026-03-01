@@ -12,7 +12,8 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <Exclude Files="$(var.Radegast.TargetDir)netstandard2.0\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)obj\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)**\*.xml"/>
-        <Exclude Files="$(var.Radegast.TargetDir)**\*.config"/>
+        <!-- Keep *.exe.config - required by .NET Framework 4.8 for runtime init and binding redirects -->
+        <Exclude Files="$(var.Radegast.TargetDir)**\*.vshost.exe.config"/>
         <!-- Exclude version control and project files -->
         <Exclude Files="$(var.Radegast.TargetDir)**\.git*"/>
         <Exclude Files="$(var.Radegast.TargetDir)**\*.csproj"/>
