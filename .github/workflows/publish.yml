@@ -492,106 +492,111 @@ jobs:
             exit 0
           }
 
-          Write-Host "Installing BugSplat symbol upload tool..."
-          npm install -g @bugsplat/symbol-upload
-
           $zipFiles = Get-ChildItem -Path "release-files" -Filter "*_symbols.zip" -File -ErrorAction SilentlyContinue
           if (-not $zipFiles -or $zipFiles.Count -eq 0) {
             Write-Host "No symbol zip files found in release-files, skipping upload"
             exit 0
           }
 
+          # Authenticate via OAuth2 client credentials (same endpoint the CLI tool uses)
+          Write-Host "Authenticating with BugSplat..."
+          # Request client credentials token. Do not request an explicit scope (some OAuth implementations reject unknown scopes).
+          $authBody = "grant_type=client_credentials&client_id=$($env:BUGSPLAT_CLIENT_ID)&client_secret=$($env:BUGSPLAT_CLIENT_SECRET)"
+          try {
+            # Use the token endpoint. The CLI used a similar flow; /token is the standard OAuth2 token endpoint.
+            $authResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/oauth2/token" -Method Post -ContentType "application/x-www-form-urlencoded" -Body $authBody
+          } catch {
+            Write-Warning "BugSplat authentication failed: $_"
+            exit 0
+          }
+
+          # Support different response shapes (access_token or token.access_token)
+          $token = $null
+          if ($authResponse -and $authResponse.access_token) { $token = $authResponse.access_token }
+          elseif ($authResponse -and $authResponse.token -and $authResponse.token.access_token) { $token = $authResponse.token.access_token }
+          if ([string]::IsNullOrEmpty($token)) {
+            Write-Warning "BugSplat authentication returned no access token. Response: $($authResponse | ConvertTo-Json -Depth 4)"
+            exit 0
+          }
+          Write-Host "Authentication success!"
+          $headers = @{ Authorization = "Bearer $token" }
+
           # Collect per-platform upload results
           $results = @()
           foreach ($zip in $zipFiles) {
-            Write-Host "Processing $($zip.Name)"
+            Write-Host "`nProcessing $($zip.Name)"
             $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
             $temp = Join-Path $env:TEMP ("symbols_" + $platform)
             Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
             New-Item -ItemType Directory -Path $temp | Out-Null
-
-            # Extract PDBs from symbols zip
             Expand-Archive -Path $zip.FullName -DestinationPath $temp -Force
 
-            # Extract matching binaries from the tbz archive so the uploader
-            # can read the CodeView GUID from the PE headers
-            $tbz = Get-ChildItem -Path "release-files" -Filter "Radegast_${platform}_${{ env.TAG_VERSION }}.tbz" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($tbz) {
-              Write-Host "Extracting binaries from $($tbz.Name) alongside PDBs..."
-              $tarPath = Join-Path $env:TEMP ("binaries_${platform}.tar")
-              # Decompress bzip2 -> tar, then extract exe/dll into the same temp dir
-              & 7z e $tbz.FullName -so 2>$null | & 7z x -si -ttar -o"$temp" "*.exe" "*.dll" -y 2>$null
-              if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Could not extract binaries from tbz for $platform (7z exit $LASTEXITCODE)"
-              }
-            } else {
-              Write-Warning "No tbz archive found for $platform; uploading PDBs only (GUID extraction may fail)"
-            }
-
-            $pdbCount = (Get-ChildItem -Path $temp -Filter "*.pdb" -Recurse -ErrorAction SilentlyContinue).Count
-            if ($pdbCount -eq 0) {
-              Write-Host "No PDB files found for $platform, skipping upload"
-              $results += [pscustomobject]@{
-                Platform = $platform
-                Files = 0
-                Status = 'skipped'
-                ExitCode = 0
-                Message = 'No PDB files'
-              }
+            $pdbFiles = Get-ChildItem -Path $temp -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue
+            if (-not $pdbFiles -or $pdbFiles.Count -eq 0) {
+              Write-Host "No PDB files found for $platform, skipping"
+              $results += [pscustomobject]@{ Platform = $platform; Files = 0; Status = 'skipped'; Message = 'No PDB files' }
               continue
             }
 
-            $fileCount = (Get-ChildItem -Path $temp -Recurse -File -ErrorAction SilentlyContinue).Count
-            Write-Host "Uploading symbols for $platform from $temp (PDBs: $pdbCount, total files: $fileCount)"
-            $status = 'unknown'
-            $message = ''
-            try {
-              $uploadArgs = @(
-                '--database', $env:BUGSPLAT_DATABASE,
-                '--application', 'Radegast',
-                '--version', "$($env:TAG_VERSION)-$platform",
-                '--directory', $temp,
-                '--files', '**/*.{pdb,exe,dll}',
-                '--clientId', $env:BUGSPLAT_CLIENT_ID,
-                '--clientSecret', $env:BUGSPLAT_CLIENT_SECRET
-              )
+            $appVersion = "$($env:TAG_VERSION)-$platform"
+            $uploaded = 0
+            $failed = 0
 
-              $output = & symbol-upload @uploadArgs 2>&1
-              $message = $output -join "`n"
-              Write-Host $message
-              if ($LASTEXITCODE -eq 0) {
-                $status = 'success'
-                Write-Host "Uploaded symbols for $platform"
-              } else {
-                $status = 'failed'
-                Write-Warning "Upload exited with code $LASTEXITCODE for $platform"
+            foreach ($pdb in $pdbFiles) {
+              Write-Host "  Uploading $($pdb.Name)..."
+
+              # Step 1: Request a presigned upload URL from BugSplat
+              try {
+                $versionResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/api/versions" -Method Post -Headers $headers -Form @{
+                  database  = $env:BUGSPLAT_DATABASE
+                  appName   = 'Radegast'
+                  appVersion = $appVersion
+                }
+              } catch {
+                Write-Warning "    Failed to create version for $($pdb.Name): $_"
+                $failed++
+                continue
               }
-            } catch {
-              $status = 'error'
-              $message = $_.ToString()
-              Write-Warning ([string]::Format("Exception uploading symbols for {0}: {1}", $platform, $message))
+
+              $uploadUrl = $versionResponse.url
+              if ([string]::IsNullOrEmpty($uploadUrl)) {
+                Write-Warning "    No upload URL returned for $($pdb.Name). Response: $($versionResponse | ConvertTo-Json -Depth 3 -Compress)"
+                $failed++
+                continue
+              }
+
+              # Step 2: Upload the PDB to the presigned URL
+              try {
+                Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers $headers -Form @{
+                  size    = $pdb.Length.ToString()
+                  symFile = $pdb
+                }
+                Write-Host "    Uploaded $($pdb.Name)"
+                $uploaded++
+              } catch {
+                Write-Warning "    Failed to upload $($pdb.Name): $_"
+                $failed++
+              }
             }
 
+            $status = if ($failed -eq 0) { 'success' } elseif ($uploaded -gt 0) { 'partial' } else { 'failed' }
             $results += [pscustomobject]@{
               Platform = $platform
-              Files = $pdbCount
-              Status = $status
-              ExitCode = $LASTEXITCODE
-              Message = $message
+              Files    = $pdbFiles.Count
+              Status   = $status
+              Message  = "Uploaded $uploaded, failed $failed"
             }
           }
 
           # Print summary
           Write-Host "`n=== BugSplat Upload Summary ==="
           $successCount = ($results | Where-Object { $_.Status -eq 'success' }).Count
-          $failedCount = ($results | Where-Object { $_.Status -ne 'success' }).Count
-          Write-Host "Successful uploads: $successCount"
-          Write-Host "Failed/Errored uploads: $failedCount"
+          $failedCount  = ($results | Where-Object { $_.Status -notin 'success','skipped' }).Count
+          Write-Host "Successful platforms: $successCount"
+          Write-Host "Failed/Partial platforms: $failedCount"
           foreach ($r in $results) {
-            Write-Host " - $($r.Platform): $($r.Status) ($($r.Files) PDBs)"
-            if ($r.Message) { Write-Host "   Message: $($r.Message)" }
+            Write-Host " - $($r.Platform): $($r.Status) ($($r.Files) PDBs) - $($r.Message)"
           }
-          # Ensure this step does not fail the workflow even if uploads had issues
           exit 0
 
       - name: Generate release notes
