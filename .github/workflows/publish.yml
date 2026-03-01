@@ -500,11 +500,11 @@ jobs:
 
           # Authenticate via OAuth2 client credentials (same endpoint the CLI tool uses)
           Write-Host "Authenticating with BugSplat..."
-          # Request client credentials token. Do not request an explicit scope (some OAuth implementations reject unknown scopes).
-          $authBody = "grant_type=client_credentials&client_id=$($env:BUGSPLAT_CLIENT_ID)&client_secret=$($env:BUGSPLAT_CLIENT_SECRET)"
+          # Request client credentials token using HTTP Basic auth (some token endpoints require Basic auth)
+          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($env:BUGSPLAT_CLIENT_ID):$($env:BUGSPLAT_CLIENT_SECRET)"))
+          $authHeaders = @{ Authorization = "Basic $basic"; 'Content-Type' = 'application/x-www-form-urlencoded' }
           try {
-            # Use the token endpoint. The CLI used a similar flow; /token is the standard OAuth2 token endpoint.
-            $authResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/oauth2/token" -Method Post -ContentType "application/x-www-form-urlencoded" -Body $authBody
+            $authResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/oauth2/token" -Method Post -Headers $authHeaders -Body "grant_type=client_credentials"
           } catch {
             Write-Warning "BugSplat authentication failed: $_"
             exit 0
