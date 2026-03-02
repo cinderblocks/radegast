@@ -498,36 +498,37 @@ jobs:
             exit 0
           }
 
-          # Use curl.exe (built into Windows 2022) for all BugSplat HTTP calls.
-          # Reason: PowerShell's Invoke-RestMethod consistently returns an empty body from the
-          # BugSplat token endpoint regardless of how the body is encoded.  curl.exe uses the
-          # same libcurl as Node.js and handles --data-urlencode (proper percent-encoding of
-          # OAuth secrets containing +, =, /) and automatic cookie capture identically to the
-          # @bugsplat/symbol-upload CLI that successfully authenticates in this environment.
-          $cookieFile = Join-Path $env:TEMP "bugsplat_cookies.txt"
-          Remove-Item $cookieFile -ErrorAction SilentlyContinue
+          # PowerShell Invoke-RestMethod and curl.exe both receive an empty 200 body from the
+          # BugSplat token endpoint.  The @bugsplat/symbol-upload CLI uses Node.js and succeeds.
+          # Root cause: Node.js's https module sends HTTP/2 (or has different TLS/ALPN behaviour)
+          # which triggers the correct JSON response.  The script uses only built-in modules.
+          Write-Host "Authenticating with BugSplat via Node.js..."
+          $authErr = Join-Path $env:TEMP "bugsplat-auth.err.txt"
+          Remove-Item $authErr -ErrorAction SilentlyContinue
+          $tokenRaw = (& node ".github/scripts/bugsplat-auth.js" 2> $authErr | Out-String).Trim()
+          if (Test-Path $authErr) {
+            $authErrText = Get-Content $authErr -Raw
+            if (-not [string]::IsNullOrWhiteSpace($authErrText)) {
+              Write-Warning "BugSplat auth stderr: $authErrText"
+            }
+            Remove-Item $authErr -ErrorAction SilentlyContinue
+          }
 
-          Write-Host "Authenticating with BugSplat..."
-          $tokenRaw = & curl.exe --silent --show-error `
-              --cookie-jar $cookieFile `
-              --request POST "https://app.bugsplat.com/oauth2/token" `
-              --data-urlencode "grant_type=client_credentials" `
-              --data-urlencode "client_id=$($env:BUGSPLAT_CLIENT_ID)" `
-              --data-urlencode "client_secret=$($env:BUGSPLAT_CLIENT_SECRET)" `
-              2>&1
           Write-Host "Token response: $tokenRaw"
-
           $tokenObj = $null
           try { $tokenObj = $tokenRaw | ConvertFrom-Json -ErrorAction Stop } catch {}
-          $token = $tokenObj?.access_token
+          $token = $null
+          if ($tokenObj -and ($tokenObj.PSObject.Properties.Name -contains 'access_token')) {
+            $token = [string]$tokenObj.access_token
+          } elseif ($tokenRaw -match '"access_token"\s*:\s*"([^"]+)"') {
+            $token = $matches[1]
+          }
 
           if ([string]::IsNullOrEmpty($token)) {
-            # BugSplat may use a session cookie instead of returning a bearer token in the body.
-            # If --cookie-jar captured a session cookie above, subsequent calls will use it.
-            Write-Warning "No access_token in token response body — will rely on session cookie for API calls"
-          } else {
-            Write-Host "Authentication success! (Bearer token obtained)"
+            Write-Warning "No access_token received — cannot upload symbols"
+            exit 0
           }
+          Write-Host "Authentication success!"
 
           $results = @()
           foreach ($zip in $zipFiles) {
@@ -553,49 +554,46 @@ jobs:
             foreach ($pdb in $pdbFiles) {
               Write-Host "  Uploading $($pdb.Name)..."
 
-              # Step 1: get presigned S3 URL.
-              # Write JSON to a temp file so no shell-escaping issues with the body.
-              $bodyFile = Join-Path $env:TEMP "bugsplat_body.json"
-              [ordered]@{ database = $env:BUGSPLAT_DATABASE; appName = 'Radegast'; appVersion = $appVersion } |
-                ConvertTo-Json | Set-Content $bodyFile -Encoding UTF8
-
-              $curlVersionArgs = @(
+              $versionsArgs = @(
                 '--silent', '--show-error',
-                '--cookie', $cookieFile,
-                '--cookie-jar', $cookieFile,
                 '--request', 'POST', 'https://app.bugsplat.com/api/versions',
-                '--header', 'Content-Type: application/json',
-                '--data', "@$bodyFile"
+                '--header', "Authorization: Bearer $token",
+                '--data-urlencode', "dbName=$($env:BUGSPLAT_DATABASE)",
+                '--data-urlencode', 'appName=Radegast',
+                '--data-urlencode', "appVersion=$appVersion",
+                '--data-urlencode', "size=$($pdb.Length)",
+                '--data-urlencode', "symFileName=$($pdb.Name)"
               )
-              if (-not [string]::IsNullOrEmpty($token)) {
-                $curlVersionArgs += @('--header', "Authorization: Bearer $token")
-              }
-
-              $versionsRaw = & curl.exe @curlVersionArgs 2>&1
-              Write-Host "  Versions API response: $versionsRaw"
-              Remove-Item $bodyFile -ErrorAction SilentlyContinue
+              $versionsRaw = & curl.exe @versionsArgs 2>&1
+              Write-Host "  /api/versions: $versionsRaw"
 
               $versionsObj = $null
               try { $versionsObj = $versionsRaw | ConvertFrom-Json -ErrorAction Stop } catch {}
+              $uploadUrl = $null
+              if ($versionsObj) {
+                if ($versionsObj.PSObject.Properties.Name -contains 'url') { $uploadUrl = $versionsObj.url }
+                elseif ($versionsObj.PSObject.Properties.Name -contains 'Url') { $uploadUrl = $versionsObj.Url }
+                elseif ($versionsObj.PSObject.Properties.Name -contains 'uploadUrl') { $uploadUrl = $versionsObj.uploadUrl }
+              }
 
-              $uploadUrl = $versionsObj?.url
               if ([string]::IsNullOrEmpty($uploadUrl)) {
-                Write-Warning "  No upload URL in response for $($pdb.Name) — skipping"
+                Write-Warning "  No upload URL returned for $($pdb.Name)"
                 $failed++
                 continue
               }
 
-              # Step 2: upload to the S3 presigned URL.
-              # Include every field from the 'fields' object (AWS policy fields) plus the file.
-              $curlUploadArgs = @('--silent', '--show-error', '--request', 'POST', $uploadUrl)
+              # Upload to S3 presigned URL — include every AWS policy field plus the file
+              $uploadArgs = @('--silent', '--show-error', '--request', 'POST', $uploadUrl)
               if ($versionsObj.fields) {
                 foreach ($key in $versionsObj.fields.PSObject.Properties.Name) {
-                  $curlUploadArgs += @('--form', "$key=$($versionsObj.fields.$key)")
+                  $uploadArgs += '--form'
+                  $uploadArgs += "$key=$($versionsObj.fields.$key)"
                 }
               }
-              $curlUploadArgs += @('--form', "file=@$($pdb.FullName)")
+              $uploadArgs += '--form'
+              $uploadArgs += "file=@$($pdb.FullName)"
 
-              $uploadResult = & curl.exe @curlUploadArgs 2>&1
+              $uploadResult = & curl.exe @uploadArgs 2>&1
               if ($LASTEXITCODE -eq 0) {
                 Write-Host "  Uploaded $($pdb.Name)"
                 $uploaded++
@@ -610,7 +608,6 @@ jobs:
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-          Remove-Item $cookieFile -ErrorAction SilentlyContinue
           Write-Host "`n=== BugSplat Upload Summary ==="
           foreach ($r in $results) { Write-Host " - $($r.Platform): $($r.Status) (uploaded $($r.Uploaded), failed $($r.Failed))" }
           exit 0
