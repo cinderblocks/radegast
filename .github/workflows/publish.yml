@@ -498,43 +498,49 @@ jobs:
             exit 0
           }
 
-          # Authenticate via OAuth2 client credentials (same endpoint the CLI tool uses)
+          # Authenticate via OAuth2 client_credentials.
+          # IMPORTANT: use a hashtable body — PowerShell URL-encodes each value automatically,
+          # which is required when the client_secret contains base64 characters (+, =, /).
+          # String concatenation does NOT URL-encode and silently produces a malformed request.
           Write-Host "Authenticating with BugSplat..."
-          # Request client credentials token using HTTP Basic auth (some token endpoints require Basic auth)
-          $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($env:BUGSPLAT_CLIENT_ID):$($env:BUGSPLAT_CLIENT_SECRET)"))
-          $authHeaders = @{ Authorization = "Basic $basic"; 'Content-Type' = 'application/x-www-form-urlencoded' }
           try {
-            $authResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/oauth2/token" -Method Post -Headers $authHeaders -Body "grant_type=client_credentials"
+            $tokenResponse = Invoke-RestMethod `
+              -Uri "https://app.bugsplat.com/oauth2/token" `
+              -Method Post `
+              -ContentType "application/x-www-form-urlencoded" `
+              -Body @{
+                grant_type    = 'client_credentials'
+                client_id     = $env:BUGSPLAT_CLIENT_ID
+                client_secret = $env:BUGSPLAT_CLIENT_SECRET
+              }
           } catch {
-            Write-Warning "BugSplat authentication failed: $_"
+            Write-Warning "BugSplat authentication request failed: $_"
             exit 0
           }
 
-          # Support different response shapes (access_token or token.access_token)
-          $token = $null
-          if ($authResponse -and $authResponse.access_token) { $token = $authResponse.access_token }
-          elseif ($authResponse -and $authResponse.token -and $authResponse.token.access_token) { $token = $authResponse.token.access_token }
-          if ([string]::IsNullOrEmpty($token)) {
-            Write-Warning "BugSplat authentication returned no access token. Response: $($authResponse | ConvertTo-Json -Depth 4)"
+          if (-not $tokenResponse -or [string]::IsNullOrEmpty($tokenResponse.access_token)) {
+            Write-Warning "No access_token in response: $($tokenResponse | ConvertTo-Json -Depth 4 -Compress)"
             exit 0
           }
           Write-Host "Authentication success!"
-          $headers = @{ Authorization = "Bearer $token" }
 
-          # Collect per-platform upload results
+          $token = $tokenResponse.access_token
+          $authHeader = @{ Authorization = "Bearer $token" }
+
           $results = @()
           foreach ($zip in $zipFiles) {
             Write-Host "`nProcessing $($zip.Name)"
             $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
-            $temp = Join-Path $env:TEMP ("symbols_" + $platform)
-            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
-            New-Item -ItemType Directory -Path $temp | Out-Null
-            Expand-Archive -Path $zip.FullName -DestinationPath $temp -Force
 
-            $pdbFiles = Get-ChildItem -Path $temp -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue
+            $tempDir = Join-Path $env:TEMP ("bugsplat_" + $platform)
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $tempDir | Out-Null
+            Expand-Archive -Path $zip.FullName -DestinationPath $tempDir -Force
+
+            $pdbFiles = Get-ChildItem -Path $tempDir -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue
             if (-not $pdbFiles -or $pdbFiles.Count -eq 0) {
               Write-Host "No PDB files found for $platform, skipping"
-              $results += [pscustomobject]@{ Platform = $platform; Files = 0; Status = 'skipped'; Message = 'No PDB files' }
+              $results += [pscustomobject]@{ Platform = $platform; Uploaded = 0; Failed = 0; Status = 'skipped' }
               continue
             }
 
@@ -545,57 +551,60 @@ jobs:
             foreach ($pdb in $pdbFiles) {
               Write-Host "  Uploading $($pdb.Name)..."
 
-              # Step 1: Request a presigned upload URL from BugSplat
+              # Step 1: get presigned S3 URL.
+              # The API expects a JSON body — using -Form (multipart) returns a missing/undefined url.
               try {
-                $versionResponse = Invoke-RestMethod -Uri "https://app.bugsplat.com/api/versions" -Method Post -Headers $headers -Form @{
-                  database  = $env:BUGSPLAT_DATABASE
-                  appName   = 'Radegast'
-                  appVersion = $appVersion
-                }
+                $versionResponse = Invoke-RestMethod `
+                  -Uri "https://app.bugsplat.com/api/versions" `
+                  -Method Post `
+                  -Headers $authHeader `
+                  -ContentType "application/json" `
+                  -Body (ConvertTo-Json @{
+                    database   = $env:BUGSPLAT_DATABASE
+                    appName    = 'Radegast'
+                    appVersion = $appVersion
+                  })
               } catch {
-                Write-Warning "    Failed to create version for $($pdb.Name): $_"
+                Write-Warning "  Failed to get presigned URL for $($pdb.Name): $_"
                 $failed++
                 continue
               }
 
               $uploadUrl = $versionResponse.url
               if ([string]::IsNullOrEmpty($uploadUrl)) {
-                Write-Warning "    No upload URL returned for $($pdb.Name). Response: $($versionResponse | ConvertTo-Json -Depth 3 -Compress)"
+                Write-Warning "  No upload URL returned for $($pdb.Name). Full API response: $($versionResponse | ConvertTo-Json -Depth 5)"
                 $failed++
                 continue
               }
 
-              # Step 2: Upload the PDB to the presigned URL
+              # Step 2: upload to the presigned S3 URL.
+              # S3 presigned POST requires every field from the 'fields' object PLUS the file.
               try {
-                Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers $headers -Form @{
-                  size    = $pdb.Length.ToString()
-                  symFile = $pdb
+                $form = @{}
+                if ($versionResponse.fields) {
+                  foreach ($key in $versionResponse.fields.PSObject.Properties.Name) {
+                    $form[$key] = $versionResponse.fields.$key
+                  }
                 }
-                Write-Host "    Uploaded $($pdb.Name)"
+                $form['file'] = Get-Item $pdb.FullName
+
+                Invoke-RestMethod -Uri $uploadUrl -Method Post -Form $form | Out-Null
+                Write-Host "  Uploaded $($pdb.Name)"
                 $uploaded++
               } catch {
-                Write-Warning "    Failed to upload $($pdb.Name): $_"
+                Write-Warning "  Upload failed for $($pdb.Name): $_"
                 $failed++
               }
             }
 
             $status = if ($failed -eq 0) { 'success' } elseif ($uploaded -gt 0) { 'partial' } else { 'failed' }
-            $results += [pscustomobject]@{
-              Platform = $platform
-              Files    = $pdbFiles.Count
-              Status   = $status
-              Message  = "Uploaded $uploaded, failed $failed"
-            }
+            $results += [pscustomobject]@{ Platform = $platform; Uploaded = $uploaded; Failed = $failed; Status = $status }
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-          # Print summary
           Write-Host "`n=== BugSplat Upload Summary ==="
-          $successCount = ($results | Where-Object { $_.Status -eq 'success' }).Count
-          $failedCount  = ($results | Where-Object { $_.Status -notin 'success','skipped' }).Count
-          Write-Host "Successful platforms: $successCount"
-          Write-Host "Failed/Partial platforms: $failedCount"
           foreach ($r in $results) {
-            Write-Host " - $($r.Platform): $($r.Status) ($($r.Files) PDBs) - $($r.Message)"
+            Write-Host " - $($r.Platform): $($r.Status) (uploaded $($r.Uploaded), failed $($r.Failed))"
           }
           exit 0
 
