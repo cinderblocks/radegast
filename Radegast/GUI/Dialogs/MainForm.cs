@@ -1373,7 +1373,6 @@ namespace Radegast
                 if (!tab.Selected)
                 {
                     tab.Select();
-                    ((ObjectsConsole)tab.Control).RefreshObjectList();
                 }
                 else
                 {
@@ -1388,7 +1387,6 @@ namespace Radegast
                 tab.Visible = true;
                 tab.AllowHide = false;
                 tab.Select();
-                ((ObjectsConsole)tab.Control).RefreshObjectList();
             }
         }
 
