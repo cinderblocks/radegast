@@ -6,5 +6,9 @@
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="!(bind.Property.ProductName)" />
     </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="APPLICATIONDATAFOLDER" Name="!(bind.Property.ProductName)" />
+    </StandardDirectory>
   </Fragment>
 </Wix>

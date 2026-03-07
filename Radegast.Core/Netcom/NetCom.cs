@@ -284,7 +284,7 @@ namespace Radegast
                 case StartLocationType.Last: startLocation = "last"; break;
 
                 case StartLocationType.Custom:
-                    var parser = new LocationParser(LoginOptions.StartLocationCustom.Trim());
+                    var parser = new SlurlParser(LoginOptions.StartLocationCustom.Trim());
                     startLocation = parser.GetStartLocationUri();
                     break;
             }

@@ -7,9 +7,9 @@
     <OutputType>Bundle</OutputType>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.1" />
-    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.1" />
-    <PackageReference Include="WixToolset.Bal.wixext" Version="6.0.1" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Bal.wixext" Version="6.0.2" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\BuildProperties.wxi" />

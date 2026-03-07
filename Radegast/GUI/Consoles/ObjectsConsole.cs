@@ -50,6 +50,8 @@ namespace Radegast
         private ObjectConsoleFilter filter;
         private readonly ObjectSorter PrimSorter;
         private readonly CancellationTokenSource contentsDownloadCancelToken;
+        private CancellationTokenSource objectListRefreshCancelToken = new CancellationTokenSource();
+        private readonly object objectListRefreshLock = new object();
 
         public Primitive CurrentPrim { get; private set; } = new Primitive();
 
@@ -98,7 +100,7 @@ namespace Radegast
             {
                 instance.GlobalSettings["object_console_filter"] = comboFilter.SelectedIndex;
                 filter = (ObjectConsoleFilter)comboFilter.SelectedIndex;
-                btnRefresh_Click(null, null);
+                QueueObjectListRefresh();
             };
 
             contentsDownloadCancelToken = new CancellationTokenSource();
@@ -119,10 +121,7 @@ namespace Radegast
             client.Groups.GroupNamesReply += Groups_GroupNamesReply;
 
             // Initial population
-            AddAllObjects();
-            // ensure UI shows initial list size immediately
-            lock (Prims) { lstPrims.VirtualListSize = Prims.Count; }
-            lstPrims.Invalidate();
+            QueueObjectListRefresh();
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -130,6 +129,7 @@ namespace Radegast
         private void frmObjects_Disposed(object sender, EventArgs e)
         {
             DisposalHelper.SafeCancelAndDispose(contentsDownloadCancelToken, (m, ex) => Logger.Debug(m, ex));
+            DisposalHelper.SafeCancelAndDispose(objectListRefreshCancelToken, (m, ex) => Logger.Debug(m, ex));
 
             DisposalHelper.SafeDispose(uiUpdateTimer, "UI update timer", (m, ex) => Logger.Debug(m, ex));
             DisposalHelper.SafeDispose(propRequester, "PropertiesQueue", (m, ex) => Logger.Debug(m, ex));
@@ -163,7 +163,122 @@ namespace Radegast
 
         public void RefreshObjectList()
         {
-            btnRefresh_Click(this, EventArgs.Empty);
+            QueueObjectListRefresh();
+        }
+
+        private void QueueObjectListRefresh(bool resetCamera = false)
+        {
+            _ = RefreshObjectListAsync(resetCamera);
+        }
+
+        private async Task RefreshObjectListAsync(bool resetCamera = false)
+        {
+            if (IsDisposed) return;
+
+            if (resetCamera)
+            {
+                instance.State.SetDefaultCamera();
+            }
+
+            CancellationTokenSource refreshTokenSource;
+            lock (objectListRefreshLock)
+            {
+                DisposalHelper.SafeCancelAndDispose(objectListRefreshCancelToken, (m, ex) => Logger.Debug(m, ex));
+                objectListRefreshCancelToken = new CancellationTokenSource();
+                refreshTokenSource = objectListRefreshCancelToken;
+            }
+
+            var token = refreshTokenSource.Token;
+            var sim = client.Network.CurrentSim;
+            if (sim == null) return;
+
+            var location = client.Self.SimPosition;
+            var selfLocalId = client.Self.LocalID;
+            var currentRadius = searchRadius;
+            var currentFilter = filter;
+            var currentSearch = searchLower;
+
+            if (btnRefresh.Enabled) btnRefresh.Enabled = false;
+            Cursor.Current = Cursors.WaitCursor;
+
+            try
+            {
+                var candidates = await Task.Run(() =>
+                {
+                    var results = new List<Primitive>();
+
+                    foreach (var kvp in sim.ObjectsPrimitives)
+                    {
+                        token.ThrowIfCancellationRequested();
+
+                        var prim = kvp.Value;
+                        if (prim == null) continue;
+
+                        bool include = (prim.ParentID == selfLocalId && (currentFilter == ObjectConsoleFilter.Attached || currentFilter == ObjectConsoleFilter.Both)) ||
+                                       (prim.ParentID == 0 && (currentFilter == ObjectConsoleFilter.Rezzed || currentFilter == ObjectConsoleFilter.Both));
+
+                        if (!include) continue;
+                        if (prim.Position == Vector3.Zero) continue;
+
+                        int distance = (int)Vector3.Distance(prim.Position, location);
+                        if (prim.ParentID == selfLocalId) distance = 0;
+                        if (distance >= currentRadius) continue;
+
+                        if (!string.IsNullOrEmpty(currentSearch))
+                        {
+                            if (prim.Properties == null || prim.Properties.Name.IndexOf(currentSearch, StringComparison.OrdinalIgnoreCase) < 0)
+                                continue;
+                        }
+
+                        results.Add(prim);
+                    }
+
+                    return results;
+                }, token);
+
+                if (token.IsCancellationRequested || IsDisposed) return;
+
+                lock (Prims)
+                {
+                    Prims.Clear();
+                    primIds.Clear();
+
+                    foreach (var prim in candidates)
+                    {
+                        Prims.Add(prim);
+                        primIds.Add(prim.ID);
+                        if (prim.Properties == null)
+                        {
+                            propRequester.RequestProps(prim);
+                        }
+                    }
+
+                    Prims.Sort(PrimSorter);
+                    lstPrims.VirtualListSize = Prims.Count;
+                }
+
+                lock (displayNameCache) { displayNameCache.Clear(); }
+                lstPrims.Invalidate();
+                lblStatus.Text = $"Tracking {Prims.Count} objects.";
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug("Error refreshing object list", ex);
+            }
+            finally
+            {
+                if (!IsDisposed)
+                {
+                    Cursor.Current = Cursors.Default;
+                    if (ReferenceEquals(refreshTokenSource, objectListRefreshCancelToken))
+                    {
+                        btnRefresh.Enabled = true;
+                    }
+                }
+            }
         }
 
         public FrozenSet<Primitive> GetObjects()
@@ -432,12 +547,16 @@ namespace Radegast
             entry.SubItems.Add("Loading...");
             lstContents.Items.Add(entry);
 
-            Task contentsTask = Task.Run(() =>
+            Task contentsTask = Task.Run(async () =>
             {
                 lstContents.Tag = CurrentPrim;
-                List<InventoryBase> items =
-                    client.Inventory.GetTaskInventory(CurrentPrim.ID, CurrentPrim.LocalID, TimeSpan.FromSeconds(30));
-                lstContents.Invoke(new MethodInvoker(() => UpdateContentsList(items)));
+                using (var cts = new CancellationTokenSource())
+                {
+                    cts.CancelAfter(TimeSpan.FromSeconds(30));
+                    List<InventoryBase> items =
+                        await client.Inventory.GetTaskInventoryAsync(CurrentPrim.ID, CurrentPrim.LocalID, cts.Token).ConfigureAwait(false);
+                    lstContents.Invoke(new MethodInvoker(() => UpdateContentsList(items)));
+                }
             }, contentsDownloadCancelToken.Token);
         }
 
@@ -904,59 +1023,6 @@ namespace Radegast
             }
         }
 
-        private void AddAllObjects()
-        {
-            Vector3 location = client.Self.SimPosition;
-
-            // Collect candidates without holding Prims lock to reduce contention
-            var candidates = new List<Primitive>();
-
-            foreach (var kvp in client.Network.CurrentSim.ObjectsPrimitives)
-            {
-                var prim = kvp.Value;
-                if (prim == null) continue;
-
-                int distance = (int)Vector3.Distance(prim.Position, location);
-                if (prim.ParentID == client.Self.LocalID) distance = 0;
-
-                if (!IncludePrim(prim)) continue;
-                if (prim.Position == Vector3.Zero) continue;
-                if (distance >= searchRadius) continue;
-
-                // Apply search filter using cached lower-case string where possible
-                if (!string.IsNullOrEmpty(searchLower))
-                {
-                    if (prim.Properties == null || prim.Properties.Name.IndexOf(searchLower, StringComparison.OrdinalIgnoreCase) < 0)
-                        continue;
-                }
-
-                candidates.Add(prim);
-            }
-
-            // Add new candidates under lock and request properties for unknowns
-            lock (Prims)
-            {
-                foreach (var prim in candidates)
-                {
-                    if (!primIds.Contains(prim.ID))
-                    {
-                        Prims.Add(prim);
-                        primIds.Add(prim.ID);
-                        if (prim.Properties == null)
-                        {
-                            propRequester.RequestProps(prim);
-                        }
-                    }
-                }
-
-                Prims.Sort(PrimSorter);
-
-                // Update UI immediately to reflect new list
-                lstPrims.VirtualListSize = Prims.Count;
-                lstPrims.Invalidate();
-            }
-        }
-
         private void btnPointAt_Click(object sender, EventArgs e)
         {
             if (btnPointAt.Text == "Point At")
@@ -984,25 +1050,19 @@ namespace Radegast
         private void txtSearch_TextChanged(object sender, EventArgs e)
         {
            searchLower = txtSearch.Text?.Trim() ?? string.Empty;
-           btnRefresh_Click(null, null);
+           QueueObjectListRefresh();
         }
 
         private void btnClear_Click(object sender, EventArgs e)
         {
             txtSearch.Clear();
             txtSearch.Select();
-            btnRefresh_Click(null, null);
+            QueueObjectListRefresh();
         }
 
-        private void btnRefresh_Click(object sender, EventArgs e)
+        private async void btnRefresh_Click(object sender, EventArgs e)
         {
-            instance.State.SetDefaultCamera();
-            Cursor.Current = Cursors.WaitCursor;
-            lock (Prims) { Prims.Clear(); primIds.Clear(); }
-            lock (displayNameCache) { displayNameCache.Clear(); }
-            AddAllObjects();
-
-            Cursor.Current = Cursors.Default;
+            await RefreshObjectListAsync(true);
         }
 
         private void lstPrims_SelectedIndexChanged(object sender, EventArgs e)

@@ -5,6 +5,13 @@
     <OutputName>RadegastSetup_$(Platform)</OutputName>
     <OutputPath>..\..\bin\Packages\</OutputPath>
     <Name>RadegastSetup</Name>
+
+    <!-- Suppress expected warnings -->
+    <SuppressSpecificWarnings>
+      8601;  <!-- Missing directory for harvesting files (expected for excluded paths) -->
+      8600;  <!-- Zero files harvested (expected when VoicePack files not present) -->
+      1076   <!-- ICE03/ICE57 informational warnings from merge modules -->
+    </SuppressSpecificWarnings>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.2" />
@@ -13,7 +20,6 @@
     <PackageReference Include="WixToolset.Heat" Version="6.0.2" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="vcredist" />
     <Folder Include="slvoice" />
   </ItemGroup>
   <ItemGroup>
@@ -23,6 +29,7 @@
     <Content Include="slvoice\vivox_licenses.txt" />
     <Content Include="slvoice\vivox_sdk_license.txt" />
     <Content Include="UI.wxi" />
+    <None Include="assets\README.md" />
     <None Include="slvoice\DbgHelp.dll" />
     <None Include="slvoice\ortp.dll" />
     <None Include="slvoice\ortp.pdb" />
@@ -33,6 +40,7 @@
     <None Include="slvoice\zlib1.dll" />
     <None Include="vcredist\Microsoft_VC120_CRT_x86.msm" />
     <None Include="vcredist\Microsoft_VC140_CRT_x86.msm" />
+    <None Include="vcredist\README.md" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Radegast\Radegast.csproj" DoNotHarvest="True" />

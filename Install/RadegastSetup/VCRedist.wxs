@@ -1,8 +1,17 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-	<Fragment>
+  <Fragment>
     <StandardDirectory Id="TARGETDIR">
-       <Merge Id="VC_Redist120" SourceFile="vcredist\Microsoft_VC120_CRT_x86.msm" DiskId="1" Language="0" />
-       <Merge Id="VC_Redist140" SourceFile="vcredist\Microsoft_VC140_CRT_x86.msm" DiskId="1" Language="0" />
+      <?if $(var.Platform)=x64 or $(var.Platform)=arm64?>
+        <!-- x64 merge modules for 64-bit builds -->
+        <!-- If x64 merge modules are not available, the build will fail with a clear error -->
+        <!-- See Install\RadegastSetup\vcredist\README.md for instructions on obtaining x64 merge modules -->
+        <Merge Id="VC_Redist120" SourceFile="vcredist\Microsoft_VC120_CRT_x64.msm" DiskId="1" Language="0" />
+        <Merge Id="VC_Redist140" SourceFile="vcredist\Microsoft_VC140_CRT_x64.msm" DiskId="1" Language="0" />
+      <?else?>
+        <!-- x86 merge modules for 32-bit builds (default) -->
+        <Merge Id="VC_Redist120" SourceFile="vcredist\Microsoft_VC120_CRT_x86.msm" DiskId="1" Language="0" />
+        <Merge Id="VC_Redist140" SourceFile="vcredist\Microsoft_VC140_CRT_x86.msm" DiskId="1" Language="0" />
+      <?endif?>
     </StandardDirectory>
   </Fragment>
 </Wix>

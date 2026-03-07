@@ -1,28 +1,202 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <?include ..\BuildProperties.wxi?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" 
+xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+<?include ..\BuildProperties.wxi?>
   <Fragment>
     <ComponentGroup Id="Radegast.Components" Directory="INSTALLFOLDER">
       <Files Include="$(var.Radegast.TargetDir)**">
+        <!-- Exclude debug symbols -->
         <Exclude Files="$(var.Radegast.TargetDir)**\*.pdb"/>
+        <!-- Exclude main executable (handled separately below) -->
         <Exclude Files="$(var.Radegast.TargetDir)Radegast.exe"/>
+        <!-- Exclude build artifacts and temporary directories -->
+        <Exclude Files="$(var.Radegast.TargetDir)netstandard2.0\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)obj\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)**\*.xml"/>
+        <!-- Keep *.exe.config - required by .NET Framework 4.8 for runtime init and binding redirects -->
+        <Exclude Files="$(var.Radegast.TargetDir)**\*.vshost.exe.config"/>
+        <!-- Exclude version control and project files -->
+        <Exclude Files="$(var.Radegast.TargetDir)**\.git*"/>
+        <Exclude Files="$(var.Radegast.TargetDir)**\*.csproj"/>
+        <Exclude Files="$(var.Radegast.TargetDir)**\*.sln"/>
+        <!-- Note: dll\ folder is INCLUDED - it contains native libraries -->
       </Files>
       <Component>
         <File Id="Radegast.Executable" Source="$(var.Radegast.TargetDir)Radegast.exe" />
       </Component>
     </ComponentGroup>
-    <!-- Start menu -->
+  </Fragment>
+
+  <!-- Desktop shortcut (optional, controlled by DESKTOPSHORTCUT property) -->
+  <Fragment>
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Condition="DESKTOPSHORTCUT = 1">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="$(var.productName)"
+                  Description="$(var.productDesc)"
+                  Target="[INSTALLFOLDER]Radegast.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="Radegast.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="desktop_shortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    
+    <!-- SLURL Protocol Handlers (optional, controlled by REGISTERPROTOCOLS property) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="SLURLProtocolHandler" Condition="REGISTERPROTOCOLS = 1">
+        <!-- secondlife:// protocol handler -->
+        <RegistryKey Root="HKCR" Key="secondlife">
+          <RegistryValue Type="string" Value="URL:Second Life Protocol" />
+          <RegistryValue Type="string" Name="URL Protocol" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- hop:// protocol handler for HyperGrid -->
+        <RegistryKey Root="HKCR" Key="hop">
+          <RegistryValue Type="string" Value="URL:HyperGrid Protocol" />
+          <RegistryValue Type="string" Name="URL Protocol" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- Use per-machine registry for KeyPath to match HKCR -->
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="protocol_handler"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    
+    <!-- Start menu (controlled by STARTMENUSHORTCUT property) -->
     <DirectoryRef Id="ApplicationProgramsFolder">
-      <Component Id="ApplicationShortcut">
+      <Component Id="ApplicationShortcut" Condition="STARTMENUSHORTCUT = 1">
+        <!-- Main application shortcut -->
         <Shortcut Id="ApplicationStartMenuShortcut"
                   Name="$(var.productName)"
                   Description="$(var.productDesc)"
                   Icon="Radegast.ico"
                   Target="[INSTALLFOLDER]Radegast.exe"
                   WorkingDirectory="INSTALLFOLDER" />
+        
+        <!-- Uninstall shortcut -->
+        <Shortcut Id="UninstallShortcut"
+                  Name="Uninstall $(var.productName)"
+                  Description="Uninstall $(var.productName)"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]"
+                  Icon="Radegast.ico" />
+        
         <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
         <RegistryValue Root="HKCU"
                        Key="Software\$(var.companyName)\$(var.productName)"
                        Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+      
+      <!-- Website shortcut component -->
+      <Component Id="WebsiteShortcut">
+        <util:InternetShortcut Id="WebsiteLink"
+                               Name="$(var.productName) Website"
+                               Target="$(var.aboutUrl)" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="website_shortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    
+    <!-- Uninstall cleanup (optional user data removal) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="UninstallCleanup" Condition="REMOVE=&quot;ALL&quot; AND CLEAN_USERDATA=&quot;1&quot;">
+        <!-- This component only activates during uninstall if user chooses to remove data -->
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="cleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+        <RemoveFile Id="RemoveAppDataFiles" 
+                    On="uninstall" 
+                    Name="*.*" 
+                    Directory="APPLICATIONDATAFOLDER" />
+        <RemoveFolder Id="RemoveAppDataFolder" 
+                      On="uninstall" 
+                      Directory="APPLICATIONDATAFOLDER" />
+      </Component>
+    </DirectoryRef>
+    
+    <!-- Application tracking registry entries -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="RegistryEntries">
+        <RegistryKey Root="HKLM" Key="Software\$(var.companyName)\$(var.productName)">
+          <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="Version" Value="[ProductVersion]" />
+          <RegistryValue Type="string" Name="DisplayName" Value="$(var.productName)" />
+          <RegistryValue Type="string" Name="Publisher" Value="$(var.companyName)" />
+          <RegistryValue Type="string" Name="HelpLink" Value="$(var.aboutUrl)" />
+        </RegistryKey>
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+    
+    <!-- File type associations (optional) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="FileAssociations" Condition="REGISTERFILEASSOC = 1">
+        <!-- .oar (OpenSimulator Archive) file association -->
+        <RegistryKey Root="HKCR" Key=".oar">
+          <RegistryValue Type="string" Value="Radegast.OAR" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Radegast.OAR">
+          <RegistryValue Type="string" Value="OpenSimulator Archive" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- .iar (Inventory Archive) file association -->
+        <RegistryKey Root="HKCR" Key=".iar">
+          <RegistryValue Type="string" Value="Radegast.IAR" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Radegast.IAR">
+          <RegistryValue Type="string" Value="OpenSimulator Inventory Archive" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- Use per-machine registry for KeyPath to match HKCR -->
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="file_associations"
                        Type="integer"
                        Value="1"
                        KeyPath="yes" />

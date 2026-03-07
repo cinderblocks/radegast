@@ -71,13 +71,13 @@ namespace Radegast.Core.RLV
 
         public async Task DetachAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
-            var items = GetInventoryItemsById(itemIds);
+            var items = await GetInventoryItemsByIdAsync(itemIds).ConfigureAwait(false);
             await instance.COF.RemoveFromOutfit(items, cancellationToken);
         }
 
         public async Task RemOutfitAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
-            var items = GetInventoryItemsById(itemIds);
+            var items = await GetInventoryItemsByIdAsync(itemIds).ConfigureAwait(false);
             await instance.COF.RemoveFromOutfit(items, cancellationToken);
         }
 
@@ -225,7 +225,7 @@ namespace Radegast.Core.RLV
             return Task.CompletedTask;
         }
 
-        private List<InventoryItem> GetInventoryItemsById(IReadOnlyList<Guid> itemIds)
+        private async Task<List<InventoryItem>> GetInventoryItemsByIdAsync(IReadOnlyList<Guid> itemIds)
         {
             var items = new List<InventoryItem>();
 
@@ -233,10 +233,14 @@ namespace Radegast.Core.RLV
             {
                 if (!instance.Client.Inventory.Store.TryGetValue(new UUID(itemId), out var foundItem))
                 {
-                    foundItem = instance.Client.Inventory.FetchItem(new UUID(itemId), instance.Client.Self.AgentID, TimeSpan.FromSeconds(5));
-                    if (foundItem == null)
+                    using (var cts = new CancellationTokenSource())
                     {
-                        continue;
+                        cts.CancelAfter(TimeSpan.FromSeconds(5));
+                        foundItem = await instance.Client.Inventory.FetchItemAsync(new UUID(itemId), instance.Client.Self.AgentID, cts.Token).ConfigureAwait(false);
+                        if (foundItem == null)
+                        {
+                            continue;
+                        }
                     }
                 }
 

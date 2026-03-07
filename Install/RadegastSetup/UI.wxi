@@ -1,7 +1,11 @@
 ﻿<Include xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
     <WixVariable Id="WixUILicenseRtf" Value="..\..\LICENSE.rtf" />
-    <!--<WixVariable Id="WixUIBannerBmp" Value="assets\banner.bmp"/>
-    <WixVariable Id="WixUIDialogBmp" Value="assets\dialog.bmp"/>>-->
+    
+    <!-- Custom branding images (create these files to enable custom branding) -->
+    <!-- Uncomment when banner.bmp and dialog.bmp are created in assets\ directory
+    <WixVariable Id="WixUIBannerBmp" Value="assets\banner.bmp"/>
+    <WixVariable Id="WixUIDialogBmp" Value="assets\dialog.bmp"/>
+    -->
 
     <ui:WixUI Id="WixUI_Advanced" />
     <UIRef Id="WixUI_ErrorProgressText" />

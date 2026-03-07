@@ -5,13 +5,14 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
     <OutputPath>..\bin\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <DebugType>full</DebugType>
     <DefineConstants>TRACE;DEBUG</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
-    <DebugType>portable</DebugType>
+    <DebugType>pdbonly</DebugType>
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseLinux|x86'">
@@ -31,7 +32,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseWindows|x86'">
     <DefineConstants>TRACE</DefineConstants>
     <Optimize>true</Optimize>
-    <DebugType>portable</DebugType>
+    <DebugType>pdbonly</DebugType>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
@@ -48,9 +49,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.2" />
     <PackageReference Include="System.Collections" Version="4.3.0" />
     <PackageReference Include="System.ComponentModel.Composition" Version="9.0.10" />
     <PackageReference Include="System.Diagnostics.Debug" Version="4.3.0" />
@@ -71,6 +72,8 @@
     <PackageReference Include="System.Threading.RateLimiting" Version="9.0.10" />
   </ItemGroup>
   <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
-    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies&quot; &quot;$(OutDir)dll&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\x64&quot; &quot;$(OutDir)dll\x64&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\x86&quot; &quot;$(OutDir)dll\x86&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\arm64&quot; &quot;$(OutDir)dll\arm64&quot; /E/I" />
   </Target>
 </Project>

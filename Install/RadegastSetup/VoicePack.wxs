@@ -1,9 +1,9 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <ComponentGroup Id="VoicePackComponentGroup" Directory="INSTALLFOLDER">
-      <Files Include="$(var.SolutionDir)Install\RadegastSetup\slvoice\*.dll" />
-      <File Id="SLVoice" Source="$(var.SolutionDir)Install\RadegastSetup\slvoice\SLVoice.exe" KeyPath="yes" Checksum="yes" />
-      <File Id="VivoxLicense" Source="$(var.SolutionDir)Install\RadegastSetup\slvoice\vivox_licenses.txt" />
+      <Files Include="slvoice\*.dll" />
+      <File Id="SLVoice" Source="slvoice\SLVoice.exe" KeyPath="yes" Checksum="yes" />
+      <File Id="VivoxLicense" Source="slvoice\vivox_licenses.txt" />
     </ComponentGroup>
   </Fragment>
 </Wix>

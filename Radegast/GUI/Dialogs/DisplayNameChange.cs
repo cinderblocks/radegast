@@ -75,6 +75,7 @@ namespace Radegast
         {
             var tcs = new TaskCompletionSource<bool>();
 
+#pragma warning disable CS4014 // Callback is properly synchronized via TaskCompletionSource
             // Request current display name, callback will perform the update
             Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID }, async (success, names, badIDs) =>
             {
@@ -96,6 +97,7 @@ namespace Radegast
                     tcs.TrySetResult(false);
                 }
             });
+#pragma warning restore CS4014
 
             await tcs.Task.ConfigureAwait(false);
         }

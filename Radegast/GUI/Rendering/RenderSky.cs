@@ -275,7 +275,6 @@ namespace Radegast.Rendering
         {
             try
             {
-                int stride = 7 * sizeof(float);
                 var interleaved = new float[vertexCount * 7];
                 
                 for (int i = 0; i < vertexCount; i++)

@@ -1,6 +1,7 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
   <?include ..\BuildProperties.wxi?>
   <?define productVersion="!(bind.packageVersion.RadegastSetup)"?>
+  <?define UpgradeCode="{B8F7E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
 
   <Bundle Name="$(var.productName)"
           Version="$(var.productVersion)"
@@ -10,23 +11,37 @@
           UpdateUrl="$(var.aboutUrl)"
           Copyright="$(var.copyright)"
           IconSourceFile="$(var.Radegast.ProjectDir)radegast.ico"
-          Id="$(var.productName)">
+          UpgradeCode="$(var.UpgradeCode)"
+          DisableModify="yes">
+    
     <BootstrapperApplication>
-      <bal:WixStandardBootstrapperApplication LicenseFile="..\..\LICENSE.rtf"
-                                              ShowVersion="yes"
-                                              Theme='rtfLargeLicense' />
+      <bal:WixStandardBootstrapperApplication 
+        LicenseFile="..\..\LICENSE.rtf"
+        ShowVersion="yes"
+        SuppressOptionsUI="no"
+        Theme='rtfLargeLicense'
+        LogoFile="$(var.Radegast.ProjectDir)radegast.ico" />
     </BootstrapperApplication>
 
-    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]$(var.productName)" />
+    <!-- Bundle variables for user customization -->
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]$(var.productName)" Persisted="yes" />
+    <Variable Name="LaunchAfterInstall" Type="numeric" Value="1" Persisted="yes" />
 
     <Chain>
+      <!-- .NET Framework 4.8 prerequisite -->
       <PackageGroupRef Id="NetFx48Redist" />
+      
+      <!-- Main application installer -->
       <MsiPackage Id="RadegastSetup"
                   SourceFile="$(var.RadegastSetup.TargetPath)"
                   DisplayName="$(var.productName)"
+                  Description="$(var.productDesc)"
                   Vital="yes"
+                  ForcePerMachine="yes"
+                  EnableFeatureSelection="yes"
                   After="NetFx48Redist">
         <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
       </MsiPackage>
     </Chain>
   </Bundle>

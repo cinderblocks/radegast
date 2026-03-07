@@ -6,48 +6,704 @@ on:
       - 'v*'
 
 jobs:
-  publish:
+  build:
+    name: Build ${{ matrix.platform }}
     runs-on: windows-2022
+    strategy:
+      matrix:
+        platform: [x86, x64, ARM64]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for release notes
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v1
 
-      - name: Set TAG_VERSION
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 6.0.2
+          wix --version
+
+      - name: Set version variables
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
-          $tagVersion = $tag -replace 'v',''
-          $tagVersion = "$tagVersion.${{ github.run_number }}"
-          Write-Host "Setting TAG_VERSION to $tagVersion"
+          $tagVersion = $tag -replace '^v',''
+          $buildVersion = "$tagVersion.${{ github.run_number }}"
+          Write-Host "Tag: $tag"
+          Write-Host "Tag Version: $tagVersion"
+          Write-Host "Build Version: $buildVersion"
+          echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "BUILD_VERSION=$buildVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore NuGet packages
-        run: nuget restore radegast.sln
-
-      - name: Build solution
-        run: msbuild radegast.sln /m /p:Configuration=ReleaseWindows
-
-      - name: Package artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType directory -Path .\artifacts
-          & 7z a -ttar -so Radegast-${{ env.TAG_VERSION }}.tar .\bin\Release\ | & 7z a -si Radegast_${{ matrix.platform }}-${{ env.TAG_VERSION }}.tbz
+          Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
+          msbuild radegast.sln /t:Restore /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }}
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
+      - name: Build solution
+        shell: pwsh
+        run: |
+          Write-Host "Building Radegast for ${{ matrix.platform }}..."
+          msbuild radegast.sln /m /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /v:minimal
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          Write-Host "Building MSI installer for ${{ matrix.platform }}"
+          msbuild Install\RadegastSetup\RadegastSetup.wixproj /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+
+          Write-Host "Building Bundle (bootstrapper) for ${{ matrix.platform }}"
+          msbuild Install\RadegastBundle\RadegastBundle.wixproj /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+
+      - name: Collect artifacts
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Write-Host "Creating artifact directory: $artifactDir"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          # Copy main application binaries
+          Write-Host "Copying application binaries..."
+          Copy-Item -Path "bin\ReleaseWindows\*" -Destination "$artifactDir\" -Recurse -Force -Exclude @("*.pdb", "*.xml", "*.vshost.*")
+
+          # Collect PDB files separately for symbols package
+          Write-Host "Collecting PDB files..."
+          $pdbDir = "$artifactDir\symbols"
+          New-Item -ItemType Directory -Path $pdbDir -Force | Out-Null
+          Get-ChildItem -Path "bin\ReleaseWindows" -Filter "*.pdb" -Recurse | Copy-Item -Destination $pdbDir -Force
+
+          # Copy MSI installer if it exists (WiX outputs to en-US subdirectory)
+          $msiPath = "bin\Packages\en-US\RadegastSetup_$platform.msi"
+          if (Test-Path $msiPath) {
+            Write-Host "Copying MSI installer: $msiPath"
+            Copy-Item -Path $msiPath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.msi" -Force
+          } else {
+            Write-Warning "MSI installer not found at: $msiPath"
+          }
+
+          # Copy Bundle exe if it exists
+          $bundlePath = "bin\Packages\RadegastBundle_$platform.exe"
+          if (Test-Path $bundlePath) {
+            Write-Host "Copying Bundle installer: $bundlePath"
+            Copy-Item -Path $bundlePath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.exe" -Force
+          } else {
+            Write-Warning "Bundle installer not found at: $bundlePath"
+          }
+
+      
+
+      - name: Generate NetSparkle Appcast
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
 
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
+          # Skip if SPARKLE_PRIVATE_KEY is not configured
+          if ([string]::IsNullOrEmpty($env:SPARKLE_PRIVATE_KEY)) {
+            Write-Host "NetSparkle private key not configured, skipping appcast generation"
+            exit 0
+          }
+
+          Write-Host "Generating NetSparkle appcast for $platform..."
+
+          # Install NetSparkle CLI tool
+          dotnet tool install --global NetSparkleUpdater.Tools.AppCastGenerator --version 2.0.0 2>$null
+
+          # Create temporary directory for appcast generation
+          $tempDir = "appcast_temp_$platform"
+          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+          # Copy MSI to temp directory for appcast generation
+          $msi = "$artifactDir\RadegastSetup_${platform}_${version}.msi"
+          if (Test-Path $msi) {
+            Copy-Item $msi -Destination $tempDir -Force
+
+            # Generate appcast (matching AppVeyor configuration)
+            try {
+              netsparkle-generate-appcast `
+                -n Radegast `
+                -e msi `
+                -a $tempDir `
+                --output-type json `
+                -o "windows-$platform" `
+                --file-version $version `
+                -u "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+              # Copy appcast files to artifacts
+              if (Test-Path "windows-$platform.json") {
+                Copy-Item "windows-$platform.json" "$artifactDir\appcast.json" -Force
+                Write-Host "✓ Generated appcast.json"
+              }
+              if (Test-Path "windows-$platform.json.signature") {
+                Copy-Item "windows-$platform.json.signature" "$artifactDir\appcast.json.signature" -Force
+                Write-Host "✓ Generated appcast.json.signature"
+              }
+            } catch {
+              Write-Warning "Failed to generate appcast: $_"
+              Write-Host "Continuing without appcast files..."
+            }
+          } else {
+            Write-Warning "MSI not found, skipping appcast generation"
+          }
+
+          # Cleanup temp directory
+          Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        continue-on-error: true
+
+      - name: Create compressed archives
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          # Create tar.bz2 (tbz) of binaries (matching AppVeyor)
+          Write-Host "Creating Radegast_${platform}_${version}.tbz using 7z"
+          Push-Location "$artifactDir"
+
+          # Use 7-Zip to create a tar stream and compress with bzip2 to avoid tar hangs on Windows
+          $tarName = "..\Radegast_${platform}_${version}.tar"
+          $tbzName = "..\Radegast_${platform}_${version}.tbz"
+
+          try {
+            & 7z a -ttar -so $tarName * -xr!symbols -xr!*.msi -xr!*.exe | & 7z a -si $tbzName -tbzip2 -mx=9
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Write-Warning "7z pipeline exited with code $code. Falling back to tar if available."
+              # Fallback: try native tar (may still fail on some runners)
+              & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+            }
+          } catch {
+            Write-Warning "7z pipeline failed: $_. Attempting native tar fallback."
+            & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+          }
+
+          Pop-Location
+
+          # Create zip of symbols
+          if (Test-Path "$artifactDir\symbols") {
+            Write-Host "Creating Radegast_${platform}_${version}_symbols.zip"
+            Compress-Archive -Path "$artifactDir\symbols\*" -DestinationPath "artifacts\Radegast_${platform}_${version}_symbols.zip" -Force
+          }
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Write-Host "Generating SHA256 checksums for $platform..."
+          $checksumFile = "$artifactDir\SHA256SUMS.txt"
+          if (Test-Path $checksumFile) { Remove-Item $checksumFile -ErrorAction SilentlyContinue }
+
+          # Collect files to checksum (msi, exe, tbz)
+          $files = Get-ChildItem -Path $artifactDir -File | Where-Object { $_.Extension -in '.msi', '.exe', '.tbz' }
+          if ($files.Count -eq 0) {
+            Write-Warning "No MSI/EXE/TBZ files found to checksum in $artifactDir"
+          } else {
+            foreach ($f in $files) {
+              $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+              "${hash}  $($f.Name)" | Out-File -FilePath $checksumFile -Encoding utf8 -Append
+              Write-Host "$hash  $($f.Name)"
+            }
+            Write-Host "✓ Checksums saved to $checksumFile"
+          }
+
+      - name: Generate SBOM (Software Bill of Materials)
+        uses: anchore/sbom-action@v0
         with:
+          path: ./bin/ReleaseWindows
+          format: spdx-json
+          output-file: artifacts/${{ matrix.platform }}/sbom.spdx.json
+          upload-artifact: false
+        continue-on-error: true
+
+      - name: Verify all expected artifacts
+        shell: pwsh
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.TAG_VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Write-Host "Verifying release artifacts for $platform..."
+
+          $expected = @(
+            "RadegastSetup_${platform}_${version}.exe",
+            "RadegastSetup_${platform}_${version}.msi",
+            "SHA256SUMS.txt"
+          )
+
+          $optional = @(
+            "appcast.json",
+            "appcast.json.signature",
+            "sbom.spdx.json"
+          )
+
+          $missing = @()
+          $found = @()
+
+          foreach ($file in $expected) {
+            if (Test-Path "$artifactDir\$file") {
+              $found += $file
+              $size = [math]::Round((Get-Item "$artifactDir\$file").Length / 1MB, 2)
+              Write-Host "  ✓ $file ($size MB)"
+            } else {
+              $missing += $file
+              Write-Warning "  ✗ $file (MISSING)"
+            }
+          }
+
+          foreach ($file in $optional) {
+            if (Test-Path "$artifactDir\$file") {
+              $size = [math]::Round((Get-Item "$artifactDir\$file").Length / 1KB, 2)
+              Write-Host "  ✓ $file ($size KB) [optional]"
+            }
+          }
+
+          # Check for tbz and symbols
+          $tarball = "artifacts\Radegast_${platform}_${version}.tbz"
+          $symbols = "artifacts\Radegast_${platform}_${version}_symbols.zip"
+
+          if (Test-Path $tarball) {
+            $size = [math]::Round((Get-Item $tarball).Length / 1MB, 2)
+            Write-Host "  ✓ Radegast_${platform}_${version}.tbz ($size MB)"
+          } else {
+            $missing += "Radegast_${platform}_${version}.tbz"
+          }
+
+          if (Test-Path $symbols) {
+            $size = [math]::Round((Get-Item $symbols).Length / 1MB, 2)
+            Write-Host "  ✓ Radegast_${platform}_${version}_symbols.zip ($size MB)"
+          } else {
+            $missing += "Radegast_${platform}_${version}_symbols.zip"
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Error "Missing required artifacts: $($missing -join ', ')"
+            exit 1
+          } else {
+            Write-Host "`All required artifacts verified successfully!"
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          # Make artifact name unique per job/run to avoid 409 Conflict when multiple matrix jobs upload
+          name: radegast-${{ matrix.platform }}-${{ env.TAG_VERSION }}-${{ github.run_id }}
+          path: |
+            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tbz
+            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols.zip
+            artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
+            artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
+            artifacts\${{ matrix.platform }}\SHA256SUMS.txt
+            artifacts\${{ matrix.platform }}\appcast.json
+            artifacts\${{ matrix.platform }}\appcast.json.signature
+            artifacts\${{ matrix.platform }}\sbom.spdx.json
+          if-no-files-found: warn
+
+      - name: Verify symbol validity
+        shell: pwsh
+        run: |
+          # Skip if BugSplat is not configured
+          if ([string]::IsNullOrEmpty("${{ secrets.BUGSPLAT_DATABASE }}")) {
+            Write-Host "BugSplat not configured, skipping symbol validation"
+            echo "SYMBOLS_VALID=false" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+            exit 0
+          }
+
+          $platform = "${{ matrix.platform }}"
+          $pdbDir = "artifacts\$platform\symbols"
+          $binDir = "artifacts\$platform"
+
+          if (-not (Test-Path $pdbDir)) {
+            Write-Host "No symbols directory found at: $pdbDir"
+            echo "SYMBOLS_VALID=false" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+            exit 0
+          }
+
+          $pdbFiles = Get-ChildItem -Path $pdbDir -Filter "*.pdb" -Recurse
+          if ($pdbFiles.Count -eq 0) {
+            Write-Host "No PDB files found in: $pdbDir"
+            echo "SYMBOLS_VALID=false" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+            exit 0
+          }
+
+          Write-Host "Validating $($pdbFiles.Count) symbol files..."
+
+          $invalidCount = 0
+          $validCount = 0
+          $warnings = @()
+
+          foreach ($pdb in $pdbFiles) {
+            Write-Host "`nValidating: $($pdb.Name)"
+
+            # Check if PDB file is accessible and not empty
+            if ($pdb.Length -eq 0) {
+              Write-Warning "  ✗ Empty PDB file"
+              $invalidCount++
+              $warnings += "$($pdb.Name): Empty file"
+              continue
+            }
+
+            # Check if PDB has valid header (basic validation)
+            try {
+              $bytes = [System.IO.File]::ReadAllBytes($pdb.FullName)
+
+              # PDB 7.0 signature: "Microsoft C/C++ MSF 7.00\r\n\x1A DS\0\0\0"
+              $signature = [System.Text.Encoding]::ASCII.GetString($bytes, 0, [Math]::Min(32, $bytes.Length))
+
+              if ($signature -notmatch "Microsoft C/C\+\+") {
+                Write-Warning "  ✗ Invalid PDB signature"
+                $invalidCount++
+                $warnings += "$($pdb.Name): Invalid signature"
+                continue
+              }
+
+              Write-Host "  ✓ Valid PDB format"
+
+              # Try to find matching binary
+              $baseName = [System.IO.Path]::GetFileNameWithoutExtension($pdb.Name)
+              $possibleExe = Get-ChildItem -Path $binDir -Filter "$baseName.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              $possibleDll = Get-ChildItem -Path $binDir -Filter "$baseName.dll" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+              $binary = if ($possibleExe) { $possibleExe } else { $possibleDll }
+
+              if ($binary) {
+                Write-Host "  ✓ Found matching binary: $($binary.Name)"
+
+                # Check file sizes are reasonable (PDB should be smaller than 100MB for sanity)
+                if ($pdb.Length -gt 100MB) {
+                  Write-Warning "  ⚠ PDB is unusually large: $([Math]::Round($pdb.Length / 1MB, 2)) MB"
+                  $warnings += "$($pdb.Name): Unusually large ($([Math]::Round($pdb.Length / 1MB, 2)) MB)"
+                }
+              } else {
+                Write-Host "  ⚠ No matching binary found (this is OK for some libraries)"
+              }
+
+              $validCount++
+              Write-Host "  ✓ PDB appears valid ($([Math]::Round($pdb.Length / 1KB, 2)) KB)"
+
+            } catch {
+              Write-Warning "  ✗ Error reading PDB: $_"
+              $invalidCount++
+              $warnings += "$($pdb.Name): Read error"
+              continue
+            }
+          }
+
+          Write-Host "`n================================"
+          Write-Host "Symbol Validation Summary"
+          Write-Host "================================"
+          Write-Host "Valid PDBs:   $validCount"
+          Write-Host "Invalid PDBs: $invalidCount"
+
+          if ($warnings.Count -gt 0) {
+            Write-Host "`nWarnings:"
+            foreach ($warning in $warnings) {
+              Write-Host "  - $warning"
+            }
+          }
+
+          # Set environment variable for next step
+          if ($validCount -gt 0 -and $invalidCount -eq 0) {
+            Write-Host "`n✓ All symbols are valid and ready for upload"
+            echo "SYMBOLS_VALID=true" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif ($validCount -gt 0 -and $invalidCount -gt 0) {
+            Write-Host "`n⚠ Some symbols are valid, will upload valid ones only"
+            echo "SYMBOLS_VALID=partial" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          } else {
+            Write-Host "`n✗ No valid symbols found, skipping upload"
+            echo "SYMBOLS_VALID=false" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      # (Symbol upload moved to release job)
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set version variables
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $tagVersion = $tag -replace '^v',''
+          echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize release files
+        shell: pwsh
+        run: |
+          Write-Host "Organizing release files..."
+          New-Item -ItemType Directory -Path "release-files" -Force | Out-Null
+
+          # Move all downloaded artifacts to release-files directory
+          Get-ChildItem -Path "release-artifacts" -Recurse -File | ForEach-Object {
+            $dest = "release-files\$($_.Name)"
+            Write-Host "Moving: $($_.FullName) -> $dest"
+            Move-Item -Path $_.FullName -Destination $dest -Force
+          }
+
+          # List final files
+          Write-Host "`nFinal release files:"
+          Get-ChildItem -Path "release-files" | ForEach-Object {
+            Write-Host "  - $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)"
+          }
+
+      - name: Upload symbols to BugSplat (centralized)
+        shell: pwsh
+        continue-on-error: true
+        env:
+          BUGSPLAT_DATABASE: ${{ secrets.BUGSPLAT_DATABASE }}
+          BUGSPLAT_CLIENT_ID: ${{ secrets.BUGSPLAT_CLIENT_ID }}
+          BUGSPLAT_CLIENT_SECRET: ${{ secrets.BUGSPLAT_CLIENT_SECRET }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:BUGSPLAT_DATABASE)) {
+            Write-Host "BugSplat not configured, skipping"
+            exit 0
+          }
+
+          $zipFiles = Get-ChildItem -Path "release-files" -Filter "*_symbols.zip" -File -ErrorAction SilentlyContinue
+          if (-not $zipFiles -or $zipFiles.Count -eq 0) {
+            Write-Host "No symbol zip files found, skipping"
+            exit 0
+          }
+
+          # PowerShell Invoke-RestMethod and curl.exe both receive an empty 200 body from the
+          # BugSplat token endpoint.  The @bugsplat/symbol-upload CLI uses Node.js and succeeds.
+          # Root cause: Node.js's https module sends HTTP/2 (or has different TLS/ALPN behaviour)
+          # which triggers the correct JSON response.  The script uses only built-in modules.
+          Write-Host "Authenticating with BugSplat via Node.js..."
+          $authErr = Join-Path $env:TEMP "bugsplat-auth.err.txt"
+          Remove-Item $authErr -ErrorAction SilentlyContinue
+          $tokenRaw = (& node ".github/scripts/bugsplat-auth.js" 2> $authErr | Out-String).Trim()
+          if (Test-Path $authErr) {
+            $authErrText = Get-Content $authErr -Raw
+            if (-not [string]::IsNullOrWhiteSpace($authErrText)) {
+              Write-Warning "BugSplat auth stderr: $authErrText"
+            }
+            Remove-Item $authErr -ErrorAction SilentlyContinue
+          }
+
+          Write-Host "Token response: $tokenRaw"
+          $tokenObj = $null
+          try { $tokenObj = $tokenRaw | ConvertFrom-Json -ErrorAction Stop } catch {}
+          $token = $null
+          if ($tokenObj -and ($tokenObj.PSObject.Properties.Name -contains 'access_token')) {
+            $token = [string]$tokenObj.access_token
+          } elseif ($tokenRaw -match '"access_token"\s*:\s*"([^"]+)"') {
+            $token = $matches[1]
+          }
+
+          if ([string]::IsNullOrEmpty($token)) {
+            Write-Warning "No access_token received — cannot upload symbols"
+            exit 0
+          }
+          Write-Host "Authentication success!"
+
+          $results = @()
+          foreach ($zip in $zipFiles) {
+            Write-Host "`nProcessing $($zip.Name)"
+            $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
+
+            $tempDir = Join-Path $env:TEMP ("bugsplat_" + $platform)
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+            New-Item -ItemType Directory -Path $tempDir | Out-Null
+            Expand-Archive -Path $zip.FullName -DestinationPath $tempDir -Force
+
+            $pdbFiles = Get-ChildItem -Path $tempDir -Filter "*.pdb" -Recurse -File -ErrorAction SilentlyContinue
+            if (-not $pdbFiles -or $pdbFiles.Count -eq 0) {
+              Write-Host "No PDBs for $platform, skipping"
+              $results += [pscustomobject]@{ Platform = $platform; Uploaded = 0; Failed = 0; Status = 'skipped' }
+              continue
+            }
+
+            $appVersion = "$($env:TAG_VERSION)-$platform"
+            $uploaded = 0
+            $failed = 0
+
+            foreach ($pdb in $pdbFiles) {
+              Write-Host "  Uploading $($pdb.Name)..."
+
+              $versionsArgs = @(
+                '--silent', '--show-error',
+                '--request', 'POST', 'https://app.bugsplat.com/api/versions',
+                '--header', "Authorization: Bearer $token",
+                '--data-urlencode', "dbName=$($env:BUGSPLAT_DATABASE)",
+                '--data-urlencode', 'appName=Radegast',
+                '--data-urlencode', "appVersion=$appVersion",
+                '--data-urlencode', "size=$($pdb.Length)",
+                '--data-urlencode', "symFileName=$($pdb.Name)"
+              )
+              $versionsRaw = & curl.exe @versionsArgs 2>&1
+              Write-Host "  /api/versions: $versionsRaw"
+
+              $versionsObj = $null
+              try { $versionsObj = $versionsRaw | ConvertFrom-Json -ErrorAction Stop } catch {}
+              $uploadUrl = $null
+              if ($versionsObj) {
+                if ($versionsObj.PSObject.Properties.Name -contains 'url') { $uploadUrl = $versionsObj.url }
+                elseif ($versionsObj.PSObject.Properties.Name -contains 'Url') { $uploadUrl = $versionsObj.Url }
+                elseif ($versionsObj.PSObject.Properties.Name -contains 'uploadUrl') { $uploadUrl = $versionsObj.uploadUrl }
+              }
+
+              if ([string]::IsNullOrEmpty($uploadUrl)) {
+                Write-Warning "  No upload URL returned for $($pdb.Name)"
+                $failed++
+                continue
+              }
+
+              # Upload to S3 presigned URL — include every AWS policy field plus the file
+              $uploadArgs = @('--silent', '--show-error', '--request', 'POST', $uploadUrl)
+              if ($versionsObj.fields) {
+                foreach ($key in $versionsObj.fields.PSObject.Properties.Name) {
+                  $uploadArgs += '--form'
+                  $uploadArgs += "$key=$($versionsObj.fields.$key)"
+                }
+              }
+              $uploadArgs += '--form'
+              $uploadArgs += "file=@$($pdb.FullName)"
+
+              $uploadResult = & curl.exe @uploadArgs 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "  Uploaded $($pdb.Name)"
+                $uploaded++
+              } else {
+                Write-Warning "  Upload failed for $($pdb.Name): $uploadResult"
+                $failed++
+              }
+            }
+
+            $status = if ($failed -eq 0) { 'success' } elseif ($uploaded -gt 0) { 'partial' } else { 'failed' }
+            $results += [pscustomobject]@{ Platform = $platform; Uploaded = $uploaded; Failed = $failed; Status = $status }
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          Write-Host "`n=== BugSplat Upload Summary ==="
+          foreach ($r in $results) { Write-Host " - $($r.Platform): $($r.Status) (uploaded $($r.Uploaded), failed $($r.Failed))" }
+          exit 0
+
+      - name: Generate release notes
+        id: release_notes
+        shell: pwsh
+        run: |
+          $tag = "${{ env.TAG }}"
+          $version = "${{ env.TAG_VERSION }}"
+
+          # Get previous tag
+          $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if (-not $previousTag) {
+            $previousTag = git rev-list --max-parents=0 HEAD
+          }
+
+          Write-Host "Generating release notes from $previousTag to $tag"
+
+          # Get commit log
+          $commits = git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges
+
+          # Create release notes
+          $releaseNotes = @"
+          # Radegast $version
+
+          ## Download
+
+          Choose the installer or archive for your platform:
+
+          ### Windows Installers (Recommended)
+          - **RadegastSetup_x86_${version}.msi** - For 32-bit Windows (most compatible)
+          - **RadegastSetup_x64_${version}.msi** - For 64-bit Windows
+          - **RadegastSetup_ARM64_${version}.msi** - For Windows on ARM64
+
+          ### Portable Archives
+          - **Radegast_x86_${version}.tbz** - 32-bit portable
+          - **Radegast_x64_${version}.tbz** - 64-bit portable  
+          - **Radegast_ARM64_${version}.tbz** - ARM64 portable
+
+          ### Debug Symbols (for developers)
+          - **Radegast_x86_${version}_symbols.zip**
+          - **Radegast_x64_${version}_symbols.zip**
+          - **Radegast_ARM64_${version}_symbols.zip**
+
+          ## Changes in this Release
+
+          $commits
+
+          ## Installation Notes
+
+          - Windows 10 or later is recommended
+          - .NET Framework 4.8 is required (usually pre-installed on Windows 10/11)
+          - Choose x86 version if unsure about your Windows architecture
+
+          ## Support
+
+          For issues and feature requests, please visit: https://github.com/cinderblocks/Radegast/issues
+          "@
+
+          # Save to file
+          $releaseNotes | Out-File -FilePath "release-notes.md" -Encoding utf8
+
+          # Set output for use in release
+          $releaseNotesEscaped = $releaseNotes -replace "`n","%0A" -replace "`r","%0D"
+          echo "notes=$releaseNotesEscaped" | Out-File -FilePath $Env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create GitHub Release (Draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: false
+          name: Radegast ${{ env.TAG_VERSION }}
+          tag_name: ${{ env.TAG }}
+          body_path: release-notes.md
+          # include files in release-files and any nested directories
           files: |
-            artifacts\*
+            release-files/**/*.exe
+            release-files/**/*.msi
+            release-files/**/*.tbz
+            release-files/**/*.zip
+            release-files/**/SHA256SUMS*.txt
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release summary
+        shell: pwsh
+        run: |
+          Write-Host "Release draft created successfully!"
+          Write-Host "Tag: ${{ env.TAG }}"
+          Write-Host "Version: ${{ env.TAG_VERSION }}"
+          Write-Host ""
+          Write-Host "Uploaded files:"
+          Get-ChildItem -Path "release-files" | ForEach-Object {
+            Write-Host "  ✓ $($_.Name)"
+          }
+          Write-Host ""
+          Write-Host "Please review the draft release and publish when ready."

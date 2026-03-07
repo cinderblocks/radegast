@@ -10,7 +10,7 @@ Radegast Metaverse Client (http://radegast.life/)
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://github.com/cinderblocks/radegast/blob/master/LICENSE.txt)
 [![Latest version downloads](https://img.shields.io/github/downloads-pre/cinderblocks/radegast/latest/total)](https://radegast.life/downloads/)  
-[![Build status](https://ci.appveyor.com/api/projects/status/g34olv3opd2vho32/branch/master?svg=true)](https://ci.appveyor.com/project/cinderblocks57647/radegast/branch/master)  
+[![Tests](https://github.com/cinderblocks/radegast/actions/workflows/ci.yml/badge.svg)](https://github.com/cinderblocks/radegast/actions/workflows/ci.yml)  
 [![Commits per month](https://img.shields.io/github/commit-activity/m/cinderblocks/radegast)](https://www.github.com/cinderblocks/radegast/)  
 [![ZEC](https://img.shields.io/keybase/zec/cinder)](https://keybase.io/cinder) [![BTC](https://img.shields.io/keybase/btc/cinder)](https://keybase.io/cinder) 
 

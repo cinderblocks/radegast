@@ -21,17 +21,30 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using FMOD;
 using System.Threading;
 using OpenMetaverse;
 using OpenMetaverse.StructuredData;
 using OpenMetaverse.Assets;
 using System.Threading.Tasks;
+using System.IO;
 
 namespace Radegast.Media
 {
     public class MediaManager : MediaObject
     {
+        // P/Invoke declarations for DLL loading on Windows
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern bool SetDllDirectory(string lpPathName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr LoadLibrary(string lpFileName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern IntPtr GetModuleHandle(string lpModuleName);
+
         /// <summary>
         /// Indicated whether sound system is ready for use
         /// </summary>
@@ -546,6 +559,207 @@ namespace Radegast.Media
                 
                 // Notify listeners that sound system failed to initialize
                 SoundSystemAvailableChanged?.Invoke(this, new SoundSystemAvailableEventArgs(false));
+            }
+        }
+
+        /// <summary>
+        /// Determine the correct architecture folder name for native DLLs
+        /// </summary>
+        private static string GetArchitectureFolder()
+        {
+            // Try to use RuntimeInformation if available (more reliable)
+            try
+            {
+                var arch = RuntimeInformation.ProcessArchitecture;
+                switch (arch)
+                {
+                    case Architecture.X64:
+                        return "x64";
+                    case Architecture.X86:
+                        return "x86";
+                    case Architecture.Arm64:
+                        return "arm64";
+                    case Architecture.Arm:
+                        return "arm";
+                    default:
+                        Logger.Debug($"Unknown architecture from RuntimeInformation: {arch}");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Could not determine architecture via RuntimeInformation: {ex.Message}");
+            }
+
+            // Fallback to Environment.Is64BitProcess
+            if (Environment.Is64BitProcess)
+            {
+                return "x64";
+            }
+            else
+            {
+                return "x86";
+            }
+        }
+
+        /// <summary>
+        /// Load a native library from architecture-specific paths (Windows only)
+        /// </summary>
+        /// <param name="libraryName">Name of the DLL without extension (e.g., "fmod", "nvdaControllerClient")</param>
+        /// <returns>True if library was found and loaded, false otherwise</returns>
+        private static bool LoadNativeLibrary(string libraryName)
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            {
+                Logger.Debug($"Skipping native library loading for {libraryName} on non-Windows platform");
+                return false;
+            }
+
+            string dllName = $"{libraryName}.dll";
+            
+            // Check if already loaded
+            IntPtr existingHandle = GetModuleHandle(libraryName);
+            if (existingHandle != IntPtr.Zero)
+            {
+                Logger.Debug($"{libraryName} library already loaded");
+                return true;
+            }
+
+            // Determine the correct architecture
+            string architecture = GetArchitectureFolder();
+            Logger.Info($"Attempting to load {libraryName} for architecture: {architecture}");
+            
+            // Try multiple possible DLL locations
+            var possiblePaths = new List<string>();
+
+            // Get the application base directory
+            string appDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            
+            // Primary installation paths - dll subdirectory (matches LibreMetaverse convention)
+            possiblePaths.Add(Path.Combine(appDirectory, "dll", architecture, dllName));
+            possiblePaths.Add(Path.Combine(appDirectory, architecture, dllName));
+            possiblePaths.Add(Path.Combine(appDirectory, dllName));
+            
+            // If we're 64-bit but looking for arm64 and it doesn't exist, try x64 as fallback (emulation)
+            if (architecture == "arm64")
+            {
+                possiblePaths.Add(Path.Combine(appDirectory, "dll", "x64", dllName));
+                possiblePaths.Add(Path.Combine(appDirectory, "x64", dllName));
+            }
+            
+            // Check Program Files if we're installed there
+            if (appDirectory.Contains("Program Files"))
+            {
+                string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                string radegastPath = Path.Combine(programFiles, "Radegast");
+                possiblePaths.Add(Path.Combine(radegastPath, "dll", architecture, dllName));
+                possiblePaths.Add(Path.Combine(radegastPath, architecture, dllName));
+                
+                if (architecture == "arm64")
+                {
+                    possiblePaths.Add(Path.Combine(radegastPath, "dll", "x64", dllName));
+                    possiblePaths.Add(Path.Combine(radegastPath, "x64", dllName));
+                }
+            }
+
+            string foundPath = null;
+            string foundDirectory = null;
+
+            // Find the first path that exists
+            foreach (var path in possiblePaths)
+            {
+                if (File.Exists(path))
+                {
+                    foundPath = path;
+                    foundDirectory = Path.GetDirectoryName(path);
+                    Logger.Info($"Found {libraryName} library at: {path}");
+                    break;
+                }
+                else
+                {
+                    Logger.Debug($"{libraryName} library not found at: {path}");
+                }
+            }
+
+            if (foundPath == null)
+            {
+                Logger.Debug($"Could not locate {libraryName} library for {architecture} architecture. Searched paths:");
+                foreach (var path in possiblePaths)
+                {
+                    Logger.Debug($"  - {path}");
+                }
+                return false;
+            }
+
+            try
+            {
+                // Set the DLL directory so dependent DLLs can be found
+                if (SetDllDirectory(foundDirectory))
+                {
+                    Logger.Debug($"Set DLL directory to: {foundDirectory}");
+                }
+                else
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    Logger.Debug($"Failed to set DLL directory to: {foundDirectory}, Win32 error code: {error}");
+                }
+
+                // Manually load the library
+                IntPtr handle = LoadLibrary(foundPath);
+                if (handle == IntPtr.Zero)
+                {
+                    int error = Marshal.GetLastWin32Error();
+                    Logger.Warn($"Failed to load {libraryName} library from {foundPath}, Win32 error code: {error}");
+                    return false;
+                }
+                else
+                {
+                    Logger.Info($"Successfully loaded {libraryName} library from: {foundPath}");
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"Exception while loading {libraryName} library: {ex.Message}", ex);
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Ensure FMOD native library can be found and loaded (Windows only)
+        /// </summary>
+        private void EnsureFMODLibraryLoaded()
+        {
+            LoadNativeLibrary("fmod");
+        }
+
+        /// <summary>
+        /// Load all required native libraries for the application
+        /// </summary>
+        public static void LoadNativeLibraries()
+        {
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            {
+                Logger.Debug("Skipping native library loading on non-Windows platform");
+                return;
+            }
+
+            Logger.Info("Loading native libraries...");
+
+            // List of native libraries to load
+            var libraries = new[] { "fmod", "nvdaControllerClient", "UniversalSpeech" };
+            
+            foreach (var library in libraries)
+            {
+                try
+                {
+                    LoadNativeLibrary(library);
+                }
+                catch (Exception ex)
+                {
+                    // Don't fail startup if optional libraries can't be loaded
+                    Logger.Debug($"Could not load optional native library {library}: {ex.Message}");
+                }
             }
         }
 

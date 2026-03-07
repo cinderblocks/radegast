@@ -39,6 +39,7 @@ using System.Drawing;
 using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Extensions.Logging;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Graphics;
 using OpenTK.Platform;
@@ -476,7 +477,7 @@ namespace Radegast.Rendering
                 catch (Exception ex)
                 {
                     RenderingEnabled = false;
-                    Logger.Log("Crash of the 3D scene viewer:\n" + ex.ToString(), Helpers.LogLevel.Error);
+                    Logger.Log("Exception in 3D scene viewer", LogLevel.Error, ex);
                     Dispose();
                 }
 #endif

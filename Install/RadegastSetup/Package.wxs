@@ -1,24 +1,52 @@
-﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
-  <?include ..\BuildProperties.wxi?>
-  <?define productVersion=!(bind.FileVersion.Radegast.Executable) ?>
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" 
+xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
+xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+<?include ..\BuildProperties.wxi?>
+<?define productVersion=!(bind.FileVersion.Radegast.Executable) ?>
+<?define UpgradeCode="{B8F7E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
 
-  <Package Name="$(var.productName)"
-           Language="1033"
-           Compressed="yes"
-           Version="$(var.productVersion)"
-           Manufacturer="$(var.companyName)"
-           Id="$(var.productName)"
-           InstallerVersion="500">
-    <SummaryInformation Description="$(var.productDesc)"
-                        Keywords="virtual world,3D,secondlife,opensimulator"
-                        Comments="$(var.copyright)" />
+<Package Name="$(var.productName)"
+         Language="1033"
+         Compressed="yes"
+         Version="$(var.productVersion)"
+         Manufacturer="$(var.companyName)"
+         UpgradeCode="$(var.UpgradeCode)"
+         InstallerVersion="500">
+  <SummaryInformation Description="$(var.productDesc)"
+                      Keywords="virtual world,3D,secondlife,opensimulator"
+                      Manufacturer="$(var.companyName)"
+                      Comments="$(var.copyright)" />
 
-    <MajorUpgrade Schedule="afterInstallInitialize" AllowDowngrades="yes" />
-    <MediaTemplate EmbedCab="true"/>
+    <!-- Allow upgrades and downgrades: Remove previous versions before installing -->
+    <MajorUpgrade 
+      Schedule="afterInstallInitialize" 
+      AllowDowngrades="yes" />
+    <MediaTemplate EmbedCab="true" CompressionLevel="high" />
     <Icon Id="Radegast.ico" SourceFile="$(var.Radegast.ProjectDir)radegast.ico" />
 
     <Property Id="ApplicationFolderName" Value="$(var.productName)" />
     <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
+    
+    <!-- Public properties for silent installation customization -->
+    <Property Id="INSTALLDIR" Secure="yes" />
+    <Property Id="DESKTOPSHORTCUT" Secure="yes" Value="1" />
+    <Property Id="STARTMENUSHORTCUT" Secure="yes" Value="1" />
+    <Property Id="REGISTERPROTOCOLS" Secure="yes" Value="1" />
+    <Property Id="REGISTERFILEASSOC" Secure="yes" Value="0" />
+    <Property Id="CLEAN_USERDATA" Secure="yes" Value="0" />
+    
+    <!-- Restart Manager: Disable for manual control -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+    
+    <!-- Enhanced logging support -->
+    <Property Id="VERBOSE_LOGGING" Secure="yes" Value="0" />
+    <Property Id="MsiLogging" Value="voicewarmup" />
+    
+    <!-- Custom action to enable verbose logging if requested -->
+    <CustomAction Id="EnableVerboseLogging"
+                  Property="MsiLogging"
+                  Value="voicewarmupx!"
+                  Execute="firstSequence" />
 
     <!-- Windows Add/Remove Programs properties -->
     <Property Id="ARPCOMMENTS" Value="$(var.productDesc)" />
@@ -29,8 +57,22 @@
     <Property Id="ARPURLUPDATEINFO" Value="$(var.aboutUrl)" />
     <!--<Property Id="ARPHELPTELEPHONE"></Property>-->
     <Property Id="ARPREADME" Value="https://radegast.life/" />
-    <!-- Update this value with the install size in Kb -->
+    <!-- Estimated install size in KB (will be calculated during build) -->
     <Property Id="ARPSIZE" Value="$(var.totalFileSize)" />
+    <Property Id="ARPNOMODIFY" Value="1" Secure="yes" />
+    <Property Id="ARPNOREPAIR" Value="1" Secure="yes" />
+    
+    <!-- Launch application after install -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch $(var.productName)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    
+    <!-- Note: Actual launch is handled by UI in WiX v4 -->
+    <!-- The exit dialog will use WIXUI_EXITDIALOGOPTIONALCHECKBOX property -->
+    
+    <InstallExecuteSequence>
+      <!-- Enable verbose logging if requested -->
+      <Custom Action="EnableVerboseLogging" Before="AppSearch" Condition="VERBOSE_LOGGING = &quot;1&quot;" />
+    </InstallExecuteSequence>
     <!-- This refers to the Id attribute of the <Icon> element -->
     <!--<Property Id="ARPNOMODIFY">1</Property>-->
     <!-- Prevent the Modify feature in Add/Remove Programs -->
@@ -40,6 +82,12 @@
     <Feature Id="ProductFeature" Title="Radegast" Level="1">
       <ComponentGroupRef Id="Radegast.Components" />
       <ComponentRef Id="ApplicationShortcut" />
+      <ComponentRef Id="WebsiteShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="SLURLProtocolHandler" />
+      <ComponentRef Id="FileAssociations" />
+      <ComponentRef Id="RegistryEntries" />
+      <ComponentRef Id="UninstallCleanup" />
       <Feature Id="VCRedist140"
                Title="Visual C++ 2015 Runtime"
                AllowAdvertise="no"
@@ -65,6 +113,15 @@
     <Launch
       Condition="Installed OR WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED"
       Message="!(loc.MissingFramework48)" />
+    
+    <!-- Restart Manager: Close running Radegast instances before install/upgrade -->
+    <util:CloseApplication Id="CloseRadegast" 
+                          Target="Radegast.exe" 
+                          CloseMessage="yes" 
+                          Description="Radegast must be closed to continue installation."
+                          RebootPrompt="no"
+                          TerminateProcess="0"
+                          Timeout="5" />
 
     <?include UI.wxi?>
   </Package>

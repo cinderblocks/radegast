@@ -21,6 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
@@ -118,28 +119,32 @@ namespace Radegast
 			}
 		}
 
-        private UUID FindOrMakeInventoryFolder(string name)
+		private async Task<UUID> FindOrMakeInventoryFolderAsync(string name)
 		{
-			List<InventoryBase> folders = Client.Inventory.FolderContents(Client.Inventory.FindFolderForType(AssetType.Texture),
-                Client.Self.AgentID, true, false, InventorySortOrder.ByName, TimeSpan.FromSeconds(15));
-			UUID dir = UUID.Zero;
-			foreach(InventoryBase item in folders)
+			using (var cts = new CancellationTokenSource())
 			{
-				if (item.Name == name)
-					dir = item.UUID;
+				cts.CancelAfter(TimeSpan.FromSeconds(15));
+				List<InventoryBase> folders = await Client.Inventory.FolderContentsAsync(Client.Inventory.FindFolderForType(AssetType.Texture),
+					Client.Self.AgentID, true, false, InventorySortOrder.ByName, cts.Token).ConfigureAwait(false);
+				UUID dir = UUID.Zero;
+				foreach(InventoryBase item in folders)
+				{
+					if (item.Name == name)
+						dir = item.UUID;
+				}
+
+				if (dir == UUID.Zero)
+					dir = Client.Inventory.CreateFolder(Client.Inventory.FindFolderForType(AssetType.Texture),name);
+				return dir;
 			}
-			
-			if (dir == UUID.Zero)
-				dir = Client.Inventory.CreateFolder(Client.Inventory.FindFolderForType(AssetType.Texture),name);
-			return dir;
 		}
 
-        private async Task UploadImagesAsync()
+		private async Task UploadImagesAsync()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
-			
-			UUID uploaddir = FindOrMakeInventoryFolder("Import_" + Path.GetFileNameWithoutExtension(txtFileName.Text));
+
+			UUID uploaddir = await FindOrMakeInventoryFolderAsync("Import_" + Path.GetFileNameWithoutExtension(txtFileName.Text)).ConfigureAwait(false);
             FailedUploads.Clear();
 			LogMessage("Begining Uploading of Textures...");
 			
@@ -190,12 +195,12 @@ namespace Radegast
 			}
 		}
 
-        private async Task UploadImagesRetryAsync()
+		private async Task UploadImagesRetryAsync()
 		{
 			ImageUploader upldr = new ImageUploader(Client);
 			string path = Path.Combine(Path.GetDirectoryName(txtFileName.Text),Path.GetFileNameWithoutExtension(txtFileName.Text));
-			
-			UUID uploaddir = FindOrMakeInventoryFolder("Import_" + Path.GetFileNameWithoutExtension(txtFileName.Text));
+
+			UUID uploaddir = await FindOrMakeInventoryFolderAsync("Import_" + Path.GetFileNameWithoutExtension(txtFileName.Text)).ConfigureAwait(false);
 			FailedUploads = new List<UUID>();
 			LogMessage("Retrying Uploading of failed Textures...");
 			

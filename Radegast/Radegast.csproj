@@ -16,7 +16,7 @@
     <DefineConstants>TRACE;DEBUG</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
-    <DebugType>portable</DebugType>
+    <DebugType>pdbonly</DebugType>
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseLinux|x86'">
@@ -36,7 +36,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseWindows|x86'">
     <DefineConstants>TRACE</DefineConstants>
     <Optimize>true</Optimize>
-    <DebugType>portable</DebugType>
+    <DebugType>pdbonly</DebugType>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
@@ -54,7 +54,7 @@
     <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.6" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
-    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.2" />
     <PackageReference Include="System.Console" Version="4.3.1" />
     <PackageReference Include="System.Resources.Extensions" Version="9.0.10" />
     <PackageReference Include="System.Resources.ResourceManager" Version="4.3.0" />

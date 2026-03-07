@@ -1401,7 +1401,8 @@ namespace Radegast
 
         public InventoryItem AttachmentAt(AttachmentPoint point)
         {
-            return (from attachment in Client.Appearance.GetAttachmentsByAttachmentPoint()
+            var attachments = Client.Appearance.GetAttachmentsByAttachmentPointAsync().Result;
+            return (from attachment in attachments
                     where attachment.Key == point
                     select attachment.Value.First()).FirstOrDefault();
         }
@@ -2052,7 +2053,7 @@ namespace Radegast
                         if (trash == Inventory.RootFolder.UUID)
                         {
                             // Create trash on a background thread and then move folder; avoid blocking
-                            Task.Run(async () =>
+                            _ = Task.Run(async () =>
                             {
                                 try
                                 {
@@ -2160,7 +2161,7 @@ namespace Radegast
                         var trash = Client.Inventory.FindFolderForType(FolderType.Trash);
                         if (trash == Inventory.RootFolder.UUID)
                         {
-                            Task.Run(async () =>
+                            _ = Task.Run(async () =>
                             {
                                 try
                                 {

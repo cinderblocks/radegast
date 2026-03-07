@@ -200,7 +200,7 @@ namespace Radegast
                 Logger.Warn("Failed setting map position controls", ex, instance.Client);
             }
 
-            gotoRegion(region, x, y);
+            _ = gotoRegion(region, x, y);
             btnTeleport.Enabled = true;
             btnTeleport.Focus();
             lblStatus.Text = $"Ready for {region}";
@@ -249,7 +249,7 @@ namespace Radegast
                 return;
             }
 
-            gotoRegion(client.Network.CurrentSim.Name, (int)client.Self.SimPosition.X, (int)client.Self.SimPosition.Y);
+            _ = gotoRegion(client.Network.CurrentSim.Name, (int)client.Self.SimPosition.X, (int)client.Self.SimPosition.Y);
             lblStatus.Text = $"Now in {client.Network.CurrentSim.Name}";
         }
 
