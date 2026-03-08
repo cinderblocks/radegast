@@ -130,6 +130,9 @@ namespace Radegast
                 lblGroupNr.Text = $"{instance.Groups.Count} groups";
                 lblGrpMax.Text = client.Network.MaxAgentGroups > 0 ? $"max {client.Network.MaxAgentGroups} groups" : string.Empty;
 
+                var maxGroups = client.Network.MaxAgentGroups;
+                btnNewGroup.Enabled = maxGroups <= 0 || instance.Groups.Count < maxGroups;
+
                 if (newGrpID != UUID.Zero)
                 {
                     lblCreateStatus.Text = "Group created successfully";
@@ -215,6 +218,8 @@ namespace Radegast
 
         private void btnNewGroup_Click(object sender, EventArgs e)
         {
+            var createCost = client.Network.AccountLevelBenefits?.CreateGroupCost ?? -1;
+            btnCreateGroup.Text = createCost > 0 ? $"Create L${createCost}" : "Create";
             pnlNewGroup.Visible = true;
             txtNewGroupName.Focus();
         }
