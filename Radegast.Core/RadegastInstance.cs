@@ -831,9 +831,16 @@ namespace Radegast
             var sim = client.Network.CurrentSim;
             if (sim == null) return false;
 
-            // If capabilities are already received, we assume readiness. Otherwise wait for the event.
             var caps = sim.Caps;
             if (caps == null) return false;
+
+            // If capabilities were already received before we got here (common when
+            // NetCom_ClientConnected fires after the initial CAPS exchange), return
+            // immediately rather than waiting for an event that will never fire again.
+            if (caps.Capabilities().Any())
+            {
+                return true;
+            }
 
             var tcs = new TaskCompletionSource<bool>();
             EventHandler<CapabilitiesReceivedEventArgs> capsHandler = null;
@@ -847,6 +854,14 @@ namespace Radegast
             };
 
             caps.CapabilitiesReceived += capsHandler;
+
+            // Re-check after subscribing to close the race window between the Any() check
+            // above and registering the handler.
+            if (caps.Capabilities().Any())
+            {
+                caps.CapabilitiesReceived -= capsHandler;
+                return true;
+            }
 
             var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout, token)).ConfigureAwait(false);
             caps.CapabilitiesReceived -= capsHandler;
