@@ -1715,7 +1715,7 @@ namespace Radegast.Media
                 // Check if already cached
                 if (cache.ContainsKey(soundId))
                 {
-                    Logger.Debug($"Sound {soundId} already in cache");
+                    Logger.Trace($"Sound {soundId} already in cache");
                     return;
                 }
 
