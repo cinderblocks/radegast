@@ -71,7 +71,7 @@ namespace Radegast.Media
             volumeSetting = vol;
             loopSound = loop;
 
-            Logger.Debug($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}");
+            Logger.Trace($"Playing sound at <{position.x:0.0},{position.y:0.0},{position.z:0.0}> ID {Id}");
 
             // Set flags to determine how it will be played.
             mode = MODE.DEFAULT |

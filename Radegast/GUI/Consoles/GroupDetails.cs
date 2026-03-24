@@ -324,8 +324,9 @@ namespace Radegast
             }
             else if (group.OpenEnrollment) // I am not in this group, but I could join it
             {
+                var maxGroups = client.Network.MaxAgentGroups;
                 btnJoin.Text = "Join $L" + group.MembershipFee;
-                btnJoin.Enabled = btnJoin.Visible = true;
+                btnJoin.Enabled = btnJoin.Visible = maxGroups <= 0 || myGroups.Count < maxGroups;
             }
 
             RefreshControlsAvailability();

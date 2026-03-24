@@ -33,8 +33,9 @@ namespace Radegast
         private readonly Button[] buttons;
         private readonly int[] defaultAmounts = new int[] { 1, 5, 10, 20 };
         public static int LastPayed = -1;
+        private readonly Simulator objectSim;
 
-        public frmPay(RadegastInstanceForms instance, UUID target, string name, bool isObject)
+        public frmPay(RadegastInstanceForms instance, UUID target, string name, bool isObject, Simulator simulator = null)
             : base(instance)
         {
             InitializeComponent();
@@ -43,6 +44,7 @@ namespace Radegast
             this.target = target;
             this.name = name;
             this.isObject = isObject;
+            this.objectSim = simulator;
 
             // Buttons
             buttons = new Button[] { btnFastPay1, btnFastPay2, btnFastPay3, btnFastPay4 };
@@ -60,8 +62,8 @@ namespace Radegast
 
             if (isObject)
             {
-                Client.Objects.RequestPayPrice(Client.Network.CurrentSim, target);
-                Client.Objects.RequestObjectPropertiesFamily(Client.Network.CurrentSim, target);
+                Client.Objects.RequestPayPrice(objectSim ?? Client.Network.CurrentSim, target);
+                Client.Objects.RequestObjectPropertiesFamily(objectSim ?? Client.Network.CurrentSim, target);
                 lblObject.Visible = true;
                 lblObject.Text = $"Via object: {name}: ";
             }

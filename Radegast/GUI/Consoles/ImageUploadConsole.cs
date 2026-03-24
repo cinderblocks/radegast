@@ -246,6 +246,8 @@ namespace Radegast
             btnLoad.Enabled = true;
             btnSave.Enabled = ImageLoaded;
             btnUpload.Enabled = ImageLoaded && client.Network.Connected;
+            var uploadCost = client.Self.Benefits?.TextureUploadCost ?? -1;
+            btnUpload.Text = uploadCost > 0 ? $"Upload L${uploadCost}" : "Upload Image";
         }
 
 

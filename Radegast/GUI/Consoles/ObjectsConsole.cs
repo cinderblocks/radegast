@@ -553,8 +553,9 @@ namespace Radegast
                 using (var cts = new CancellationTokenSource())
                 {
                     cts.CancelAfter(TimeSpan.FromSeconds(30));
+                    var taskSim = instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID);
                     List<InventoryBase> items =
-                        await client.Inventory.GetTaskInventoryAsync(CurrentPrim.ID, CurrentPrim.LocalID, cts.Token).ConfigureAwait(false);
+                        await client.Inventory.GetTaskInventoryAsync(CurrentPrim.ID, CurrentPrim.LocalID, taskSim, cts.Token).ConfigureAwait(false);
                     lstContents.Invoke(new MethodInvoker(() => UpdateContentsList(items)));
                 }
             }, contentsDownloadCancelToken.Token);
@@ -681,7 +682,7 @@ namespace Radegast
                     {
                         if (i.Tag is InventoryItem it)
                         {
-                            client.Inventory.RemoveTaskInventory(prim.LocalID, it.UUID, client.Network.CurrentSim);
+                            client.Inventory.RemoveTaskInventory(prim.LocalID, it.UUID, instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID));
                         }
                     }
                 });
@@ -700,11 +701,11 @@ namespace Radegast
                     {
                         if (instance.InventoryClipboard.Item is InventoryLSL)
                         {
-                            client.Inventory.CopyScriptToTask(prim.LocalID, (InventoryItem)instance.InventoryClipboard.Item, true);
+                            client.Inventory.CopyScriptToTask(prim.LocalID, (InventoryItem)instance.InventoryClipboard.Item, true, instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID));
                         }
                         else
                         {
-                            client.Inventory.UpdateTaskInventory(prim.LocalID, (InventoryItem)instance.InventoryClipboard.Item);
+                            client.Inventory.UpdateTaskInventory(prim.LocalID, (InventoryItem)instance.InventoryClipboard.Item, instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID));
                         }
                     });
                 }
@@ -719,11 +720,11 @@ namespace Radegast
 
                             if (item is InventoryLSL)
                             {
-                                client.Inventory.CopyScriptToTask(prim.LocalID, item, true);
+                                client.Inventory.CopyScriptToTask(prim.LocalID, item, true, instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID));
                             }
                             else
                             {
-                                client.Inventory.UpdateTaskInventory(prim.LocalID, item);
+                                client.Inventory.UpdateTaskInventory(prim.LocalID, item, instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID));
                             }
                         }
                     });
@@ -755,9 +756,10 @@ namespace Radegast
 
             UUID folderID = client.Inventory.CreateFolder(client.Inventory.Store.RootFolder.UUID, prim.Properties.Name);
 
+            var sim = instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID);
             foreach (var item in items)
             {
-                client.Inventory.MoveTaskInventory(prim.LocalID, item.UUID, folderID, client.Network.CurrentSim);
+                client.Inventory.MoveTaskInventory(prim.LocalID, item.UUID, folderID, sim);
             }
 
             instance.ShowNotificationInChat(
@@ -1112,7 +1114,7 @@ namespace Radegast
                 if (CurrentPrim != null && (CurrentPrim.Properties == null 
                     || (CurrentPrim.Properties != null && CurrentPrim.Properties.CreatorID == UUID.Zero)))
                 {
-                    client.Objects.SelectObject(client.Network.CurrentSim, CurrentPrim.LocalID);
+                    client.Objects.SelectObject(instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID), CurrentPrim.LocalID);
                 }
 
                 UpdateCurrentObject();
@@ -1167,7 +1169,7 @@ namespace Radegast
 
         private void btnPay_Click(object sender, EventArgs e)
         {
-            (new frmPay(instance, CurrentPrim.ID, CurrentPrim.Properties.Name, true)).ShowDialog();
+            (new frmPay(instance, CurrentPrim.ID, CurrentPrim.Properties.Name, true, instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID))).ShowDialog();
         }
 
         private void btnDetach_Click(object sender, EventArgs e)
@@ -1225,7 +1227,7 @@ namespace Radegast
         {
             if (lstPrims.SelectedIndices.Count != 1) return;
             btnBuy.Enabled = false;
-            client.Objects.BuyObject(client.Network.CurrentSim, CurrentPrim.LocalID, 
+            client.Objects.BuyObject(instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID), CurrentPrim.LocalID, 
                 CurrentPrim.Properties.SaleType, CurrentPrim.Properties.SalePrice, client.Self.ActiveGroup, 
                 client.Inventory.FindFolderForType(AssetType.Object));
         }
@@ -1496,7 +1498,7 @@ namespace Radegast
             if (CurrentPrim == null) return;
             if (CurrentPrim.Properties == null || (CurrentPrim.Properties != null && CurrentPrim.Properties.Name != txtObjectName.Text))
             {
-                client.Objects.SetName(client.Network.CurrentSim, CurrentPrim.LocalID, txtObjectName.Text);
+                client.Objects.SetName(instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID), CurrentPrim.LocalID, txtObjectName.Text);
             }
         }
 
@@ -1505,7 +1507,7 @@ namespace Radegast
             if (CurrentPrim == null) return;
             if (CurrentPrim.Properties == null || (CurrentPrim.Properties != null && CurrentPrim.Properties.Description != txtDescription.Text))
             {
-                client.Objects.SetDescription(client.Network.CurrentSim, CurrentPrim.LocalID, txtDescription.Text);
+                client.Objects.SetDescription(instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID), CurrentPrim.LocalID, txtDescription.Text);
             }
         }
 
@@ -1520,7 +1522,7 @@ namespace Radegast
 
             if (pm == PermissionMask.None) return;
 
-            client.Objects.SetPermissions(client.Network.CurrentSim, new List<uint>() { CurrentPrim.LocalID }, PermissionWho.NextOwner, pm, cb.Checked);
+            client.Objects.SetPermissions(instance.State.FindSimulatorForPrim(CurrentPrim.ID, CurrentPrim.LocalID), new List<uint>() { CurrentPrim.LocalID }, PermissionWho.NextOwner, pm, cb.Checked);
         }
 
         private void lstPrims_Enter(object sender, EventArgs e)

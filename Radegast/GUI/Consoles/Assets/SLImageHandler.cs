@@ -404,10 +404,13 @@ namespace Radegast
                 return;
             }
 
-            // Marshal to UI thread reliably
-            if (pictureBox1 != null && pictureBox1.InvokeRequired)
+            // Marshal to UI thread reliably using the captured uiContext.
+            // InvokeRequired is NOT used here because it returns false when the control's
+            // handle has not yet been created, which would bypass the marshal and cause
+            // a cross-thread exception on controls like progressBar1.
+            if (SynchronizationContext.Current != uiContext && uiContext != null)
             {
-                pictureBox1.BeginInvoke(new Action(() => Assets_OnImageReceived(assetTexture)));
+                uiContext.Post(_ => Assets_OnImageReceived(assetTexture), null);
                 return;
             }
 

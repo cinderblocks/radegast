@@ -182,15 +182,24 @@ jobs:
           $tbzName = "..\Radegast_${platform}_${version}.tbz"
 
           try {
-            & 7z a -ttar -so $tarName * -xr!symbols -xr!*.msi -xr!*.exe | & 7z a -si $tbzName -tbzip2 -mx=9
+            Write-Host "Creating intermediate tar: $tarName"
+            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!*.exe -mx=0
             $code = $LASTEXITCODE
-            if ($code -ne 0) {
-              Write-Warning "7z pipeline exited with code $code. Falling back to tar if available."
-              # Fallback: try native tar (may still fail on some runners)
-              & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+            if ($code -ne 0 -or -not (Test-Path $tarName)) {
+              Throw "7z failed to create tar (exit $code)"
             }
+
+            Write-Host "Compressing tar to tbz: $tbzName"
+            & 7z a $tbzName -tbzip2 -mx=9 $tarName
+            $code = $LASTEXITCODE
+            if ($code -ne 0 -or -not (Test-Path $tbzName)) {
+              Throw "7z failed to compress tar (exit $code)"
+            }
+
+            # Remove intermediate tar
+            Remove-Item $tarName -Force -ErrorAction SilentlyContinue
           } catch {
-            Write-Warning "7z pipeline failed: $_. Attempting native tar fallback."
+            Write-Warning "Compression with 7z failed: $_. Attempting native tar fallback."
             & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
           }
 

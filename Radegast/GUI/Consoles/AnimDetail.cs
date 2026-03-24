@@ -120,6 +120,8 @@ namespace Radegast
                 Logger.Debug($"Animation {anim} download success; {asset.AssetData.Length} bytes.");
                 pnlSave.Visible = true;
                 animData = asset.AssetData;
+                var uploadCost = instance.Client.Self.Benefits?.AnimationUploadCost ?? -1;
+                btnSend.Text = uploadCost > 0 ? $"L${uploadCost} Send to" : "Send to";
             }
             else
             {

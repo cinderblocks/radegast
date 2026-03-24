@@ -119,6 +119,9 @@ namespace Radegast
                     btnStart.Enabled = false;
                 }
 
+                var meshCost = client.Self.Benefits?.MeshUploadCost ?? -1;
+                btnStart.Text = meshCost > 0 ? $"Start L${meshCost}" : "Start";
+
                 lock (FileNames)
                 {
                     lblStatus.Text = $"{FileNames.Count} files remaining";

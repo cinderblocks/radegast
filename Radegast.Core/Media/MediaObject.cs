@@ -121,7 +121,7 @@ namespace Radegast.Media
             set
             {
                 volume = value;
-                if (!channel.hasHandle()) return;
+                if (!channel.hasHandle() || finished) return;
 
                 invoke(delegate
                 {
@@ -259,6 +259,14 @@ namespace Radegast.Media
 
         protected static void FMODExec(RESULT result)
         {
+            // ERR_CHANNEL_STOLEN and ERR_INVALID_HANDLE are normal lifecycle events:
+            // FMOD recycles channels after sounds finish, so any in-flight operation
+            // (e.g. a queued volume change) that arrives after playback ends will hit
+            // these codes. They are not real errors and must not be thrown.
+            if (result == RESULT.ERR_CHANNEL_STOLEN || result == RESULT.ERR_INVALID_HANDLE)
+            {
+                return;
+            }
             if (result != RESULT.OK)
             {
                 throw new MediaException($"FMOD error! {result} - {Error.String(result)}");
@@ -268,6 +276,10 @@ namespace Radegast.Media
         protected static void FMODExec(RESULT result, string trace)
         {
             Logger.Info($"FMOD call {trace} returned {result}");
+            if (result == RESULT.ERR_CHANNEL_STOLEN || result == RESULT.ERR_INVALID_HANDLE)
+            {
+                return;
+            }
             if (result != RESULT.OK)
             {
                 throw new MediaException($"FMOD error! {result} - {Error.String(result)}");

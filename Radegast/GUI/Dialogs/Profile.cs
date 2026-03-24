@@ -296,6 +296,12 @@ namespace Radegast
 
             newPickID = UUID.Zero;
 
+            if (myProfile)
+            {
+                var picksLimit = Client.Self.Benefits?.PicksLimit ?? -1;
+                btnNewPick.Enabled = picksLimit <= 0 || picks.Count < picksLimit;
+            }
+
             firstButton?.PerformClick();
         }
 

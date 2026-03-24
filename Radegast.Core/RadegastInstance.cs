@@ -56,8 +56,15 @@ namespace Radegast
         /// <summary>Per client settings</summary>
         public Settings ClientSettings { get; protected set; }
         private string CrashMarkerFileName => Path.Combine(UserDir, "crash_marker");
-        /// <summary>FIXME: Is this really the best place for this?</summary>
+        /// <summary>
+        /// Cache of the agent's current group memberships, keyed by group UUID.
+        /// Populated from <c>AgentGroupDataUpdate</c> CAPS messages; the server
+        /// may deliver the full membership set across multiple successive events
+        /// (observed when the account holds more groups than the legacy 42/72 cap),
+        /// so entries are merged rather than replaced on each update.
+        /// </summary>
         public Dictionary<UUID, Group> Groups { get; private set; } = new Dictionary<UUID, Group>();
+        private readonly object _groupsLock = new object();
 
         #region Managers
         public StateManager State { get; private set; }
@@ -367,8 +374,8 @@ namespace Radegast
         private void RegisterClientEvents(GridClient client)
         {
             client.Groups.CurrentGroups += Groups_CurrentGroups;
-            client.Groups.GroupLeaveReply += Groups_GroupsChanged;
-            client.Groups.GroupDropped += Groups_GroupsChanged;
+            client.Groups.GroupLeaveReply += Groups_GroupLeaveReply;
+            client.Groups.GroupDropped += Groups_GroupDropped;
             client.Groups.GroupJoinedReply += Groups_GroupsChanged;
             client.Network.LoginProgress += Network_LoginProgress;
             if (NetCom != null)
@@ -381,8 +388,8 @@ namespace Radegast
         private void UnregisterClientEvents(GridClient client)
         {
             client.Groups.CurrentGroups -= Groups_CurrentGroups;
-            client.Groups.GroupLeaveReply -= Groups_GroupsChanged;
-            client.Groups.GroupDropped -= Groups_GroupsChanged;
+            client.Groups.GroupLeaveReply -= Groups_GroupLeaveReply;
+            client.Groups.GroupDropped -= Groups_GroupDropped;
             client.Groups.GroupJoinedReply -= Groups_GroupsChanged;
             client.Network.LoginProgress -= Network_LoginProgress;
             if (NetCom != null)
@@ -431,6 +438,7 @@ namespace Radegast
             
             Client = new GridClient();
             InitializeClient(Client);
+            lock (_groupsLock) { Groups.Clear(); }
             OnClientChanged(new ClientChangedEventArgs(oldClient, Client));
             NetCom.Login();
         }
@@ -547,9 +555,42 @@ namespace Radegast
             Client.Groups.RequestCurrentGroups();
         }
 
+        private void Groups_GroupLeaveReply(object sender, GroupOperationEventArgs e)
+        {
+            if (e.Success)
+            {
+                lock (_groupsLock) { Groups.Remove(e.GroupID); }
+            }
+            Client.Groups.RequestCurrentGroups();
+        }
+
+        private void Groups_GroupDropped(object sender, GroupDroppedEventArgs e)
+        {
+            lock (_groupsLock) { Groups.Remove(e.GroupID); }
+            Client.Groups.RequestCurrentGroups();
+        }
+
         private void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
         {
-            Groups = e.Groups;
+            // Merge incoming groups into the existing dictionary rather than replacing
+            // it. The server may deliver the complete membership set across multiple
+            // successive AgentGroupDataUpdate events (observed for accounts that hold
+            // more groups than the legacy cap, e.g. 72+). Replacing on each event
+            // would discard previously-received entries and leave the list truncated.
+            try
+            {
+                lock (_groupsLock)
+                {
+                    foreach (var kv in e.Groups)
+                    {
+                        Groups[kv.Key] = kv.Value;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn("Failed to merge current groups: " + ex.Message, Client);
+            }
         }
 
         public static string ComputeCacheName(string cacheDir, UUID assetID)
@@ -790,9 +831,16 @@ namespace Radegast
             var sim = client.Network.CurrentSim;
             if (sim == null) return false;
 
-            // If capabilities are already received, we assume readiness. Otherwise wait for the event.
             var caps = sim.Caps;
             if (caps == null) return false;
+
+            // If capabilities were already received before we got here (common when
+            // NetCom_ClientConnected fires after the initial CAPS exchange), return
+            // immediately rather than waiting for an event that will never fire again.
+            if (caps.Capabilities().Any())
+            {
+                return true;
+            }
 
             var tcs = new TaskCompletionSource<bool>();
             EventHandler<CapabilitiesReceivedEventArgs> capsHandler = null;
@@ -806,6 +854,14 @@ namespace Radegast
             };
 
             caps.CapabilitiesReceived += capsHandler;
+
+            // Re-check after subscribing to close the race window between the Any() check
+            // above and registering the handler.
+            if (caps.Capabilities().Any())
+            {
+                caps.CapabilitiesReceived -= capsHandler;
+                return true;
+            }
 
             var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeout, token)).ConfigureAwait(false);
             caps.CapabilitiesReceived -= capsHandler;
