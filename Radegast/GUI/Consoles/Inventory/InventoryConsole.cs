@@ -1878,7 +1878,7 @@ namespace Radegast
                         {
                             ctxInv.Items.Add(new ToolStripSeparator());
 
-                            if (IsWorn(wearable))
+                            if (IsWorn(wearable) && wearable.AssetType != AssetType.Bodypart)
                             {
                                 ctxItem = new ToolStripMenuItem("Take off", null, OnInvContextClick) { Name = "wearable_take_off" };
                                 ctxInv.Items.Add(ctxItem);

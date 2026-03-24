@@ -43,6 +43,7 @@ namespace Radegast
          private readonly GridClient Client;
          private string ExportDirectory;
 		private uint uLocalID;
+		private Simulator exportSim;
 		public delegate void LogMessageDelegate(string format, params object[] args);
 		public LogMessageDelegate LogMessage;
 		
@@ -109,13 +110,15 @@ namespace Radegast
 								sim = s;
 								break;
 							}
+									}
+								}
+							}
+							catch { }
 						}
-					}
-				}
-				catch { }
-			}
 
-			// Check for export permission first
+							exportSim = sim;
+
+							// Check for export permission first
 			GotPermissions = EventSubscriptionHelper.WaitForEvent<ObjectPropertiesFamilyEventArgs, bool>(
 				h => { Client.Objects.ObjectPropertiesFamily += h; Client.Objects.RequestObjectPropertiesFamily(sim, exportPrim.ID); },
 				h => Client.Objects.ObjectPropertiesFamily -= h,
@@ -282,7 +285,7 @@ namespace Radegast
 			Properties.SetFamilyProperties(e.Properties);
 			if (e.Properties.CreatorID == UUID.Zero)
 			{
-				Client.Objects.SelectObject(Client.Network.CurrentSim,uLocalID);
+				Client.Objects.SelectObject(exportSim ?? Client.Network.CurrentSim, uLocalID);
 			}
 			else
 			{

@@ -185,6 +185,25 @@ namespace Radegast.Rendering
         private Thread textureThread;
         private volatile bool textureThreadRunning = false;
 
+        // Lazily-resolved simulator that owns RootPrimLocalID
+        private Simulator _primSim;
+        private Simulator PrimSim
+        {
+            get
+            {
+                if (_primSim != null) return _primSim;
+                lock (Client.Network.Simulators)
+                {
+                    foreach (var sim in Client.Network.Simulators)
+                    {
+                        if (sim?.ObjectsPrimitives.ContainsKey(RootPrimLocalID) == true)
+                            return _primSim = sim;
+                    }
+                }
+                return _primSim = Client.Network.CurrentSim;
+            }
+        }
+
         // Shader Management
         private ShaderManager shaderManager;
         private bool shadersAvailable = false;
@@ -517,7 +536,7 @@ namespace Radegast.Rendering
             Primitive prim;
             string objName = string.Empty;
 
-            if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(RootPrimLocalID, out prim))
+            if (PrimSim.ObjectsPrimitives.TryGetValue(RootPrimLocalID, out prim))
             {
                 if (prim.Properties != null)
                 {
@@ -758,10 +777,10 @@ namespace Radegast.Rendering
 
             ThreadPool.QueueUserWorkItem(sync =>
                 {
-                    if (Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(RootPrimLocalID))
+                    if (PrimSim.ObjectsPrimitives.ContainsKey(RootPrimLocalID))
                     {
-                        UpdatePrimBlocking(Client.Network.CurrentSim.ObjectsPrimitives[RootPrimLocalID]);
-                        var children = (from p in Client.Network.CurrentSim.ObjectsPrimitives
+                        UpdatePrimBlocking(PrimSim.ObjectsPrimitives[RootPrimLocalID]);
+                        var children = (from p in PrimSim.ObjectsPrimitives
                             where p.Value != null
                             where p.Value.ParentID == RootPrimLocalID
                             select p.Value).ToList();
