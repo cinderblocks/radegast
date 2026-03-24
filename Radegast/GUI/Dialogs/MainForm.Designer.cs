@@ -137,6 +137,8 @@ namespace Radegast
             this.aboutRadegastToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.toolStripSeparator2 = new System.Windows.Forms.ToolStripSeparator();
             this.debugConsoleToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
+            this.toolStripSeparator6 = new System.Windows.Forms.ToolStripSeparator();
+            this.logViewerToolStripMenuItem = new System.Windows.Forms.ToolStripMenuItem();
             this.statusStrip1 = new System.Windows.Forms.StatusStrip();
             this.tlblLoginName = new System.Windows.Forms.ToolStripStatusLabel();
             this.tlblMoneyBalance = new System.Windows.Forms.ToolStripStatusLabel();
@@ -702,7 +704,9 @@ namespace Radegast
             this.toolStripSeparator5,
             this.checkForUpdatesToolStripItem,
             this.toolStripSeparator4,
-            this.aboutRadegastToolStripMenuItem});
+            this.aboutRadegastToolStripMenuItem,
+            this.toolStripSeparator6,
+            this.logViewerToolStripMenuItem});
             this.tbtnHelp.Image = ((System.Drawing.Image)(resources.GetObject("tbtnHelp.Image")));
             this.tbtnHelp.ImageTransparentColor = System.Drawing.Color.Magenta;
             this.tbtnHelp.Name = "tbtnHelp";
@@ -744,6 +748,18 @@ namespace Radegast
             this.aboutRadegastToolStripMenuItem.Size = new System.Drawing.Size(203, 22);
             this.aboutRadegastToolStripMenuItem.Text = "About Radegast...";
             this.aboutRadegastToolStripMenuItem.Click += new System.EventHandler(this.aboutRadegastToolStripMenuItem_Click);
+            // 
+            // toolStripSeparator6
+            // 
+            this.toolStripSeparator6.Name = "toolStripSeparator6";
+            this.toolStripSeparator6.Size = new System.Drawing.Size(200, 6);
+            // 
+            // logViewerToolStripMenuItem
+            // 
+            this.logViewerToolStripMenuItem.Name = "logViewerToolStripMenuItem";
+            this.logViewerToolStripMenuItem.Size = new System.Drawing.Size(203, 22);
+            this.logViewerToolStripMenuItem.Text = "Log Viewer...";
+            this.logViewerToolStripMenuItem.Click += new System.EventHandler(this.logViewerToolStripMenuItem_Click);
             // 
             // toolStripSeparator2
             // 
@@ -1099,6 +1115,8 @@ namespace Radegast
         private System.Windows.Forms.ToolStripMenuItem checkForUpdatesToolStripItem;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator5;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator4;
+        private System.Windows.Forms.ToolStripSeparator toolStripSeparator6;
+        private System.Windows.Forms.ToolStripMenuItem logViewerToolStripMenuItem;
     }
 }
 

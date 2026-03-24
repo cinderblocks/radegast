@@ -1365,6 +1365,21 @@ namespace Radegast
             }
         }
 
+        private void logViewerToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if (TabConsole.TabExists("logviewer"))
+            {
+                ToggleHidden("logviewer");
+            }
+            else
+            {
+                RadegastTab tab = TabConsole.AddTab("logviewer", "Log Viewer", new LogViewerConsole(instance));
+                tab.AllowClose = false;
+                tab.AllowHide = true;
+                tab.Select();
+            }
+        }
+
         private void tbnObjects_Click(object sender, EventArgs e)
         {
             if (TabConsole.TabExists("objects"))
