@@ -2486,7 +2486,7 @@ namespace Radegast
             UUID itemUUID = item.UUID;
             if (item is InventoryItem inventoryItem)
             {
-                itemUUID = inventoryItem.ActualUUID;
+                itemUUID = inventoryItem.ResolvedItemID;
             }
 
             UpdateLabelsFor(itemUUID, suspendLayout);
@@ -2857,7 +2857,7 @@ namespace Radegast
                                     it.Description.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0));
 
                     if (cbSrchWorn.Checked && add &&
-                        !((it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ActualUUID))
+                        !((it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ResolvedItemID))
                           || ((it.InventoryType == InventoryType.Attachment
                                || it.InventoryType == InventoryType.Object) && IsAttached(it))))
                     {
