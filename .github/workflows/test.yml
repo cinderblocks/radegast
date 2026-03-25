@@ -1,4 +1,4 @@
-name: CI
+name: Build and Test
 
 on:
   push:
@@ -64,3 +64,53 @@ jobs:
           path: |
             bin\Release\**
             bin\**\Release\**
+
+  test:
+    name: Test (Radegast.Core)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run tests
+        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --configuration Release --logger "trx;LogFileName=test-results.trx" --verbosity normal
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: Radegast.Core.Tests/TestResults/test-results.trx
+
+  test-windows:
+    name: Test net48 (Windows)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Run tests (net48)
+        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net48 --configuration Release --logger "trx;LogFileName=test-results-net48.trx" --verbosity normal
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-net48
+          path: Radegast.Core.Tests\TestResults\test-results-net48.trx
