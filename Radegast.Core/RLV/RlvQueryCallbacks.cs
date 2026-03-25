@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -213,7 +213,7 @@ namespace Radegast.Core.RLV
             }
             else if (item is InventoryAttachment attachment)
             {
-                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ResolvedItemID, out var primIdTemp))
                 {
                     attachedPrimId = primIdTemp.Guid;
                 }
@@ -222,7 +222,7 @@ namespace Radegast.Core.RLV
             }
             else if (item is InventoryObject obj)
             {
-                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ResolvedItemID, out var primIdTemp))
                 {
                     attachedPrimId = primIdTemp.Guid;
                 }
@@ -274,13 +274,13 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                if (currentOutfitMap.ContainsKey(item.ActualUUID))
+                if (currentOutfitMap.ContainsKey(item.ResolvedItemID))
                 {
                     // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
                     GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var isActiveGesture);
 
                     var newItem = rootConverted.AddItem(
-                        item.ActualUUID.Guid,
+                        item.ResolvedItemID.Guid,
                         item.Name,
                         item.IsLink(),
                         attachedTo,
@@ -293,7 +293,7 @@ namespace Radegast.Core.RLV
                 else
                 {
                     var newItem = rootConverted.AddItem(
-                        item.ActualUUID.Guid,
+                        item.ResolvedItemID.Guid,
                         item.Name,
                         item.IsLink(),
                         null,
@@ -319,7 +319,7 @@ namespace Radegast.Core.RLV
             var currentOutfitMap = new Dictionary<UUID, InventoryItem>();
             foreach (var item in currentOutfitLinks)
             {
-                currentOutfitMap[item.ActualUUID] = item;
+                currentOutfitMap[item.ResolvedItemID] = item;
             }
 
             // If there is no shared #RLV folder in the user's inventory, create an empty representation
@@ -340,7 +340,7 @@ namespace Radegast.Core.RLV
 
             foreach (var item in currentOutfitLinks)
             {
-                if (itemMap.ContainsKey(item.ActualUUID.Guid))
+                if (itemMap.ContainsKey(item.ResolvedItemID.Guid))
                 {
                     continue;
                 }
@@ -354,7 +354,7 @@ namespace Radegast.Core.RLV
                 // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
                 GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var gestureState);
                 var newItem = new RlvInventoryItem(
-                    item.ActualUUID.Guid,
+                    item.ResolvedItemID.Guid,
                     item.Name,
                     item.IsLink(),
                     item.ParentUUID.Guid,
@@ -364,7 +364,7 @@ namespace Radegast.Core.RLV
                     gestureState
                  );
 
-                itemMap.Add(item.ActualUUID.Guid, newItem);
+                itemMap.Add(item.ResolvedItemID.Guid, newItem);
                 externalItems.Add(newItem);
             }
 

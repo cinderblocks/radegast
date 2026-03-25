@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -282,7 +282,7 @@ namespace Radegast.Core.RLV
                 if (item is InventoryWearable wearable)
                 {
                     await instance.RLV.rlvService.ReportItemUnworn(
-                        wearable.ActualUUID.Guid,
+                        wearable.ResolvedItemID.Guid,
                         wearable.ParentUUID.Guid,
                         isShared,
                         (RlvWearableType)wearable.WearableType,
@@ -294,7 +294,7 @@ namespace Radegast.Core.RLV
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
                     await instance.RLV.rlvService.ReportItemDetached(
-                        attachment.ActualUUID.Guid,
+                        attachment.ResolvedItemID.Guid,
                         attachedPrimId.Guid,
                         attachment.ParentUUID.Guid,
                         isShared,
@@ -307,7 +307,7 @@ namespace Radegast.Core.RLV
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
                     await instance.RLV.rlvService.ReportItemDetached(
-                        attachedObj.ActualUUID.Guid,
+                        attachedObj.ResolvedItemID.Guid,
                         attachedPrimId.Guid,
                         attachedObj.ParentUUID.Guid,
                         isShared,
@@ -343,7 +343,7 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                if (attachmentId == attachedItem.ActualUUID)
+                if (attachmentId == attachedItem.ResolvedItemID)
                 {
                     return (attachmentId, (RlvAttachmentPoint)item.PrimData.AttachmentPoint);
                 }
