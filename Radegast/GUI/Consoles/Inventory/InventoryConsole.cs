@@ -962,7 +962,6 @@ namespace Radegast
                     else
                     {
                         await Client.Inventory.RequestFetchInventoryAsync(attachment.UUID, Client.Self.AgentID, token);
-                        return;
                     }
                 }
             }
@@ -2869,7 +2868,7 @@ namespace Radegast
                     bool add = ((cbSrchName.Checked && !string.IsNullOrEmpty(searchString) &&
                                  it.Name.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0) 
                                 || (cbSrchDesc.Checked && !string.IsNullOrEmpty(searchString) &&
-                                    it.Description.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) >= 0));
+                                    (it.Description?.IndexOf(searchString, StringComparison.OrdinalIgnoreCase) ?? -1) >= 0));
 
                     if (cbSrchWorn.Checked && add &&
                         !((it.InventoryType == InventoryType.Wearable && Client.Appearance.IsItemWorn(it.ResolvedItemID))
@@ -3045,7 +3044,7 @@ namespace Radegast
 
                 if (result.Inv is InventoryItem inv)
                 {
-                    string desc = inv.Description.Trim();
+                    string desc = (inv.Description ?? string.Empty).Trim();
                     if (desc == string.Empty) return;
 
                     using (Font descFont = new Font(lstInventorySearch.Font, FontStyle.Italic))
