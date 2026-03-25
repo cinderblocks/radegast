@@ -175,7 +175,7 @@ namespace Radegast
 
         public void CopyTo(KeyValuePair<string, OSD>[] array, int index)
         {
-            throw new NotImplementedException();
+            ((ICollection<KeyValuePair<string, OSD>>)SettingsData).CopyTo(array, index);
         }
 
         public bool Remove(KeyValuePair<string, OSD> kvp)
@@ -188,12 +188,12 @@ namespace Radegast
 
         public IEnumerator<KeyValuePair<string, OSD>> GetEnumerator()
         {
-            throw new NotImplementedException();
+            return ((IEnumerable<KeyValuePair<string, OSD>>)SettingsData).GetEnumerator();
         }
 
         IEnumerator IEnumerable.GetEnumerator()
         {
-            return SettingsData.GetEnumerator();
+            return GetEnumerator();
         }
 
         #endregion IDictionary Implementation
