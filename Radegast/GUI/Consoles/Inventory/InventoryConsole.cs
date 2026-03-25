@@ -1399,9 +1399,9 @@ namespace Radegast
             return Client.Appearance.isItemAttached(item);
         }
 
-        public InventoryItem AttachmentAt(AttachmentPoint point)
+        public async Task<InventoryItem> AttachmentAtAsync(AttachmentPoint point)
         {
-            var attachments = Client.Appearance.GetAttachmentsByAttachmentPointAsync().Result;
+            var attachments = await Client.Appearance.GetAttachmentsByAttachmentPointAsync().ConfigureAwait(false);
             return (from attachment in attachments
                     where attachment.Key == point
                     select attachment.Value.First()).FirstOrDefault();
@@ -1542,6 +1542,21 @@ namespace Radegast
                 catch (Exception ex)
                 {
                     Logger.Error("Error checking attach/detach capabilities: " + ex.Message, Client);
+                }
+            }
+
+            // Pre-fetch attachment points once so the synchronous RunOnUi lambda can look up without async
+            Dictionary<AttachmentPoint, InventoryItem> attachmentsByPoint = null;
+            if (canAttach)
+            {
+                try
+                {
+                    var allAttachments = await Client.Appearance.GetAttachmentsByAttachmentPointAsync().ConfigureAwait(false);
+                    attachmentsByPoint = allAttachments.ToDictionary(a => a.Key, a => a.Value.First());
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Error fetching attachment points: " + ex.Message, Client);
                 }
             }
 
@@ -1829,7 +1844,7 @@ namespace Radegast
                                     string name = Utils.EnumToText(pt);
 
                                     InventoryItem alreadyAttached = null;
-                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    if (attachmentsByPoint != null && attachmentsByPoint.TryGetValue(pt, out alreadyAttached))
                                     {
                                         name += $" ({alreadyAttached.Name})";
                                     }
@@ -1848,7 +1863,7 @@ namespace Radegast
                                     string name = Utils.EnumToText(pt).Substring(3);
 
                                     InventoryItem alreadyAttached = null;
-                                    if ((alreadyAttached = AttachmentAt(pt)) != null)
+                                    if (attachmentsByPoint != null && attachmentsByPoint.TryGetValue(pt, out alreadyAttached))
                                     {
                                         name += $" ({alreadyAttached.Name})";
                                     }

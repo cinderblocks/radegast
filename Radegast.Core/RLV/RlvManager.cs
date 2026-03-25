@@ -122,7 +122,7 @@ namespace Radegast.Core.RLV
         }
 
         #region Item Reporting
-        private void Objects_KillObject(object sender, KillObjectEventArgs e)
+        private async void Objects_KillObject(object sender, KillObjectEventArgs e)
         {
             if (!Enabled)
             {
@@ -150,11 +150,11 @@ namespace Radegast.Core.RLV
 
             if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
-                ReportItemChange(item, false).Wait();
+                await ReportItemChange(item, false).ConfigureAwait(false);
             }
         }
 
-        private void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
+        private async void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
         {
             if (!Enabled)
             {
@@ -182,7 +182,7 @@ namespace Radegast.Core.RLV
 
             if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
             {
-                ReportItemChange(item, true).Wait();
+                await ReportItemChange(item, true).ConfigureAwait(false);
             }
         }
 
@@ -381,7 +381,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private void CleanupTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        private async void CleanupTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
         {
             if (!Enabled)
             {
@@ -391,7 +391,7 @@ namespace Radegast.Core.RLV
             var objects = new List<UUID>();
             var rlvTrackedPrimIds = rlvService.Restrictions.GetTrackedPrimIds();
 
-            var wornItems = instance.COF.GetCurrentOutfitLinks().Result
+            var wornItems = (await instance.COF.GetCurrentOutfitLinks().ConfigureAwait(false))
                 .ToDictionary(k => k.UUID.Guid, v => v);
 
             var deadPrimIds = new List<Guid>();
@@ -409,7 +409,7 @@ namespace Radegast.Core.RLV
 
             if (deadPrimIds.Count > 0)
             {
-                rlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).Wait();
+                await rlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).ConfigureAwait(false);
             }
         }
 

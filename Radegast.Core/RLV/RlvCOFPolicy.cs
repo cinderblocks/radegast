@@ -47,7 +47,7 @@ namespace Radegast.Core.RLV
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = Task.Run(() => queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None)).GetAwaiter().GetResult();
             if (hasInventoryMap && inventoryMap != null)
             {
                 var rlvItems = inventoryMap.GetItemsById(item.UUID.Guid);
@@ -79,7 +79,7 @@ namespace Radegast.Core.RLV
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = Task.Run(() => queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None)).GetAwaiter().GetResult();
             if (!hasInventoryMap || inventoryMap == null)
             {
                 return false;

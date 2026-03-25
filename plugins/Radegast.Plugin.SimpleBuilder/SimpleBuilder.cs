@@ -345,7 +345,7 @@ namespace SimpleBuilderNamespace
             //txtChat.Text = e.Message;
         }
 
-        private void btnBuild_Click(object sender, EventArgs e)
+        private async void btnBuild_Click(object sender, EventArgs e)
         {
             Button btn = sender as Button;
 
@@ -353,10 +353,18 @@ namespace SimpleBuilderNamespace
 
             PrimType primType = (PrimType)Enum.Parse(typeof(PrimType), btn.Text);
 
-            BuildAndRez(primType);
+            try
+            {
+                await BuildAndRezAsync(primType).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                instance.MainForm.TabConsole.DisplayNotificationInChat(
+                    pluginName + ": Build failed: " + ex.Message, ChatBufferTextStyle.Alert);
+            }
         }
 
-        private async void BuildAndRez(PrimType primType)
+        private async Task BuildAndRezAsync(PrimType primType)
         {
             float size, distance;
 
