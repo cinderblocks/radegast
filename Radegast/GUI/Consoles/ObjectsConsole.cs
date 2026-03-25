@@ -739,7 +739,7 @@ namespace Radegast
             ctxContents.Items.Add("Close", null, btnCloseContents_Click);
         }
 
-        private void OpenObject(object sender, EventArgs e)
+        private async void OpenObject(object sender, EventArgs e)
         {
             Primitive prim = lstContents.Tag as Primitive;
             if (prim?.Properties == null) return;
@@ -755,6 +755,11 @@ namespace Radegast
             if (items.Count == 0) return;
 
             UUID folderID = client.Inventory.CreateFolder(client.Inventory.Store.RootFolder.UUID, prim.Properties.Name);
+
+            // Give the server time to register the new folder before moving items into it,
+            // otherwise MoveTaskInventory packets arrive before the folder exists server-side
+            // and the items are lost (empty folder). Same pattern used in FolderCopy.CopyFolderAsync.
+            await Task.Delay(500);
 
             var sim = instance.State.FindSimulatorForPrim(prim.ID, prim.LocalID);
             foreach (var item in items)
