@@ -29,17 +29,17 @@ namespace Radegast
 {
     public class Grid
     {
-        public string ID = string.Empty;
-        public string Name = string.Empty;
-        public string Platform = string.Empty;
-        public string LoginURI = string.Empty;
-        public string LoginPage = string.Empty;
-        public string HelperURI = string.Empty;
-        public string Website = string.Empty;
-        public string Support = string.Empty;
-        public string Register = string.Empty;
-        public string PasswordURL = string.Empty;
-        public string Version = "1";
+        public string ID { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Platform { get; set; } = string.Empty;
+        public string LoginURI { get; set; } = string.Empty;
+        public string LoginPage { get; set; } = string.Empty;
+        public string HelperURI { get; set; } = string.Empty;
+        public string Website { get; set; } = string.Empty;
+        public string Support { get; set; } = string.Empty;
+        public string Register { get; set; } = string.Empty;
+        public string PasswordURL { get; set; } = string.Empty;
+        public string Version { get; set; } = "1";
 
         public Grid() { }
 
