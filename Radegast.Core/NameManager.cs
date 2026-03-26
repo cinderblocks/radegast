@@ -37,7 +37,7 @@ namespace Radegast
     {
         private const string UNKNOWN = "(???) (???)";
 
-        public event EventHandler<UUIDNameReplyEventArgs> NameUpdated;
+        public event EventHandler<UUIDNameReplyEventArgs>? NameUpdated;
 
         public NameMode Mode
         {
@@ -189,7 +189,7 @@ namespace Radegast
                 {
                     if (success)
                     {
-                        ProcessDisplayNames(names);
+                        ProcessDisplayNames(names!);
                     }
                     else
                     {
@@ -329,7 +329,7 @@ namespace Radegast
                 return UNKNOWN;
             }
 
-            string name = null;
+            string? name = null;
             bool requestName = true;
 
             if (names.TryGetValue(agentID, out AgentDisplayName displayName))
@@ -346,10 +346,10 @@ namespace Radegast
             {
                 QueueNameRequest(agentID);
             }
-            return string.IsNullOrEmpty(name) ? RadegastInstance.INCOMPLETE_NAME : name;
+            return string.IsNullOrEmpty(name) ? RadegastInstance.INCOMPLETE_NAME : name!;
         }
 
-        private string FormatName(AgentDisplayName name)
+        private string? FormatName(AgentDisplayName name)
         {
             switch (Mode)
             {
@@ -378,7 +378,7 @@ namespace Radegast
         {
             if (names.TryGetValue(agentID, out var displayName))
             {
-                return FormatName(displayName);
+                return FormatName(displayName) ?? RadegastInstance.INCOMPLETE_NAME;
             }
 
             // Use EventSubscriptionHelper to wait for NameUpdated without manual TaskCompletionSource
@@ -401,7 +401,7 @@ namespace Radegast
             // Fallback: maybe the name was filled into the cache while we awaited
             if (names.TryGetValue(agentID, out var avatarDisplayName))
             {
-                return FormatName(avatarDisplayName);
+                return FormatName(avatarDisplayName) ?? RadegastInstance.INCOMPLETE_NAME;
             }
 
             return RadegastInstance.INCOMPLETE_NAME;
@@ -459,7 +459,7 @@ namespace Radegast
 
             if (names.TryGetValue(agentID, out var name))
             {
-                return name.UserName;
+                return name.UserName ?? RadegastInstance.INCOMPLETE_NAME;
             }
 
             QueueNameRequest(agentID);
@@ -480,14 +480,14 @@ namespace Radegast
 
             if (names.TryGetValue(agentID, out var name))
             {
-                return name.DisplayName;
+                return name.DisplayName ?? RadegastInstance.INCOMPLETE_NAME;
             }
 
             QueueNameRequest(agentID);
             return RadegastInstance.INCOMPLETE_NAME;
         }
 
-        private bool IsValidName(string displayName)
+        private bool IsValidName(string? displayName)
         {
             return !string.IsNullOrEmpty(displayName) &&
                    displayName != "???" &&
@@ -505,7 +505,7 @@ namespace Radegast
                     continue;
                 }
 
-                updatedNames.Add(name.ID, FormatName(name));
+                updatedNames.Add(name.ID, FormatName(name) ?? string.Empty);
                 name.Updated = DateTime.Now;
 
                 names.AddOrUpdate(name.ID, name, (id, old) => name);
@@ -583,7 +583,7 @@ namespace Radegast
 
             Dictionary<UUID, string> results = new Dictionary<UUID, string>
             {
-                { e.DisplayName.ID, FormatName(e.DisplayName) }
+                { e.DisplayName.ID, FormatName(e.DisplayName) ?? string.Empty }
             };
             OnDisplayNamesChanged(results);
         }
@@ -594,17 +594,17 @@ namespace Radegast
 
             foreach (var kvp in e.Names)
             {
-                string name = UpdateAvatarDisplayName(kvp.Key, kvp.Value);
+                string? name = UpdateAvatarDisplayName(kvp.Key, kvp.Value);
                 if (!string.IsNullOrEmpty(name))
                 {
-                    results.Add(kvp.Key, name);
+                    results.Add(kvp.Key, name!);
                 }
             }
 
             OnDisplayNamesChanged(results);
         }
 
-        private string UpdateAvatarDisplayName(UUID avatarId, string name)
+        private string? UpdateAvatarDisplayName(UUID avatarId, string name)
         {
             AgentDisplayName agentDisplayName = names.GetOrAdd(avatarId, (id) => new AgentDisplayName()
             {
@@ -614,7 +614,7 @@ namespace Radegast
                 Updated = DateTime.Now
             });
 
-            if (!Utilities.TryParseTwoNames(name, out string first, out string last))
+            if (!Utilities.TryParseTwoNames(name, out string? first, out string? last))
             {
                 return null;
             }
@@ -627,7 +627,7 @@ namespace Radegast
             agentDisplayName.LegacyFirstName = first;
             agentDisplayName.LegacyLastName = last;
             agentDisplayName.UserName = agentDisplayName.LegacyLastName == "Resident"
-                ? agentDisplayName.LegacyFirstName.ToLower()
+                ? agentDisplayName.LegacyFirstName?.ToLower() ?? string.Empty
                 : (first + "." + last).ToLower();
 
             hasUpdates = true;

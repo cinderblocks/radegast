@@ -88,7 +88,7 @@ namespace Radegast.Core.RLV
         private readonly RlvActionCallbacks actionCallbacks;
         private readonly RlvService rlvService;
 
-        private System.Timers.Timer cleanupTimer;
+        private System.Timers.Timer? cleanupTimer;
 
         public RlvPermissionsService Permissions => rlvService.Permissions;
         public RlvRestrictionManager Restrictions => rlvService.Restrictions;
@@ -145,10 +145,10 @@ namespace Radegast.Core.RLV
             var attachItemId = prim
                 .NameValues
                 .Where(n => n.Name == "AttachItemID" && n.Value != null && n.Value is string)
-                .Select(n => new UUID(n.Value as string))
+                .Select(n => new UUID((n.Value as string)!))
                 .FirstOrDefault();
 
-            if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
+            if (instance.Client.Inventory.Store!.TryGetValue(attachItemId, out InventoryItem item))
             {
                 await ReportItemChange(item, false).ConfigureAwait(false);
             }
@@ -177,10 +177,10 @@ namespace Radegast.Core.RLV
             var attachItemId = prim
                 .NameValues
                 .Where(n => n.Name == "AttachItemID" && n.Value != null && n.Value is string)
-                .Select(n => new UUID(n.Value as string))
+                .Select(n => new UUID((n.Value as string)!))
                 .FirstOrDefault();
 
-            if (instance.Client.Inventory.Store.TryGetValue(attachItemId, out InventoryItem item))
+            if (instance.Client.Inventory.Store!.TryGetValue(attachItemId, out InventoryItem item))
             {
                 await ReportItemChange(item, true).ConfigureAwait(false);
             }
@@ -188,8 +188,8 @@ namespace Radegast.Core.RLV
 
         private async Task<bool> IsInSharedFolder(InventoryItem item, CancellationToken cancellationToken = default)
         {
-            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
-                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
+            var sharedFolder = instance.Client.Inventory.Store!.RootNode.Nodes.Values
+                .FirstOrDefault(n => n.Data?.Name == "#RLV" && n.Data is InventoryFolder);
 
             if (sharedFolder == null)
             {
@@ -202,7 +202,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data.UUID, cancellationToken);
+            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data!.UUID, cancellationToken);
             if (isInTrash)
             {
                 return true;
@@ -320,7 +320,7 @@ namespace Radegast.Core.RLV
 
         private (UUID, RlvAttachmentPoint) GetAttachedPrimId(InventoryItem attachedItem)
         {
-            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim.ObjectsPrimitives.Values.ToList();
+            var objectPrimitivesSnapshot = instance.Client.Network.CurrentSim!.ObjectsPrimitives.Values.ToList();
 
             foreach (var item in objectPrimitivesSnapshot)
             {
@@ -397,8 +397,8 @@ namespace Radegast.Core.RLV
             var deadPrimIds = new List<Guid>();
             foreach (var primId in rlvTrackedPrimIds)
             {
-                var itemExistsInWorld = instance.Client.Network.CurrentSim.ObjectsPrimitives
-                    .Any(n => n.Value.ID.Guid == primId);
+                var itemExistsInWorld = instance.Client.Network.CurrentSim?.ObjectsPrimitives
+                    .Any(n => n.Value.ID.Guid == primId) ?? false;
                 if (itemExistsInWorld)
                 {
                     continue;

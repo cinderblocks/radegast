@@ -35,18 +35,18 @@ namespace Radegast
         private delegate void OnMoneyBalanceRaise(BalanceEventArgs e);
         private delegate void OnTeleportStatusRaise(TeleportEventArgs e);
 
-        public event EventHandler<OverrideEventArgs> ClientLoggingIn;
-        public event EventHandler<LoginProgressEventArgs> ClientLoginStatus;
-        public event EventHandler<OverrideEventArgs> ClientLoggingOut;
-        public event EventHandler ClientLoggedOut;
-        public event EventHandler<DisconnectedEventArgs> ClientDisconnected;
-        public event EventHandler<ChatEventArgs> ChatReceived;
-        public event EventHandler<ChatSentEventArgs> ChatSent;
-        public event EventHandler<InstantMessageEventArgs> InstantMessageReceived;
-        public event EventHandler<InstantMessageSentEventArgs> InstantMessageSent;
-        public event EventHandler<TeleportEventArgs> TeleportStatusChanged;
-        public event EventHandler<AlertMessageEventArgs> AlertMessageReceived;
-        public event EventHandler<BalanceEventArgs> MoneyBalanceUpdated;
+        public event EventHandler<OverrideEventArgs>? ClientLoggingIn;
+        public event EventHandler<LoginProgressEventArgs>? ClientLoginStatus;
+        public event EventHandler<OverrideEventArgs>? ClientLoggingOut;
+        public event EventHandler? ClientLoggedOut;
+        public event EventHandler<DisconnectedEventArgs>? ClientDisconnected;
+        public event EventHandler<ChatEventArgs>? ChatReceived;
+        public event EventHandler<ChatSentEventArgs>? ChatSent;
+        public event EventHandler<InstantMessageEventArgs>? InstantMessageReceived;
+        public event EventHandler<InstantMessageSentEventArgs>? InstantMessageSent;
+        public event EventHandler<TeleportEventArgs>? TeleportStatusChanged;
+        public event EventHandler<AlertMessageEventArgs>? AlertMessageReceived;
+        public event EventHandler<BalanceEventArgs>? MoneyBalanceUpdated;
 
         protected virtual void OnClientLoggingIn(OverrideEventArgs e)
         {

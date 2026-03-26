@@ -141,7 +141,7 @@ namespace Radegast.Core
             return processInfo;
         }
 
-        private string GetPlatformName(string processorArchitecture)
+        private string? GetPlatformName(string processorArchitecture)
         {
             if (string.IsNullOrEmpty(processorArchitecture))
                 return null;
@@ -216,6 +216,7 @@ namespace Radegast.Core
         private IntPtr LoadLibraryInternal(string dllName, string baseDirectory, ProcessArchitectureInfo processArchInfo)
         {
             var platformName = GetPlatformName(processArchInfo.Architecture);
+            if (platformName == null) return IntPtr.Zero;
             var expectedDllDirectory = Path.Combine(
                 Path.Combine(baseDirectory, DllDirectory), platformName);
             return this.LoadLibraryRaw(dllName, expectedDllDirectory);
@@ -281,7 +282,7 @@ namespace Radegast.Core
             public string Architecture
             {
                 get; set;
-            }
+            } = string.Empty;
 
             private List<string> Warnings
             {

@@ -5,6 +5,8 @@
 /* For more detail visit:                                                                   */
 /* https://fmod.com/resources/documentation-api?version=2.0&page=core-api.html              */
 /* ======================================================================================== */
+#nullable disable
+#pragma warning disable CS8632
 
 using System;
 using System.Text;
@@ -900,7 +902,7 @@ namespace FMOD
 
     public struct Debug
     {
-        public static RESULT Initialize(DEBUG_FLAGS flags, DEBUG_MODE mode = DEBUG_MODE.TTY, DEBUG_CALLBACK callback = null, string filename = null)
+        public static RESULT Initialize(DEBUG_FLAGS flags, DEBUG_MODE mode = DEBUG_MODE.TTY, DEBUG_CALLBACK? callback = null, string? filename = null)
         {
             using (StringHelper.ThreadSafeEncoding encoder = StringHelper.GetFreeHelper())
             {
@@ -3813,7 +3815,7 @@ namespace FMOD
                 return newNumber;
             }
 
-            public byte[] byteFromStringUTF8(string s)
+            public byte[]? byteFromStringUTF8(string? s)
             {
                 if (s == null)
                 {

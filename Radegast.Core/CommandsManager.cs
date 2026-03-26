@@ -37,7 +37,7 @@ namespace Radegast.Commands
         public readonly List<ICommandInterpreter> InterpretersLoaded = new List<ICommandInterpreter>();
         private IRadegastInstance instance;
         public Queue<KeyValuePair<string, ThreadStart>> CommandQueue = new Queue<KeyValuePair<string, ThreadStart>>();
-        public AutoResetEvent CommandQueued = new AutoResetEvent(false);
+        public AutoResetEvent? CommandQueued = new AutoResetEvent(false);
 
         private readonly CancellationTokenSource commandWorkerCancelToken;
 
@@ -69,7 +69,7 @@ namespace Radegast.Commands
                 }
                 if (CommandQueue.Count == 0)
                 {
-                    CommandQueued.WaitOne();
+                    CommandQueued!.WaitOne();
                 }
                 if (commandWorkerCancelToken.Token.IsCancellationRequested)
                 {
@@ -103,7 +103,7 @@ namespace Radegast.Commands
         {
             lock (CommandQueue)
                 CommandQueue.Enqueue(new KeyValuePair<string, ThreadStart>(name, ts));
-            CommandQueued.Set();
+            CommandQueued!.Set();
         }
 
         public IRadegastCommand AddCmd(string name, string desc, string usage, CommandExecuteDelegate executeDelegate)
@@ -351,7 +351,7 @@ namespace Radegast.Commands
         {
             List<string> list = new List<string>();
             StringBuilder current = new StringBuilder();
-            string trimmed = null;
+            string? trimmed = null;
             bool withinQuote = false;
             bool escaped = false;
 

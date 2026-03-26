@@ -40,21 +40,21 @@ namespace Radegast
         /// <summary>When was Radegast started (UTC)</summary>
         public readonly DateTime StartupTimeUTC = DateTime.UtcNow;
         /// <summary>Time zone of the current world (currently hard coded to US Pacific time)</summary>
-        public TimeZoneInfo WordTimeZone;
+        public TimeZoneInfo WordTimeZone = null!;
         public GridClient Client { get; private set; }
         public INetCom NetCom { get; private set; }
         /// <summary>System (not grid!) user's dir</summary>
-        public string UserDir { get; protected set; }
+        public string UserDir { get; protected set; } = null!;
         /// <summary>Grid client's user dir for settings and logs</summary>
-        public string ClientDir => !string.IsNullOrEmpty(Client?.Self?.Name) ? Path.Combine(UserDir, Client.Self.Name) : Environment.CurrentDirectory;
+        public string ClientDir => !string.IsNullOrEmpty(Client?.Self?.Name) ? Path.Combine(UserDir, Client!.Self!.Name) : Environment.CurrentDirectory;
         public string InventoryCacheFileName => Path.Combine(ClientDir, "inventory.cache");
-        public string GlobalLogFile { get; protected set; }
+        public string GlobalLogFile { get; protected set; } = null!;
         public bool MonoRuntime { get; } = Type.GetType("Mono.Runtime") != null;
         public string AppName { get; }
         /// <summary>Global settings for the entire application </summary>
-        public Settings GlobalSettings { get; protected set; }
+        public Settings GlobalSettings { get; protected set; } = null!;
         /// <summary>Per client settings</summary>
-        public Settings ClientSettings { get; protected set; }
+        public Settings ClientSettings { get; protected set; } = null!;
         private string CrashMarkerFileName => Path.Combine(UserDir, "crash_marker");
         /// <summary>
         /// Cache of the agent's current group memberships, keyed by group UUID.
@@ -67,44 +67,44 @@ namespace Radegast
         private readonly object _groupsLock = new object();
 
         #region Managers
-        public StateManager State { get; private set; }
+        public StateManager State { get; private set; } = null!;
 
         /// <summary>Manages retrieving avatar names</summary>
-        public NameManager Names { get; private set; }
+        public NameManager Names { get; private set; } = null!;
 
         /// <summary>Radegast media manager for playing streams and in world sounds</summary>
-        public MediaManager MediaManager { get; private set; }
+        public MediaManager MediaManager { get; private set; } = null!;
 
         /// <summary>Radegast command manager for executing textual console commands</summary>
-        public CommandsManager CommandsManager { get; private set; }
+        public CommandsManager CommandsManager { get; private set; } = null!;
 
         /// <summary>Manager for RLV functionality</summary>
-        public RlvManager RLV { get; private set; }
+        public RlvManager RLV { get; private set; } = null!;
 
         /// <summary>Manages default params for different grids</summary>
-        public GridManager GridManger { get; private set; }
+        public GridManager GridManger { get; private set; } = null!;
 
         /// <summary>Current Outfit Folder (appearance) manager</summary>
-        public OutfitManager COF { get; private set; }
+        public OutfitManager COF { get; private set; } = null!;
 
         /// <summary>Gesture manager</summary>
-        public GestureManager GestureManager { get; private set; }
+        public GestureManager GestureManager { get; private set; } = null!;
 
         /// <summary>LSL Syntax manager</summary>
-        public LslSyntax LslSyntax { get; private set; }
+        public LslSyntax LslSyntax { get; private set; } = null!;
 
         #endregion Managers
 
         /// <summary>Allows key emulation for moving avatar around</summary>
-        public RadegastMovement Movement { get; private set; }
+        public RadegastMovement Movement { get; private set; } = null!;
 
-        private InventoryClipboard inventoryClipboard;
+        private InventoryClipboard? inventoryClipboard;
         /// <summary>
         /// The last item that was cut or copied in the inventory, used for pasting
         /// in a different place on the inventory, or other places like profile
         /// that allow sending copied inventory items
         /// </summary>
-        public InventoryClipboard InventoryClipboard
+        public InventoryClipboard? InventoryClipboard
         {
             get => inventoryClipboard;
             set
@@ -114,23 +114,23 @@ namespace Radegast
             }
         }
 
-        public IMSessionManager IMSessions { get; private set; }
-        private InitialOutfitHandler _initialOutfitHandler;
+        public IMSessionManager IMSessions { get; private set; } = null!;
+        private InitialOutfitHandler? _initialOutfitHandler;
         // Cancellation token source for COF initialization retries
-        private CancellationTokenSource _cofInitCts;
+        private CancellationTokenSource? _cofInitCts;
 
         #region Events
 
         #region ClientChanged event
         /// <summary>The event subscribers, null of no subscribers</summary>
-        private EventHandler<ClientChangedEventArgs> m_ClientChanged;
+        private EventHandler<ClientChangedEventArgs>? m_ClientChanged;
 
         ///<summary>Raises the ClientChanged Event</summary>
         /// <param name="e">A ClientChangedEventArgs object containing
         /// the old and the new client</param>
         protected virtual void OnClientChanged(ClientChangedEventArgs e)
         {
-            EventHandler<ClientChangedEventArgs> handler = m_ClientChanged;
+            EventHandler<ClientChangedEventArgs>? handler = m_ClientChanged;
             handler?.Invoke(this, e);
         }
 
@@ -147,14 +147,14 @@ namespace Radegast
 
         #region InventoryClipboardUpdated event
         /// <summary>The event subscribers, null of no subscribers</summary>
-        private EventHandler<EventArgs> m_InventoryClipboardUpdated;
+        private EventHandler<EventArgs>? m_InventoryClipboardUpdated;
 
         ///<summary>Raises the InventoryClipboardUpdated Event</summary>
         /// <param name="e">A EventArgs object containing
         /// the old and the new client</param>
         protected virtual void OnInventoryClipboardUpdated(EventArgs e)
         {
-            EventHandler<EventArgs> handler = m_InventoryClipboardUpdated;
+            EventHandler<EventArgs>? handler = m_InventoryClipboardUpdated;
             handler?.Invoke(this, e);
         }
 
@@ -439,7 +439,7 @@ namespace Radegast
             Client = new GridClient();
             InitializeClient(Client);
             lock (_groupsLock) { Groups.Clear(); }
-            OnClientChanged(new ClientChangedEventArgs(oldClient, Client));
+            OnClientChanged(new ClientChangedEventArgs(oldClient!, Client));
             NetCom.Login();
         }
 
@@ -459,25 +459,25 @@ namespace Radegast
             if (COF != null)
             {
                 COF.Dispose();
-                COF = null;
+                COF = null!;
             }
 
             if (Names != null)
             {
                 Names.Dispose();
-                Names = null;
+                Names = null!;
             }
 
             if (GridManger != null)
             {
                 GridManger.Dispose();
-                GridManger = null;
+                GridManger = null!;
             }
 
             if (RLV != null)
             {
                 RLV.Dispose();
-                RLV = null;
+                RLV = null!;
             }
 
             if (Client != null)
@@ -488,32 +488,32 @@ namespace Radegast
             if (Movement != null)
             {
                 Movement.Dispose();
-                Movement = null;
+                Movement = null!;
             }
             if (CommandsManager != null)
             {
                 CommandsManager.Dispose();
-                CommandsManager = null;
+                CommandsManager = null!;
             }
             if (MediaManager != null)
             {
                 MediaManager.Dispose();
-                MediaManager = null;
+                MediaManager = null!;
             }
             if (State != null)
             {
                 State.Dispose();
-                State = null;
+                State = null!;
             }
             if (IMSessions != null)
             {
                 IMSessions.Dispose();
-                IMSessions = null;
+                IMSessions = null!;
             }
             if (NetCom != null)
             {
                 NetCom.Dispose();
-                NetCom = null;
+                NetCom = null!;
             }
             Logger.Debug("RadegastInstance finished cleaning up.");
         }
@@ -734,7 +734,7 @@ namespace Radegast
 
         #region Crash reporting
 
-        private FileStream MarkerLock = null;
+        private FileStream? MarkerLock = null;
         private readonly object _lockChatLog = new object();
 
         public bool AnotherInstanceRunning()
@@ -812,17 +812,17 @@ namespace Radegast
             if (client.Network?.CurrentSim == null)
             {
                 var tcsSim = new TaskCompletionSource<bool>();
-                EventHandler<SimChangedEventArgs> simHandler = null;
+                EventHandler<SimChangedEventArgs>? simHandler = null;
                 simHandler = (s, e) =>
                 {
                     if (client.Network?.CurrentSim != null)
                     {
-                        client.Network.SimChanged -= simHandler;
+                        client.Network.SimChanged -= simHandler!;
                         tcsSim.TrySetResult(true);
                     }
                 };
 
-                client.Network.SimChanged += simHandler;
+                client.Network!.SimChanged += simHandler!;
                 var completedSim = await Task.WhenAny(tcsSim.Task, Task.Delay(timeout, token)).ConfigureAwait(false);
                 client.Network.SimChanged -= simHandler;
                 if (completedSim != tcsSim.Task) return false;
@@ -843,12 +843,12 @@ namespace Radegast
             }
 
             var tcs = new TaskCompletionSource<bool>();
-            EventHandler<CapabilitiesReceivedEventArgs> capsHandler = null;
+            EventHandler<CapabilitiesReceivedEventArgs>? capsHandler = null;
             capsHandler = (s, e) =>
             {
                 if (e.Simulator == sim)
                 {
-                    caps.CapabilitiesReceived -= capsHandler;
+                    caps.CapabilitiesReceived -= capsHandler!;
                     tcs.TrySetResult(true);
                 }
             };

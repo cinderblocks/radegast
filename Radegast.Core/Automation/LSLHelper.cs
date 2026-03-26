@@ -129,7 +129,7 @@ namespace Radegast.Automation
                                     UUID invItemID = UUID.Zero;
                                     if (!UUID.TryParse(args[1].Trim(), out sendTo)) return false;
                                     if (!UUID.TryParse(args[2].Trim(), out invItemID)) return false;
-                                    if (!client.Inventory.Store.Contains(invItemID))
+                                    if (!client.Inventory.Store!.Contains(invItemID))
                                     {
                                         instance.ShowNotificationInChat(
                                             $"Tried to offer {invItemID} but could not find it in my inventory",
@@ -137,7 +137,7 @@ namespace Radegast.Automation
                                         return false;
                                     }
 
-                                    if (!(client.Inventory.Store[invItemID] is InventoryItem item))
+                                    if (!(client.Inventory.Store![invItemID] is InventoryItem item))
                                         return false;
                                     client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, sendTo, true);
 
@@ -224,7 +224,7 @@ namespace Radegast.Automation
                         var completed = await Task.WhenAny(tcs.Task, Task.Delay(30 * 1000)).ConfigureAwait(false);
                         client.Groups.GroupMembersReply -= handler;
 
-                        Dictionary<UUID, GroupMember> Members = null;
+                        Dictionary<UUID, GroupMember>? Members = null;
                         if (completed == tcs.Task)
                         {
                             Members = tcs.Task.Result;

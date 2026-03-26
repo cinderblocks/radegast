@@ -36,7 +36,7 @@ namespace Radegast
         public LoginOptions LoginOptions { get; set; } = new LoginOptions();
 
         public bool AgreeToTos { get; set; } = false;
-        public Grid Grid { get; private set; }
+        public Grid Grid { get; private set; } = null!;
 
         // Duplicate suppression caches (short-lived)
         private readonly ConcurrentDictionary<string, DateTime> _recentChatHashes = new ConcurrentDictionary<string, DateTime>();
@@ -124,14 +124,14 @@ namespace Radegast
 
         #region ClientConnected event
         /// <summary>The event subscribers, null of no subscribers</summary>
-        private EventHandler<EventArgs> m_ClientConnected;
+        private EventHandler<EventArgs>? m_ClientConnected;
 
         ///<summary>Raises the ClientConnected Event</summary>
         /// <param name="e">A ClientConnectedEventArgs object containing
         /// the old and the new client</param>
         protected virtual void OnClientConnected(EventArgs e)
         {
-            EventHandler<EventArgs> handler = m_ClientConnected;
+            EventHandler<EventArgs>? handler = m_ClientConnected;
             handler?.Invoke(this, e);
         }
 
@@ -291,30 +291,30 @@ namespace Radegast
 
             string password;
 
-            if (LoginOptions.IsPasswordMD5(LoginOptions.Password))
+            if (LoginOptions.IsPasswordMD5(LoginOptions.Password!))
             {
-                password = LoginOptions.Password;
+                password = LoginOptions.Password!;
             }
             else
             {
-                password = Utils.MD5(LoginOptions.Password.Length > 16
+                password = Utils.MD5(LoginOptions.Password!.Length > 16
                     ? LoginOptions.Password.Substring(0, 16) 
                     : LoginOptions.Password);
             }
 
             LoginParams loginParams = Client.Network.DefaultLoginParams(
-                LoginOptions.FirstName, LoginOptions.LastName, password,
+                LoginOptions.FirstName!, LoginOptions.LastName!, password,
                 LoginOptions.Channel, LoginOptions.Version);
 
-            Grid = LoginOptions.Grid;
+            Grid = LoginOptions.Grid!;
             loginParams.Start = startLocation;
             loginParams.LoginLocation = loginLocation;
             loginParams.AgreeToTos = AgreeToTos;
-            loginParams.URI = Grid.LoginURI;
+            loginParams.URI = Grid!.LoginURI;
             loginParams.LastExecEvent = LoginOptions.LastExecEvent;
             loginParams.MfaEnabled = true;
-            loginParams.MfaHash = LoginOptions.MfaHash;
-            loginParams.Token = LoginOptions.MfaToken;
+            loginParams.MfaHash = LoginOptions.MfaHash!;
+            loginParams.Token = LoginOptions.MfaToken!;
 
             Client.Network.BeginLogin(loginParams);
         }
@@ -359,7 +359,7 @@ namespace Radegast
 
             Client.Self.InstantMessage(
                 LoginOptions.FullName, target, message, session, InstantMessageDialog.MessageFromAgent,
-                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim.ID, null);
+                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim!.ID, null!);
 
             var ev = new InstantMessageSentEventArgs(message, target, session, DateTime.UtcNow, LoginOptions.FullName, Client.Self.AgentID);
             try
@@ -381,7 +381,7 @@ namespace Radegast
 
             Client.Self.InstantMessage(
                 LoginOptions.FullName, target, "typing", session, InstantMessageDialog.StartTyping,
-                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim.ID, null);
+                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim!.ID, null!);
         }
 
         public void SendIMStopTyping(UUID target, UUID session)
@@ -390,7 +390,7 @@ namespace Radegast
 
             Client.Self.InstantMessage(
                 LoginOptions.FullName, target, "typing", session, InstantMessageDialog.StopTyping,
-                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim.ID, null);
+                InstantMessageOnline.Online, Client.Self.SimPosition, Client.Network.CurrentSim!.ID, null!);
         }
 
         public bool IsLoggingIn { get; private set; } = false;

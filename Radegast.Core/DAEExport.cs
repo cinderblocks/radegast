@@ -36,16 +36,16 @@ namespace Radegast
 {
     public class DAEExport : IDisposable
     {
-        public string FileName { get; set; }
-        public Primitive RootPrim { get; set; }
+        public string FileName { get; set; } = null!;
+        public Primitive RootPrim { get; set; } = null!;
         public List<Primitive> Prims = new List<Primitive>();
         public List<FacetedMesh> MeshedPrims = new List<FacetedMesh>();
         public List<UUID> Textures = new List<UUID>();
-        public string[] TextureNames;
+        public string?[] TextureNames = null!;
         public int ExportablePrims { get; set; }
         public int ExportableTextures { get; set; }
         public bool ExportTextures { get; set; }
-        public string ImageFormat { get; set; }
+        public string ImageFormat { get; set; } = null!;
         public bool ConsolidateMaterials { get; set; }
         public bool SkipTransparentFaces { get; set; }
 
@@ -61,9 +61,9 @@ namespace Radegast
         private GridClient Client => Instance.Client;
         private readonly System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
         private readonly MeshmerizerR Mesher;
-        private XmlDocument Doc;
+        private XmlDocument Doc = null!;
 
-        public event EventHandler<DAEStatutsEventArgs> Progress;
+        public event EventHandler<DAEStatutsEventArgs>? Progress;
 
         private void OnProgress(string message)
         {
@@ -77,7 +77,7 @@ namespace Radegast
             ConsolidateMaterials = true;
             SkipTransparentFaces = true;
             Mesher = new MeshmerizerR();
-            Init(Client.Network.CurrentSim, requestedPrim);
+            Init(Client.Network.CurrentSim!, requestedPrim);
         }
 
         public void Dispose()
@@ -150,11 +150,12 @@ namespace Radegast
                 if (!CanExport(prim)) continue;
                 ExportablePrims++;
 
-                var defaultTexture = prim.Textures.DefaultTexture;
+                var defaultTexture = prim.Textures?.DefaultTexture;
                 if (defaultTexture != null && !Textures.Contains(defaultTexture.TextureID))
                 {
                     Textures.Add(defaultTexture.TextureID);
                 }
+                if (prim.Textures?.FaceTextures != null)
                 foreach (var te in prim.Textures.FaceTextures)
                 {
                     if (te == null) continue;
@@ -200,7 +201,7 @@ namespace Radegast
                 {
                     if (!CanExport(prim)) continue;
 
-                    FacetedMesh mesh = await MeshPrimAsync(prim).ConfigureAwait(false);
+                    FacetedMesh? mesh = await MeshPrimAsync(prim).ConfigureAwait(false);
                     if (mesh == null) continue;
 
                     for (int j = 0; j < mesh.Faces.Count; j++)
@@ -250,12 +251,12 @@ namespace Radegast
 
                 OnProgress("Fetching texture" + id);
 
-                SKBitmap bitmap = null;
-                byte[] jpegData = null;
+                SKBitmap? bitmap = null;
+                byte[]? jpegData = null;
 
                 try
                 {
-                    var tcs = new TaskCompletionSource<(byte[] jpeg, SKBitmap bmp)>();
+                    var tcs = new TaskCompletionSource<(byte[]? jpeg, SKBitmap? bmp)>();
 
                     Client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
                     {
@@ -264,7 +265,7 @@ namespace Radegast
                             if (state == TextureRequestState.Finished && asset != null)
                             {
                                 var data = asset.AssetData;
-                                SKBitmap bmp = null;
+                                SKBitmap? bmp = null;
                                 try { bmp = J2kImage.FromBytes(data).As<SKBitmap>(); } catch { bmp = null; }
                                 tcs.TrySetResult((data, bmp));
                                 return;
@@ -313,7 +314,7 @@ namespace Radegast
                                 break;
                             }
                             case "J2C":
-                                File.WriteAllBytes(fullFileName, jpegData);
+                                File.WriteAllBytes(fullFileName, jpegData!);
                                 break;
                             case "TGA":
                                 var tga = Pfim.Targa.Create(bitmap.Bytes, new Pfim.PfimConfig());
@@ -359,7 +360,7 @@ namespace Radegast
 
             return prim.Properties.OwnerID == Client.Self.AgentID &&
                    prim.Properties.CreatorID == Client.Self.AgentID ||
-                   (Instance.NetCom.LoginOptions.Grid.Platform != "SecondLife"
+                   (Instance.NetCom.LoginOptions.Grid?.Platform != "SecondLife"
                     && prim.Properties.OwnerID == Client.Self.AgentID
                     && IsFullPerm(prim.Properties.Permissions));
         }
@@ -367,12 +368,12 @@ namespace Radegast
         private bool CanExportTexture(UUID id, out string name)
         {
             name = id.ToString();
-            if (BuiltInTextures.Contains(id) || Instance.NetCom.LoginOptions.Grid.Platform != "SecondLife")
+            if (BuiltInTextures.Contains(id) || Instance.NetCom.LoginOptions.Grid?.Platform != "SecondLife")
             {
                 return true;
             }
 
-            if (Client.Inventory.Store.Contains(id) && Client.Inventory.Store[id] is InventoryItem item)
+            if (Client.Inventory.Store != null && Client.Inventory.Store.Contains(id) && Client.Inventory.Store[id] is InventoryItem item)
             {
                 if (IsFullPerm(item))
                 {
@@ -384,16 +385,16 @@ namespace Radegast
             return false;
         }
 
-        private async Task<FacetedMesh> MeshPrimAsync(Primitive prim)
+        private async Task<FacetedMesh?> MeshPrimAsync(Primitive prim)
         {
-            FacetedMesh mesh = null;
+            FacetedMesh? mesh = null;
             if (prim.Sculpt == null || prim.Sculpt.SculptTexture == UUID.Zero)
             {
                 mesh = Mesher.GenerateFacetedMesh(prim, DetailLevel.Highest);
             }
             else if (prim.Sculpt.Type != SculptType.Mesh)
             {
-                SKBitmap img = await LoadTextureAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
+                SKBitmap? img = await LoadTextureAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
                 if (img != null)
                 {
                     mesh = Mesher.GenerateFacetedSculptMesh(prim, img, DetailLevel.Highest);
@@ -401,14 +402,14 @@ namespace Radegast
             }
             else
             {
-                var tcs = new TaskCompletionSource<FacetedMesh>();
+                var tcs = new TaskCompletionSource<FacetedMesh?>();
 
                 Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
                 {
                     try
                     {
-                        FacetedMesh localMesh = null;
-                        if (success && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out localMesh))
+                        FacetedMesh? localMesh = null;
+                        if (success && meshAsset != null && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out localMesh))
                         {
                             tcs.TrySetResult(localMesh);
                         }
@@ -432,9 +433,9 @@ namespace Radegast
             return mesh;
         }
 
-        private async Task<SKBitmap> LoadTextureAsync(UUID textureID)
+        private async Task<SKBitmap?> LoadTextureAsync(UUID textureID)
         {
-            var tcs = new TaskCompletionSource<SKBitmap>();
+            var tcs = new TaskCompletionSource<SKBitmap?>();
 
             try
             {
@@ -443,7 +444,7 @@ namespace Radegast
                     try
                     {
                         if (state != TextureRequestState.Finished || assetTexture == null) { return; }
-                        SKBitmap img = null;
+                        SKBitmap? img = null;
                         try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
                         tcs.TrySetResult(img);
                     }
@@ -630,7 +631,7 @@ namespace Radegast
         {
             public UUID TextureID;
             public Color4 Color;
-            public string Name;
+            public string Name = null!;
 
             public bool Matches(Primitive.TextureEntryFace TextureEntry)
             {
@@ -642,7 +643,7 @@ namespace Radegast
 
         private MaterialInfo GetMaterial(Primitive.TextureEntryFace te)
         {
-            MaterialInfo ret = null;
+            MaterialInfo? ret = null;
             foreach (var mat in AllMeterials)
             {
                 if (mat.Matches(te))
@@ -708,7 +709,7 @@ namespace Radegast
                 var effect = effects.AppendChild(Doc.CreateElement("effect"));
                 effect.Attributes.Append(Doc.CreateAttribute("id")).InnerText = mat.Name + "-fx";
                 var profile = effect.AppendChild(Doc.CreateElement("profile_COMMON"));
-                string colladaName = null;
+                string? colladaName = null;
                 if (ExportTextures)
                 {
                     UUID textID = UUID.Zero;

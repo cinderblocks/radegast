@@ -55,7 +55,7 @@ namespace Radegast
             return Name;
         }
 
-        public static Grid FromOSD(OSD data)
+        public static Grid? FromOSD(OSD data)
         {
             if (data == null || data.Type != OSDType.Map) return null;
             Grid grid = new Grid();
@@ -102,7 +102,8 @@ namespace Radegast
                 OSDArray sysGrids = (OSDArray)OSDParser.DeserializeLLSDXml(File.ReadAllText(sysGridsFile));
                 foreach (var grid in sysGrids)
                 {
-                    RegisterGrid(Grid.FromOSD(grid));
+                    var g = Grid.FromOSD(grid);
+                    if (g != null) RegisterGrid(g);
                 }
             }
             catch (Exception ex)

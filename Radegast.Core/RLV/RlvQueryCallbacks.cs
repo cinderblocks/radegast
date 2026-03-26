@@ -47,12 +47,12 @@ namespace Radegast.Core.RLV
             // Search across all connected simulators for the object
             try
             {
-                Simulator[] sims = null;
+                Simulator[]? sims = null;
                 lock (instance.Client.Network.Simulators)
                 {
                     sims = instance.Client.Network.Simulators.ToArray();
                 }
-                
+
                 foreach (var sim in sims)
                 {
                     if (sim == null) continue;
@@ -71,7 +71,7 @@ namespace Radegast.Core.RLV
         {
             var activeGroupId = instance.Client.Self.ActiveGroup;
 
-            string groupName = null;
+            string? groupName = null;
 
             var tcs = new TaskCompletionSource<bool>();
             void groupNameReply(object sender, GroupNamesEventArgs e)
@@ -95,7 +95,7 @@ namespace Radegast.Core.RLV
                     return (false, string.Empty);
                 }
 
-                return (true, groupName);
+                return (true, groupName ?? string.Empty);
             }
             finally
             {
@@ -103,9 +103,9 @@ namespace Radegast.Core.RLV
             }
         }
 
-        public Task<(bool Success, CameraSettings CameraSettings)> TryGetCameraSettingsAsync(CancellationToken cancellationToken)
+        public Task<(bool Success, CameraSettings? CameraSettings)> TryGetCameraSettingsAsync(CancellationToken cancellationToken)
         {
-            return Task.FromResult((false, (CameraSettings)null));
+            return Task.FromResult<(bool, CameraSettings?)>((false, null));
         }
 
         private Dictionary<UUID, UUID> GetAttachedItemIdToPrimitiveIdMap()
@@ -115,16 +115,16 @@ namespace Radegast.Core.RLV
             // Scan all connected simulators for attachments
             try
             {
-                Simulator[] sims = null;
+                Simulator[]? sims = null;
                 lock (instance.Client.Network.Simulators)
                 {
                     sims = instance.Client.Network.Simulators.ToArray();
                 }
-                
+
                 foreach (var sim in sims)
                 {
                     if (sim == null) continue;
-                    
+
                     var objectPrimitivesSnapshot = sim.ObjectsPrimitives.Values.ToList();
                     foreach (var item in objectPrimitivesSnapshot)
                     {
@@ -174,7 +174,7 @@ namespace Radegast.Core.RLV
                 // Search across all connected simulators for the sit object
                 try
                 {
-                    Simulator[] sims = null;
+                    Simulator[]? sims = null;
                     lock (instance.Client.Network.Simulators)
                     {
                         sims = instance.Client.Network.Simulators.ToArray();
@@ -244,7 +244,7 @@ namespace Radegast.Core.RLV
             Dictionary<Guid, RlvInventoryItem> itemMap
         )
         {
-            folderMap[root.Data.UUID.Guid] = rootConverted;
+            folderMap[root.Data!.UUID.Guid] = rootConverted;
 
             foreach (var node in root.Nodes.Values)
             {
@@ -306,15 +306,15 @@ namespace Radegast.Core.RLV
             }
         }
 
-        public async Task<(bool Success, InventoryMap InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
+        public async Task<(bool Success, InventoryMap? InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
         {
             // Get current attached items <InventoryItem>
             var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinks(cancellationToken);
             var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
 
             // Build shared folder
-            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
-                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
+            var sharedFolder = instance.Client.Inventory.Store!.RootNode.Nodes.Values
+                .FirstOrDefault(n => n.Data?.Name == "#RLV" && n.Data is InventoryFolder);
 
             var currentOutfitMap = new Dictionary<UUID, InventoryItem>();
             foreach (var item in currentOutfitLinks)
@@ -324,7 +324,7 @@ namespace Radegast.Core.RLV
 
             // If there is no shared #RLV folder in the user's inventory, create an empty representation
             var sharedFolderConverted = sharedFolder != null
-                ? new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "")
+                ? new RlvSharedFolder(sharedFolder.Data!.UUID.Guid, "")
                 : new RlvSharedFolder(Guid.Empty, "#RLV");
 
             var itemMap = new Dictionary<Guid, RlvInventoryItem>();

@@ -29,7 +29,7 @@ namespace Radegast.Automation
     public class AutoSitPreferences
     {
         public UUID Primitive { get; set; }
-        public string PrimitiveName { get; set; }
+        public string PrimitiveName { get; set; } = string.Empty;
         public bool Enabled { get; set; }
 
         public static explicit operator AutoSitPreferences(OSD osd){
@@ -76,7 +76,7 @@ namespace Radegast.Automation
         private const string c_label = "Use as Auto-Sit target";
 
         private readonly RadegastInstance m_instance;
-        private Timer m_Timer;
+        private Timer? m_Timer;
 
         public AutoSit(RadegastInstance instance)
         {
@@ -98,13 +98,13 @@ namespace Radegast.Automation
             }
         }
 
-        public AutoSitPreferences Preferences
+        public AutoSitPreferences? Preferences
         {
             get => !m_instance.Client.Network.Connected ? null : (AutoSitPreferences)m_instance.ClientSettings;
 
             set {
-                m_instance.ClientSettings["AutoSit"] = value;
-                if (Preferences.Enabled)
+                m_instance.ClientSettings["AutoSit"] = value!;
+                if (Preferences?.Enabled == true)
                 {
                     m_instance.RegisterContextAction(typeof(Primitive), c_label, PrimitiveContextAction);
                 }
@@ -122,7 +122,7 @@ namespace Radegast.Automation
             {
                 Primitive = prim.ID,
                 PrimitiveName = prim.Properties != null ? prim.Properties.Name : "",
-                Enabled = Preferences.Enabled
+                Enabled = Preferences?.Enabled ?? false
             };
             if (prim.Properties == null)
             {
@@ -133,13 +133,13 @@ namespace Radegast.Automation
 
         public void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
         {
-            if (e.Properties.ObjectID != Preferences.Primitive) return;
+            if (Preferences == null || e.Properties.ObjectID != Preferences.Primitive) return;
 
             Preferences = new AutoSitPreferences
             {
-                Primitive = Preferences.Primitive,
+                Primitive = Preferences!.Primitive,
                 PrimitiveName = e.Properties.Name,
-                Enabled = Preferences.Enabled
+                Enabled = Preferences!.Enabled
             };
 
             m_instance.Client.Objects.ObjectProperties -= Objects_ObjectProperties;
@@ -154,24 +154,24 @@ namespace Radegast.Automation
                     if (!m_instance.State.IsSitting)
                     {
                         m_instance.State.SetSitting(true, Preferences.Primitive);
-                        m_Timer.Enabled = true;
-                    }
-                    else
-                    {
-                        if (!m_instance.Client.Network.CurrentSim.ObjectsPrimitives.ContainsKey(m_instance.Client.Self.SittingOn))
-                        {
-                            m_instance.State.SetSitting(false, UUID.Zero);
+                            if (m_Timer != null) m_Timer.Enabled = true;
+                                }
+                                else
+                                {
+                                    if (!m_instance.Client.Network.CurrentSim!.ObjectsPrimitives.ContainsKey(m_instance.Client.Self.SittingOn))
+                                    {
+                                        m_instance.State.SetSitting(false, UUID.Zero);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                if (m_Timer != null) m_Timer.Enabled = false;
+                            }
                         }
-                    }
-                }
-                else
-                {
-                    m_Timer.Enabled = false;
-                }
-            }
-            else
-            {
-                m_Timer.Enabled = false; // being lazy here, just letting timer elapse rather than disabling on client disconnect
+                        else
+                        {
+                            if (m_Timer != null) m_Timer.Enabled = false; // being lazy here, just letting timer elapse rather than disabling on client disconnect
             }
         }
     }

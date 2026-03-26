@@ -29,9 +29,9 @@ namespace Radegast
             return pass.Length == 35 && pass.StartsWith("$1$");
         }
 
-        public string FirstName { get; set; }
+        public string? FirstName { get; set; }
 
-        public string LastName { get; set; }
+        public string? LastName { get; set; }
 
         public string FullName
         {
@@ -44,11 +44,11 @@ namespace Radegast
             }
         }
 
-        public string Password { get; set; }
+        public string? Password { get; set; }
 
-        public string MfaToken { get; set; }
+        public string? MfaToken { get; set; }
 
-        public string MfaHash { get; set; }
+        public string? MfaHash { get; set; }
 
         public StartLocationType StartLocation { get; set; } = StartLocationType.Home;
 
@@ -58,7 +58,7 @@ namespace Radegast
 
         public string Version { get; set; } = string.Empty;
 
-        public Grid Grid { get; set; }
+        public Grid? Grid { get; set; }
 
         public string GridCustomLoginUri { get; set; } = string.Empty;
 

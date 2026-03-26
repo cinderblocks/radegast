@@ -88,7 +88,7 @@ namespace Radegast
             return OSDParser.SerializeLLSDXmlString(ClientHelpers.PrimListToOSD(prims));
         }
 
-        private bool RequestObjectProperties(IReadOnlyList<Primitive> objects, int msPerRequest, Simulator sim = null)
+        private bool RequestObjectProperties(IReadOnlyList<Primitive> objects, int msPerRequest, Simulator? sim = null)
         {
             // Create an array of the local IDs of all the prims we are requesting properties for
             uint[] localids = new uint[objects.Count];
@@ -107,7 +107,7 @@ namespace Radegast
             {
                 // If no simulator provided, fall back to current
                 var targetSim = sim ?? Client.Network.CurrentSim;
-                Client.Objects.SelectObjects(targetSim, localids, false);
+                Client.Objects.SelectObjects(targetSim!, localids, false);
                 // Wait for ObjectProperties events until all requested prims have been removed from PrimsWaiting.
                 var timeout = 2000 + msPerRequest * localids.Length;
                 EventSubscriptionHelper.WaitForCondition<ObjectPropertiesEventArgs>(
@@ -129,7 +129,7 @@ namespace Radegast
                     Logger.Warn($"Failed to retrieve object properties for {PrimsWaiting.Count} prims out of {localids.Length}", Client);
                 }
 
-                Client.Objects.DeselectObjects(targetSim, localids);
+                Client.Objects.DeselectObjects(targetSim!, localids);
                 return PrimsWaiting.Count == 0;
             }
             return true;

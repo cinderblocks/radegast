@@ -53,16 +53,16 @@ namespace Radegast.Media
         /// <summary>
         /// Event fired when sound system availability changes
         /// </summary>
-        public event EventHandler<SoundSystemAvailableEventArgs> SoundSystemAvailableChanged;
+        public event EventHandler<SoundSystemAvailableEventArgs>? SoundSystemAvailableChanged;
         
         public IRadegastInstance Instance;
 
         private readonly CancellationTokenSource soundCancelToken;
 
         private List<MediaObject> sounds = new List<MediaObject>();
-        private Task commandLoop;
-        private Task listenerLoop;
-        private Task deviceMonitorLoop;
+        private Task? commandLoop;
+        private Task? listenerLoop;
+        private Task? deviceMonitorLoop;
 
         /// <summary>
         /// Currently selected audio driver index
@@ -333,7 +333,7 @@ namespace Radegast.Media
             {
                 // Wait for something to show up in the queue; use a short timeout
                 // so we can observe cancellation periodically.
-                SoundDelegate action = null;
+                SoundDelegate? action = null;
                 lock (queue)
                 {
                     PerformanceStats.QueueDepth = queue.Count;
@@ -662,8 +662,8 @@ namespace Radegast.Media
                 }
             }
 
-            string foundPath = null;
-            string foundDirectory = null;
+            string? foundPath = null;
+            string? foundDirectory = null;
 
             // Find the first path that exists
             foreach (var path in possiblePaths)
@@ -694,7 +694,7 @@ namespace Radegast.Media
             try
             {
                 // Set the DLL directory so dependent DLLs can be found
-                if (SetDllDirectory(foundDirectory))
+                if (SetDllDirectory(foundDirectory!))
                 {
                     Logger.Debug($"Set DLL directory to: {foundDirectory}");
                 }
@@ -798,7 +798,7 @@ namespace Radegast.Media
                 sounds.Clear();
             }
 
-            sounds = null;
+            sounds = null!;
 
             if (system.hasHandle())
             {
@@ -949,7 +949,7 @@ namespace Radegast.Media
         /// <summary>
         /// Event fired when audio devices are added or removed
         /// </summary>
-        public event EventHandler<AudioDevicesChangedEventArgs> AudioDevicesChanged;
+        public event EventHandler<AudioDevicesChangedEventArgs>? AudioDevicesChanged;
 
         /// <summary>
         /// Handle request to play a sound, which might (or might not) have been preloaded.
@@ -1065,8 +1065,8 @@ namespace Radegast.Media
         {
             if (!SoundSystemAvailable) return;
             
-            Primitive p = null;
-            if (!e.Simulator.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out  p)) return;
+            Primitive? p = null;
+            if (!e.Simulator.ObjectsPrimitives.TryGetValue(e.ObjectLocalID, out p)) return;
 
             // Objects without sounds are not interesting.
             if (p.Sound == UUID.Zero) return;
@@ -1424,7 +1424,7 @@ namespace Radegast.Media
     /// </summary>
     public class FMODPerformanceInfo
     {
-        public string Stats { get; set; }
+        public string Stats { get; set; } = null!;
         public bool SoundSystemAvailable { get; set; }
         public int DriverCount { get; set; }
         public int SelectedDriver { get; set; }
@@ -1467,7 +1467,7 @@ namespace Radegast.Media
     /// </summary>
     public class AudioProfile
     {
-        public string Name { get; set; }
+        public string Name { get; set; } = null!;
         public float MasterVolume { get; set; } = 1.0f;
         public float ObjectVolume { get; set; } = 0.8f;
         public float UIVolume { get; set; } = 0.5f;
@@ -1542,7 +1542,7 @@ namespace Radegast.Media
         /// <summary>
         /// Create from OSD storage
         /// </summary>
-        public static AudioProfile FromOSD(OSD osd)
+        public static AudioProfile? FromOSD(OSD osd)
         {
             if (!(osd is OSDMap map)) return null;
 
@@ -1639,10 +1639,10 @@ namespace Radegast.Media
     public class AudioDriverInfo
     {
         public int Index { get; set; }
-        public string Name { get; set; }
+        public string Name { get; set; } = null!;
         public Guid Guid { get; set; }
         public int SampleRate { get; set; }
-        public string SpeakerMode { get; set; }
+        public string SpeakerMode { get; set; } = null!;
         public int Channels { get; set; }
         public bool IsDefault { get; set; }
 
@@ -1679,7 +1679,7 @@ namespace Radegast.Media
         /// <summary>
         /// Get cached sound data, or null if not cached
         /// </summary>
-        public byte[] Get(UUID soundId)
+        public byte[]? Get(UUID soundId)
         {
             lock (cacheLock)
             {
@@ -1864,12 +1864,12 @@ namespace Radegast.Media
         private class CachedSound
         {
             public UUID SoundId { get; set; }
-            public byte[] Data { get; set; }
+            public byte[] Data { get; set; } = null!;
             public long Size { get; set; }
             public DateTime CachedTime { get; set; }
             public DateTime LastAccessed { get; set; }
             public int AccessCount { get; set; }
-            public LinkedListNode<UUID> LruNode { get; set; }
+            public LinkedListNode<UUID> LruNode { get; set; } = null!;
         }
     }
 

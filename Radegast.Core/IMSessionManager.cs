@@ -53,10 +53,10 @@ namespace Radegast
         public TimeSpan TypingClearTimeout { get; set; } = TimeSpan.FromSeconds(8);
         public TimeSpan CleanupInterval { get; set; } = TimeSpan.FromSeconds(30);
 
-        public event EventHandler<IMSessionEventArgs> SessionOpened;
-        public event EventHandler<IMSessionEventArgs> SessionClosed;
-        public event EventHandler<IMTypingEventArgs> TypingStarted;
-        public event EventHandler<IMTypingEventArgs> TypingStopped;
+        public event EventHandler<IMSessionEventArgs>? SessionOpened;
+        public event EventHandler<IMSessionEventArgs>? SessionClosed;
+        public event EventHandler<IMTypingEventArgs>? TypingStarted;
+        public event EventHandler<IMTypingEventArgs>? TypingStopped;
 
         public IMSessionManager(RadegastInstance instance)
         {
@@ -199,7 +199,7 @@ namespace Radegast
 
         public void CloseSession(UUID sessionId)
         {
-            IMSessionInfo info = null;
+            IMSessionInfo? info = null;
             lock (sync)
             {
                 if (sessions.TryGetValue(sessionId, out info))

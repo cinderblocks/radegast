@@ -57,8 +57,8 @@ namespace Radegast
 
         public class ParsedUriInfo
         {
-            public string DisplayText { get; set; }
-            public string RequestedFontSettingName { get; set; }
+            public string? DisplayText { get; set; }
+            public string? RequestedFontSettingName { get; set; }
             public UUID RequestedSoundUUID { get; set; }
         }
 
@@ -72,7 +72,7 @@ namespace Radegast
 
         public class MapLinkInfo
         {
-            public string RegionName { get; set; }
+            public string? RegionName { get; set; }
             public int? X { get; set; }
             public int? Y { get; set; }
             public int? Z { get; set; }
@@ -96,7 +96,7 @@ namespace Radegast
                 return RegionName + extraRegionInfo;
             }
         }
-        public static bool TryParseMapLink(string link, out MapLinkInfo mapLinkInfo)
+        public static bool TryParseMapLink(string link, out MapLinkInfo? mapLinkInfo)
         {
             Match match = MapLinkRegex.Match(link);
             if (!match.Success)
@@ -207,7 +207,7 @@ namespace Radegast
             {
                 return new ParsedUriInfo()
                 {
-                    DisplayText = mapLinkInfo.ToString()
+                    DisplayText = mapLinkInfo!.ToString()
                 };
             }
 

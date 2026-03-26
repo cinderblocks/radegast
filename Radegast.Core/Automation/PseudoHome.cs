@@ -29,7 +29,7 @@ namespace Radegast.Automation
     public class PseudoHomePreferences
     {
         public bool Enabled { get; set; }
-        public string Region { get; set; }
+        public string? Region { get; set; }
         public Vector3 Position { get; set; }
         public uint Tolerance { get; set; } = 256;
 
@@ -95,22 +95,22 @@ namespace Radegast.Automation
             m_Timer.Enabled = false;
         }
 
-        public PseudoHomePreferences Preferences
+        public PseudoHomePreferences? Preferences
         {
             get => !m_instance.Client.Network.Connected ? null : (PseudoHomePreferences)m_instance.ClientSettings;
 
-            set => m_instance.ClientSettings["PseudoHome"] = value;
+            set => m_instance.ClientSettings["PseudoHome"] = value!;
         }
 
         public void ETGoHome()
         {
-            if (Preferences != null && m_instance.Client.Network.Connected && Preferences.Region.Trim() != string.Empty)
+            if (Preferences != null && m_instance.Client.Network.Connected && Preferences.Region?.Trim() != string.Empty)
             {
                 if (Preferences.Enabled 
-                    && (m_instance.Client.Network.CurrentSim.Name != Preferences.Region 
+                    && (m_instance.Client.Network.CurrentSim!.Name != Preferences.Region 
                         || Vector3.Distance(m_instance.Client.Self.SimPosition, Preferences.Position) > Preferences.Tolerance))
                 {
-                    m_instance.Client.Self.Teleport(Preferences.Region, Preferences.Position);
+                    m_instance.Client.Self.Teleport(Preferences.Region!, Preferences.Position);
                     m_Timer.Enabled = true;
                 }
                 else
