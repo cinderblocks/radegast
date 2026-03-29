@@ -52,7 +52,7 @@ namespace Radegast
         /// <summary>Invalid Operation</summary>
         public static UUID InvalidOperation = new UUID("4174f859-0d3d-c517-c424-72923dc21f65");
 
-        /// <summary>Invalid Keystrole</summary>
+        /// <summary>Invalid Keystroke</summary>
         public static UUID InvalidKeystroke = new UUID("2ca849ba-2885-4bc3-90ef-d4987a5b983a");
 
         /// <summary>Keyboard Loop</summary>
