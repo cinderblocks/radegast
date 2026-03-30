@@ -249,6 +249,16 @@ namespace Radegast
 
                         Logger.Info("COF initialization: COF constructed", Client);
 
+                        // Caps are already available but SimChanged already fired before OutfitManager
+                        // was constructed, so Simulator_OnCapabilitiesReceived never hooked up.
+                        // Explicitly initialize COF now.
+                        var initialized = await COF.InitializeAsync(token).ConfigureAwait(false);
+                        if (!initialized)
+                        {
+                            Logger.Warn("COF initialization: InitializeAsync returned false; will retry", Client);
+                            throw new InvalidOperationException("COF.InitializeAsync failed");
+                        }
+
                         // Now it's safe to initialize RLV and the managers that depend on COF
                         RLV = new RlvManager(this);
 
@@ -279,6 +289,12 @@ namespace Radegast
                                 {
                                     COF = new OutfitManager(this);
                                     Logger.Info("COF initialization: COF constructed on periodic retry", Client);
+
+                                    var retryInit = await COF.InitializeAsync(token).ConfigureAwait(false);
+                                    if (!retryInit)
+                                    {
+                                        throw new InvalidOperationException("COF.InitializeAsync failed on periodic retry");
+                                    }
 
                                     RLV = new RlvManager(this);
 
