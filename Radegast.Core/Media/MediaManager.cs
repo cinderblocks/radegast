@@ -961,7 +961,7 @@ namespace Radegast.Media
             if (!SoundSystemAvailable) return;
             if (e.SoundID == UUID.Zero) return;
 
-            Logger.Debug($"Trigger sound {e.SoundID} in object {e.ObjectID}");
+            Logger.Trace($"Trigger sound {e.SoundID} in object {e.ObjectID}");
 
             new BufferSound(
                 e.ObjectID,
@@ -1739,7 +1739,7 @@ namespace Radegast.Media
                 cache[soundId] = cached;
                 currentCacheSize += data.Length;
 
-                Logger.Debug($"Cached sound {soundId}, size: {data.Length} bytes, total cache: {currentCacheSize}/{MaxCacheSize}");
+                Logger.Trace($"Cached sound {soundId}, size: {data.Length} bytes, total cache: {currentCacheSize}/{MaxCacheSize}");
             }
         }
 
