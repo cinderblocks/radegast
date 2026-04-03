@@ -39,12 +39,12 @@
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="2.6.1" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="2.6.1" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.6.1" />
-    <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.6.1" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="2.6.1" />
-    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.6.1" />
+    <PackageReference Include="LibreMetaverse" Version="2.6.4" />
+    <PackageReference Include="LibreMetaverse.LslTools" Version="2.6.4" />
+    <PackageReference Include="LibreMetaverse.PrimMesher" Version="2.6.4" />
+    <PackageReference Include="LibreMetaverse.Rendering.Meshmerizer" Version="2.6.4" />
+    <PackageReference Include="LibreMetaverse.RLV" Version="2.6.4" />
+    <PackageReference Include="LibreMetaverse.Voice.Vivox" Version="2.6.4" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.2" />
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.2" />

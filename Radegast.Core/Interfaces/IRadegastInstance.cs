@@ -34,6 +34,7 @@ namespace Radegast
 
         bool MonoRuntime { get; }
         string AppName { get; }
+        string InventoryCacheFileName { get; }
         Dictionary<UUID, Group> Groups { get; }
         StateManager State { get; }
         NameManager Names { get; }
