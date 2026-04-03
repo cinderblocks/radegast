@@ -1,0 +1,31 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Radegast.Veles.Views.PermissionBadgesControl"
+             AutomationProperties.Name="Permission badges">
+    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center"
+                x:Name="BadgeContainer">
+        <!-- No Modify badge (orange) — shown when NoModify=true -->
+        <Border x:Name="ModifyBadge" Background="#CC8800" CornerRadius="2" Padding="3,1"
+                IsVisible="False">
+            <TextBlock Text="M" Foreground="White" FontSize="10" FontWeight="Bold"
+                       ToolTip.Tip="No Modify" AutomationProperties.Name="No Modify" />
+        </Border>
+        <!-- No Copy badge (blue) — shown when NoCopy=true -->
+        <Border x:Name="CopyBadge" Background="#0066CC" CornerRadius="2" Padding="3,1"
+                IsVisible="False">
+            <TextBlock Text="C" Foreground="White" FontSize="10" FontWeight="Bold"
+                       ToolTip.Tip="No Copy" AutomationProperties.Name="No Copy" />
+        </Border>
+        <!-- No Transfer badge (red) — shown when NoTransfer=true -->
+        <Border x:Name="TransferBadge" Background="#CC3300" CornerRadius="2" Padding="3,1"
+                IsVisible="False">
+            <TextBlock Text="T" Foreground="White" FontSize="10" FontWeight="Bold"
+                       ToolTip.Tip="No Transfer" AutomationProperties.Name="No Transfer" />
+        </Border>
+    </StackPanel>
+</UserControl>

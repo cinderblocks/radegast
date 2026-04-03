@@ -54,7 +54,7 @@ namespace Radegast
         }
 
         private readonly GridClient Client;
-        private Primitive currentPrim;
+        private Primitive? currentPrim;
         private Vector3 currentPosition;
         private readonly AutoResetEvent primDone = new AutoResetEvent(false);
         private List<Primitive> primsCreated;
@@ -65,6 +65,8 @@ namespace Radegast
         public PrimDeserializer(GridClient c)
         {
             Client = c;
+            primsCreated = new List<Primitive>();
+            linkQueue = new List<uint>();
             Client.Objects.ObjectUpdate += Objects_ObjectUpdate;
         }
 
@@ -120,14 +122,14 @@ namespace Radegast
                     Quaternion rootRotation = linkset.RootPrim.Rotation;
                     linkset.RootPrim.Rotation = Quaternion.Identity;
 
-                    Client.Objects.AddPrim(Client.Network.CurrentSim, linkset.RootPrim.PrimData, Client.Self.ActiveGroup,
+                    Client.Objects.AddPrim(Client.Network.CurrentSim!, linkset.RootPrim.PrimData, Client.Self.ActiveGroup,
                         linkset.RootPrim.Position, linkset.RootPrim.Scale, linkset.RootPrim.Rotation);
 
                     if (!primDone.WaitOne(25000, false))
                     {
                         throw new Exception("Rez failed, timed out while creating the root prim.");
                     }
-                    Client.Objects.SetPosition(Client.Network.CurrentSim, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
+                    Client.Objects.SetPosition(Client.Network.CurrentSim!, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
 
                     state = ImporterState.RezzingChildren;
 
@@ -137,14 +139,14 @@ namespace Radegast
                         currentPrim = prim;
                         currentPosition = prim.Position + linkset.RootPrim.Position;
 
-                        Client.Objects.AddPrim(Client.Network.CurrentSim, prim.PrimData, UUID.Zero, currentPosition,
+                        Client.Objects.AddPrim(Client.Network.CurrentSim!, prim.PrimData, UUID.Zero, currentPosition,
                             prim.Scale, prim.Rotation);
 
                         if (!primDone.WaitOne(25000, false))
                         {
                             throw new Exception("Rez failed, timed out while creating child prim.");
                         }
-                        Client.Objects.SetPosition(Client.Network.CurrentSim, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
+                        Client.Objects.SetPosition(Client.Network.CurrentSim!, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
                         // Client.Objects.SetRotation(Client.Network.CurrentSim, primsCreated[primsCreated.Count - 1].LocalID, prim.Rotation);
                     }
 
@@ -163,23 +165,23 @@ namespace Radegast
 
                         // Link and set the permissions + rotation
                         state = ImporterState.Linking;
-                        Client.Objects.LinkPrims(Client.Network.CurrentSim, linkQueue);
-                        Client.Objects.SetRotation(Client.Network.CurrentSim, rootLocalID, rootRotation);
+                        Client.Objects.LinkPrims(Client.Network.CurrentSim!, linkQueue);
+                        Client.Objects.SetRotation(Client.Network.CurrentSim!, rootLocalID, rootRotation);
 
                         if (!primDone.WaitOne(5000, false))
                         {
                             Logger.Warn($"Warning: Failed to link {linkQueue.Count} prims");
                         }
 
-                        Client.Objects.SetPermissions(Client.Network.CurrentSim, primIDs,
+                        Client.Objects.SetPermissions(Client.Network.CurrentSim!, primIDs,
                             PermissionWho.NextOwner,
                             PermissionMask.All, true);
                     }
                     else
                     {
                         List<uint> primsForPerms = new List<uint> {rootLocalID};
-                        Client.Objects.SetRotation(Client.Network.CurrentSim, rootLocalID, rootRotation);
-                        Client.Objects.SetPermissions(Client.Network.CurrentSim, primsForPerms,
+                        Client.Objects.SetRotation(Client.Network.CurrentSim!, rootLocalID, rootRotation);
+                        Client.Objects.SetPermissions(Client.Network.CurrentSim!, primsForPerms,
                             PermissionWho.NextOwner,
                             PermissionMask.All, true);
                     }
@@ -214,7 +216,7 @@ namespace Radegast
                         Console.WriteLine("Setting properties for " + e.Prim.LocalID);
                         // TODO: Is there a way to set all of this at once, and update more ObjectProperties stuff?
                         Client.Objects.SetPosition(e.Simulator, e.Prim.LocalID, currentPosition);
-                        Client.Objects.SetTextures(e.Simulator, e.Prim.LocalID, currentPrim.Textures);
+                        Client.Objects.SetTextures(e.Simulator, e.Prim.LocalID, currentPrim!.Textures!);
 
                         if (currentPrim.Light != null && currentPrim.Light.Intensity > 0)
                         {

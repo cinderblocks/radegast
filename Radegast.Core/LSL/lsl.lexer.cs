@@ -18,6 +18,8 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
+#nullable disable
+
 using LibreMetaverse.LslTools;
 
 namespace Radegast.LSL

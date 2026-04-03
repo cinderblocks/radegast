@@ -40,17 +40,17 @@ namespace Radegast.Core.RLV
             this.queryCallbacks = queryCallbacks;
         }
 
-        public bool CanAttach(InventoryItem item)
+        public bool CanAttach(InventoryItem? item)
         {
             if (!instance.RLV.Enabled)
             {
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = Task.Run(() => queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None)).GetAwaiter().GetResult();
             if (hasInventoryMap && inventoryMap != null)
             {
-                var rlvItems = inventoryMap.GetItemsById(item.UUID.Guid);
+                var rlvItems = inventoryMap.GetItemsById(item!.UUID.Guid);
                 foreach (var rlvItem in rlvItems)
                 {
                     if (rlvItem.AttachedTo != null || rlvItem.WornOn != null || rlvItem.GestureState == RlvGestureState.Active)
@@ -72,20 +72,20 @@ namespace Radegast.Core.RLV
                 : item is InventoryObject obj && rlvService.Permissions.CanAttach(item.ParentUUID.Guid, false, (RlvAttachmentPoint)obj.AttachPoint, null);
         }
 
-        public bool CanDetach(InventoryItem item)
+        public bool CanDetach(InventoryItem? item)
         {
             if (!instance.RLV.Enabled)
             {
                 return true;
             }
 
-            var (hasInventoryMap, inventoryMap) = queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None).Result;
+            var (hasInventoryMap, inventoryMap) = Task.Run(() => queryCallbacks.TryGetInventoryMapAsync(CancellationToken.None)).GetAwaiter().GetResult();
             if (!hasInventoryMap || inventoryMap == null)
             {
                 return false;
             }
 
-            var foundItems = inventoryMap.GetItemsById(item.UUID.Guid);
+            var foundItems = inventoryMap.GetItemsById(item!.UUID.Guid);
             foreach (var foundItem in foundItems)
             {
                 if (foundItem.WornOn == null && foundItem.AttachedTo == null && foundItem.GestureState != RlvGestureState.Active)
@@ -102,14 +102,14 @@ namespace Radegast.Core.RLV
             return true;
         }
 
-        public async Task ReportItemChange(List<InventoryItem> addedItems, List<InventoryItem> removedItems, CancellationToken cancellationToken = default)
+        public async Task ReportItemChange(List<InventoryItem>? addedItems, List<InventoryItem>? removedItems, CancellationToken cancellationToken = default)
         {
             if (!instance.RLV.Enabled)
             {
                 return;
             }
 
-            await instance.RLV.ReportItemChange(addedItems, removedItems, cancellationToken);
+            await instance.RLV.ReportItemChange(addedItems ?? new List<InventoryItem>(), removedItems ?? new List<InventoryItem>(), cancellationToken);
         }
     }
 }

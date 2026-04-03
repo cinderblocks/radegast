@@ -64,23 +64,23 @@ namespace Radegast
 			}
 		}
 
-        private Primitive currentPrim;
-        private Vector3 currentPosition;
-        private readonly AutoResetEvent primDone = new AutoResetEvent(false);
-        private List<Primitive> primsCreated;
-        private List<uint> linkQueue;
-        private uint rootLocalID;
-        private ImporterState state = ImporterState.Idle;
-        private readonly GridClient Client;
+		private Primitive? currentPrim;
+		private Vector3 currentPosition;
+		private readonly AutoResetEvent primDone = new AutoResetEvent(false);
+		private List<Primitive> primsCreated = new List<Primitive>();
+		private List<uint> linkQueue = new List<uint>();
+		private uint rootLocalID;
+		private ImporterState state = ImporterState.Idle;
+		private readonly GridClient Client;
 
-        private string ImportDirectory;
-		
+		private string ImportDirectory = null!;
+
 		public delegate void LogMessageDelegate(string format, params object[] args);
 		public Dictionary<UUID,UUID> Textures;
-		public Dictionary<UUID,UUID> SculptTextures;
+		public Dictionary<UUID,UUID> SculptTextures = new Dictionary<UUID, UUID>();
 		public Vector3 RezAt;
 		public TextureSet TextureUse = TextureSet.OriginalUUID;
-		public LogMessageDelegate LogMessage;
+		public LogMessageDelegate? LogMessage;
 		
 		public PrimImporter(GridClient client)
 		{
@@ -134,13 +134,13 @@ namespace Radegast
 					Quaternion rootRotation = linkset.RootPrim.Rotation;
 					linkset.RootPrim.Rotation = Quaternion.Identity;
 					
-					Client.Objects.AddPrim(Client.Network.CurrentSim, linkset.RootPrim.PrimData, UUID.Zero,
+					Client.Objects.AddPrim(Client.Network.CurrentSim!, linkset.RootPrim.PrimData, UUID.Zero,
 						linkset.RootPrim.Position, linkset.RootPrim.Scale, linkset.RootPrim.Rotation);
-					
+
 					if (!primDone.WaitOne(10000, false))
 						throw new Exception("Rez failed, timed out while creating the root prim.");
-					
-					Client.Objects.SetPosition(Client.Network.CurrentSim, primsCreated[primsCreated.Count - 1].LocalID, linkset.RootPrim.Position);
+
+					Client.Objects.SetPosition(Client.Network.CurrentSim!, primsCreated[primsCreated.Count - 1].LocalID, linkset.RootPrim.Position);
 					
 					state = ImporterState.RezzingChildren;
 					
@@ -150,12 +150,12 @@ namespace Radegast
 						currentPrim = prim;
 						currentPosition = prim.Position + linkset.RootPrim.Position;
 						
-						Client.Objects.AddPrim(Client.Network.CurrentSim, prim.PrimData, UUID.Zero, currentPosition,
-						                       prim.Scale, prim.Rotation);
-						
+						Client.Objects.AddPrim(Client.Network.CurrentSim!, prim.PrimData, UUID.Zero, currentPosition,
+											   prim.Scale, prim.Rotation);
+
 						if (!primDone.WaitOne(10000, false))
 							throw new Exception("Rez failed, timed out while creating child prim.");
-						Client.Objects.SetPosition(Client.Network.CurrentSim, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
+						Client.Objects.SetPosition(Client.Network.CurrentSim!, primsCreated[primsCreated.Count - 1].LocalID, currentPosition);
 					}
 					
 					// Create a list of the local IDs of the newly created prims
@@ -176,27 +176,27 @@ namespace Radegast
 						
 						// Link and set the permissions + rotation
 						state = ImporterState.Linking;
-						Client.Objects.LinkPrims(Client.Network.CurrentSim, linkQueue);
-						
+						Client.Objects.LinkPrims(Client.Network.CurrentSim!, linkQueue);
+
 						if (primDone.WaitOne(1000 * linkset.Children.Count, false))
-							Client.Objects.SetRotation(Client.Network.CurrentSim, rootLocalID, rootRotation);
+							Client.Objects.SetRotation(Client.Network.CurrentSim!, rootLocalID, rootRotation);
 						else
-							LogMessage("Warning: Failed to link {0} prims",linkQueue.Count);
+							LogMessage?.Invoke("Warning: Failed to link {0} prims",linkQueue.Count);
 					}
 					else
 					{
-						Client.Objects.SetRotation(Client.Network.CurrentSim, rootLocalID, rootRotation);
+						Client.Objects.SetRotation(Client.Network.CurrentSim!, rootLocalID, rootRotation);
 					}
-					
+
 					// Set permissions on newly created prims
-					Client.Objects.SetPermissions(Client.Network.CurrentSim, primIDs,
+					Client.Objects.SetPermissions(Client.Network.CurrentSim!, primIDs,
 						PermissionWho.Everyone | PermissionWho.Group | PermissionWho.NextOwner,
 						PermissionMask.All, true);
 					
 					state = ImporterState.Idle;
 				}
 				else
-					LogMessage("WARNING: Skipping a linkset with a missing root prim");
+					LogMessage?.Invoke("WARNING: Skipping a linkset with a missing root prim");
 				
 				// Reset everything for the next linkset
 				primsCreated.Clear();
@@ -224,32 +224,32 @@ namespace Radegast
 						// TODO: Is there a way to set all of this at once, and update more ObjectProperties stuff?
 						Client.Objects.SetPosition(e.Simulator, prim.LocalID, currentPosition);
 						if (TextureUse == TextureSet.NewUUID)
-                        {
-                            currentPrim.Textures.DefaultTexture.TextureID = Textures[currentPrim.Textures.DefaultTexture.TextureID] == UUID.Zero
-                                ? Primitive.TextureEntry.WHITE_TEXTURE 
-                                : Textures[currentPrim.Textures.DefaultTexture.TextureID];
+						{
+							currentPrim!.Textures!.DefaultTexture!.TextureID = Textures[currentPrim.Textures!.DefaultTexture!.TextureID] == UUID.Zero
+								? Primitive.TextureEntry.WHITE_TEXTURE 
+								: Textures[currentPrim.Textures!.DefaultTexture!.TextureID];
 
-                            for (int j = 0; j < currentPrim.Textures.FaceTextures.Length; j++)
+							for (int j = 0; j < currentPrim.Textures!.FaceTextures.Length; j++)
 							{
-								if (currentPrim.Textures.FaceTextures[j] != null &&
-								    currentPrim.Textures.FaceTextures[j].TextureID != Primitive.TextureEntry.WHITE_TEXTURE)
+								if (currentPrim.Textures!.FaceTextures[j] != null &&
+									currentPrim.Textures!.FaceTextures[j].TextureID != Primitive.TextureEntry.WHITE_TEXTURE)
 								{
-									if (Textures[currentPrim.Textures.FaceTextures[j].TextureID] == UUID.Zero)
-										currentPrim.Textures.FaceTextures[j] = null;
+									if (Textures[currentPrim.Textures!.FaceTextures[j].TextureID] == UUID.Zero)
+										currentPrim.Textures!.FaceTextures[j] = null!;
 									else
-										currentPrim.Textures.FaceTextures[j].TextureID = Textures[currentPrim.Textures.FaceTextures[j].TextureID];
+										currentPrim.Textures!.FaceTextures[j].TextureID = Textures[currentPrim.Textures!.FaceTextures[j].TextureID];
 								}
 							}
-                        }
+						}
 						else if (TextureUse == TextureSet.WhiteUUID || TextureUse == TextureSet.SculptUUID)
 						{
-							currentPrim.Textures.DefaultTexture.TextureID = Primitive.TextureEntry.WHITE_TEXTURE;
-							for (int j = 0; j < currentPrim.Textures.FaceTextures.Length; j++)
+							currentPrim!.Textures!.DefaultTexture!.TextureID = Primitive.TextureEntry.WHITE_TEXTURE;
+							for (int j = 0; j < currentPrim.Textures!.FaceTextures.Length; j++)
 							{
-								currentPrim.Textures.FaceTextures[j] = null;
+								currentPrim.Textures!.FaceTextures[j] = null!;
 							}
 						}
-						Client.Objects.SetTextures(e.Simulator, prim.LocalID, currentPrim.Textures);
+						Client.Objects.SetTextures(e.Simulator, prim.LocalID, currentPrim!.Textures!);
 						
 						if (currentPrim.Light != null && currentPrim.Light.Intensity > 0)
 						{

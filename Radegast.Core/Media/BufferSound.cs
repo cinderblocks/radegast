@@ -192,7 +192,7 @@ namespace Radegast.Media
         /**
          * Handle arrival of a sound resource.
          */
-        private void Assets_OnSoundReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnSoundReceived(AssetDownload transfer, Asset? asset)
         {
             if (transfer.Success)
             {
@@ -325,7 +325,7 @@ namespace Radegast.Media
         /// <returns></returns>
         protected async System.Threading.Tasks.Task StopSoundAsync(bool blocking)
         {
-            System.Threading.Tasks.TaskCompletionSource<bool> tcs = null;
+            System.Threading.Tasks.TaskCompletionSource<bool>? tcs = null;
             if (blocking) tcs = new System.Threading.Tasks.TaskCompletionSource<bool>(System.Threading.Tasks.TaskCreationOptions.RunContinuationsAsynchronously);
 
             finished = true;

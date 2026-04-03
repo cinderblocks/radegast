@@ -1,0 +1,84 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        xmlns:controls="using:Radegast.Veles.Controls"
+        x:Class="Radegast.Veles.Views.MapWindow"
+        x:DataType="vm:MapViewModel"
+        Title="Radegast Veles - Map"
+        Width="850" Height="550"
+        MinWidth="600" MinHeight="400"
+        WindowStartupLocation="CenterScreen"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Radegast Veles world map window">
+
+    <Grid ColumnDefinitions="*,8,220">
+        <!-- Left: Map area -->
+        <controls:GridMapControl Grid.Column="0"
+                                  x:Name="MapControl"
+                                  Regions="{Binding MapRegions}"
+                                  Avatars="{Binding MapAvatars}"
+                                  AutomationProperties.Name="Interactive world map" />
+
+        <!-- Splitter -->
+        <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize map panel" />
+
+        <!-- Right: Search and controls -->
+        <DockPanel Grid.Column="2">
+            <!-- Status and progress at bottom -->
+            <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="4">
+                <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="11" AutomationProperties.Name="Map status" />
+                <ProgressBar IsIndeterminate="{Binding IsTeleporting}" IsVisible="{Binding IsTeleporting}" Height="8" AutomationProperties.Name="Teleport progress" />
+            </StackPanel>
+
+            <!-- Main controls -->
+            <ScrollViewer Padding="4">
+                <StackPanel Spacing="8">
+                    <!-- Region search -->
+                    <TextBlock Text="Region Search" FontWeight="SemiBold" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" x:Name="TxtRegionSearch" Text="{Binding RegionSearch, Mode=TwoWay}" Watermark="Region name..." AutomationProperties.Name="Region search input" />
+                        <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" Margin="4,0,0,0" AutomationProperties.Name="Search for region" />
+                    </Grid>
+
+                    <!-- Region results -->
+                    <ListBox ItemsSource="{Binding RegionResults}" SelectedItem="{Binding SelectedRegion}" MaxHeight="140" AutomationProperties.Name="Search results list" />
+
+                    <!-- Online friends -->
+                    <TextBlock Text="Online Friends" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding OnlineFriends}" SelectedItem="{Binding SelectedFriend}" HorizontalAlignment="Stretch" AutomationProperties.Name="Find online friend on map" />
+
+                    <!-- Coordinates -->
+                    <TextBlock Text="Coordinates" FontWeight="SemiBold" />
+                    <Grid ColumnDefinitions="*,*,*" RowDefinitions="Auto,Auto">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="X" Margin="0,0,4,0" />
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Y" Margin="4,0,4,0" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Z" Margin="4,0,0,0" />
+                        <NumericUpDown Grid.Row="1" Grid.Column="0" Value="{Binding CoordX}" Minimum="0" Maximum="256" Margin="0,0,4,0" AutomationProperties.Name="X coordinate" />
+                        <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding CoordY}" Minimum="0" Maximum="256" Margin="4,0,4,0" AutomationProperties.Name="Y coordinate" />
+                        <NumericUpDown Grid.Row="1" Grid.Column="2" Value="{Binding CoordZ}" Minimum="0" Maximum="4096" Margin="4,0,0,0" AutomationProperties.Name="Z coordinate" />
+                    </Grid>
+
+                    <!-- Action buttons -->
+                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                        <Button Content="Teleport" Command="{Binding TeleportCommand}" IsEnabled="{Binding CanTeleport}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Teleport to destination" />
+                        <Button Content="Go Home" Command="{Binding GoHomeCommand}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Teleport home" />
+                    </WrapPanel>
+                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                        <Button Content="My Position" Command="{Binding GoToMyPositionCommand}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Center map on my position" />
+                        <Button Content="Destination" Command="{Binding GoToDestinationCommand}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Center map on destination" />
+                    </WrapPanel>
+                    <Button Content="Refresh" Command="{Binding RefreshCommand}" MinWidth="80" AutomationProperties.Name="Refresh map data" />
+
+                    <!-- Zoom -->
+                    <TextBlock Text="Zoom" FontWeight="SemiBold" />
+                    <Slider Value="{Binding ZoomLevel}" Minimum="0" Maximum="100" AutomationProperties.Name="Map zoom level" />
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+    </Grid>
+</Window>

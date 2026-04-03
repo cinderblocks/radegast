@@ -1,0 +1,34 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:views="using:Radegast.Veles.Views"
+             x:Class="Radegast.Veles.Views.SoundPanel"
+             x:DataType="vm:SoundViewModel"
+             AutomationProperties.Name="Sound player">
+    <DockPanel>
+        <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="4,2">
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding SoundName}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" AutomationProperties.Name="Sound name" />
+                <Button Content="&#x25B6; Play (local)" Command="{Binding PlayLocalCommand}" Margin="0,0,4,0" MinWidth="96" AutomationProperties.Name="Play sound locally" />
+                <Button Content="&#x1F50A; Play (inworld)" Command="{Binding PlayInworldCommand}" Margin="0,0,8,0" MinWidth="112" AutomationProperties.Name="Play sound inworld" />
+                <Button x:Name="BtnDetach" Content="&#x23CF; Detach" Margin="0,0,4,0" MinWidth="72" AutomationProperties.Name="Detach sound player" />
+                <Button x:Name="BtnClose" Content="&#x2715; Close" Margin="0,0,4,0" MinWidth="64" AutomationProperties.Name="Close sound player" />
+            </WrapPanel>
+        </Border>
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4,2" VerticalAlignment="Center" AutomationProperties.Name="Sound status" />
+        <ContentControl DockPanel.Dock="Bottom" Content="{Binding Metadata}">
+            <ContentControl.ContentTemplate>
+                <DataTemplate x:DataType="vm:ItemMetadataViewModel">
+                    <views:ItemMetadataPanel />
+                </DataTemplate>
+            </ContentControl.ContentTemplate>
+        </ContentControl>
+        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="8">
+            <TextBlock Text="&#x1F3B5;" FontSize="48" HorizontalAlignment="Center" AutomationProperties.Name="Sound icon" />
+            <TextBlock Text="{Binding SoundName}" FontSize="14" HorizontalAlignment="Center" TextWrapping="Wrap" AutomationProperties.Name="Sound name label" />
+            <TextBlock IsVisible="{Binding !SoundSystemAvailable}" Text="Sound system unavailable"
+                       Foreground="OrangeRed" HorizontalAlignment="Center"
+                       AutomationProperties.Name="Sound system unavailable warning" />
+        </StackPanel>
+    </DockPanel>
+</UserControl>

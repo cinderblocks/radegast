@@ -1,0 +1,423 @@
+﻿<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Views.AvatarProfilePanel"
+             x:DataType="vm:AvatarProfileViewModel"
+             DragDrop.AllowDrop="True"
+             AutomationProperties.Name="Avatar profile panel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
+        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+
+            <TextBlock Text="Loading profile..." IsVisible="{Binding IsLoading}"
+                       FontStyle="Italic" Opacity="0.6"
+                       AutomationProperties.Name="Loading indicator" />
+
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <Grid ColumnDefinitions="Auto,12,*">
+                    <Border Grid.Column="0" Width="120" Height="120" CornerRadius="6"
+                            ClipToBounds="True" Background="#10FFFFFF"
+                            AutomationProperties.Name="Profile image">
+                        <Image Source="{Binding ProfileImage}" Stretch="UniformToFill" />
+                    </Border>
+                    <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DisplayName}" FontSize="20" FontWeight="Bold" TextWrapping="Wrap"
+                                   AutomationProperties.Name="Display name" />
+                        <TextBlock Text="{Binding BornOn, StringFormat=Born: {0}}" Opacity="0.7"
+                                   IsVisible="{Binding BornOn, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   AutomationProperties.Name="Born date" />
+                        <TextBlock Text="{Binding AccountInfo}" Opacity="0.7"
+                                   IsVisible="{Binding AccountInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   AutomationProperties.Name="Account info" />
+                        <StackPanel Orientation="Horizontal" Spacing="4"
+                                    IsVisible="{Binding PartnerName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="Partner:" Opacity="0.7" VerticalAlignment="Center" />
+                            <controls:AvatarNameButton AgentName="{Binding PartnerName}"
+                                                       AgentID="{Binding PartnerID}"
+                                                       Instance="{Binding Instance}"
+                                                       AutomationProperties.Name="Partner name" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding AgentIdText}" FontSize="10" Opacity="0.4"
+                                   TextTrimming="CharacterEllipsis"
+                                   AutomationProperties.Name="Agent UUID" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Action buttons — other avatars only -->
+            <WrapPanel IsVisible="{Binding !IsOwnProfile}" Orientation="Horizontal">
+                <Button Content="Send IM" Command="{Binding SendIMCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Send instant message" />
+                <Button Content="Offer Teleport" Command="{Binding OfferTeleportCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Offer teleport to this avatar" />
+                <Button Content="Request Teleport" Command="{Binding RequestTeleportCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Ask this avatar to teleport you to them" />
+                <Button Content="Pay" Command="{Binding PayCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Pay this avatar" />
+                <Button Content="{Binding MuteButtonText}" Command="{Binding ToggleMuteCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="{Binding MuteButtonText}" />
+                <Button Content="{Binding FriendButtonText}" Command="{Binding OfferFriendshipCommand}"
+                        IsVisible="{Binding !IsFriend}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="{Binding FriendButtonText}" />
+                <Button Content="Remove Friend" Command="{Binding RemoveFriendCommand}"
+                        IsVisible="{Binding IsFriend}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Remove from friends list" />
+            </WrapPanel>
+
+            <!-- Edit / Save / Cancel buttons — own profile only -->
+            <WrapPanel IsVisible="{Binding CanBeginEdit}" Orientation="Horizontal">
+                <Button Content="Edit Profile" Command="{Binding BeginEditCommand}"
+                        AutomationProperties.Name="Edit your profile" />
+            </WrapPanel>
+            <WrapPanel IsVisible="{Binding IsEditingOwnProfile}" Orientation="Horizontal">
+                <Button Content="Save Profile" Command="{Binding SaveProfileCommand}"
+                        Margin="0,0,6,0"
+                        AutomationProperties.Name="Save profile changes" />
+                <Button Content="Cancel" Command="{Binding DiscardEditCommand}"
+                        AutomationProperties.Name="Discard profile changes" />
+            </WrapPanel>
+
+            <!-- Inventory drop zone — drag items from Inventory panel to give them -->
+            <Border x:Name="DropZoneBorder"
+                    IsVisible="{Binding !IsOwnProfile}"
+                    BorderThickness="1" CornerRadius="4" Padding="8,6"
+                    AutomationProperties.Name="Drop inventory items here to give">
+                <TextBlock x:Name="DropZoneLabel"
+                           Text="📦 Drop inventory item here to give"
+                           FontStyle="Italic" Opacity="0.5" FontSize="12"
+                           HorizontalAlignment="Center" />
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowAbout}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="About" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <controls:RichChatText Text="{Binding AboutText}"
+                               IsVisible="{Binding !IsEditing}"
+                               AutomationProperties.Name="About text" />
+                    <TextBox Text="{Binding AboutText}"
+                             IsVisible="{Binding IsEditing}"
+                             AcceptsReturn="True" TextWrapping="Wrap"
+                             MinHeight="80" MaxHeight="240"
+                             Watermark="About me..."
+                             AutomationProperties.Name="About text edit" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowWeb}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Web" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <StackPanel Orientation="Horizontal" Spacing="8"
+                                IsVisible="{Binding !IsEditing}">
+                        <TextBlock Text="{Binding WebUrl}" TextWrapping="Wrap" Foreground="#5599DD"
+                                   VerticalAlignment="Center"
+                                   AutomationProperties.Name="Web URL" />
+                        <Button Content="Open" Command="{Binding OpenWebUrlCommand}"
+                                IsVisible="{Binding WebUrl, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                AutomationProperties.Name="Open web URL in browser" />
+                    </StackPanel>
+                    <TextBox Text="{Binding WebUrl}"
+                             IsVisible="{Binding IsEditing}"
+                             Watermark="https://..."
+                             AutomationProperties.Name="Web URL edit" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowFirstLife}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="First Life" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <Grid ColumnDefinitions="Auto,8,*" IsVisible="{Binding !IsEditing}">
+                        <Border Grid.Column="0" Width="80" Height="80" CornerRadius="6"
+                                ClipToBounds="True" Background="#10FFFFFF"
+                                IsVisible="{Binding FirstLifeImage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                AutomationProperties.Name="First life image">
+                            <Image Source="{Binding FirstLifeImage}" Stretch="UniformToFill" />
+                        </Border>
+                        <controls:RichChatText Grid.Column="2"
+                                   Text="{Binding FirstLifeText}"
+                                   VerticalAlignment="Top"
+                                   AutomationProperties.Name="First life text" />
+                    </Grid>
+                    <TextBox Text="{Binding FirstLifeText}"
+                             IsVisible="{Binding IsEditing}"
+                             AcceptsReturn="True" TextWrapping="Wrap"
+                             MinHeight="60" MaxHeight="200"
+                             Watermark="About my first life..."
+                             AutomationProperties.Name="First life text edit" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowInterests}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Interests" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+
+                    <!-- View mode -->
+                    <StackPanel Spacing="4" IsVisible="{Binding !IsEditing}">
+                        <StackPanel Spacing="4"
+                                    IsVisible="{Binding WantToFlags, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="Want To" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <TextBlock Text="{Binding WantToFlags}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding WantToText}" TextWrapping="Wrap" Opacity="0.9"
+                                   IsVisible="{Binding WantToText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <StackPanel Spacing="4"
+                                    IsVisible="{Binding SkillsFlags, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="Skills" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <TextBlock Text="{Binding SkillsFlags}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding SkillsText}" TextWrapping="Wrap" Opacity="0.9"
+                                   IsVisible="{Binding SkillsText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        <StackPanel Spacing="4"
+                                    IsVisible="{Binding LanguagesText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="Languages" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <TextBlock Text="{Binding LanguagesText}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Edit mode -->
+                    <StackPanel Spacing="8" IsVisible="{Binding IsEditing}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Want To" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <WrapPanel Orientation="Horizontal">
+                                <CheckBox Content="Build"     IsChecked="{Binding WantToBuild}"    Margin="0,0,8,4" AutomationProperties.Name="Want to build" />
+                                <CheckBox Content="Explore"   IsChecked="{Binding WantToExplore}"  Margin="0,0,8,4" AutomationProperties.Name="Want to explore" />
+                                <CheckBox Content="Meet"      IsChecked="{Binding WantToMeet}"     Margin="0,0,8,4" AutomationProperties.Name="Want to meet" />
+                                <CheckBox Content="Group"     IsChecked="{Binding WantToGroup}"    Margin="0,0,8,4" AutomationProperties.Name="Want to join a group" />
+                                <CheckBox Content="Buy"       IsChecked="{Binding WantToBuy}"      Margin="0,0,8,4" AutomationProperties.Name="Want to buy" />
+                                <CheckBox Content="Sell"      IsChecked="{Binding WantToSell}"     Margin="0,0,8,4" AutomationProperties.Name="Want to sell" />
+                                <CheckBox Content="Be Hired"  IsChecked="{Binding WantToBeHired}"  Margin="0,0,8,4" AutomationProperties.Name="Want to be hired" />
+                                <CheckBox Content="Hire"      IsChecked="{Binding WantToHire}"     Margin="0,0,8,4" AutomationProperties.Name="Want to hire" />
+                            </WrapPanel>
+                            <TextBox Text="{Binding WantToText}" Watermark="Tell others what you want to do..."
+                                     AutomationProperties.Name="Want to text" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Skills" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <WrapPanel Orientation="Horizontal">
+                                <CheckBox Content="Textures"          IsChecked="{Binding SkillTextures}"        Margin="0,0,8,4" AutomationProperties.Name="Skill: textures" />
+                                <CheckBox Content="Architecture"      IsChecked="{Binding SkillArchitecture}"    Margin="0,0,8,4" AutomationProperties.Name="Skill: architecture" />
+                                <CheckBox Content="Event Planning"    IsChecked="{Binding SkillEventPlanning}"   Margin="0,0,8,4" AutomationProperties.Name="Skill: event planning" />
+                                <CheckBox Content="Modeling"          IsChecked="{Binding SkillModeling}"        Margin="0,0,8,4" AutomationProperties.Name="Skill: modeling" />
+                                <CheckBox Content="Scripting"         IsChecked="{Binding SkillScripting}"       Margin="0,0,8,4" AutomationProperties.Name="Skill: scripting" />
+                                <CheckBox Content="Custom Characters" IsChecked="{Binding SkillCustomCharacters}" Margin="0,0,8,4" AutomationProperties.Name="Skill: custom characters" />
+                            </WrapPanel>
+                            <TextBox Text="{Binding SkillsText}" Watermark="Describe your skills..."
+                                     AutomationProperties.Name="Skills text" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Languages" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
+                            <TextBox Text="{Binding LanguagesText}" Watermark="e.g. English, Español..."
+                                     AutomationProperties.Name="Languages text" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowPicks}">
+                <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Picks" FontWeight="SemiBold" FontSize="13" Opacity="0.7"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Add Pick Here"
+                                Command="{Binding AddPickCommand}"
+                                IsVisible="{Binding IsEditingOwnProfile}"
+                                AutomationProperties.Name="Add a new pick at current location" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Picks}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AvatarPickEntry">
+                                <Border Background="#10FFFFFF" CornerRadius="4" Padding="8" Margin="0,2">
+                                    <Grid ColumnDefinitions="Auto,8,*">
+                                        <Border Grid.Column="0" Width="80" Height="60" CornerRadius="4"
+                                                ClipToBounds="True" Background="#10FFFFFF"
+                                                IsVisible="{Binding Snapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                            <Image Source="{Binding Snapshot}" Stretch="UniformToFill" />
+                                        </Border>
+                                        <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
+                                            <!-- View mode -->
+                                            <StackPanel Spacing="2"
+                                                        IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsNotEditingOwnProfile}">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Opacity="0.8"
+                                                           MaxLines="3" TextTrimming="CharacterEllipsis"
+                                                           IsVisible="{Binding Description, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                <TextBlock Text="{Binding Location}" FontSize="11" Opacity="0.5"
+                                                           IsVisible="{Binding Location, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                            </StackPanel>
+                                            <!-- Edit mode -->
+                                            <StackPanel Spacing="4"
+                                                        IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsEditingOwnProfile}">
+                                                <TextBox Text="{Binding Name}" Watermark="Pick title..."
+                                                         AutomationProperties.Name="Pick name" />
+                                                <TextBox Text="{Binding Description}" AcceptsReturn="True"
+                                                         TextWrapping="Wrap" MinHeight="60" MaxHeight="120"
+                                                         Watermark="Description..."
+                                                         AutomationProperties.Name="Pick description" />
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <Button Content="Save Pick"
+                                                            Command="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).SavePickCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            AutomationProperties.Name="Save this pick" />
+                                                    <Button Content="Delete"
+                                                            Command="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).DeletePickCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            AutomationProperties.Name="Delete this pick" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowClassifieds}">
+                <StackPanel Spacing="6">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0" Text="Classifieds" FontWeight="SemiBold" FontSize="13" Opacity="0.7"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1" Content="Add Classified"
+                                Command="{Binding AddClassifiedCommand}"
+                                IsVisible="{Binding IsEditingOwnProfile}"
+                                AutomationProperties.Name="Create a new classified ad" />
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Classifieds}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AvatarClassifiedEntry">
+                                <Border Background="#10FFFFFF" CornerRadius="4" Padding="8" Margin="0,2">
+                                    <StackPanel Spacing="4">
+                                        <!-- View mode -->
+                                        <StackPanel Spacing="2"
+                                                    IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsNotEditingOwnProfile}">
+                                            <Grid ColumnDefinitions="Auto,8,*">
+                                                <Border Grid.Column="0" Width="60" Height="45" CornerRadius="3"
+                                                        ClipToBounds="True" Background="#10FFFFFF"
+                                                        IsVisible="{Binding Snapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                                    <Image Source="{Binding Snapshot}" Stretch="UniformToFill" />
+                                                </Border>
+                                                <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Text="{Binding CategoryName}" FontSize="11" Opacity="0.6" />
+                                                        <TextBlock Text="{Binding Price, StringFormat=L${0}/week}" FontSize="11" Opacity="0.6" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </Grid>
+                                        </StackPanel>
+                                        <!-- Edit mode -->
+                                        <StackPanel Spacing="6"
+                                                    IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsEditingOwnProfile}">
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="Title" FontSize="11" Opacity="0.6" />
+                                                <TextBox Text="{Binding Name}" Watermark="Classified title..."
+                                                         AutomationProperties.Name="Classified title" />
+                                            </StackPanel>
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="Description" FontSize="11" Opacity="0.6" />
+                                                <TextBox Text="{Binding Description}" AcceptsReturn="True"
+                                                         TextWrapping="Wrap" MinHeight="60" MaxHeight="160"
+                                                         Watermark="Describe your classified..."
+                                                         AutomationProperties.Name="Classified description" />
+                                            </StackPanel>
+                                            <Grid ColumnDefinitions="*,12,Auto" RowDefinitions="Auto,8,Auto">
+                                                <StackPanel Grid.Column="0" Grid.Row="0" Spacing="4">
+                                                    <TextBlock Text="Category" FontSize="11" Opacity="0.6" />
+                                                    <ComboBox ItemsSource="{x:Static vm:AvatarClassifiedEntry.AllCategories}"
+                                                              SelectedItem="{Binding Category}"
+                                                              HorizontalAlignment="Stretch"
+                                                              AutomationProperties.Name="Classified category" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="2" Grid.Row="0" Spacing="4">
+                                                    <TextBlock Text="Price (L$/week)" FontSize="11" Opacity="0.6" />
+                                                    <NumericUpDown Value="{Binding Price}"
+                                                                   Minimum="0" Increment="50"
+                                                                   FormatString="0"
+                                                                   Width="120"
+                                                                   AutomationProperties.Name="Classified price per week in Linden dollars" />
+                                                </StackPanel>
+                                                <CheckBox Grid.Column="0" Grid.Row="2"
+                                                          Content="Auto-renew" IsChecked="{Binding AutoRenew}"
+                                                          AutomationProperties.Name="Auto-renew classified" />
+                                            </Grid>
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Button Content="Save Classified"
+                                                        Command="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).SaveClassifiedCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        AutomationProperties.Name="Save this classified" />
+                                                <Button Content="Delete"
+                                                        Command="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).DeleteClassifiedCommand}"
+                                                        CommandParameter="{Binding}"
+                                                        AutomationProperties.Name="Delete this classified" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding Groups.Count}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Groups" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <ItemsControl ItemsSource="{Binding Groups}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AvatarGroupEntry">
+                                <Button Command="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).OpenGroupProfileCommand}"
+                                        CommandParameter="{Binding}"
+                                        Margin="0,1" Padding="2"
+                                        Background="Transparent" BorderThickness="0"
+                                        Cursor="Hand"
+                                        AutomationProperties.Name="{Binding GroupName}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="{Binding GroupName}" Foreground="#5599DD" />
+                                        <TextBlock Text="{Binding GroupTitle, StringFormat=({0})}" Opacity="0.5"
+                                                   IsVisible="{Binding GroupTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Notes" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <TextBox Text="{Binding Notes}" AcceptsReturn="True" MinHeight="60"
+                             TextWrapping="Wrap" Watermark="Private notes about this person..."
+                             AutomationProperties.Name="Notes text" />
+                    <Button Content="Save Notes" Command="{Binding SaveNotesCommand}"
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Save notes" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+
+</UserControl>

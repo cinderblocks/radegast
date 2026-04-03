@@ -1,0 +1,33 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Controls.MinimapControl"
+             x:DataType="controls:MinimapControl"
+             MinWidth="180" MinHeight="180"
+             AutomationProperties.Name="Minimap showing nearby avatar positions">
+    <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+            BorderThickness="1" CornerRadius="4" ClipToBounds="True"
+            Background="#1A1A2E">
+        <Grid>
+            <Canvas x:Name="MinimapCanvas" />
+            <!-- Hover tooltip overlay - rendered on top, does not intercept mouse -->
+            <Border x:Name="HoverTooltip"
+                    Background="#DD1A1A2E"
+                    BorderBrush="#66FFFFFF" BorderThickness="1"
+                    CornerRadius="4" Padding="6,3"
+                    IsVisible="False"
+                    IsHitTestVisible="False"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top">
+                <TextBlock x:Name="HoverTooltipText"
+                           FontSize="11" Foreground="White"
+                           AutomationProperties.Name="Avatar hover info" />
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

@@ -53,5 +53,16 @@ namespace Radegast
             // Atomically update the underlying GridClient in the base class
             UpdateClient(e.Client);
         }
+
+        /// <summary>
+        /// Explicitly trigger COF initialization. Safe to call when the simulator is already
+        /// connected and SimChanged won't fire again. Waits until the COF folder is resolved.
+        /// </summary>
+        public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
+        {
+            // GetCurrentOutfitLinks lazily initializes COF if it hasn't been yet
+            await GetCurrentOutfitLinks(cancellationToken).ConfigureAwait(false);
+            return COF != null;
+        }
     }
 }

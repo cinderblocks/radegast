@@ -1,0 +1,151 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        xmlns:models="using:Radegast.Veles.Models"
+        xmlns:core="clr-namespace:Radegast;assembly=Radegast.Core"
+        x:Class="Radegast.Veles.Views.LoginWindow"
+        x:DataType="vm:LoginViewModel"
+        Title="Radegast Veles - Login"
+        Width="420" Height="640"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen"
+        Icon="/Assets/radegast.ico">
+
+    <DockPanel>
+        <Menu DockPanel.Dock="Top">
+            <MenuItem Header="_File">
+                <MenuItem Header="_Preferences..." Click="OnPreferencesClick" />
+                <Separator />
+                <MenuItem Header="E_xit" Click="OnExitClick" />
+            </MenuItem>
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Log Viewer" Click="OnLogViewerClick" />
+                <Separator />
+                <MenuItem Header="_Website" Click="OnWebsiteClick" />
+                <MenuItem Header="_Issue Tracker" Click="OnIssueTrackerClick" />
+                <Separator />
+                <MenuItem Header="_About Radegast Veles" Click="OnAboutClick" />
+            </MenuItem>
+        </Menu>
+
+        <ScrollViewer>
+            <Border Padding="24">
+                <StackPanel Spacing="12">
+
+            <!-- Title -->
+            <TextBlock Text="Radegast Veles"
+                       FontSize="24" FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       Margin="0,0,0,8" />
+
+            <!-- Saved Accounts -->
+            <TextBlock Text="Saved Accounts" IsVisible="{Binding SavedAccounts.Count}" />
+            <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding SavedAccounts.Count}">
+                <ComboBox Grid.Column="0"
+                          ItemsSource="{Binding SavedAccounts}"
+                          SelectedItem="{Binding SelectedSavedAccount}"
+                          IsEnabled="{Binding !IsLoggingIn}"
+                          HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:SavedAccount">
+                            <TextBlock Text="{Binding}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="1" Content="✕"
+                        Command="{Binding RemoveSavedAccountCommand}"
+                        Margin="4,0,0,0" Padding="6,4"
+                        ToolTip.Tip="Remove saved account"
+                        AutomationProperties.Name="Remove saved account" />
+            </Grid>
+
+            <!-- Username -->
+            <TextBlock Text="Username (First Last)" />
+            <TextBox Text="{Binding Username}"
+                     Watermark="First Last"
+                     IsEnabled="{Binding !IsLoggingIn}" />
+
+            <!-- Password -->
+            <TextBlock Text="Password" />
+            <TextBox Text="{Binding Password}"
+                     PasswordChar="•"
+                     RevealPassword="False"
+                     Watermark="Password"
+                     IsEnabled="{Binding !IsLoggingIn}" />
+
+            <!-- Grid Selection -->
+            <TextBlock Text="Grid" />
+            <ComboBox ItemsSource="{Binding Grids}"
+                      SelectedItem="{Binding SelectedGrid}"
+                      IsEnabled="{Binding !IsLoggingIn}"
+                      HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="core:Grid">
+                        <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <!-- Custom Login URI (only shown for custom grid) -->
+            <TextBox Text="{Binding CustomLoginUri}"
+                     Watermark="Custom Login URI"
+                     IsVisible="{Binding IsCustomGrid}"
+                     IsEnabled="{Binding !IsLoggingIn}" />
+
+            <!-- Start Location -->
+            <TextBlock Text="Start Location" />
+            <ComboBox ItemsSource="{Binding LocationOptions}"
+                      SelectedIndex="{Binding SelectedLocationIndex}"
+                      IsEnabled="{Binding !IsLoggingIn}"
+                      HorizontalAlignment="Stretch" />
+
+            <!-- Custom location (visible only when Custom… is selected) -->
+            <TextBox Text="{Binding CustomLocation}"
+                     Watermark="Region/X/Y/Z  e.g. Refugio/120/120/40"
+                     IsVisible="{Binding IsCustomLocation}"
+                     IsEnabled="{Binding !IsLoggingIn}" />
+
+            <!-- Remember Credentials -->
+            <CheckBox Content="Remember credentials"
+                      IsChecked="{Binding RememberCredentials}"
+                      IsEnabled="{Binding !IsLoggingIn}" />
+
+            <!-- Buttons -->
+            <Grid ColumnDefinitions="*,8,*" Margin="0,8,0,0">
+                <Button Grid.Column="0"
+                        Content="Login"
+                        Command="{Binding LoginCommand}"
+                        IsVisible="{Binding !IsLoggingIn}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+                <Button Grid.Column="0"
+                        Content="Cancel"
+                        Command="{Binding CancelLoginCommand}"
+                        IsVisible="{Binding IsLoggingIn}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center" />
+                <Button Grid.Column="2"
+                        Content="Exit"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Center"
+                        Click="OnExitClick" />
+            </Grid>
+
+            <!-- Status -->
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsLoggingIn}"
+                         Height="4"
+                         Margin="0,4,0,0"
+                         AutomationProperties.Name="Login progress indicator" />
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="12"
+                       Foreground="Gray"
+                       HorizontalAlignment="Center"
+                       TextWrapping="Wrap" />
+
+        </StackPanel>
+    </Border>
+    </ScrollViewer>
+    </DockPanel>
+
+</Window>

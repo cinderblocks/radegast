@@ -1,0 +1,435 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.DirectorySearchPanel"
+             x:DataType="vm:DirectorySearchViewModel"
+             AutomationProperties.Name="Directory search panel">
+
+    <DockPanel>
+
+        <!-- Maturity filter — applies to all searches -->
+        <Border DockPanel.Dock="Top" Background="#14FFFFFF" Padding="8,6" Margin="0,0,0,2">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Maturity:" VerticalAlignment="Center" Opacity="0.8" />
+                <ComboBox SelectedIndex="{Binding MaturityIndex}" Width="200"
+                          AutomationProperties.Name="Maturity filter">
+                    <ComboBoxItem Content="General" />
+                    <ComboBoxItem Content="General + Moderate" />
+                    <ComboBoxItem Content="General + Moderate + Adult" />
+                </ComboBox>
+            </StackPanel>
+        </Border>
+
+    <TabControl SelectedIndex="{Binding SelectedTabIndex}">
+
+        <!-- People -->
+        <TabItem Header="People" AutomationProperties.Name="People search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                    <TextBox Text="{Binding PeopleQuery}" Width="250" Watermark="Search people…"
+                             AutomationProperties.Name="People search query">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SearchPeopleCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="Search" Command="{Binding SearchPeopleCommand}"
+                            AutomationProperties.Name="Search people" />
+                    <TextBlock Text="{Binding PeopleStatus}" VerticalAlignment="Center"
+                               Opacity="0.7" FontStyle="Italic" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="← Prev" IsEnabled="{Binding PeopleCanGoPrev}"
+                            Command="{Binding PeoplePrevCommand}"
+                            AutomationProperties.Name="Previous people page" />
+                    <Button Content="Next →" IsEnabled="{Binding PeopleHasMore}"
+                            Command="{Binding PeopleNextCommand}"
+                            AutomationProperties.Name="Next people page" />
+                    <Button Content="Open Profile" Command="{Binding OpenPersonProfileCommand}"
+                            IsEnabled="{Binding SelectedPerson, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            AutomationProperties.Name="Open person profile" />
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingPeople}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Person detail -->
+                <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasPersonDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding PersonDetailBorn}" Foreground="LightSkyBlue" FontSize="11" />
+                        <TextBlock Text="{Binding PersonDetailBio}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="4" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding PeopleResults}"
+                         SelectedItem="{Binding SelectedPerson}"
+                         Height="350" Background="Transparent"
+                         AutomationProperties.Name="People results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PersonResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <TextBlock Text="{Binding FullName}" AutomationProperties.Name="Person name" />
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+        <!-- Places -->
+        <TabItem Header="Places" AutomationProperties.Name="Places search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                    <TextBox Text="{Binding PlacesQuery}" Width="250" Watermark="Search places…"
+                             AutomationProperties.Name="Places search query">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SearchPlacesCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="Search" Command="{Binding SearchPlacesCommand}"
+                            AutomationProperties.Name="Search places" />
+                    <TextBlock Text="{Binding PlacesStatus}" VerticalAlignment="Center"
+                               Opacity="0.7" FontStyle="Italic" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="← Prev" IsEnabled="{Binding PlacesCanGoPrev}"
+                            Command="{Binding PlacesPrevCommand}"
+                            AutomationProperties.Name="Previous places page" />
+                    <Button Content="Next →" IsEnabled="{Binding PlacesHasMore}"
+                            Command="{Binding PlacesNextCommand}"
+                            AutomationProperties.Name="Next places page" />
+
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingPlaces}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Place detail -->
+                <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasPlaceDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,2,0,0">
+                            <TextBlock Text="📍" FontSize="11" VerticalAlignment="Center" />
+                            <Button Classes="hyperlink" FontSize="11"
+                                    Command="{Binding TeleportToPlaceCommand}"
+                                    AutomationProperties.Name="Teleport to place">
+                                <TextBlock Text="{Binding PlaceDetailLocation}" FontSize="11" />
+                            </Button>
+                        </StackPanel>
+                        <TextBlock Text="{Binding PlaceDetailDescription}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="4" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding PlaceResults}"
+                         SelectedItem="{Binding SelectedPlace}"
+                         Height="330" Background="Transparent"
+                         AutomationProperties.Name="Places results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PlaceResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold"
+                                               AutomationProperties.Name="Place name" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding DwellDisplay}" FontSize="11" Opacity="0.7"
+                                                   AutomationProperties.Name="Dwell traffic" />
+                                        <TextBlock Text="{Binding ForSaleDisplay}" FontSize="11"
+                                                   Foreground="Gold"
+                                                   IsVisible="{Binding ForSale}"
+                                                   AutomationProperties.Name="For sale" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+        <!-- Groups -->
+        <TabItem Header="Groups" AutomationProperties.Name="Groups search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                    <TextBox Text="{Binding GroupsQuery}" Width="250" Watermark="Search groups…"
+                             AutomationProperties.Name="Groups search query">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SearchGroupsCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="Search" Command="{Binding SearchGroupsCommand}"
+                            AutomationProperties.Name="Search groups" />
+                    <TextBlock Text="{Binding GroupsStatus}" VerticalAlignment="Center"
+                               Opacity="0.7" FontStyle="Italic" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="← Prev" IsEnabled="{Binding GroupsCanGoPrev}"
+                            Command="{Binding GroupsPrevCommand}"
+                            AutomationProperties.Name="Previous groups page" />
+                    <Button Content="Next →" IsEnabled="{Binding GroupsHasMore}"
+                            Command="{Binding GroupsNextCommand}"
+                            AutomationProperties.Name="Next groups page" />
+                    <Button Content="Open Group Profile" Command="{Binding OpenGroupProfileCommand}"
+                            IsEnabled="{Binding SelectedGroup, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            AutomationProperties.Name="Open group profile" />
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingGroups}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Group detail -->
+                <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasGroupDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding GroupDetailMembers}" Foreground="LightSkyBlue" FontSize="11" />
+                        <TextBlock Text="{Binding GroupDetailCharter}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="4" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding GroupResults}"
+                         SelectedItem="{Binding SelectedGroup}"
+                         Height="330" Background="Transparent"
+                         AutomationProperties.Name="Groups results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:GroupResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold"
+                                               AutomationProperties.Name="Group name" />
+                                    <TextBlock Text="{Binding MembersDisplay}" FontSize="11" Opacity="0.7"
+                                               AutomationProperties.Name="Member count" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+        <!-- Events -->
+        <TabItem Header="Events" AutomationProperties.Name="Events search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                    <TextBox Text="{Binding EventsQuery}" Width="250" Watermark="Search events…"
+                             AutomationProperties.Name="Events search query">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SearchEventsCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="Search" Command="{Binding SearchEventsCommand}"
+                            AutomationProperties.Name="Search events" />
+                    <TextBlock Text="{Binding EventsStatus}" VerticalAlignment="Center"
+                               Opacity="0.7" FontStyle="Italic" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="← Prev" IsEnabled="{Binding EventsCanGoPrev}"
+                            Command="{Binding EventsPrevCommand}"
+                            AutomationProperties.Name="Previous events page" />
+                    <Button Content="Next →" IsEnabled="{Binding EventsHasMore}"
+                            Command="{Binding EventsNextCommand}"
+                            AutomationProperties.Name="Next events page" />
+
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingEvents}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Event detail panel, shown when a result is selected -->
+                <Border DockPanel.Dock="Bottom"
+                        IsVisible="{Binding HasEventDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding EventDetailName}" FontWeight="Bold" FontSize="13" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <TextBlock Text="{Binding EventDetailCategory}" Opacity="0.7" FontSize="11" />
+                            <TextBlock Text="{Binding EventDetailDate}" Opacity="0.8" FontSize="11" />
+                            <TextBlock Text="{Binding EventDetailDuration}" Opacity="0.7" FontSize="11" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,2,0,0">
+                            <TextBlock Text="📍" FontSize="11" VerticalAlignment="Center" />
+                            <Button Classes="hyperlink" FontSize="11"
+                                    Command="{Binding TeleportToEventCommand}"
+                                    AutomationProperties.Name="Teleport to event">
+                                <TextBlock Text="{Binding EventDetailLocation}" FontSize="11" />
+                            </Button>
+                        </StackPanel>
+                        <TextBlock Text="{Binding EventDetailDescription}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="4" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding EventResults}"
+                         SelectedItem="{Binding SelectedEvent}"
+                         Height="300" Background="Transparent"
+                         AutomationProperties.Name="Events results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EventResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold"
+                                               AutomationProperties.Name="Event name" />
+                                    <TextBlock Text="{Binding DisplayDate}" FontSize="11" Opacity="0.7"
+                                               AutomationProperties.Name="Event date" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+        <!-- Classifieds -->
+        <TabItem Header="Classifieds" AutomationProperties.Name="Classifieds search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                    <TextBox Text="{Binding ClassifiedsQuery}" Width="250" Watermark="Search classifieds…"
+                             AutomationProperties.Name="Classifieds search query">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Return" Command="{Binding SearchClassifiedsCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="Search" Command="{Binding SearchClassifiedsCommand}"
+                            AutomationProperties.Name="Search classifieds" />
+                    <TextBlock Text="{Binding ClassifiedsStatus}" VerticalAlignment="Center"
+                               Opacity="0.7" FontStyle="Italic" />
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingClassifieds}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <TextBlock Text="Select a classified to see details." IsVisible="{Binding !HasClassifiedDetail}"
+                               FontStyle="Italic" Opacity="0.5" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Classified detail -->
+                <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasClassifiedDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="By:" Opacity="0.6" FontSize="11" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding ClassifiedDetailPoster}" FontSize="11"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding ClassifiedDetailDescription}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="5" />
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,2,0,0">
+                            <TextBlock Text="📍" FontSize="11" VerticalAlignment="Center" />
+                            <Button Classes="hyperlink" FontSize="11"
+                                    Command="{Binding TeleportToClassifiedCommand}"
+                                    AutomationProperties.Name="Teleport to classified location">
+                                <TextBlock Text="{Binding ClassifiedDetailLocation}" FontSize="11" />
+                            </Button>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding ClassifiedResults}"
+                         SelectedItem="{Binding SelectedClassified}"
+                         Height="330" Background="Transparent"
+                         AutomationProperties.Name="Classifieds results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ClassifiedResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="Bold"
+                                               AutomationProperties.Name="Classified name" />
+                                    <TextBlock Grid.Column="1" Text="{Binding PriceDisplay}"
+                                               Foreground="Gold" FontSize="12" HorizontalAlignment="Right"
+                                               VerticalAlignment="Center"
+                                               AutomationProperties.Name="Classified price" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+        <!-- Land Sales -->
+        <TabItem Header="Land Sales" AutomationProperties.Name="Land sales search tab">
+            <DockPanel Margin="8">
+                <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+                    <WrapPanel Orientation="Horizontal">
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,4">
+                            <TextBlock Text="Max Price (L$):" VerticalAlignment="Center" />
+                            <NumericUpDown Value="{Binding LandMaxPrice}" Minimum="0" Maximum="9999999"
+                                           Width="120" Increment="1000" FormatString="0"
+                                           AutomationProperties.Name="Maximum price filter" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,4">
+                            <TextBlock Text="Min Area (sqm):" VerticalAlignment="Center" />
+                            <NumericUpDown Value="{Binding LandMinArea}" Minimum="0" Maximum="65536"
+                                           Width="120" Increment="512" FormatString="0"
+                                           AutomationProperties.Name="Minimum area filter" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,8,4">
+                            <TextBlock Text="Type:" VerticalAlignment="Center" />
+                            <ComboBox SelectedIndex="{Binding LandTypeIndex}" Width="110"
+                                      AutomationProperties.Name="Land type filter">
+                                <ComboBoxItem Content="Any" />
+                                <ComboBoxItem Content="Mainland" />
+                                <ComboBoxItem Content="Estate" />
+                                <ComboBoxItem Content="Auction" />
+                            </ComboBox>
+                        </StackPanel>
+                        <Button Content="Search" Command="{Binding SearchLandSalesCommand}"
+                                Margin="0,0,0,4"
+                                AutomationProperties.Name="Search land sales" />
+                    </WrapPanel>
+                    <TextBlock Text="{Binding LandSalesStatus}" Opacity="0.7" FontStyle="Italic" />
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8" Margin="0,8,0,0">
+                    <Button Content="← Prev" IsEnabled="{Binding LandSalesCanGoPrev}"
+                            Command="{Binding LandSalesPrevCommand}"
+                            AutomationProperties.Name="Previous land sales page" />
+                    <Button Content="Next →" IsEnabled="{Binding LandSalesHasMore}"
+                            Command="{Binding LandSalesNextCommand}"
+                            AutomationProperties.Name="Next land sales page" />
+
+                    <TextBlock Text="Searching…" IsVisible="{Binding IsSearchingLandSales}"
+                               FontStyle="Italic" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+                <!-- Land sale detail -->
+                <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasLandSaleDetail}"
+                        Background="#20FFFFFF" CornerRadius="8" Padding="12" Margin="0,8,0,4">
+                    <StackPanel Spacing="4">
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,2,0,0">
+                            <TextBlock Text="📍" FontSize="11" VerticalAlignment="Center" />
+                            <Button Classes="hyperlink" FontSize="11"
+                                    Command="{Binding TeleportToLandSaleCommand}"
+                                    AutomationProperties.Name="Teleport to land parcel">
+                                <TextBlock Text="{Binding LandSaleDetailLocation}" FontSize="11" />
+                            </Button>
+                        </StackPanel>
+                        <TextBlock Text="{Binding LandSaleDetailDescription}" TextWrapping="Wrap"
+                                   Opacity="0.9" FontSize="11" MaxLines="4" />
+                    </StackPanel>
+                </Border>
+                <ListBox ItemsSource="{Binding LandSaleResults}"
+                         SelectedItem="{Binding SelectedLandSale}"
+                         Height="300" Background="Transparent"
+                         AutomationProperties.Name="Land sales results">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LandSaleResult">
+                            <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                <Grid ColumnDefinitions="*,Auto,Auto">
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="Bold"
+                                               VerticalAlignment="Center"
+                                               AutomationProperties.Name="Parcel name" />
+                                    <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right"
+                                                Margin="8,0">
+                                        <TextBlock Text="{Binding PriceDisplay}" Foreground="Gold"
+                                                   FontSize="12" HorizontalAlignment="Right"
+                                                   AutomationProperties.Name="Sale price" />
+                                        <TextBlock Text="{Binding PricePerMeterDisplay}" Opacity="0.7"
+                                                   FontSize="11" HorizontalAlignment="Right"
+                                                   AutomationProperties.Name="Price per meter" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="2" Text="{Binding AreaDisplay}"
+                                               Opacity="0.7" FontSize="12" VerticalAlignment="Center"
+                                               AutomationProperties.Name="Parcel area" />
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </TabItem>
+
+    </TabControl>
+
+    </DockPanel>
+
+</UserControl>

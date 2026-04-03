@@ -34,18 +34,18 @@ namespace Radegast
 	/// </summary>
 	public class PrimExporter
 	{
-        private List<UUID> Textures = new List<UUID>();
-         private Primitive.ObjectProperties Properties;
-         private bool GotPermissions = false;
-         private UUID SelectedObject = UUID.Zero;
+		private List<UUID> Textures = new List<UUID>();
+		 private Primitive.ObjectProperties Properties = null!;
+		 private bool GotPermissions = false;
+		 private UUID SelectedObject = UUID.Zero;
 
-         private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
-         private readonly GridClient Client;
-         private string ExportDirectory;
+		 private readonly Dictionary<UUID, Primitive> PrimsWaiting = new Dictionary<UUID, Primitive>();
+		 private readonly GridClient Client;
+		 private string ExportDirectory = null!;
 		private uint uLocalID;
-		private Simulator exportSim;
+		private Simulator? exportSim;
 		public delegate void LogMessageDelegate(string format, params object[] args);
-		public LogMessageDelegate LogMessage;
+		public LogMessageDelegate? LogMessage;
 		
 		public PrimExporter(GridClient client)
 		{
@@ -66,8 +66,8 @@ namespace Radegast
 			Directory.CreateDirectory(ExportDirectory);
 			
 			// Search all connected simulators for the prim
-			Primitive exportPrim = null;
-			Simulator targetSim = null;
+			Primitive? exportPrim = null;
+			Simulator? targetSim = null;
 			
 			try
 			{
@@ -160,7 +160,7 @@ namespace Radegast
 				{
 					UUID texture;
 						
-					if (prim.Textures.DefaultTexture.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
+					if (prim.Textures!.DefaultTexture!.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
 						!Textures.Contains(prim.Textures.DefaultTexture.TextureID))
 					{
 						texture = new UUID(prim.Textures.DefaultTexture.TextureID);
@@ -191,7 +191,7 @@ namespace Radegast
 
 				foreach (var request in textureRequests)
 				{
-					Client.Assets.RequestImage(request.ImageID, request.Type, Assets_OnImageReceived);
+					Client.Assets.RequestImage(request.ImageID, request.Type, Assets_OnImageReceived!);
 				}
 			}
 		}
@@ -210,8 +210,7 @@ namespace Radegast
 				}
 				else
 				{
-					InventoryItem item = (InventoryItem)n.Data;
-					if (item.InventoryType == InventoryType.Texture)
+					if (n.Data is InventoryItem item && item.InventoryType == InventoryType.Texture)
 						textures.Add(n);
 				}
 			}
@@ -220,48 +219,48 @@ namespace Radegast
 		
 		private void FindImagesInInventory()
 		{
-			List<InventoryNode> nodes = TraverseDir(Client.Inventory.Store.RootNode);
+			List<InventoryNode> nodes = TraverseDir(Client.Inventory.Store!.RootNode);
 			List<UUID> oldTextures = new List<UUID>(Textures);
 			Textures = new List<UUID>();
-			
+
 			foreach (InventoryNode n in nodes)
 			{
-				InventoryItem texture = (InventoryItem)n.Data;
+				InventoryItem texture = (InventoryItem)n.Data!;
 				if (oldTextures.Contains(texture.AssetUUID))
 				{
-					LogMessage("Found Texture {0}: {1}",texture.AssetUUID.ToString(),texture.Name);
+					LogMessage?.Invoke("Found Texture {0}: {1}",texture.AssetUUID.ToString(),texture.Name);
 					PermissionMask fullPerm = PermissionMask.Modify | PermissionMask.Copy | PermissionMask.Transfer;
 					if ((texture.Permissions.OwnerMask & fullPerm) == fullPerm)
 					{
 						Textures.Add(texture.AssetUUID);
-						LogMessage("Texture {0} will be exported",texture.Name);
+						LogMessage?.Invoke("Texture {0} will be exported",texture.Name);
 						oldTextures.Remove(texture.AssetUUID);
 					}
 					else
-						LogMessage("Texture {0} is not full perm, will not export.",texture.Name);
+						LogMessage?.Invoke("Texture {0} is not full perm, will not export.",texture.Name);
 				}
 			}
 			foreach (UUID texture in oldTextures)
-				LogMessage("Failed to find {0}, will not export",texture.ToString());
+				LogMessage?.Invoke("Failed to find {0}, will not export",texture.ToString());
 		}
 		
-		private bool RequestObjectProperties(List<Primitive> objects, int msPerRequest, Simulator sim = null)
+		private bool RequestObjectProperties(List<Primitive> objects, int msPerRequest, Simulator? sim = null)
 		{
-            uint[] localids = new uint[objects.Count];
-            
-            lock (PrimsWaiting)
-            {
-                PrimsWaiting.Clear();
-                
-                for (int i = 0; i < objects.Count; ++i)
-                {
-                    localids[i] = objects[i].LocalID;
-                    PrimsWaiting.Add(objects[i].ID,objects[i]);
-                }
-            }
-            
-            var targetSim = sim ?? Client.Network.CurrentSim;
-            Client.Objects.SelectObjects(targetSim, localids);
+			uint[] localids = new uint[objects.Count];
+
+			lock (PrimsWaiting)
+			{
+				PrimsWaiting.Clear();
+
+				for (int i = 0; i < objects.Count; ++i)
+				{
+					localids[i] = objects[i].LocalID;
+					PrimsWaiting.Add(objects[i].ID,objects[i]);
+				}
+			}
+
+			var targetSim = sim ?? Client.Network.CurrentSim;
+			Client.Objects.SelectObjects(targetSim!, localids);
             
             var timeout = 2000 + msPerRequest * objects.Count;
             EventSubscriptionHelper.WaitForCondition<ObjectPropertiesEventArgs>(
@@ -285,7 +284,7 @@ namespace Radegast
 			Properties.SetFamilyProperties(e.Properties);
 			if (e.Properties.CreatorID == UUID.Zero)
 			{
-				Client.Objects.SelectObject(exportSim ?? Client.Network.CurrentSim, uLocalID);
+				Client.Objects.SelectObject((exportSim ?? Client.Network.CurrentSim)!, uLocalID);
 			}
 			else
 			{
@@ -319,17 +318,17 @@ namespace Radegast
 
                 try
                 {
-                    File.WriteAllBytes(Path.Combine(ExportDirectory,asset.AssetID + ".jp2"), asset.AssetData);
-                    LogMessage("Successfully downloaded texture {0}",asset.AssetID.ToString());
-                }
-                catch (Exception ex)
-                {
-                    LogMessage("Failed to download texture {0}\r\nReason: {1}",asset.AssetID.ToString(),ex.Message);
-                }
-                lock (Textures)
+					File.WriteAllBytes(Path.Combine(ExportDirectory,asset.AssetID + ".jp2"), asset.AssetData);
+					LogMessage?.Invoke("Successfully downloaded texture {0}",asset.AssetID.ToString());
+				}
+				catch (Exception ex)
+				{
+					LogMessage?.Invoke("Failed to download texture {0}\r\nReason: {1}",asset.AssetID.ToString(),ex.Message);
+				}
+				lock (Textures)
 				{
 					if (Textures.Count == 0)
-						LogMessage("Texture Download complete!");
+						LogMessage?.Invoke("Texture Download complete!");
 				}
 			}
 		}

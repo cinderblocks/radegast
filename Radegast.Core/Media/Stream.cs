@@ -51,9 +51,9 @@ namespace Radegast.Media
         /// <summary>
         /// Fired when a stream meta data is received
         /// </summary>
-        public event StreamInfoCallback OnStreamInfo;
+        public event StreamInfoCallback? OnStreamInfo;
 
-        private Timer updateTimer = null;
+        private Timer? updateTimer = null;
         private readonly uint updateIntervl = 500;
 
         /// <summary>
@@ -96,7 +96,7 @@ namespace Radegast.Media
 
             if (!channel.hasHandle()) return;
 
-            TaskCompletionSource<bool> tcs = null;
+            TaskCompletionSource<bool>? tcs = null;
             if (blocking) tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             invoke(delegate
@@ -113,7 +113,7 @@ namespace Radegast.Media
 
                 if (blocking)
                 {
-                    try { tcs.TrySetResult(true); } catch { }
+                    try { tcs!.TrySetResult(true); } catch { }
                 }
             });
 
@@ -188,7 +188,7 @@ namespace Radegast.Media
                     if (res != RESULT.OK || numTagsUpdated <= 0) return;
                     for (var i=0; i < numTags; i++)
                     {
-                        if (sound.getTag(null, i, out tag) != RESULT.OK)
+                        if (sound.getTag(null!, i, out tag) != RESULT.OK)
                         {
                             continue;
                         }

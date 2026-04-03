@@ -24,7 +24,7 @@ namespace Radegast.Commands
 {
     public abstract class RadegastCommand : IRadegastCommand
     {
-        private readonly CommandExecuteDelegate _execute;
+        private readonly CommandExecuteDelegate? _execute;
 
         /// <summary>
         /// Radegast instance received during start command
@@ -57,11 +57,11 @@ namespace Radegast.Commands
             _execute = exec;
         }
 
-        public virtual string Name { get; set; }
+        public virtual string Name { get; set; } = null!;
 
-        public virtual string Description { get; set; }
+        public virtual string Description { get; set; } = null!;
 
-        public virtual string Usage { get; set; }
+        public virtual string Usage { get; set; } = null!;
 
         public virtual void StartCommand(IRadegastInstance inst)
         {
@@ -70,7 +70,7 @@ namespace Radegast.Commands
 
         public virtual void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)
         {
-            _execute(name, cmdArgs, WriteLine);
+            _execute!(name, cmdArgs, WriteLine);
         }
 
         public virtual void Dispose()

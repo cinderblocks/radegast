@@ -34,7 +34,7 @@ namespace Radegast
         protected readonly OSDMap SettingsData;
 
         public delegate void SettingChangedCallback(object sender, SettingsEventArgs e);
-        public event SettingChangedCallback OnSettingChanged;
+        public event SettingChangedCallback? OnSettingChanged;
 
         public Settings(string fileName)
         {
@@ -95,7 +95,7 @@ namespace Radegast
             }
         }
 
-        private void FireEvent(string key, OSD val)
+        private void FireEvent(string key, OSD? val)
         {
             if (OnSettingChanged == null) { return; }
 
@@ -150,7 +150,7 @@ namespace Radegast
         public bool Remove(string key)
         {
             bool ret = SettingsData.Remove(key);
-            FireEvent(key, null);
+            FireEvent(key, (OSD?)null);
             Save();
             return ret;
         }
@@ -175,25 +175,25 @@ namespace Radegast
 
         public void CopyTo(KeyValuePair<string, OSD>[] array, int index)
         {
-            throw new NotImplementedException();
+            ((ICollection<KeyValuePair<string, OSD>>)SettingsData).CopyTo(array, index);
         }
 
         public bool Remove(KeyValuePair<string, OSD> kvp)
         {
             bool ret = SettingsData.Remove(kvp.Key);
-            FireEvent(kvp.Key, null);
+            FireEvent(kvp.Key, (OSD?)null);
             Save();
             return ret;
         }
 
         public IEnumerator<KeyValuePair<string, OSD>> GetEnumerator()
         {
-            throw new NotImplementedException();
+            return ((IEnumerable<KeyValuePair<string, OSD>>)SettingsData).GetEnumerator();
         }
 
         IEnumerator IEnumerable.GetEnumerator()
         {
-            return SettingsData.GetEnumerator();
+            return GetEnumerator();
         }
 
         #endregion IDictionary Implementation
@@ -202,10 +202,10 @@ namespace Radegast
 
     public class SettingsEventArgs : EventArgs
     {
-        public string Key;
-        public OSD Value;
+        public string Key = string.Empty;
+        public OSD? Value;
 
-        public SettingsEventArgs(string key, OSD val)
+        public SettingsEventArgs(string key, OSD? val)
         {
             Key = key;
             Value = val;

@@ -1,0 +1,269 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Views.LandProfilePanel"
+             x:DataType="vm:LandProfileViewModel"
+             AutomationProperties.Name="Land profile panel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
+        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+
+            <TextBlock Text="Loading parcel info..." IsVisible="{Binding IsLoading}"
+                       FontStyle="Italic" Opacity="0.6"
+                       AutomationProperties.Name="Loading indicator" />
+
+            <!-- Header / Name -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <Grid ColumnDefinitions="Auto,12,*">
+                    <Border Grid.Column="0" Width="160" Height="120" CornerRadius="6"
+                            ClipToBounds="True" Background="#10FFFFFF"
+                            IsVisible="{Binding SnapshotImage, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            AutomationProperties.Name="Parcel snapshot">
+                        <Image Source="{Binding SnapshotImage}" Stretch="UniformToFill" />
+                    </Border>
+                    <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Center">
+                        <!-- View mode: parcel name -->
+                        <TextBlock Text="{Binding ParcelName}" FontSize="20" FontWeight="Bold" TextWrapping="Wrap"
+                                   IsVisible="{Binding IsNotEditing}"
+                                   AutomationProperties.Name="Parcel name" />
+                        <!-- Edit mode: name text box -->
+                        <TextBox Text="{Binding EditName}" FontSize="16" FontWeight="Bold"
+                                 IsVisible="{Binding IsEditingOwnParcel}"
+                                 Watermark="Parcel name"
+                                 AutomationProperties.Name="Edit parcel name" />
+                        <TextBlock Text="{Binding RegionName}" Opacity="0.7"
+                                   AutomationProperties.Name="Region name" />
+                        <TextBlock Text="{Binding RegionType}" Opacity="0.5" FontSize="12"
+                                   IsVisible="{Binding RegionType, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   AutomationProperties.Name="Region type" />
+                        <TextBlock Text="{Binding MaturityRating, StringFormat=Rating: {0}}" Opacity="0.6"
+                                   AutomationProperties.Name="Maturity rating" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Action buttons -->
+            <StackPanel Orientation="Horizontal" Spacing="8"
+                        IsVisible="{Binding IsOwnParcel}">
+                <Button Content="Edit Parcel" Command="{Binding BeginEditCommand}"
+                        IsVisible="{Binding IsNotEditing}"
+                        AutomationProperties.Name="Begin editing parcel" />
+                <Button Content="Save Changes" Command="{Binding SaveParcelCommand}"
+                        IsVisible="{Binding IsEditingOwnParcel}"
+                        AutomationProperties.Name="Save parcel changes" />
+                <Button Content="Cancel" Command="{Binding DiscardEditCommand}"
+                        IsVisible="{Binding IsEditingOwnParcel}"
+                        AutomationProperties.Name="Discard parcel changes" />
+            </StackPanel>
+
+            <!-- Buy Land button (shown to non-owners when parcel is for sale) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding ShowBuyButton}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="This parcel is for sale" FontWeight="SemiBold" FontSize="13" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="{Binding SalePriceDisplay}" VerticalAlignment="Center" />
+                        <Button Content="Buy Land" Command="{Binding BuyLandCommand}"
+                                AutomationProperties.Name="Buy this land" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Description -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Description" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <!-- View mode -->
+                    <TextBlock Text="{Binding ParcelDescription}" TextWrapping="Wrap"
+                               IsVisible="{Binding IsNotEditing}"
+                               AutomationProperties.Name="Parcel description" />
+                    <!-- Edit mode -->
+                    <TextBox Text="{Binding EditDescription}" TextWrapping="Wrap" AcceptsReturn="True"
+                             Height="80" IsVisible="{Binding IsEditingOwnParcel}"
+                             Watermark="Parcel description"
+                             AutomationProperties.Name="Edit parcel description" />
+                </StackPanel>
+            </Border>
+
+            <!-- Ownership -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Ownership" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Owner:" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <controls:AvatarNameButton AgentName="{Binding OwnerName}"
+                                                    AgentID="{Binding OwnerID}"
+                                                    Instance="{Binding Instance}"
+                                                    IsVisible="{Binding !IsGroupOwned}"
+                                                    AutomationProperties.Name="View owner profile" />
+                        <TextBlock Text="{Binding OwnerName}" IsVisible="{Binding IsGroupOwned}"
+                                   AutomationProperties.Name="Owner" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="8"
+                                IsVisible="{Binding GroupName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="Group:" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button Content="{Binding GroupName}" Command="{Binding ShowGroupProfileCommand}"
+                                Cursor="Hand" Padding="0" Background="Transparent" BorderThickness="0"
+                                AutomationProperties.Name="View group profile" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Statistics -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Statistics" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Area:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Area, StringFormat={}{0} sqm}" AutomationProperties.Name="Parcel area" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Traffic:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding Traffic}" AutomationProperties.Name="Parcel traffic" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Sim Prims:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding SimPrims}" AutomationProperties.Name="Sim prim count" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Parcel Prims:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding ParcelPrims}" AutomationProperties.Name="Parcel prim count" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Auto Return:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding AutoReturn}" AutomationProperties.Name="Auto return time" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Permissions (view mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsNotEditing}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Permissions" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Left">
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,4">
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding AllowFly}" Foreground="LimeGreen" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !AllowFly}" Foreground="Tomato" />
+                            <TextBlock Text="Fly" AutomationProperties.Name="Flying allowed" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,4">
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding AllowScripts}" Foreground="LimeGreen" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !AllowScripts}" Foreground="Tomato" />
+                            <TextBlock Text="Scripts" AutomationProperties.Name="Scripts allowed" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,4">
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding AllowBuild}" Foreground="LimeGreen" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !AllowBuild}" Foreground="Tomato" />
+                            <TextBlock Text="Build" AutomationProperties.Name="Building allowed" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,4">
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding AllowLandmark}" Foreground="LimeGreen" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !AllowLandmark}" Foreground="Tomato" />
+                            <TextBlock Text="Landmark" AutomationProperties.Name="Landmarks allowed" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,0,16,4">
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding AllowVoice}" Foreground="LimeGreen" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !AllowVoice}" Foreground="Tomato" />
+                            <TextBlock Text="Voice" AutomationProperties.Name="Voice allowed" />
+                        </StackPanel>
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Permissions (edit mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsEditingOwnParcel}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Permissions" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <WrapPanel HorizontalAlignment="Left">
+                        <CheckBox Content="Allow Fly" IsChecked="{Binding EditAllowFly}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow fly" />
+                        <CheckBox Content="Allow Scripts" IsChecked="{Binding EditAllowScripts}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow scripts" />
+                        <CheckBox Content="Allow Build" IsChecked="{Binding EditAllowBuild}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow build" />
+                        <CheckBox Content="Allow Landmark" IsChecked="{Binding EditAllowLandmark}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow landmark" />
+                        <CheckBox Content="Allow Voice" IsChecked="{Binding EditAllowVoice}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow voice" />
+                        <CheckBox Content="Allow Damage" IsChecked="{Binding EditAllowDamage}"
+                                  Margin="0,0,16,4" AutomationProperties.Name="Allow damage" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- For Sale (view mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsForSale}">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="For Sale" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <TextBlock Text="{Binding SalePriceDisplay, StringFormat=Price: {0}}"
+                               AutomationProperties.Name="Sale price" />
+                </StackPanel>
+            </Border>
+
+            <!-- For Sale (edit mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsEditingOwnParcel}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Sale Settings" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <CheckBox Content="List For Sale" IsChecked="{Binding EditForSale}"
+                              AutomationProperties.Name="List parcel for sale" />
+                    <StackPanel Spacing="6" IsVisible="{Binding ShowSalePriceEdit}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Text="Price (L$):" VerticalAlignment="Center" FontWeight="SemiBold" />
+                            <NumericUpDown Value="{Binding EditSalePrice}" Minimum="0" Maximum="999999999"
+                                          FormatString="N0" Width="140"
+                                          AutomationProperties.Name="Sale price in Linden dollars" />
+                        </StackPanel>
+                        <CheckBox Content="Sell to Anyone" IsChecked="{Binding EditSellToAnyone}"
+                                  AutomationProperties.Name="Sell to anyone or specific buyer" />
+                        <StackPanel Spacing="4" IsVisible="{Binding ShowAuthBuyerEdit}">
+                            <TextBlock Text="Buyer UUID:" FontWeight="SemiBold" />
+                            <TextBox Text="{Binding EditAuthBuyerIdText}"
+                                     Watermark="Paste avatar UUID here"
+                                     AutomationProperties.Name="Authorized buyer UUID" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Deed to Group (edit mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsEditingOwnParcel}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Deed to Group" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <TextBlock Text="No groups available." FontStyle="Italic" Opacity="0.6"
+                               IsVisible="{Binding !HasAgentGroups}" />
+                    <StackPanel Spacing="8" IsVisible="{Binding HasAgentGroups}">
+                        <ComboBox ItemsSource="{Binding AgentGroups}"
+                                  SelectedItem="{Binding SelectedGroupForDeed}"
+                                  MinWidth="200"
+                                  AutomationProperties.Name="Select group to deed land to">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <Button Content="Deed to Selected Group" Command="{Binding DeedToGroupCommand}"
+                                AutomationProperties.Name="Deed parcel to selected group" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Abandon parcel (edit mode) -->
+            <Border Background="#30FF4444" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsEditingOwnParcel}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Danger Zone" FontWeight="SemiBold" FontSize="13" Foreground="Tomato" />
+                    <TextBlock Text="Releasing a parcel returns it to Linden Lab. This cannot be undone."
+                               TextWrapping="Wrap" Opacity="0.8" />
+                    <Button Content="Abandon Parcel" Command="{Binding AbandonParcelCommand}"
+                            Background="Tomato" Foreground="White"
+                            AutomationProperties.Name="Abandon this parcel" />
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -47,12 +47,12 @@ namespace Radegast.Core.RLV
             // Search across all connected simulators for the object
             try
             {
-                Simulator[] sims = null;
+                Simulator[]? sims = null;
                 lock (instance.Client.Network.Simulators)
                 {
                     sims = instance.Client.Network.Simulators.ToArray();
                 }
-                
+
                 foreach (var sim in sims)
                 {
                     if (sim == null) continue;
@@ -71,7 +71,7 @@ namespace Radegast.Core.RLV
         {
             var activeGroupId = instance.Client.Self.ActiveGroup;
 
-            string groupName = null;
+            string? groupName = null;
 
             var tcs = new TaskCompletionSource<bool>();
             void groupNameReply(object sender, GroupNamesEventArgs e)
@@ -95,7 +95,7 @@ namespace Radegast.Core.RLV
                     return (false, string.Empty);
                 }
 
-                return (true, groupName);
+                return (true, groupName ?? string.Empty);
             }
             finally
             {
@@ -103,9 +103,9 @@ namespace Radegast.Core.RLV
             }
         }
 
-        public Task<(bool Success, CameraSettings CameraSettings)> TryGetCameraSettingsAsync(CancellationToken cancellationToken)
+        public Task<(bool Success, CameraSettings? CameraSettings)> TryGetCameraSettingsAsync(CancellationToken cancellationToken)
         {
-            return Task.FromResult((false, (CameraSettings)null));
+            return Task.FromResult<(bool, CameraSettings?)>((false, null));
         }
 
         private Dictionary<UUID, UUID> GetAttachedItemIdToPrimitiveIdMap()
@@ -115,16 +115,16 @@ namespace Radegast.Core.RLV
             // Scan all connected simulators for attachments
             try
             {
-                Simulator[] sims = null;
+                Simulator[]? sims = null;
                 lock (instance.Client.Network.Simulators)
                 {
                     sims = instance.Client.Network.Simulators.ToArray();
                 }
-                
+
                 foreach (var sim in sims)
                 {
                     if (sim == null) continue;
-                    
+
                     var objectPrimitivesSnapshot = sim.ObjectsPrimitives.Values.ToList();
                     foreach (var item in objectPrimitivesSnapshot)
                     {
@@ -174,7 +174,7 @@ namespace Radegast.Core.RLV
                 // Search across all connected simulators for the sit object
                 try
                 {
-                    Simulator[] sims = null;
+                    Simulator[]? sims = null;
                     lock (instance.Client.Network.Simulators)
                     {
                         sims = instance.Client.Network.Simulators.ToArray();
@@ -213,7 +213,7 @@ namespace Radegast.Core.RLV
             }
             else if (item is InventoryAttachment attachment)
             {
-                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ResolvedItemID, out var primIdTemp))
                 {
                     attachedPrimId = primIdTemp.Guid;
                 }
@@ -222,7 +222,7 @@ namespace Radegast.Core.RLV
             }
             else if (item is InventoryObject obj)
             {
-                if (attachmentIdToInventoryIdMap.TryGetValue(item.ActualUUID, out var primIdTemp))
+                if (attachmentIdToInventoryIdMap.TryGetValue(item.ResolvedItemID, out var primIdTemp))
                 {
                     attachedPrimId = primIdTemp.Guid;
                 }
@@ -244,7 +244,7 @@ namespace Radegast.Core.RLV
             Dictionary<Guid, RlvInventoryItem> itemMap
         )
         {
-            folderMap[root.Data.UUID.Guid] = rootConverted;
+            folderMap[root.Data!.UUID.Guid] = rootConverted;
 
             foreach (var node in root.Nodes.Values)
             {
@@ -274,13 +274,13 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                if (currentOutfitMap.ContainsKey(item.ActualUUID))
+                if (currentOutfitMap.ContainsKey(item.ResolvedItemID))
                 {
                     // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
                     GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var isActiveGesture);
 
                     var newItem = rootConverted.AddItem(
-                        item.ActualUUID.Guid,
+                        item.ResolvedItemID.Guid,
                         item.Name,
                         item.IsLink(),
                         attachedTo,
@@ -293,7 +293,7 @@ namespace Radegast.Core.RLV
                 else
                 {
                     var newItem = rootConverted.AddItem(
-                        item.ActualUUID.Guid,
+                        item.ResolvedItemID.Guid,
                         item.Name,
                         item.IsLink(),
                         null,
@@ -306,25 +306,25 @@ namespace Radegast.Core.RLV
             }
         }
 
-        public async Task<(bool Success, InventoryMap InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
+        public async Task<(bool Success, InventoryMap? InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
         {
             // Get current attached items <InventoryItem>
             var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinks(cancellationToken);
             var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
 
             // Build shared folder
-            var sharedFolder = instance.Client.Inventory.Store.RootNode.Nodes.Values
-                .FirstOrDefault(n => n.Data.Name == "#RLV" && n.Data is InventoryFolder);
+            var sharedFolder = instance.Client.Inventory.Store!.RootNode.Nodes.Values
+                .FirstOrDefault(n => n.Data?.Name == "#RLV" && n.Data is InventoryFolder);
 
             var currentOutfitMap = new Dictionary<UUID, InventoryItem>();
             foreach (var item in currentOutfitLinks)
             {
-                currentOutfitMap[item.ActualUUID] = item;
+                currentOutfitMap[item.ResolvedItemID] = item;
             }
 
             // If there is no shared #RLV folder in the user's inventory, create an empty representation
             var sharedFolderConverted = sharedFolder != null
-                ? new RlvSharedFolder(sharedFolder.Data.UUID.Guid, "")
+                ? new RlvSharedFolder(sharedFolder.Data!.UUID.Guid, "")
                 : new RlvSharedFolder(Guid.Empty, "#RLV");
 
             var itemMap = new Dictionary<Guid, RlvInventoryItem>();
@@ -340,7 +340,7 @@ namespace Radegast.Core.RLV
 
             foreach (var item in currentOutfitLinks)
             {
-                if (itemMap.ContainsKey(item.ActualUUID.Guid))
+                if (itemMap.ContainsKey(item.ResolvedItemID.Guid))
                 {
                     continue;
                 }
@@ -354,7 +354,7 @@ namespace Radegast.Core.RLV
                 // Note: Inventory item link and the real item will report different wearable type. Only use RealItem for this
                 GetItemAttachmentInfo(realItem, attachmentIdToInventoryIdMap, out var wornOn, out var attachedTo, out var attachedPrimId, out var gestureState);
                 var newItem = new RlvInventoryItem(
-                    item.ActualUUID.Guid,
+                    item.ResolvedItemID.Guid,
                     item.Name,
                     item.IsLink(),
                     item.ParentUUID.Guid,
@@ -364,7 +364,7 @@ namespace Radegast.Core.RLV
                     gestureState
                  );
 
-                itemMap.Add(item.ActualUUID.Guid, newItem);
+                itemMap.Add(item.ResolvedItemID.Guid, newItem);
                 externalItems.Add(newItem);
             }
 

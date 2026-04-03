@@ -36,8 +36,8 @@ namespace Radegast.Media
         /// <summary>
         /// Fired when a stream meta data is received
         /// </summary>
-        public event SpeechDoneCallback OnSpeechDone;
-        private string filename;
+        public event SpeechDoneCallback? OnSpeechDone;
+        private string? filename;
         private Vector3 speakerPos;
 
         public static bool Compress { set; get; } = true;
@@ -187,7 +187,7 @@ namespace Radegast.Media
             uint len = await PlayAsync(speakfile, global, pos).ConfigureAwait(false);
 
             var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            SpeechDoneCallback callback = null;
+            SpeechDoneCallback? callback = null;
             callback = (sender, e) =>
             {
                 try { tcs.TrySetResult(true); } catch { }

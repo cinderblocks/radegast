@@ -1,0 +1,127 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.MediaPanel"
+             x:DataType="vm:MediaViewModel"
+             AutomationProperties.Name="Media panel">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="8" Spacing="12">
+
+            <!-- Sound System Status -->
+            <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="8">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding SoundSystemStatus}"
+                               VerticalAlignment="Center"
+                               AutomationProperties.Name="Sound system status" />
+                    <Button DockPanel.Dock="Right" Content="Retry"
+                            Command="{Binding RetryInitializeCommand}"
+                            IsVisible="{Binding !SoundSystemAvailable}"
+                            HorizontalAlignment="Right"
+                            AutomationProperties.Name="Retry sound system initialization" />
+                </DockPanel>
+            </Border>
+
+            <!-- Parcel Audio Streaming -->
+            <TextBlock Text="Parcel Audio Stream" FontWeight="SemiBold" FontSize="14" />
+            <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,0,0,4">
+                <TextBlock Grid.Column="0" Text="URL:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                <TextBox Grid.Column="1" Text="{Binding StreamUrl}" Watermark="Stream URL"
+                         IsEnabled="{Binding SoundSystemAvailable}"
+                         AutomationProperties.Name="Stream URL" />
+                <Button Grid.Column="2" Content="Play" Margin="4,0,0,0"
+                        Command="{Binding PlayStreamCommand}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        ToolTip.Tip="Play stream"
+                        AutomationProperties.Name="Play stream" />
+                <Button Grid.Column="3" Content="Stop" Margin="4,0,0,0"
+                        Command="{Binding StopStreamCommand}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        ToolTip.Tip="Stop stream"
+                        AutomationProperties.Name="Stop stream" />
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <CheckBox Content="Auto-play" IsChecked="{Binding AutoPlay}"
+                          AutomationProperties.Name="Auto-play parcel audio" />
+                <CheckBox Content="Keep URL on parcel change" IsChecked="{Binding KeepUrl}"
+                          AutomationProperties.Name="Keep URL on parcel change" />
+            </StackPanel>
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Station:" Margin="0,0,6,2" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding StationName, TargetNullValue='(none)'}"
+                           TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Station name" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Now Playing:" Margin="0,0,6,0" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SongTitle, TargetNullValue='(none)'}"
+                           TextTrimming="CharacterEllipsis"
+                           AutomationProperties.Name="Song title" />
+            </Grid>
+
+            <!-- Stream Volume -->
+            <Grid ColumnDefinitions="120,*,40">
+                <TextBlock Grid.Column="0" Text="Stream Volume" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding StreamVolume}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        AutomationProperties.Name="Stream volume slider" />
+                <TextBlock Grid.Column="2" Text="{Binding StreamVolume, StringFormat='{}{0}%'}"
+                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+            </Grid>
+
+            <Separator />
+
+            <!-- Object / Ambient Sounds -->
+            <TextBlock Text="Object / Ambient Sounds" FontWeight="SemiBold" FontSize="14" />
+            <CheckBox Content="Enable object sounds" IsChecked="{Binding ObjectSoundsEnabled}"
+                      AutomationProperties.Name="Enable object sounds" />
+            <Grid ColumnDefinitions="120,*,40">
+                <TextBlock Grid.Column="0" Text="Object Volume" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding ObjectVolume}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        AutomationProperties.Name="Object volume slider" />
+                <TextBlock Grid.Column="2" Text="{Binding ObjectVolume, StringFormat='{}{0}%'}"
+                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+            </Grid>
+
+            <Separator />
+
+            <!-- UI Sounds -->
+            <TextBlock Text="UI Sounds" FontWeight="SemiBold" FontSize="14" />
+            <Grid ColumnDefinitions="120,*,40">
+                <TextBlock Grid.Column="0" Text="UI Volume" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding UiVolume}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        AutomationProperties.Name="UI volume slider" />
+                <TextBlock Grid.Column="2" Text="{Binding UiVolume, StringFormat='{}{0}%'}"
+                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+            </Grid>
+
+            <Separator />
+
+            <!-- Master Volume -->
+            <TextBlock Text="Master" FontWeight="SemiBold" FontSize="14" />
+            <Grid ColumnDefinitions="120,*,40,Auto">
+                <TextBlock Grid.Column="0" Text="Master Volume" VerticalAlignment="Center" />
+                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding MasterVolume}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        AutomationProperties.Name="Master volume slider" />
+                <TextBlock Grid.Column="2" Text="{Binding MasterVolume, StringFormat='{}{0}%'}"
+                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+                <Button Grid.Column="3" Margin="8,0,0,0"
+                        Command="{Binding ToggleMuteCommand}"
+                        IsEnabled="{Binding SoundSystemAvailable}"
+                        AutomationProperties.Name="Toggle mute">
+                    <Panel>
+                        <TextBlock Text="Unmute" IsVisible="{Binding IsMuted}" />
+                        <TextBlock Text="Mute" IsVisible="{Binding !IsMuted}" />
+                    </Panel>
+                </Button>
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

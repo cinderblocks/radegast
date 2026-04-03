@@ -35,7 +35,7 @@ namespace Radegast
         private DateTime start;
 		public UUID TextureID = UUID.Zero;
 		public TimeSpan Duration;
-		public string Status;
+		public string? Status;
 		public bool Success;
 		
 		public ImageUploader(GridClient client)

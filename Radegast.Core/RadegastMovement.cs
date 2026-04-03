@@ -28,7 +28,7 @@ namespace Radegast
     {
         private readonly IRadegastInstance instance;
         private GridClient client => instance.Client;
-        private Timer timer;
+        private Timer? timer;
         private Vector3 forward = new Vector3(1, 0, 0);
         private bool turningLeft = false;
         private bool turningRight = false;
@@ -46,9 +46,9 @@ namespace Radegast
                 turningLeft = value;
                 if (value) {
                     timer_Elapsed(null, null);
-                    timer.Enabled = true;
+                    timer!.Enabled = true;
                 } else {
-                    timer.Enabled = false;
+                    timer!.Enabled = false;
                     client.Self.Movement.TurnLeft = false;
                     client.Self.Movement.SendUpdate(true);
                 }
@@ -63,9 +63,9 @@ namespace Radegast
                 turningRight = value;
                 if (value) {
                     timer_Elapsed(null, null);
-                    timer.Enabled = true;
+                    timer!.Enabled = true;
                 } else {
-                    timer.Enabled = false;
+                    timer!.Enabled = false;
                     client.Self.Movement.TurnRight = false;
                     client.Self.Movement.SendUpdate(true);
                 }
@@ -167,14 +167,14 @@ namespace Radegast
 
         public void Dispose()
         {
-            timer.Enabled = false;
-            timer.Dispose();
+            timer!.Enabled = false;
+            timer!.Dispose();
             timer = null;
         }
 
-        private void timer_Elapsed(object sender, ElapsedEventArgs e)
+        private void timer_Elapsed(object? sender, ElapsedEventArgs? e)
         {
-            float delta = (float)timer.Interval / 1000f;
+            float delta = (float)timer!.Interval / 1000f;
             if (turningLeft) {
                 client.Self.Movement.TurnLeft = true;
                 client.Self.Movement.BodyRotation = client.Self.Movement.BodyRotation * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, delta);

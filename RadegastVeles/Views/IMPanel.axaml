@@ -1,0 +1,202 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Views.IMPanel"
+             x:DataType="vm:IMViewModel"
+             AutomationProperties.Name="Instant messages panel">
+
+    <Grid ColumnDefinitions="220,8,*">
+        <!-- Left: Session list -->
+        <DockPanel Grid.Column="0">
+            <TextBlock DockPanel.Dock="Top" Text="Conversations" FontWeight="SemiBold" Margin="4" />
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4" FontSize="11" Opacity="0.7" AutomationProperties.Name="IM status" />
+
+            <ListBox x:Name="SessionListBox"
+                     ItemsSource="{Binding Sessions}"
+                     SelectedItem="{Binding SelectedSession}"
+                     AutomationProperties.Name="IM session list"
+                     Margin="4,0"
+                     ContextRequested="SessionListBox_ContextRequested">
+                <ListBox.Styles>
+                    <Style Selector="Button.sessionName">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="MinWidth" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="HorizontalAlignment" Value="Stretch" />
+                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                    </Style>
+                    <Style Selector="Button.sessionName:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                        <Setter Property="Background" Value="Transparent" />
+                    </Style>
+                    <Style Selector="Button.sessionName TextBlock">
+                        <Setter Property="TextDecorations" Value="Underline" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:IMSession">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <!-- Unread dot: IsVisible binding + text "● " in DisplayText act as belt-and-suspenders -->
+                            <TextBlock Text="●" Foreground="OrangeRed" FontSize="10"
+                                       VerticalAlignment="Top" Margin="0,2,0,0"
+                                       IsVisible="{Binding HasUnread}"
+                                       AutomationProperties.Name="" />
+                            <!-- Name + typing indicator stacked vertically -->
+                            <StackPanel Orientation="Vertical" Spacing="1">
+                                <Button Classes="sessionName"
+                                        Click="OnSessionNameClick"
+                                        Tag="{Binding}"
+                                        IsVisible="{Binding HasProfileLink}"
+                                        AutomationProperties.Name="{Binding Label, StringFormat=Open profile for {0}}">
+                                    <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+                                </Button>
+                                <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
+                                           AutomationProperties.Name="{Binding DisplayText}"
+                                           IsVisible="{Binding !HasProfileLink}" />
+                                <TextBlock Text="typing…" FontStyle="Italic" FontSize="11" Opacity="0.65"
+                                           IsVisible="{Binding IsPartnerTyping}"
+                                           AutomationProperties.Name="" />
+                            </StackPanel>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+        <!-- Splitter -->
+        <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize IM splitter" />
+
+        <!-- Right: Active conversation + optional participants -->
+        <Grid Grid.Column="2"
+              ColumnDefinitions="*,4,180">
+
+            <!-- Conversation area -->
+            <DockPanel Grid.Column="0">
+                <!-- Header -->
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="4">
+                    <TextBlock Grid.Column="0"
+                               Text="{Binding SelectedSession.Label, FallbackValue='Select a conversation'}"
+                               FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"
+                               AutomationProperties.Name="Active conversation name" />
+                    <Button Grid.Column="1" Content="Close" Command="{Binding CloseSessionCommand}"
+                            MinWidth="60" AutomationProperties.Name="Close conversation" />
+                </Grid>
+
+                <!-- Input area -->
+                <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="4" AutomationProperties.Name="IM input area">
+                    <TextBox Grid.Column="0" x:Name="IMInputBox"
+                             Text="{Binding MessageInput, Mode=TwoWay}"
+                             Watermark="Type a message..."
+                             IsEnabled="{Binding SelectedSession, Converter={x:Static ObjectConverters.IsNotNull}}"
+                             AutomationProperties.Name="IM message input" />
+                    <Button Grid.Column="1" Content="Send" Command="{Binding SendMessageCommand}"
+                            Margin="4,0,0,0" MinWidth="60"
+                            AutomationProperties.Name="Send IM" />
+                </Grid>
+
+                <!-- Typing indicator (shown above input when partner is typing) -->
+                <TextBlock DockPanel.Dock="Bottom"
+                           Text="{Binding SelectedSession.TypingText, FallbackValue=''}"
+                           FontStyle="Italic" FontSize="11" Opacity="0.65"
+                           Margin="8,0,4,2"
+                           IsVisible="{Binding SelectedSession.IsPartnerTyping, FallbackValue=False}"
+                           AutomationProperties.Name="Partner typing indicator" />
+
+                <!-- Message log with clickable sender names -->
+                <ListBox x:Name="IMLog"
+                         ItemsSource="{Binding SelectedSession.Messages}"
+                         Margin="4,0"
+                         AutomationProperties.Name="IM message history"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.Styles>
+                        <Style Selector="Button.imName">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="Cursor" Value="Hand" />
+                            <Setter Property="MinWidth" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                        <Style Selector="Button.imName:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                        <Style Selector="Button.imName TextBlock">
+                            <Setter Property="TextDecorations" Value="Underline" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ChatLine">
+                            <WrapPanel AutomationProperties.Name="{Binding AutomationText}"
+                                       Opacity="{Binding HistoryOpacity}">
+                                <TextBlock Text="{Binding FormattedTime}" Opacity="0.6" Margin="0,0,4,0" />
+                                <Button Classes="imName" Click="OnIMNameClick" ContextRequested="OnIMNameContextRequested" Tag="{Binding}"
+                                        IsVisible="{Binding HasAgentLink}"
+                                        AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
+                                    <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
+                                </Button>
+                                <TextBlock Text="{Binding From}" FontWeight="SemiBold"
+                                           IsVisible="{Binding !HasAgentLink}" />
+                                <controls:RichChatText Text="{Binding Text}" />
+                            </WrapPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- Participants panel splitter -->
+            <GridSplitter Grid.Column="1"
+                          ResizeDirection="Columns"
+                          Background="Transparent"
+                          IsVisible="{Binding SelectedSession.ShowParticipants, FallbackValue=False}"
+                          AutomationProperties.Name="Resize participants splitter" />
+
+            <!-- Participants panel (group / conference sessions only) -->
+            <DockPanel Grid.Column="2"
+                       IsVisible="{Binding SelectedSession.ShowParticipants, FallbackValue=False}">
+                <TextBlock DockPanel.Dock="Top" Text="Participants" FontWeight="SemiBold" Margin="4,4,4,2" />
+                <ListBox x:Name="ParticipantsList"
+                         ItemsSource="{Binding SelectedSession.Participants}"
+                         Margin="4,0,4,4"
+                         AutomationProperties.Name="Chat participants"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.Styles>
+                        <Style Selector="Button.participantName">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Padding" Value="2,1" />
+                            <Setter Property="Cursor" Value="Hand" />
+                            <Setter Property="MinWidth" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter Property="HorizontalContentAlignment" Value="Left" />
+                        </Style>
+                        <Style Selector="Button.participantName:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                            <Setter Property="Background" Value="Transparent" />
+                        </Style>
+                        <Style Selector="Button.participantName TextBlock">
+                            <Setter Property="TextDecorations" Value="Underline" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:IMParticipant">
+                            <Button Classes="participantName" Click="OnParticipantClick" ContextRequested="OnParticipantContextRequested" Tag="{Binding}"
+                                    AutomationProperties.Name="{Binding Name, StringFormat=Open profile for {0}}">
+                                <TextBlock Text="{Binding DisplayText}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis" />
+                            </Button>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Grid>
+    </Grid>
+</UserControl>

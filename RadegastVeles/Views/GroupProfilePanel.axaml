@@ -1,0 +1,461 @@
+﻿<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Views.GroupProfilePanel"
+             x:DataType="vm:GroupProfileViewModel"
+             AutomationProperties.Name="Group profile panel">
+
+    <Grid RowDefinitions="Auto,*">
+
+        <!-- ── Header: insignia + name + primary actions ── -->
+        <Border Grid.Row="0" Background="#18FFFFFF" Padding="10">
+            <Grid ColumnDefinitions="Auto,10,*">
+                <Border Grid.Column="0" Width="64" Height="64" CornerRadius="6"
+                        ClipToBounds="True" Background="#10FFFFFF"
+                        AutomationProperties.Name="Group insignia">
+                    <Image Source="{Binding InsigniaImage}" Stretch="UniformToFill" />
+                </Border>
+                <StackPanel Grid.Column="2" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding GroupName}" FontSize="18" FontWeight="Bold" TextWrapping="Wrap"
+                               IsVisible="{Binding !IsLoading}"
+                               AutomationProperties.Name="Group name" />
+                    <TextBlock Text="Loading…" FontStyle="Italic" Opacity="0.5"
+                               IsVisible="{Binding IsLoading}" />
+                    <Button Command="{Binding ShowFounderProfileCommand}"
+                            Background="Transparent" BorderThickness="0" Padding="0" Cursor="Hand"
+                            IsVisible="{Binding !IsLoading}"
+                            AutomationProperties.Name="Show founder profile">
+                        <TextBlock Text="{Binding FounderName}" Foreground="#5599DD" FontSize="12" />
+                    </Button>
+                    <StackPanel Orientation="Horizontal" Spacing="4" Margin="0,4,0,0">
+                        <Button Content="Join" Command="{Binding JoinGroupCommand}"
+                                IsVisible="{Binding CanJoin}" AutomationProperties.Name="Join group" />
+                        <Button Content="Leave" Command="{Binding LeaveGroupCommand}"
+                                IsVisible="{Binding IsMember}" AutomationProperties.Name="Leave group" />
+                        <Button Content="Chat" Command="{Binding OpenGroupChatCommand}"
+                                IsVisible="{Binding IsMember}" AutomationProperties.Name="Open group chat" />
+                        <Button Content="Voice" Command="{Binding JoinGroupVoiceCommand}"
+                                IsVisible="{Binding IsMember}" AutomationProperties.Name="Join group voice" />
+                        <Button Content="Activate" Command="{Binding ActivateGroupCommand}"
+                                IsVisible="{Binding IsMember}" AutomationProperties.Name="Activate group" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding StatusText}" FontSize="11" Opacity="0.65"
+                               IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Status" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ── Tab body ── -->
+        <TabControl Grid.Row="1">
+
+            <!-- ══ General ══ -->
+            <TabItem Header="General" AutomationProperties.Name="General tab">
+                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="10">
+                    <StackPanel Spacing="10" MaxWidth="620" HorizontalAlignment="Left">
+
+                        <!-- Info summary -->
+                        <Border Background="#18FFFFFF" CornerRadius="6" Padding="10">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding MemberCount}" Opacity="0.7" />
+                                <TextBlock Text="{Binding EnrollmentInfo}" Opacity="0.7" />
+                                <TextBlock Text="{Binding GroupIdText}" FontSize="10" Opacity="0.4"
+                                           TextTrimming="CharacterEllipsis"
+                                           AutomationProperties.Name="Group UUID" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Active title selector -->
+                        <Border Background="#18FFFFFF" CornerRadius="6" Padding="10"
+                                IsVisible="{Binding HasTitles}"
+                                AutomationProperties.Name="Active title section">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Active Title" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                                <ComboBox ItemsSource="{Binding Titles}"
+                                          SelectedItem="{Binding SelectedTitle}"
+                                          HorizontalAlignment="Stretch"
+                                          AutomationProperties.Name="Active title selector">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:GroupTitleEntry">
+                                            <TextBlock Text="{Binding Title}" />
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Charter (read-only display) -->
+                        <Border Background="#18FFFFFF" CornerRadius="6" Padding="10"
+                                IsVisible="{Binding Charter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Charter" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                                <controls:RichChatText Text="{Binding Charter}"
+                                            AutomationProperties.Name="Group charter" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Member preferences (member only) -->
+                        <Border Background="#18FFFFFF" CornerRadius="6" Padding="10"
+                                IsVisible="{Binding IsMember}"
+                                AutomationProperties.Name="Member preferences section">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="My Preferences" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                                <CheckBox Content="Receive group notices"
+                                          IsChecked="{Binding AcceptNotices}"
+                                          AutomationProperties.Name="Receive notices" />
+                                <CheckBox Content="List group in my profile"
+                                          IsChecked="{Binding ListInProfile}"
+                                          AutomationProperties.Name="List in profile" />
+                            </StackPanel>
+                        </Border>
+
+                        <!-- Editable group settings (permission-gated) -->
+                        <Border Background="#18FFFFFF" CornerRadius="6" Padding="10"
+                                IsVisible="{Binding IsMember}"
+                                AutomationProperties.Name="Group settings section">
+                            <StackPanel Spacing="6">
+                                <TextBlock Text="Group Settings" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+
+                                <TextBlock Text="Charter" FontSize="11" Opacity="0.6" />
+                                <TextBox Text="{Binding EditCharter}"
+                                         IsReadOnly="{Binding !CanEditIdentity}"
+                                         AcceptsReturn="True" MaxHeight="120" TextWrapping="Wrap"
+                                         AutomationProperties.Name="Charter editor" />
+
+                                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
+                                    <CheckBox Grid.Row="0" Grid.Column="0"
+                                              Content="Show in search"
+                                              IsChecked="{Binding EditShowInSearch}"
+                                              IsEnabled="{Binding CanEditIdentity}"
+                                              AutomationProperties.Name="Show in search" />
+                                    <CheckBox Grid.Row="0" Grid.Column="1"
+                                              Content="Open enrollment"
+                                              IsChecked="{Binding EditOpenEnrollment}"
+                                              IsEnabled="{Binding CanEditOptions}"
+                                              AutomationProperties.Name="Open enrollment" />
+                                    <CheckBox Grid.Row="1" Grid.Column="0"
+                                              Content="Mature content"
+                                              IsChecked="{Binding EditMature}"
+                                              IsEnabled="{Binding CanEditIdentity}"
+                                              AutomationProperties.Name="Mature content" />
+                                    <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                        <TextBlock Text="Fee (L$):" VerticalAlignment="Center" FontSize="12" />
+                                        <NumericUpDown Value="{Binding EditEnrollmentFee}"
+                                                       Minimum="0" Maximum="99999" Increment="1"
+                                                       IsEnabled="{Binding CanEditOptions}"
+                                                       Width="90"
+                                                       AutomationProperties.Name="Enrollment fee" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Button Content="Save Settings" Command="{Binding SaveSettingsCommand}"
+                                        IsVisible="{Binding SettingsChanged}"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.Name="Save settings" />
+                            </StackPanel>
+                        </Border>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ══ Members & Roles ══ -->
+            <TabItem Header="Members &amp; Roles" IsVisible="{Binding IsMember}"
+                     AutomationProperties.Name="Members and roles tab">
+                <TabControl>
+
+                    <!-- Members sub-tab -->
+                    <TabItem Header="Members" AutomationProperties.Name="Members sub-tab">
+                        <DockPanel Margin="8">
+                            <!-- Action bar -->
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6" Spacing="4">
+                                <Button Content="Invite…" Command="{Binding InviteMemberCommand}"
+                                        IsVisible="{Binding CanInvite}"
+                                        AutomationProperties.Name="Invite member" />
+                                <Button Content="Eject" Command="{Binding EjectMemberCommand}"
+                                        IsVisible="{Binding CanEject}"
+                                        IsEnabled="{Binding SelectedMember, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                        AutomationProperties.Name="Eject member" />
+                                <Button Content="Ban" Command="{Binding BanGroupMemberCommand}"
+                                        CommandParameter="{Binding SelectedMember}"
+                                        IsVisible="{Binding IsBanListLoaded}"
+                                        IsEnabled="{Binding SelectedMember, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                        AutomationProperties.Name="Ban selected member" />
+                            </StackPanel>
+
+                            <!-- Invite form -->
+                            <Border DockPanel.Dock="Top"
+                                    Background="#14FFFFFF" CornerRadius="4" Padding="8"
+                                    Margin="0,0,0,6"
+                                    IsVisible="{Binding CanInvite}"
+                                    AutomationProperties.Name="Invite form">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Invite by Avatar UUID:" FontSize="11" Opacity="0.7" />
+                                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2,0,0">
+                                        <TextBox Grid.Column="0" Text="{Binding InviteAvatarIdText}"
+                                                 Watermark="Avatar UUID…"
+                                                 AutomationProperties.Name="Invite avatar UUID" />
+                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Roles}"
+                                                  SelectedItem="{Binding SelectedInviteRole}"
+                                                  Margin="4,0" Width="130"
+                                                  AutomationProperties.Name="Invite role selector">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:GroupRoleEntry">
+                                                    <TextBlock Text="{Binding Name}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <Button Grid.Column="2" Content="Send" Command="{Binding InviteMemberCommand}"
+                                                AutomationProperties.Name="Send invite" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding InviteStatusText}" FontSize="11" Opacity="0.7"
+                                               IsVisible="{Binding InviteStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Member list -->
+                            <ListBox ItemsSource="{Binding Members}"
+                                     SelectedItem="{Binding SelectedMember}"
+                                     AutomationProperties.Name="Member list">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:GroupMemberEntry">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <Button Grid.Column="0"
+                                                    Command="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).ShowMemberProfileCommand}"
+                                                    CommandParameter="{Binding}"
+                                                    Padding="2" Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                    AutomationProperties.Name="{Binding Name}">
+                                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                                    <TextBlock Text="{Binding Name}" Foreground="#5599DD" />
+                                                    <TextBlock Text="{Binding Title, StringFormat=({0})}" Opacity="0.5"
+                                                               IsVisible="{Binding Title, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </TabItem>
+
+                    <!-- Roles sub-tab -->
+                    <TabItem Header="Roles" AutomationProperties.Name="Roles sub-tab">
+                        <Grid ColumnDefinitions="180,6,*" Margin="8">
+
+                            <!-- Role list + buttons -->
+                            <DockPanel Grid.Column="0">
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4" Spacing="4">
+                                    <Button Content="New" Command="{Binding NewRoleCommand}"
+                                            IsVisible="{Binding CanCreateRole}"
+                                            AutomationProperties.Name="New role" />
+                                    <Button Content="Delete" Command="{Binding DeleteRoleCommand}"
+                                            IsVisible="{Binding CanDeleteRole}"
+                                            IsEnabled="{Binding SelectedRole, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                            AutomationProperties.Name="Delete role" />
+                                </StackPanel>
+                                <ListBox ItemsSource="{Binding Roles}"
+                                         SelectedItem="{Binding SelectedRole}"
+                                         AutomationProperties.Name="Role list">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:GroupRoleEntry">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                                <TextBlock Text="{Binding MemberCount, StringFormat={}{0} members}"
+                                                           FontSize="10" Opacity="0.6" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+
+                            <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" />
+
+                            <!-- Role editor -->
+                            <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto">
+                                <StackPanel Spacing="8" Margin="4,0,0,0"
+                                            IsVisible="{Binding SelectedRole, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                    <TextBlock Text="{Binding IsNewRole, StringFormat={}{0}}"
+                                               IsVisible="False" />
+
+                                    <!-- Role name/title/description -->
+                                    <TextBlock Text="Role Name" FontSize="11" Opacity="0.6" />
+                                    <TextBox Text="{Binding EditRoleName}"
+                                             IsReadOnly="{Binding !CanEditRoleProps}"
+                                             AutomationProperties.Name="Role name" />
+                                    <TextBlock Text="Title (shown above member name)" FontSize="11" Opacity="0.6" />
+                                    <TextBox Text="{Binding EditRoleTitle}"
+                                             IsReadOnly="{Binding !CanEditRoleProps}"
+                                             AutomationProperties.Name="Role title" />
+                                    <TextBlock Text="Description" FontSize="11" Opacity="0.6" />
+                                    <TextBox Text="{Binding EditRoleDescription}"
+                                             IsReadOnly="{Binding !CanEditRoleProps}"
+                                             AcceptsReturn="True" MaxHeight="60"
+                                             AutomationProperties.Name="Role description" />
+
+                                    <!-- Permissions -->
+                                    <TextBlock Text="Permissions" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                                    <ItemsControl ItemsSource="{Binding EditRolePowers}" MaxHeight="200">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:GroupPowerEntry">
+                                                <CheckBox Content="{Binding Name}"
+                                                          IsChecked="{Binding IsEnabled}"
+                                                          IsEnabled="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).CanEditRolePowers}"
+                                                          AutomationProperties.Name="{Binding Name}" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- Members in this role -->
+                                    <TextBlock Text="Members in Role" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                                    <ItemsControl ItemsSource="{Binding SelectedRoleMembers}" MaxHeight="120">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="x:String">
+                                                <TextBlock Text="{Binding}" FontSize="12" Margin="2,1" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <Button Content="Save Role" Command="{Binding SaveRoleCommand}"
+                                            IsVisible="{Binding CanEditRoleProps}"
+                                            HorizontalAlignment="Right"
+                                            AutomationProperties.Name="Save role" />
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Grid>
+                    </TabItem>
+
+                </TabControl>
+            </TabItem>
+
+            <!-- ══ Notices ══ -->
+            <TabItem Header="Notices" IsVisible="{Binding IsMember}"
+                     AutomationProperties.Name="Notices tab">
+                <Grid ColumnDefinitions="220,6,*" Margin="8">
+
+                    <!-- Notice list -->
+                    <DockPanel Grid.Column="0">
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4" Spacing="4">
+                            <Button Content="New Notice" Command="{Binding BeginNewNoticeCommand}"
+                                    IsVisible="{Binding CanSendNotices}"
+                                    AutomationProperties.Name="New notice" />
+                            <Button Content="Refresh" Command="{Binding RefreshNoticesCommand}"
+                                    AutomationProperties.Name="Refresh notices" />
+                        </StackPanel>
+                        <ListBox ItemsSource="{Binding Notices}"
+                                 SelectedItem="{Binding SelectedNotice}"
+                                 AutomationProperties.Name="Notice list">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:GroupNoticeEntry">
+                                    <StackPanel Margin="2">
+                                        <TextBlock Text="{Binding Subject}" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   AutomationProperties.Name="{Binding Subject}" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6" Opacity="0.6">
+                                            <TextBlock Text="{Binding FromName}" FontSize="10" />
+                                            <TextBlock Text="{Binding Date}" FontSize="10" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+
+                    <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" />
+
+                    <!-- Notice detail / new notice form -->
+                    <ScrollViewer Grid.Column="2" HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto" Padding="4,0,0,0">
+                        <StackPanel Spacing="8">
+
+                            <!-- New notice form -->
+                            <StackPanel IsVisible="{Binding ShowNewNoticeForm}" Spacing="6">
+                                <TextBlock Text="New Notice" FontWeight="SemiBold" FontSize="14" />
+                                <TextBlock Text="Subject" FontSize="11" Opacity="0.6" />
+                                <TextBox Text="{Binding NewNoticeSubject}" Watermark="Subject…"
+                                         AutomationProperties.Name="Notice subject" />
+                                <TextBlock Text="Message" FontSize="11" Opacity="0.6" />
+                                <TextBox Text="{Binding NewNoticeBody}"
+                                         AcceptsReturn="True" MinHeight="120" MaxHeight="240"
+                                         TextWrapping="Wrap"
+                                         AutomationProperties.Name="Notice body" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Button Content="Send" Command="{Binding SendNoticeCommand}"
+                                            AutomationProperties.Name="Send notice" />
+                                    <Button Content="Cancel" Command="{Binding CancelNewNoticeCommand}"
+                                            AutomationProperties.Name="Cancel notice" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!-- Notice body viewer -->
+                            <StackPanel IsVisible="{Binding !ShowNewNoticeForm}" Spacing="6">
+                                <TextBlock Text="Loading notice…" FontStyle="Italic" Opacity="0.6"
+                                           IsVisible="{Binding IsNoticeBodyLoading}" />
+                                <TextBlock Text="{Binding SelectedNoticeBody}" TextWrapping="Wrap"
+                                           IsVisible="{Binding SelectedNoticeBody, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                           AutomationProperties.Name="Notice body" />
+
+                                <!-- Attachment bar -->
+                                <Border Background="#14FFFFFF" CornerRadius="4" Padding="8"
+                                        IsVisible="{Binding HasNoticeAttachment}"
+                                        AutomationProperties.Name="Notice attachment">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="{Binding NoticeAttachmentName}" FontSize="12"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   AutomationProperties.Name="Attachment name" />
+                                        <Button Content="Save to Inventory" Command="{Binding AcceptNoticeAttachmentCommand}"
+                                                AutomationProperties.Name="Save attachment" />
+                                    </StackPanel>
+                                </Border>
+
+                                <TextBlock Text="Select a notice to read it." Opacity="0.4" FontStyle="Italic"
+                                           IsVisible="{Binding SelectedNotice, Converter={x:Static ObjectConverters.IsNull}}" />
+                            </StackPanel>
+
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </TabItem>
+
+            <!-- ══ Banned ══ -->
+            <TabItem Header="Banned" IsVisible="{Binding IsMember}"
+                     AutomationProperties.Name="Banned members tab">
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6" Spacing="4">
+                        <Button Content="Refresh" Command="{Binding RefreshBanListCommand}"
+                                AutomationProperties.Name="Refresh ban list" />
+                    </StackPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="No banned members." Opacity="0.6" FontStyle="Italic"
+                               IsVisible="{Binding !BannedMembers.Count}" Margin="0,4" />
+                    <ListBox ItemsSource="{Binding BannedMembers}"
+                             SelectedItem="{Binding SelectedBanEntry}"
+                             AutomationProperties.Name="Banned members list">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:GroupBanEntry">
+                                <Grid ColumnDefinitions="*,80,Auto" Margin="0,2">
+                                    <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center"
+                                               AutomationProperties.Name="{Binding Name}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding BanDate}" FontSize="11" Opacity="0.6"
+                                               VerticalAlignment="Center" />
+                                    <Button Grid.Column="2" Content="Unban"
+                                            Command="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).UnbanMemberCommand}"
+                                            CommandParameter="{Binding}"
+                                            MinWidth="52"
+                                            AutomationProperties.Name="Unban member" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
+
+        </TabControl>
+    </Grid>
+
+</UserControl>

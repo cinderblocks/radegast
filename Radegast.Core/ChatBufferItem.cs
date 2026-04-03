@@ -41,15 +41,15 @@ namespace Radegast
 
         public DateTime Timestamp { get; set; }
 
-        public string From { get; set; }
+        public string? From { get; set; }
 
         public UUID ID { get; set; }
 
-        public string Text { get; set; }
+        public string? Text { get; set; }
 
         public ChatBufferTextStyle Style { get; set; }
 
-        public ChatEventArgs RawMessage { get; set; }
+        public ChatEventArgs? RawMessage { get; set; }
     }
 
     public enum ChatBufferTextStyle

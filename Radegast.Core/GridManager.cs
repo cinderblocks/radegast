@@ -29,17 +29,17 @@ namespace Radegast
 {
     public class Grid
     {
-        public string ID = string.Empty;
-        public string Name = string.Empty;
-        public string Platform = string.Empty;
-        public string LoginURI = string.Empty;
-        public string LoginPage = string.Empty;
-        public string HelperURI = string.Empty;
-        public string Website = string.Empty;
-        public string Support = string.Empty;
-        public string Register = string.Empty;
-        public string PasswordURL = string.Empty;
-        public string Version = "1";
+        public string ID { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Platform { get; set; } = string.Empty;
+        public string LoginURI { get; set; } = string.Empty;
+        public string LoginPage { get; set; } = string.Empty;
+        public string HelperURI { get; set; } = string.Empty;
+        public string Website { get; set; } = string.Empty;
+        public string Support { get; set; } = string.Empty;
+        public string Register { get; set; } = string.Empty;
+        public string PasswordURL { get; set; } = string.Empty;
+        public string Version { get; set; } = "1";
 
         public Grid() { }
 
@@ -55,7 +55,7 @@ namespace Radegast
             return Name;
         }
 
-        public static Grid FromOSD(OSD data)
+        public static Grid? FromOSD(OSD data)
         {
             if (data == null || data.Type != OSDType.Map) return null;
             Grid grid = new Grid();
@@ -102,7 +102,8 @@ namespace Radegast
                 OSDArray sysGrids = (OSDArray)OSDParser.DeserializeLLSDXml(File.ReadAllText(sysGridsFile));
                 foreach (var grid in sysGrids)
                 {
-                    RegisterGrid(Grid.FromOSD(grid));
+                    var g = Grid.FromOSD(grid);
+                    if (g != null) RegisterGrid(g);
                 }
             }
             catch (Exception ex)

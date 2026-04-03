@@ -1,0 +1,115 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:views="using:Radegast.Veles.Views"
+             x:Class="Radegast.Veles.Views.ItemMetadataPanel"
+             x:DataType="vm:ItemMetadataViewModel"
+             AutomationProperties.Name="Item properties panel">
+    <Expander IsExpanded="False" Padding="4,2">
+        <Expander.Header>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="{Binding TypeIcon}" FontSize="16" VerticalAlignment="Center"
+                           AutomationProperties.Name="Item type icon" />
+                <TextBlock Text="Properties" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <Border Background="#FF0078D7" CornerRadius="3" Padding="4,1"
+                        IsVisible="{Binding IsLink}"
+                        AutomationProperties.Name="Link indicator">
+                    <TextBlock Text="&#x1F517; Link" Foreground="White" FontSize="11" />
+                </Border>
+                <Border Background="#FF107C10" CornerRadius="3" Padding="4,1"
+                        IsVisible="{Binding IsWorn}"
+                        AutomationProperties.Name="Worn indicator">
+                    <StackPanel Orientation="Horizontal" Spacing="3">
+                        <TextBlock Text="&#x1F4CC;" Foreground="White" FontSize="11" />
+                        <TextBlock Text="{Binding WornSlotText}" Foreground="White" FontSize="11"
+                                   AutomationProperties.Name="Worn slot" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </Expander.Header>
+
+        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto"
+              Margin="4,4,4,4" HorizontalAlignment="Stretch">
+
+            <!-- Creator (clickable) -->
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Creator:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <Button Grid.Row="0" Grid.Column="1"
+                    Padding="0" BorderThickness="0" Background="Transparent" Cursor="Hand"
+                    Command="{Binding OpenCreatorProfileCommand}"
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    AutomationProperties.Name="Open creator profile">
+                <TextBlock Text="{Binding CreatorName}" TextDecorations="Underline" />
+            </Button>
+
+            <!-- Worn / attached slot (hidden when not worn) -->
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Worn:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center"
+                       IsVisible="{Binding IsWorn}" />
+            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding WornSlotText}"
+                       VerticalAlignment="Center" IsVisible="{Binding IsWorn}"
+                       AutomationProperties.Name="Worn slot text" />
+
+            <!-- Created -->
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Created:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding CreationDateText}"
+                       VerticalAlignment="Center" AutomationProperties.Name="Creation date" />
+
+            <!-- Permissions -->
+            <TextBlock Grid.Row="3" Grid.Column="0" Text="Owner:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <views:PermissionBadgesControl Grid.Row="3" Grid.Column="1"
+                       NoModify="{Binding OwnerNoModify}"
+                       NoCopy="{Binding OwnerNoCopy}"
+                       NoTransfer="{Binding OwnerNoTransfer}"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Owner permissions" />
+
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Next:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <views:PermissionBadgesControl Grid.Row="4" Grid.Column="1"
+                       NoModify="{Binding NextNoModify}"
+                       NoCopy="{Binding NextNoCopy}"
+                       NoTransfer="{Binding NextNoTransfer}"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Next owner permissions" />
+
+            <TextBlock Grid.Row="5" Grid.Column="0" Text="Everyone:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <views:PermissionBadgesControl Grid.Row="5" Grid.Column="1"
+                       NoModify="{Binding EveryoneNoModify}"
+                       NoCopy="{Binding EveryoneNoCopy}"
+                       NoTransfer="{Binding EveryoneNoTransfer}"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Everyone permissions" />
+
+            <!-- UUIDs -->
+            <TextBlock Grid.Row="6" Grid.Column="0" Text="Item ID:" FontWeight="SemiBold"
+                       Margin="0,0,8,3" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding ItemIdText}"
+                       FontSize="11" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                       VerticalAlignment="Center" AutomationProperties.Name="Item UUID">
+                <ToolTip.Tip>
+                    <TextBlock Text="{Binding ItemIdText}" />
+                </ToolTip.Tip>
+            </TextBlock>
+
+            <TextBlock Grid.Row="7" Grid.Column="0" Text="Asset ID:" FontWeight="SemiBold"
+                       Margin="0,0,8,0" VerticalAlignment="Center" />
+            <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding AssetIdText}"
+                       FontSize="11" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                       VerticalAlignment="Center" AutomationProperties.Name="Asset UUID">
+                <ToolTip.Tip>
+                    <TextBlock Text="{Binding AssetIdText}" />
+                </ToolTip.Tip>
+            </TextBlock>
+
+        </Grid>
+    </Expander>
+</UserControl>

@@ -42,9 +42,9 @@ namespace Radegast.Media
 
         /// Queue of sound commands
         ///
-        protected static Queue<SoundDelegate> queue;
-        protected static MediaManager manager;
-        protected static Dictionary<UUID,BufferSound> allBuffers;
+        protected static Queue<SoundDelegate> queue = null!;
+        protected static MediaManager manager = null!;
+        protected static Dictionary<UUID,BufferSound> allBuffers = null!;
 
 
         // A SOUND represents the data (buffer or stream)
@@ -57,7 +57,7 @@ namespace Radegast.Media
 
         // Additional info for callbacks goes here.
         protected CREATESOUNDEXINFO extraInfo;
-        protected static CHANNELCONTROL_CALLBACK endCallback;
+        protected static CHANNELCONTROL_CALLBACK endCallback = null!;
 
         // Vectors used for orienting spatial axes.
         protected static VECTOR UpVector;
@@ -196,8 +196,8 @@ namespace Radegast.Media
             return v;
         }
 
-        protected static Dictionary<IntPtr,MediaObject> allSounds;
-        protected static Dictionary<IntPtr, MediaObject> allChannels;
+        protected static Dictionary<IntPtr,MediaObject> allSounds = null!;
+        protected static Dictionary<IntPtr, MediaObject> allChannels = null!;
         protected void RegisterSound(Sound sound)
         {
             IntPtr raw = sound.handle;

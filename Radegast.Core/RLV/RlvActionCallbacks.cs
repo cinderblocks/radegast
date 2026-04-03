@@ -48,7 +48,7 @@ namespace Radegast.Core.RLV
         {
             foreach (var item in itemsToAttach)
             {
-                if (!instance.Client.Inventory.Store.TryGetValue(new UUID(item.ItemId), out var foundItem))
+                if (!instance.Client.Inventory.Store!.TryGetValue(new UUID(item.ItemId), out var foundItem))
                 {
                     continue;
                 }
@@ -114,7 +114,7 @@ namespace Radegast.Core.RLV
             return Task.CompletedTask;
         }
 
-        public async Task SetGroupAsync(Guid groupId, string roleName, CancellationToken cancellationToken)
+        public async Task SetGroupAsync(Guid groupId, string? roleName, CancellationToken cancellationToken)
         {
             if (groupId == Guid.Empty)
             {
@@ -129,7 +129,7 @@ namespace Radegast.Core.RLV
             UUID? roleId = null;
             if (!string.IsNullOrEmpty(roleName))
             {
-                var (roleIdValid, roleIdTemp) = await TryGetGroupRoleId(group.ID, roleName);
+                var (roleIdValid, roleIdTemp) = await TryGetGroupRoleId(group.ID, roleName!);
                 if (roleIdValid)
                 {
                     roleId = roleIdTemp;
@@ -143,7 +143,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        public async Task SetGroupAsync(string groupName, string roleName, CancellationToken cancellationToken)
+        public async Task SetGroupAsync(string groupName, string? roleName, CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(groupName))
             {
@@ -161,7 +161,7 @@ namespace Radegast.Core.RLV
             UUID? roleId = null;
             if (!string.IsNullOrEmpty(roleName))
             {
-                var (roleIdValid, roleIdTemp) = await TryGetGroupRoleId(group.ID, roleName);
+                var (roleIdValid, roleIdTemp) = await TryGetGroupRoleId(group.ID, roleName!);
                 if (roleIdValid)
                 {
                     roleId = roleIdTemp;
@@ -195,7 +195,7 @@ namespace Radegast.Core.RLV
             return Task.CompletedTask;
         }
 
-        public Task TpToAsync(float x, float y, float z, string regionName, float? lookat, CancellationToken cancellationToken)
+        public Task TpToAsync(float x, float y, float z, string? regionName, float? lookat, CancellationToken cancellationToken)
         {
             var vecLookAt = Vector3.UnitY;
 
@@ -213,7 +213,7 @@ namespace Radegast.Core.RLV
             }
             else
             {
-                _ = instance.Client.Self.Teleport(regionName, new Vector3(x, y, z), vecLookAt);
+                _ = instance.Client.Self.Teleport(regionName!, new Vector3(x, y, z), vecLookAt);
             }
 
             return Task.CompletedTask;
@@ -231,7 +231,7 @@ namespace Radegast.Core.RLV
 
             foreach (var itemId in itemIds)
             {
-                if (!instance.Client.Inventory.Store.TryGetValue(new UUID(itemId), out var foundItem))
+                if (!instance.Client.Inventory.Store!.TryGetValue(new UUID(itemId), out var foundItem))
                 {
                     using (var cts = new CancellationTokenSource())
                     {

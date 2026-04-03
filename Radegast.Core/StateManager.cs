@@ -32,8 +32,8 @@ namespace Radegast
 {
     public class KnownHeading
     {
-        public string ID { get; set; }
-        public string Name { get; set; }
+        public string ID { get; set; } = null!;
+        public string Name { get; set; } = null!;
         public Quaternion Heading { get; set; }
         // Precomputed heading in degrees (0..359)
         public int Degrees { get; private set; }
@@ -64,7 +64,7 @@ namespace Radegast
 
     public class StateManager : IDisposable
     {
-        public Parcel Parcel { get; set; }
+        public Parcel Parcel { get; set; } = null!;
 
         private readonly RadegastInstance instance;
         private GridClient Client => instance.Client;
@@ -79,7 +79,7 @@ namespace Radegast
         private bool displayEndWalk = false;
 
         internal static readonly ThreadLocal<Random> rnd = new ThreadLocal<Random>(() => new Random());
-        private Timer lookAtTimer;
+        private Timer? lookAtTimer;
 
         private readonly UUID teleportEffect = UUID.Random();
 
@@ -94,14 +94,14 @@ namespace Radegast
         /// <summary>
         /// Fires when we start or stop walking towards a target
         /// </summary>
-        public event WalkStateChanged OnWalkStateChanged;
+        public event WalkStateChanged? OnWalkStateChanged;
 
         /// <summary>
         /// Fires when avatar stands
         /// </summary>
-        public event EventHandler<SitEventArgs> SitStateChanged;
+        public event EventHandler<SitEventArgs>? SitStateChanged;
 
-        private static ImmutableList<KnownHeading> m_Headings;
+        private static ImmutableList<KnownHeading>? m_Headings;
         public static ImmutableList<KnownHeading> KnownHeadings => m_Headings ?? (m_Headings = ImmutableList.Create<KnownHeading>(
             new KnownHeading("E", "East", new Quaternion(0.00000f, 0.00000f, 0.00000f, 1.00000f)),
             new KnownHeading("ENE", "East by Northeast", new Quaternion(0.00000f, 0.00000f, 0.19509f, 0.98079f)),
@@ -173,7 +173,7 @@ namespace Radegast
             return ret;
         }
 
-        public ImmutableDictionary<UUID, string> KnownAnimations;
+        public ImmutableDictionary<UUID, string> KnownAnimations = null!;
         public bool CameraTracksOwnAvatar = true;
         public Vector3 DefaultCameraOffset = new Vector3(-5, 0, 0);
 
@@ -248,7 +248,7 @@ namespace Radegast
 
                     // Dispose timers and helpers
                     try { beamTimer?.Dispose(); } catch { }
-                    beamTimer = null;
+                    beamTimer = null!;
 
                     try { lookAtTimer?.Dispose(); } catch { }
                     lookAtTimer = null;
@@ -259,13 +259,13 @@ namespace Radegast
                     if (AutoSit != null)
                     {
                         try { AutoSit.Dispose(); } catch { }
-                        AutoSit = null;
+                        AutoSit = null!;
                     }
 
                     if (LSLHelper != null)
                     {
                         try { LSLHelper.Dispose(); } catch { }
-                        LSLHelper = null;
+                        LSLHelper = null!;
                     }
                 }
                 catch (Exception ex)
@@ -315,7 +315,7 @@ namespace Radegast
                 }
             }
             catch { }
-            return Client.Network.CurrentSim;
+            return Client.Network.CurrentSim!;
         }
 
         /// <summary>
@@ -351,7 +351,7 @@ namespace Radegast
                 }
             }
             catch { }
-            return Client.Network.CurrentSim;
+            return Client.Network.CurrentSim!;
         }
 
         /// <summary>
@@ -376,7 +376,7 @@ namespace Radegast
                 }
             }
             catch { }
-            return Client.Network.CurrentSim;
+            return Client.Network.CurrentSim!;
         }
 
         private void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
@@ -408,7 +408,7 @@ namespace Radegast
             if (!TryFindAvatar(person, out var sim, out position)) { return false; }
             // same sim?
             if (sim == Client.Network.CurrentSim) { return true; }
-            position = PositionHelper.ToLocalPosition(sim.Handle, position);
+            position = PositionHelper.ToLocalPosition(sim!.Handle, position);
             return true;
         }
 
@@ -419,14 +419,14 @@ namespace Radegast
         /// <param name="sim">Simulator avatar is in</param>
         /// <param name="position">Position within sim</param>
         /// <returns>True if managed to find the avatar</returns>
-        public bool TryFindAvatar(UUID person, out Simulator sim, out Vector3 position)
+        public bool TryFindAvatar(UUID person, out Simulator? sim, out Vector3 position)
         {
             return TryFindPrim(person, out sim, out position, true);
         }
 
-        public bool TryFindPrim(UUID person, out Simulator sim, out Vector3 position, bool onlyAvatars)
+        public bool TryFindPrim(UUID person, out Simulator? sim, out Vector3 position, bool onlyAvatars)
         {
-            Simulator[] Simulators = null;
+            Simulator[]? Simulators = null;
             lock (Client.Network.Simulators)
             {
                 Simulators = Client.Network.Simulators.ToArray();
@@ -434,7 +434,7 @@ namespace Radegast
             sim = null;
             position = Vector3.Zero;
 
-            Primitive avi = null;
+            Primitive? avi = null;
             // First try the object tracker
             foreach (var s in Simulators)
             {
@@ -467,7 +467,7 @@ namespace Radegast
                 }
                 else
                 {
-                    if (sim.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seat))
+                    if (sim!.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seat))
                     {
                         position = seat.Position + avi.Position * seat.Rotation;
                     }
@@ -491,13 +491,13 @@ namespace Radegast
 
         public bool TryLocatePrim(Primitive avi, out Simulator sim, out Vector3 position)
         {
-            Simulator[] Simulators = null;
+            Simulator[]? Simulators = null;
             lock (Client.Network.Simulators)
             {
                 Simulators = Client.Network.Simulators.ToArray();
             }
 
-            sim = Client.Network.CurrentSim;
+            sim = Client.Network.CurrentSim!;
             position = Vector3.Zero;
             {
                 foreach (var s in Simulators)
@@ -533,7 +533,7 @@ namespace Radegast
         /// <param name="useTP">Move using teleport</param>
         public void MoveTo(Vector3 target, bool useTP)
         {
-            MoveTo(Client.Network.CurrentSim, target, useTP);
+            MoveTo(Client.Network.CurrentSim!, target, useTP);
         }
 
         /// <summary>
@@ -646,8 +646,8 @@ namespace Radegast
             if (!IsFollowing) { return; }
 
             // Locate the avatar object by local ID across known simulators
-            Avatar foundAv = null;
-            Simulator foundSim = null;
+            Avatar? foundAv = null;
+            Simulator? foundSim = null;
             try
             {
                 lock (Client.Network.Simulators)
@@ -675,11 +675,11 @@ namespace Radegast
             // If this is the avatar we're following, compute its position and update follow
             if (foundAv.ID == followID)
             {
-                var pos = AvatarPosition(foundSim, foundAv);
+                var pos = AvatarPosition(foundSim!, foundAv);
                 // Convert to current sim local coordinates if avatar is on another simulator
                 if (foundSim != Client.Network.CurrentSim)
                 {
-                    try { pos = PositionHelper.ToLocalPosition(foundSim.Handle, pos); } catch { }
+                    try { pos = PositionHelper.ToLocalPosition(foundSim!.Handle, pos); } catch { }
                 }
 
                 FollowUpdate(pos);
@@ -692,7 +692,7 @@ namespace Radegast
             {
                 Vector3 target = pos + Vector3.Normalize(Client.Self.SimPosition - pos) * (FollowDistance - 1f);
                 Client.Self.AutoPilotCancel();
-                Vector3d glb = GlobalPosition(Client.Network.CurrentSim, target);
+                Vector3d glb = GlobalPosition(Client.Network.CurrentSim!, target);
                 Client.Self.AutoPilot(glb.X, glb.Y, glb.Z);
             }
             else
@@ -763,7 +763,7 @@ namespace Radegast
         /// </summary>
         public Vector3d GlobalPosition(Primitive prim)
         {
-            return PositionHelper.GlobalPosition(prim, Client.Network.CurrentSim);
+            return PositionHelper.GlobalPosition(prim, Client.Network.CurrentSim!);
         }
 
         public Vector3 AvatarPosition(Simulator sim, Avatar av)
@@ -852,7 +852,7 @@ namespace Radegast
 
         #region Walking (move to)
 
-        private Timer walkTimer;
+        private Timer? walkTimer;
         private readonly int walkChekInterval = 500;
         private Vector3d walkToTarget;
         private int lastDistance = 0;
@@ -1093,15 +1093,15 @@ namespace Radegast
             }
         }
 
-        private System.Timers.Timer beamTimer;
-        private List<Vector3d> beamTarget;
+        private System.Timers.Timer beamTimer = null!;
+        private List<Vector3d>? beamTarget;
         private readonly ThreadLocal<Random> beamRandom = new ThreadLocal<Random>(() => new Random());
         private UUID pointID;
         private UUID sphereID;
-        private List<UUID> beamID;
+        private List<UUID>? beamID;
         private int numBeams;
         private readonly Color4[] beamColors = new Color4[] { new Color4(0, 255, 0, 255), new Color4(255, 0, 0, 255), new Color4(0, 0, 255, 255) };
-        private Primitive targetPrim;
+        private Primitive targetPrim = null!;
 
         public void UnSetPointing()
         {
@@ -1241,8 +1241,8 @@ namespace Radegast
         public string FollowName { get; set; } = string.Empty;
         public float FollowDistance { get; set; } = 3.0f;
         public bool IsWalking { get; private set; } = false;
-        public AutoSit AutoSit { get; private set; }
-        public LSLHelper LSLHelper { get; private set; }
+        public AutoSit AutoSit { get; private set; } = null!;
+        public LSLHelper LSLHelper { get; private set; } = null!;
         public PseudoHome PseudoHome { get; }
 
         /// <summary>

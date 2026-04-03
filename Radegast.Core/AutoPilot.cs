@@ -29,14 +29,14 @@ namespace Radegast
     {
         private readonly GridClient Client;
         private readonly List<Vector3> Waypoints = new List<Vector3>();
-        private CancellationTokenSource tickerCts;
-        private Task tickerTask;
+        private CancellationTokenSource? tickerCts;
+        private Task? tickerTask;
 
         private Vector3 AgentPosition;
         private int nwp = 0;
 
         // Cancellation source for the delayed AutoPilotLocal invocation
-        private CancellationTokenSource moveDelayCts;
+        private CancellationTokenSource? moveDelayCts;
 
         private int NextWaypoint
         {

@@ -59,7 +59,7 @@ namespace Radegast
         /// <summary>
         /// Try parse two names from a string (like "First Last")
         /// </summary>
-        public static bool TryParseTwoNames(string input, out string first, out string last)
+        public static bool TryParseTwoNames(string input, out string? first, out string? last)
         {
             first = null;
             last = null;
@@ -100,7 +100,7 @@ namespace Radegast
         /// <summary>
         /// Format a nullable integer as a string, or return null
         /// </summary>
-        public static string FormatNullableInt(int? value)
+        public static string? FormatNullableInt(int? value)
         {
             return value?.ToString();
         }

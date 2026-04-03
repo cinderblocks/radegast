@@ -45,7 +45,7 @@ namespace Radegast
 
         public async Task GetFoldersAsync(string folder, CancellationToken cancellationToken = default)
         {
-            var f = FindFolder(folder, Client.Inventory.Store.LibraryRootNode);
+            var f = FindFolder(folder, Client.Inventory.Store!.LibraryRootNode);
             if (f == null) return;
 
             UUID dest = Client.Inventory.FindFolderForType(AssetType.Clothing);
@@ -138,7 +138,7 @@ namespace Radegast
                     var names = batch.Select(it => it.Name).ToList();
 
                     bool batchSuccess = false;
-                    Exception lastEx = null;
+                    Exception? lastEx = null;
 
                     for (int attempt = 0; attempt <= COPY_BATCH_RETRIES; attempt++)
                     {
@@ -207,9 +207,9 @@ namespace Radegast
             }
         }
 
-        public InventoryNode FindFolder(string folder, InventoryNode start)
+        public InventoryNode? FindFolder(string folder, InventoryNode start)
         {
-            if (start.Data.Name == folder)
+            if (start.Data?.Name == folder)
             {
                 return start;
             }

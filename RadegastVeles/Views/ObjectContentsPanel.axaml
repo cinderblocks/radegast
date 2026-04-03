@@ -1,0 +1,109 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:views="using:Radegast.Veles.Views"
+             x:Class="Radegast.Veles.Views.ObjectContentsPanel"
+             x:DataType="vm:ObjectContentsViewModel"
+             MinWidth="340" MinHeight="280"
+             AutomationProperties.Name="Object task inventory panel">
+
+    <DockPanel>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="4,3">
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="&#x1F4E6;" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="14" />
+                <TextBlock Text="{Binding ObjectName}" FontWeight="SemiBold" VerticalAlignment="Center"
+                           Margin="0,0,12,0" AutomationProperties.Name="Object name" />
+                <Button Content="&#x1F4CB; Copy to Inventory"
+                        Command="{Binding CopyToInventoryCommand}"
+                        IsEnabled="{Binding CanCopySelected}"
+                        Margin="0,0,4,0" MinWidth="140"
+                        AutomationProperties.Name="Copy selected item to inventory" />
+                <Button Content="&#x1F4C2; Open"
+                        Command="{Binding OpenItemCommand}"
+                        IsEnabled="{Binding CanOpenSelected}"
+                        IsVisible="{Binding CanOpenSelected}"
+                        Margin="0,0,4,0" MinWidth="72"
+                        AutomationProperties.Name="Open selected item" />
+                <Button Content="&#x1F5D1; Delete"
+                        Command="{Binding DeleteItemCommand}"
+                        IsEnabled="{Binding CanDeleteSelected}"
+                        Margin="0,0,4,0" MinWidth="76"
+                        AutomationProperties.Name="Delete selected item from object" />
+                <Button Content="&#x1F504; Refresh"
+                        Command="{Binding RefreshCommand}"
+                        Margin="0,0,4,0" MinWidth="76"
+                        AutomationProperties.Name="Refresh contents" />
+            </WrapPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4,2"
+                   VerticalAlignment="Center" AutomationProperties.Name="Status" />
+
+        <!-- Loading indicator -->
+        <TextBlock DockPanel.Dock="Top" Text="Loading contents…" FontStyle="Italic" Opacity="0.6"
+                   IsVisible="{Binding IsLoading}" Margin="8,4"
+                   AutomationProperties.Name="Loading indicator" />
+
+        <!-- Item list -->
+        <ListBox x:Name="ItemList"
+                 ItemsSource="{Binding Items}"
+                 SelectedItem="{Binding SelectedItem}"
+                 IsVisible="{Binding !IsLoading}"
+                 DragDrop.AllowDrop="True"
+                 AutomationProperties.Name="Object contents list">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ObjectContentItem">
+                    <Grid ColumnDefinitions="28,*,Auto" Margin="2,2">
+
+                        <!-- Type icon -->
+                        <TextBlock Grid.Column="0" Text="{Binding TypeIcon}" FontSize="16"
+                                   VerticalAlignment="Center" HorizontalAlignment="Center"
+                                   AutomationProperties.Name="{Binding TypeName}" />
+
+                        <!-- Name + type -->
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                            <TextBlock Text="{Binding Name}" TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       AutomationProperties.Name="{Binding Name}" />
+                            <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6"
+                                       AutomationProperties.Name="Item type" />
+                        </StackPanel>
+
+                        <!-- Permission badges -->
+                        <views:PermissionBadgesControl Grid.Column="2"
+                                     NoModify="{Binding NoModify}"
+                                     NoCopy="{Binding NoCopy}"
+                                     NoTransfer="{Binding NoTransfer}"
+                                     VerticalAlignment="Center"
+                                     AutomationProperties.Name="Item permissions" />
+
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+            <ListBox.ContextMenu>
+                <ContextMenu>
+                    <MenuItem Header="&#x1F4CB; Copy to Inventory"
+                              Command="{Binding CopyToInventoryCommand}"
+                              AutomationProperties.Name="Copy to inventory" />
+                    <MenuItem Header="&#x1F4C2; Open / Edit"
+                              Command="{Binding OpenItemCommand}"
+                              AutomationProperties.Name="Open item" />
+                    <Separator />
+                    <MenuItem Header="&#x1F5D1; Delete from Object"
+                              Command="{Binding DeleteItemCommand}"
+                              AutomationProperties.Name="Delete from object" />
+                </ContextMenu>
+            </ListBox.ContextMenu>
+        </ListBox>
+
+    </DockPanel>
+</UserControl>
+

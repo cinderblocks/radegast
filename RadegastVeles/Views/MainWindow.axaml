@@ -1,0 +1,375 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        xmlns:views="using:Radegast.Veles.Views"
+        x:Class="Radegast.Veles.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="{Binding Title}"
+        Width="1024" Height="768"
+        AutomationProperties.Name="Radegast Veles main window">
+
+    <DockPanel>
+        <!-- Menu bar -->
+        <Menu DockPanel.Dock="Top" AutomationProperties.Name="Main menu">
+            <MenuItem Header="_File" AutomationProperties.Name="File menu">
+                <MenuItem Header="_Preferences" AutomationProperties.Name="Preferences"
+                          Click="OnPreferencesClick" />
+                <Separator />
+                <MenuItem Header="_Logout" AutomationProperties.Name="Logout agent"
+                          Click="OnLogoutClick" />
+                <MenuItem Header="_Hide Window" AutomationProperties.Name="Hide window"
+                          Click="OnHideClick" />
+                <Separator />
+                <MenuItem Header="E_xit" AutomationProperties.Name="Exit application"
+                          Click="OnExitClick" />
+            </MenuItem>
+            <MenuItem Header="_World" AutomationProperties.Name="World menu">
+                <MenuItem Header="_My Profile" AutomationProperties.Name="Open my profile"
+                          Click="OnShowMyProfileClick" />
+                <MenuItem Header="_My 3D Avatar" AutomationProperties.Name="View my avatar in 3D"
+                          Click="OnShowMyAvatarViewerClick" />
+                <MenuItem Header="_Search" AutomationProperties.Name="Open search"
+                          Click="OnShowSearchClick" />
+                <Separator />
+                <MenuItem Header="_Nearby" AutomationProperties.Name="Show nearby tab"
+                          Click="OnShowNearbyClick" />
+                <MenuItem Header="_IMs" AutomationProperties.Name="Show IMs tab"
+                          Click="OnShowIMClick" />
+                <MenuItem Header="_Map" AutomationProperties.Name="Show map tab"
+                          Click="OnShowMapClick" />
+                <MenuItem Header="_Objects" AutomationProperties.Name="Show objects tab"
+                          Click="OnShowObjectsClick" />
+                <MenuItem Header="_Inventory" AutomationProperties.Name="Show inventory tab"
+                          Click="OnShowInventoryClick" />
+                <MenuItem Header="_Friends" AutomationProperties.Name="Show friends tab"
+                          Click="OnShowFriendsClick" />
+                <MenuItem Header="_Groups" AutomationProperties.Name="Show groups tab"
+                          Click="OnShowGroupsClick" />
+                <MenuItem Header="_Media" AutomationProperties.Name="Show media tab"
+                          Click="OnShowMediaClick" />
+                <Separator />
+                <MenuItem Header="_Mute List" AutomationProperties.Name="Show mute list"
+                          Click="OnShowMuteListClick" />
+                <Separator />
+                <MenuItem Header="_Land Info" AutomationProperties.Name="Show land info"
+                          Click="OnShowLandInfoClick" />
+                <MenuItem Header="_Land Holdings" AutomationProperties.Name="Show land holdings"
+                          Click="OnShowLandHoldingsClick" />
+                <MenuItem Header="_Region Info" AutomationProperties.Name="Show region info"
+                          Click="OnShowEstateInfoClick" />
+                <Separator />
+                <MenuItem Header="_HUD Viewer" AutomationProperties.Name="Open HUD viewer"
+                          Click="OnShowHudViewerClick" />
+            </MenuItem>
+            <MenuItem Header="_Create" AutomationProperties.Name="Create menu">
+                <MenuItem Header="Upload _Image..." AutomationProperties.Name="Upload image"
+                          Click="OnUploadImageClick" />
+                <MenuItem Header="Upload _Mesh..." AutomationProperties.Name="Upload mesh"
+                          Click="OnUploadMeshClick" />
+                <MenuItem Header="Upload _Sound..." AutomationProperties.Name="Upload sound"
+                          Click="OnUploadSoundClick" />
+                <MenuItem Header="Upload _Animation..." AutomationProperties.Name="Upload animation"
+                          Click="OnUploadAnimationClick" />
+            </MenuItem>
+            <MenuItem Header="_Help" AutomationProperties.Name="Help menu">
+                <MenuItem Header="_Log Viewer" AutomationProperties.Name="Open log viewer"
+                          Click="OnLogViewerClick" />
+                <Separator />
+                <MenuItem Header="_Website" AutomationProperties.Name="Open project website"
+                          Click="OnWebsiteClick" />
+                <MenuItem Header="_Issue Tracker" AutomationProperties.Name="Open issue tracker"
+                          Click="OnIssueTrackerClick" />
+                <Separator />
+                <MenuItem Header="_About Radegast Veles" AutomationProperties.Name="About Radegast Veles"
+                          Click="OnAboutClick" />
+            </MenuItem>
+        </Menu>
+
+        <!-- Status bar -->
+        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto,Auto" Margin="4,2" AutomationProperties.Name="Status bar">
+            <Grid.Styles>
+                <Style Selector="Button.locationLink">
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Cursor" Value="Hand" />
+                    <Setter Property="MinWidth" Value="0" />
+                    <Setter Property="MinHeight" Value="0" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                </Style>
+                <Style Selector="Button.locationLink:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+                <Style Selector="Button.locationLink TextBlock">
+                    <Setter Property="TextDecorations" Value="Underline" />
+                </Style>
+                <!-- PTT button: highlight while actively transmitting -->
+                <Style Selector="Button.active /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="{DynamicResource SystemAccentColor}" />
+                </Style>
+                <Style Selector="Button.active TextBlock">
+                    <Setter Property="Foreground" Value="White" />
+                </Style>
+            </Grid.Styles>
+
+            <TextBlock Grid.Column="0" Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Status message" />
+
+            <!-- Voice controls (always visible when voice hardware is available and enabled) -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                        Margin="0,0,8,0"
+                        IsVisible="{Binding Voice.IsVisibleInUI}"
+                        AutomationProperties.Name="Voice controls">
+                <!-- Speaking participants (compact icons, only when connected) -->
+                <ItemsControl ItemsSource="{Binding Voice.Participants}"
+                              IsVisible="{Binding Voice.IsConnected}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="2" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:VoiceParticipant">
+                            <TextBlock Text="{Binding SpeakingIcon}" FontSize="11" VerticalAlignment="Center"
+                                       IsVisible="{Binding IsSpeaking}"
+                                       ToolTip.Tip="{Binding Name}"
+                                       AutomationProperties.Name="{Binding Name, StringFormat='{}{0} is speaking'}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <!-- PTT button (only when connected and PTT mode on) -->
+                <Button x:Name="PttButton"
+                        IsVisible="{Binding Voice.PushToTalkButtonVisible}"
+                        Classes.active="{Binding Voice.IsPushToTalking}"
+                        MinHeight="20" Padding="6,1" FontSize="11"
+                        ToolTip.Tip="Hold to talk"
+                        AutomationProperties.Name="Push to talk"
+                        PointerPressed="OnPttPointerPressed"
+                        PointerReleased="OnPttPointerReleased">
+                    <StackPanel Orientation="Horizontal" Spacing="3">
+                        <TextBlock Text="🎤" />
+                        <TextBlock Text="Talk" />
+                    </StackPanel>
+                </Button>
+                <!-- Mic mute toggle (only when connected and PTT mode off) -->
+                <Button Content="{Binding Voice.MicIcon}"
+                        Command="{Binding Voice.ToggleMicCommand}"
+                        IsVisible="{Binding Voice.MicMuteButtonVisible}"
+                        MinWidth="24" MinHeight="20" Padding="2,0" FontSize="12"
+                        ToolTip.Tip="Toggle microphone mute"
+                        AutomationProperties.Name="Toggle microphone mute" />
+                <!-- Separator dot when connected -->
+                <TextBlock Text="·" VerticalAlignment="Center" Opacity="0.4"
+                           IsVisible="{Binding Voice.IsConnected}" />
+                <!-- Connect / disconnect -->
+                <Button Content="{Binding Voice.ConnectLabel}"
+                        Command="{Binding Voice.ToggleConnectCommand}"
+                        MinHeight="20" Padding="6,1" FontSize="11"
+                        AutomationProperties.Name="{Binding Voice.ConnectLabel}" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                        AutomationProperties.Name="Current location">
+                <TextBlock Text="{Binding BalanceText}" VerticalAlignment="Center" FontWeight="SemiBold"
+                           IsVisible="{Binding BalanceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           AutomationProperties.Name="L$ balance" />
+                <TextBlock Text="·" VerticalAlignment="Center" Opacity="0.4"
+                           IsVisible="{Binding BalanceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <Button Classes="locationLink"
+                        Command="{Binding Chat.ShowEstateProfileCommand}"
+                        IsVisible="{Binding Chat.HasRegionName}"
+                        AutomationProperties.Name="{Binding Chat.RegionName, StringFormat=Open region info for {0}}">
+                    <TextBlock Text="{Binding Chat.RegionName}" FontWeight="SemiBold" />
+                </Button>
+                <TextBlock Text="{Binding Chat.LocationCoords}" VerticalAlignment="Center" Opacity="0.7" />
+                <TextBlock Text="·" VerticalAlignment="Center" Opacity="0.4" IsVisible="{Binding Chat.HasParcelName}" />
+                <Button Classes="locationLink"
+                        Command="{Binding Chat.ShowParcelProfileCommand}"
+                        IsVisible="{Binding Chat.HasParcelName}"
+                        AutomationProperties.Name="{Binding Chat.ParcelName, StringFormat=Open parcel info for {0}}">
+                    <TextBlock Text="{Binding Chat.ParcelName}" />
+                </Button>
+                <Border Background="{Binding Chat.MaturityBrush}" CornerRadius="3" Padding="4,1"
+                        IsVisible="{Binding Chat.HasRegionName}" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Chat.MaturityText}" FontSize="10" Foreground="White" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <!-- Tabbed console area with overlaid script-dialog panel -->
+        <Grid>
+        <TabControl x:Name="MainTabControl" SelectedIndex="{Binding SelectedTabIndex}" AutomationProperties.Name="Console tabs">
+            <TabItem AutomationProperties.Name="{Binding Chat.UnreadTabLabel}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Nearby" VerticalAlignment="Center" />
+                        <TextBlock Text="●" Foreground="OrangeRed" FontSize="8"
+                                   VerticalAlignment="Center"
+                                   IsVisible="{Binding Chat.HasUnread}"
+                                   AutomationProperties.Name="" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockChatClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach chat panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Chat}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:NearbyViewModel">
+                            <views:ChatPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="{Binding IM.UnreadTabLabel}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="IMs" VerticalAlignment="Center" />
+                        <TextBlock Text="●" Foreground="OrangeRed" FontSize="8"
+                                   VerticalAlignment="Center"
+                                   IsVisible="{Binding IM.HasUnreadAny}"
+                                   AutomationProperties.Name="" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockIMClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach IM panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding IM}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:IMViewModel">
+                            <views:IMPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="World map tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="World Map" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockMapClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach map panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Map}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:MapViewModel">
+                            <views:MapPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Objects tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Objects" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockObjectsClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach objects panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Objects}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:ObjectsViewModel">
+                            <views:ObjectsPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Inventory tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Inventory" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockInventoryClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach inventory panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Inventory}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:InventoryViewModel">
+                            <views:InventoryPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Friends tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Friends" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockFriendsClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach friends panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Friends}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:FriendsViewModel">
+                            <views:FriendsPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Groups tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Groups" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockGroupsClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach groups panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Groups}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:GroupsViewModel">
+                            <views:GroupsPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Media tab">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Media" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockMediaClick"
+                                ToolTip.Tip="Detach panel to own window"
+                                AutomationProperties.Name="Detach media panel" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Media}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:MediaViewModel">
+                            <views:MediaPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+        </TabControl>
+
+        <!-- Notification overlay: bottom-right of content area -->
+        <ContentControl Content="{Binding Notifications}"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Margin="0,0,8,8"
+            AutomationProperties.Name="Notifications">
+            <ContentControl.ContentTemplate>
+                <DataTemplate x:DataType="vm:NotificationQueueViewModel">
+                    <views:ScriptDialogOverlay />
+                </DataTemplate>
+            </ContentControl.ContentTemplate>
+        </ContentControl>
+
+        </Grid>
+    </DockPanel>
+</Window>

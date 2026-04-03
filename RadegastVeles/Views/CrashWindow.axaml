@@ -1,0 +1,52 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Radegast.Veles.Views.CrashWindow"
+        Title="Radegast Veles — Unhandled Error"
+        Width="620" Height="480"
+        MinWidth="480" MinHeight="360"
+        WindowStartupLocation="CenterScreen"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Crash error window">
+
+    <DockPanel Margin="16">
+
+        <!-- Header -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,0,0,12">
+            <TextBlock Text="&#x1F4A5;" FontSize="32" VerticalAlignment="Center" />
+            <StackPanel VerticalAlignment="Center" Spacing="2">
+                <TextBlock Text="An unhandled error occurred" FontSize="16" FontWeight="SemiBold" />
+                <TextBlock Text="Radegast Veles has encountered an unexpected error and must close."
+                           Opacity="0.75" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Bottom buttons -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                    HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="BtnCopy" Content="&#x1F4CB; Copy to Clipboard"
+                    MinWidth="140"
+                    AutomationProperties.Name="Copy error to clipboard" />
+            <Button x:Name="BtnClose" Content="&#x2715; Close"
+                    MinWidth="80"
+                    AutomationProperties.Name="Close crash window" />
+        </StackPanel>
+
+        <!-- Exception display -->
+        <Border BorderThickness="1" CornerRadius="4" Padding="2" Margin="0,0,0,0">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <TextBlock x:Name="TxtException"
+                           FontFamily="Consolas,Cascadia Mono,Menlo,monospace"
+                           FontSize="11"
+                           TextWrapping="NoWrap"
+                           Margin="6,4"
+                           AutomationProperties.Name="Exception details" />
+            </ScrollViewer>
+        </Border>
+
+    </DockPanel>
+</Window>

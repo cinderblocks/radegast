@@ -1,0 +1,131 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.LandHoldingsPanel"
+             x:DataType="vm:LandHoldingsViewModel"
+             AutomationProperties.Name="Land holdings panel">
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#18FFFFFF" Padding="8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="My Land Holdings" FontSize="16" FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+                <Button Content="Refresh" Command="{Binding RefreshCommand}"
+                        AutomationProperties.Name="Refresh land holdings" />
+                <TextBlock Text="{Binding StatusMessage}" VerticalAlignment="Center"
+                           Opacity="0.7" FontStyle="Italic" FontSize="12" />
+                <TextBlock Text="{Binding TotalAreaDisplay}" VerticalAlignment="Center"
+                           FontWeight="SemiBold" FontSize="12" />
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
+            <StackPanel Spacing="16">
+
+                <TextBlock Text="Searching…" IsVisible="{Binding IsLoading}"
+                           FontStyle="Italic" Opacity="0.6"
+                           AutomationProperties.Name="Loading indicator" />
+
+                <!-- Personal Land -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Personal Land" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="No personal land." Opacity="0.6" FontStyle="Italic"
+                               IsVisible="{Binding !HasPersonalParcels}"
+                               AutomationProperties.Name="No personal land" />
+                    <ItemsControl ItemsSource="{Binding PersonalParcels}"
+                                  IsVisible="{Binding HasPersonalParcels}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:LandHoldingEntry">
+                                <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="Bold"
+                                                       TextWrapping="Wrap"
+                                                       AutomationProperties.Name="Parcel name" />
+                                            <TextBlock Text="{Binding LocationDisplay}" FontSize="11" Opacity="0.7"
+                                                       AutomationProperties.Name="Parcel location" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right">
+                                            <TextBlock Text="{Binding AreaDisplay}" FontSize="12"
+                                                       HorizontalAlignment="Right"
+                                                       AutomationProperties.Name="Parcel area" />
+                                            <TextBlock Text="{Binding LandTypeDisplay}" FontSize="11" Opacity="0.7"
+                                                       HorizontalAlignment="Right"
+                                                       AutomationProperties.Name="Land type" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- Group Land -->
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Group Land" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text="(none)" Opacity="0.6" FontStyle="Italic"
+                               IsVisible="{Binding !HasGroupParcels}"
+                               AutomationProperties.Name="No group land" />
+                    <ItemsControl ItemsSource="{Binding GroupParcels}"
+                                  IsVisible="{Binding HasGroupParcels}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:LandHoldingEntry">
+                                <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="{Binding Name}" FontWeight="Bold"
+                                                       TextWrapping="Wrap"
+                                                       AutomationProperties.Name="Parcel name" />
+                                            <TextBlock Text="{Binding LocationDisplay}" FontSize="11" Opacity="0.7"
+                                                       AutomationProperties.Name="Parcel location" />
+                                            <TextBlock Text="{Binding GroupName}" FontSize="11" Opacity="0.7"
+                                                       FontStyle="Italic"
+                                                       AutomationProperties.Name="Group name" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Spacing="2" HorizontalAlignment="Right">
+                                            <TextBlock Text="{Binding AreaDisplay}" FontSize="12"
+                                                       HorizontalAlignment="Right"
+                                                       AutomationProperties.Name="Parcel area" />
+                                            <TextBlock Text="{Binding LandTypeDisplay}" FontSize="11" Opacity="0.7"
+                                                       HorizontalAlignment="Right"
+                                                       AutomationProperties.Name="Land type" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <!-- Group Land Contributions -->
+                <StackPanel Spacing="4" IsVisible="{Binding HasGroupContributions}">
+                    <TextBlock Text="Group Land Contributions" FontSize="14" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding GroupContributions}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:GroupContributionEntry">
+                                <Border Background="#18FFFFFF" CornerRadius="6" Padding="10" Margin="0,0,0,4">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0" Text="{Binding GroupName}"
+                                                   VerticalAlignment="Center"
+                                                   AutomationProperties.Name="Group name" />
+                                        <TextBlock Grid.Column="1" Text="{Binding ContributionDisplay}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   FontWeight="SemiBold"
+                                                   AutomationProperties.Name="Land contribution" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+
+</UserControl>

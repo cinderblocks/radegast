@@ -1,0 +1,54 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:controls="using:Radegast.Veles.Controls"
+             x:Class="Radegast.Veles.Views.FriendsPanel"
+             x:DataType="vm:FriendsViewModel"
+             AutomationProperties.Name="Friends panel">
+    <Grid ColumnDefinitions="*,8,280">
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4" Spacing="4">
+                <Button Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh friends list" />
+            </StackPanel>
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4" AutomationProperties.Name="Friends status" />
+            <ListBox ItemsSource="{Binding Friends}" SelectedItem="{Binding SelectedFriend}" AutomationProperties.Name="Friends list" Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FriendEntry">
+                        <controls:AvatarNameButton
+                            AgentName="{Binding Name}"
+                            DisplayLabel="{Binding DisplayText}"
+                            AgentID="{Binding Id}"
+                            Instance="{Binding $parent[UserControl].((vm:FriendsViewModel)DataContext).Instance}"
+                            AutomationProperties.Name="{Binding DisplayText}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+        <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize friends splitter" />
+        <ScrollViewer Grid.Column="2" Padding="4">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Friend Details" FontWeight="SemiBold" FontSize="14" />
+                <TextBlock Text="{Binding SelectedFriend.Name, TargetNullValue='(no friend selected)', FallbackValue='(no friend selected)'}" FontSize="13" TextWrapping="Wrap" AutomationProperties.Name="Selected friend name" />
+                <TextBlock Text="{Binding SelectedFriend.IsOnline, StringFormat='Online: {0}', TargetNullValue='', FallbackValue=''}" AutomationProperties.Name="Friend online status" />
+                <Separator />
+                <TextBlock Text="Rights" FontWeight="SemiBold" />
+                <CheckBox Content="Can see me online" IsChecked="{Binding CanSeeMeOnline}" AutomationProperties.Name="Friend can see me online" />
+                <CheckBox Content="Can see me on map" IsChecked="{Binding CanSeeMeOnMap}" AutomationProperties.Name="Friend can see me on map" />
+                <CheckBox Content="Can modify my objects" IsChecked="{Binding CanModifyMyObjects}" AutomationProperties.Name="Friend can modify my objects" />
+                <Separator />
+                <TextBlock Text="Actions" FontWeight="SemiBold" />
+                <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="Profile" Command="{Binding ShowProfileCommand}" Margin="0,0,4,4" AutomationProperties.Name="Show friend profile" />
+                    <Button Content="IM" Command="{Binding IMCommand}" Margin="0,0,4,4" AutomationProperties.Name="Send IM to friend" />
+                    <Button Content="Pay" Command="{Binding PayCommand}" Margin="0,0,4,4" AutomationProperties.Name="Pay friend" />
+                    <Button Content="Remove" Command="{Binding RemoveFriendCommand}" Margin="0,0,4,4" AutomationProperties.Name="Remove friend" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>
