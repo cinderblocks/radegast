@@ -1,0 +1,51 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.MuteListPanel"
+             x:DataType="vm:MuteListViewModel"
+             AutomationProperties.Name="Mute list panel">
+    <DockPanel>
+        <TextBlock DockPanel.Dock="Top" Text="Mute List" FontWeight="SemiBold" FontSize="14" Margin="8,8,8,4"
+                   AutomationProperties.Name="Mute list title" />
+
+        <!-- Bottom: Mute by name input -->
+        <Border DockPanel.Dock="Bottom" Padding="8,4" BorderThickness="0,1,0,0">
+            <Grid ColumnDefinitions="*,4,Auto,4,Auto" RowDefinitions="Auto">
+                <TextBox Grid.Column="0" Text="{Binding MuteByNameInput, Mode=TwoWay}"
+                         Watermark="Name to mute..."
+                         AutomationProperties.Name="Enter name to mute" />
+                <Button Grid.Column="2" Content="Mute by Name" Command="{Binding MuteByNameCommand}"
+                        AutomationProperties.Name="Add mute by name" />
+                <Button Grid.Column="4" Content="Refresh" Command="{Binding RefreshCommand}"
+                        AutomationProperties.Name="Refresh mute list" />
+            </Grid>
+        </Border>
+
+        <!-- Unselect / Unmute bar -->
+        <Border DockPanel.Dock="Bottom" Padding="8,4">
+            <Button Content="Unmute Selected" Command="{Binding UnmuteCommand}"
+                    IsEnabled="{Binding CanUnmute}"
+                    AutomationProperties.Name="Unmute selected entry" />
+        </Border>
+
+        <!-- Mute list -->
+        <ListBox ItemsSource="{Binding MuteEntries}" SelectedItem="{Binding SelectedEntry, Mode=TwoWay}"
+                 Margin="4" AutomationProperties.Name="Mute entries list">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:MuteEntryItem">
+                    <Grid ColumnDefinitions="80,*">
+                        <TextBlock Grid.Column="0" Text="{Binding TypeLabel}" Opacity="0.7" FontSize="11"
+                                   VerticalAlignment="Center" AutomationProperties.Name="{Binding TypeLabel}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}" />
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</UserControl>

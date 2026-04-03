@@ -1,0 +1,92 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.UploadAnimationWindow"
+        x:DataType="vm:UploadAnimationViewModel"
+        Title="Upload Animation"
+        Width="480" Height="360"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Upload animation window">
+    <DockPanel LastChildFill="True">
+
+        <!-- Bottom button bar -->
+        <Border DockPanel.Dock="Bottom" Padding="8" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button x:Name="BrowseButton"
+                        Content="Browse..."
+                        MinWidth="90"
+                        AutomationProperties.Name="Browse for animation file"
+                        Click="OnBrowseClick" />
+                <Button Content="{Binding UploadButtonText}"
+                        Command="{Binding UploadCommand}"
+                        MinWidth="130"
+                        AutomationProperties.Name="{Binding UploadButtonText}" />
+                <Button Content="Cancel Upload"
+                        Command="{Binding CancelUploadCommand}"
+                        MinWidth="100"
+                        IsVisible="{Binding IsUploading}"
+                        AutomationProperties.Name="Cancel upload" />
+                <Button x:Name="CloseButton"
+                        Content="Close"
+                        MinWidth="80"
+                        AutomationProperties.Name="Close window"
+                        Click="OnCloseClick" />
+            </StackPanel>
+        </Border>
+
+        <!-- Main content -->
+        <StackPanel Margin="12" Spacing="8">
+
+            <!-- Name -->
+            <TextBlock Text="Name:" FontSize="12" AutomationProperties.Name="Name label" />
+            <TextBox Text="{Binding AnimationName, Mode=TwoWay}"
+                     Watermark="Animation name"
+                     AutomationProperties.Name="Animation name" />
+
+            <!-- File info -->
+            <TextBlock Text="{Binding FileInfo}"
+                       FontSize="11"
+                       Opacity="0.75"
+                       AutomationProperties.Name="File info" />
+            <ProgressBar IsIndeterminate="{Binding IsLoading}"
+                         IsVisible="{Binding IsLoading}"
+                         AutomationProperties.Name="Loading indicator" />
+
+            <!-- Asset ID -->
+            <TextBlock Text="Asset ID:" FontSize="12" AutomationProperties.Name="Asset ID label" />
+            <TextBox Text="{Binding AssetId}"
+                     IsReadOnly="True"
+                     FontFamily="Courier New,monospace"
+                     FontSize="11"
+                     AutomationProperties.Name="Uploaded asset ID" />
+
+            <!-- Status log -->
+            <TextBlock Text="Status:" FontSize="12" AutomationProperties.Name="Status log label" />
+            <ScrollViewer Height="100" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto"
+                          AutomationProperties.Name="Status log scroll viewer">
+                <TextBox Text="{Binding StatusLog}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         FontSize="11"
+                         BorderThickness="0"
+                         AutomationProperties.Name="Upload status log" />
+            </ScrollViewer>
+
+            <!-- Upload progress -->
+            <ProgressBar IsIndeterminate="{Binding IsUploading}"
+                         IsVisible="{Binding IsUploading}"
+                         AutomationProperties.Name="Upload progress indicator" />
+
+        </StackPanel>
+    </DockPanel>
+</Window>

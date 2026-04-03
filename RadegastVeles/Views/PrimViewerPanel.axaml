@@ -1,0 +1,110 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:rendering="using:Radegast.Veles.Rendering"
+             x:Class="Radegast.Veles.Views.PrimViewerPanel"
+             x:DataType="vm:PrimViewerViewModel"
+             AutomationProperties.Name="3D prim viewer">
+
+    <DockPanel>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="6,3">
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding ObjectName}"
+                           FontWeight="SemiBold" VerticalAlignment="Center"
+                           Margin="0,0,12,0"
+                           AutomationProperties.Name="Object name" />
+
+                <Button Content="⟳ Reset Camera"
+                        Command="{Binding ResetCameraCommand}"
+                        Margin="0,0,8,0" MinWidth="110"
+                        ToolTip.Tip="Return camera to default orbit position"
+                        AutomationProperties.Name="Reset camera" />
+
+                <!-- Orbit buttons: arrow cross (keyboard layout) -->
+                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,6,0"
+                        VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="26,2,26,2,26" RowDefinitions="22,2,22"
+                          VerticalAlignment="Center">
+                        <Button Grid.Row="0" Grid.Column="2" Content="↑" Command="{Binding OrbitUpCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Orbit up (10°)" />
+                        <Button Grid.Row="2" Grid.Column="0" Content="←" Command="{Binding OrbitLeftCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Orbit left (15°)" />
+                        <Button Grid.Row="2" Grid.Column="2" Content="↓" Command="{Binding OrbitDownCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Orbit down (10°)" />
+                        <Button Grid.Row="2" Grid.Column="4" Content="→" Command="{Binding OrbitRightCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Orbit right (15°)" />
+                    </Grid>
+                </Border>
+
+                <!-- Zoom buttons -->
+                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,8,0"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Vertical" Spacing="1" VerticalAlignment="Center">
+                        <Button Content="+" Command="{Binding ZoomInCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Zoom in" />
+                        <Button Content="−" Command="{Binding ZoomOutCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Zoom out" />
+                    </StackPanel>
+                </Border>
+
+                <CheckBox Content="Wireframe"
+                          IsChecked="{Binding Wireframe}"
+                          VerticalAlignment="Center"
+                          Margin="0,0,6,0"
+                          AutomationProperties.Name="Toggle wireframe overlay" />
+            </WrapPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" Padding="6,2">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding StatusText}"
+                           VerticalAlignment="Center"
+                           AutomationProperties.Name="Status" />
+                <ProgressBar Grid.Column="1"
+                             IsVisible="{Binding IsLoading}"
+                             IsIndeterminate="True"
+                             Width="80" Height="10"
+                             Margin="8,0,0,0"
+                             AutomationProperties.Name="Loading indicator" />
+            </Grid>
+        </Border>
+
+        <!-- Error overlay -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasError}"
+                Background="#CC0000" Padding="8,4" Margin="0,0,0,2">
+            <TextBlock Text="{Binding ErrorText}"
+                       Foreground="White" TextWrapping="Wrap"
+                       AutomationProperties.Name="Error message" />
+        </Border>
+
+        <!-- 3-D viewport -->
+        <rendering:GlViewportControl x:Name="Viewport"
+                                     Wireframe="{Binding Wireframe}"
+                                     HorizontalAlignment="Stretch"
+                                     VerticalAlignment="Stretch"
+                                     AutomationProperties.Name="3D viewport" />
+
+    </DockPanel>
+</UserControl>

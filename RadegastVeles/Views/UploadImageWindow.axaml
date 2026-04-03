@@ -1,0 +1,118 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.UploadImageWindow"
+        x:DataType="vm:UploadImageViewModel"
+        Title="Upload Image"
+        Width="600" Height="520"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Upload image window">
+    <DockPanel LastChildFill="True">
+
+        <!-- Bottom button bar -->
+        <Border DockPanel.Dock="Bottom" Padding="8" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button x:Name="BrowseButton"
+                        Content="Browse..."
+                        MinWidth="90"
+                        AutomationProperties.Name="Browse for image file"
+                        Click="OnBrowseClick" />
+                <Button Content="{Binding UploadButtonText}"
+                        Command="{Binding UploadCommand}"
+                        MinWidth="120"
+                        AutomationProperties.Name="{Binding UploadButtonText}" />
+                <Button Content="Cancel Upload"
+                        Command="{Binding CancelUploadCommand}"
+                        MinWidth="100"
+                        IsVisible="{Binding IsUploading}"
+                        AutomationProperties.Name="Cancel upload" />
+                <Button x:Name="CloseButton"
+                        Content="Close"
+                        MinWidth="80"
+                        AutomationProperties.Name="Close window"
+                        Click="OnCloseClick" />
+            </StackPanel>
+        </Border>
+
+        <!-- Main content -->
+        <Grid ColumnDefinitions="220,*" Margin="8">
+
+            <!-- Left: preview -->
+            <StackPanel Grid.Column="0" Spacing="4" Margin="0,0,8,0">
+                <TextBlock Text="Preview" FontWeight="SemiBold" FontSize="12" Opacity="0.75"
+                           AutomationProperties.Name="Image preview label" />
+                <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                        BorderThickness="1"
+                        Width="210" Height="210"
+                        HorizontalAlignment="Left"
+                        Background="{DynamicResource SystemControlBackgroundAltHighBrush}">
+                    <Image Source="{Binding PreviewImage}"
+                           Stretch="Uniform"
+                           Width="208" Height="208"
+                           AutomationProperties.Name="Image preview" />
+                </Border>
+                <TextBlock Text="{Binding ImageSize}"
+                           FontSize="11"
+                           Opacity="0.75"
+                           TextWrapping="Wrap"
+                           AutomationProperties.Name="Image dimensions and size" />
+                <ProgressBar IsIndeterminate="{Binding IsLoading}"
+                             IsVisible="{Binding IsLoading}"
+                             Width="210"
+                             HorizontalAlignment="Left"
+                             AutomationProperties.Name="Image loading progress" />
+            </StackPanel>
+
+            <!-- Right: controls -->
+            <StackPanel Grid.Column="1" Spacing="10">
+
+                <!-- Name -->
+                <TextBlock Text="Name:" FontSize="12" AutomationProperties.Name="Name label" />
+                <TextBox Text="{Binding ImageName, Mode=TwoWay}"
+                         Watermark="Texture name"
+                         AutomationProperties.Name="Texture name" />
+
+                <!-- Lossless -->
+                <CheckBox IsChecked="{Binding Lossless, Mode=TwoWay}"
+                          Content="Lossless encoding"
+                          AutomationProperties.Name="Enable lossless encoding" />
+
+                <!-- Asset ID -->
+                <TextBlock Text="Asset ID:" FontSize="12" AutomationProperties.Name="Asset ID label" />
+                <TextBox Text="{Binding AssetId}"
+                         IsReadOnly="True"
+                         FontFamily="Courier New,monospace"
+                         FontSize="11"
+                         AutomationProperties.Name="Uploaded asset ID" />
+
+                <!-- Status log -->
+                <TextBlock Text="Status:" FontSize="12" AutomationProperties.Name="Status log label" />
+                <ScrollViewer Height="140" HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              AutomationProperties.Name="Status log scroll viewer">
+                    <TextBox Text="{Binding StatusLog}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             FontSize="11"
+                             BorderThickness="0"
+                             AutomationProperties.Name="Upload status log" />
+                </ScrollViewer>
+
+                <!-- Upload progress -->
+                <ProgressBar IsIndeterminate="{Binding IsUploading}"
+                             IsVisible="{Binding IsUploading}"
+                             AutomationProperties.Name="Upload progress indicator" />
+
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</Window>

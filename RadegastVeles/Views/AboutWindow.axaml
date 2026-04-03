@@ -1,0 +1,150 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Radegast.Veles.Views.AboutWindow"
+        Title="About Radegast Veles"
+        Width="520" Height="460"
+        MinWidth="400" MinHeight="360"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="About Radegast Veles">
+
+    <Window.Styles>
+        <Style Selector="Button.linkButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+        <Style Selector="Button.linkButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="16">
+
+        <!-- Header -->
+        <StackPanel DockPanel.Dock="Top" Spacing="4" Margin="0,0,0,12" HorizontalAlignment="Center">
+            <TextBlock x:Name="AppTitle" Text="Radegast Veles"
+                       FontSize="22" FontWeight="Bold"
+                       HorizontalAlignment="Center" />
+            <TextBlock x:Name="AppVersion" Text="Version …"
+                       FontSize="13" Opacity="0.7"
+                       HorizontalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Close button -->
+        <Button DockPanel.Dock="Bottom" Content="Close" Click="OnCloseClick"
+                HorizontalAlignment="Right" MinWidth="80" Margin="0,12,0,0"
+                AutomationProperties.Name="Close about window" />
+
+        <!-- Tabs -->
+        <TabControl>
+
+            <!-- About tab -->
+            <TabItem Header="About" AutomationProperties.Name="About tab">
+                <ScrollViewer>
+                    <StackPanel Spacing="10" Margin="8">
+                        <TextBlock Text="A cross-platform Second Life® compatible viewer."
+                                   TextWrapping="Wrap" />
+                        <TextBlock TextWrapping="Wrap">
+                            <Run>Copyright © 2009–2014, Radegast Development Team</Run>
+                            <LineBreak />
+                            <Run>Copyright © 2016–2026, Sjofn LLC</Run>
+                        </TextBlock>
+                        <TextBlock TextWrapping="Wrap"
+                                   Text="Licensed under the GNU Lesser General Public License v3 or later." />
+                        <Button Classes="linkButton" Click="OnWebsiteClick"
+                                AutomationProperties.Name="Open Radegast website">
+                            <TextBlock Text="https://radegast.life" TextDecorations="Underline" />
+                        </Button>
+                        <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11"
+                                   Text="Second Life® is a trademark of Linden Research, Inc. Radegast is not affiliated with or sponsored by Linden Research." />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Credits tab -->
+            <TabItem Header="Credits" AutomationProperties.Name="Credits tab">
+                <ScrollViewer>
+                    <StackPanel Spacing="12" Margin="8">
+
+                        <TextBlock Text="Project Founder" FontWeight="SemiBold" />
+                        <TextBlock Text="Latif Khalifa" Margin="8,0,0,0" />
+
+                        <TextBlock Text="Current Maintainer" FontWeight="SemiBold" />
+                        <TextBlock Text="Cinder Roxley" Margin="8,0,0,0" />
+
+                        <TextBlock Text="Contributors" FontWeight="SemiBold" />
+                        <StackPanel Margin="8,0,0,0" Spacing="2">
+                            <TextBlock Text="nooperation" />
+                            <TextBlock Text="Luminous Luminos" />
+                            <TextBlock Text="Douglas R. Miles" />
+                            <TextBlock Text="Mojito Sorbet" />
+                            <TextBlock Text="Robin Cornelius" />
+                            <TextBlock Text="Revolution Smythe" />
+                        </StackPanel>
+
+                        <TextBlock Text="GitHub Contributors" FontWeight="SemiBold" />
+                        <StackPanel x:Name="GitHubContributorsList" Margin="8,0,0,0" Spacing="2" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- Libraries tab -->
+            <TabItem Header="Libraries" AutomationProperties.Name="Libraries tab">
+                <ScrollViewer>
+                    <StackPanel Spacing="12" Margin="8">
+
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Avalonia UI" FontWeight="SemiBold" />
+                            <TextBlock Text="Version 11.3.12  ·  MIT License" Opacity="0.8" FontSize="12" />
+                            <TextBlock Text="Copyright © 2013–2024 AvaloniaUI OÜ and contributors"
+                                       Opacity="0.7" FontSize="11" TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="LibreMetaverse (OpenMetaverse fork)" FontWeight="SemiBold" />
+                            <TextBlock Text="BSD 3-Clause License" Opacity="0.8" FontSize="12" />
+                            <TextBlock Text="Copyright © 2006–2016, OpenMetaverse Contributors" Opacity="0.7" FontSize="11" TextWrapping="Wrap" />
+                            <TextBlock Text="Copyright © 2016–2026, Sjofn LLC" Opacity="0.7" FontSize="11" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="CommunityToolkit.Mvvm" FontWeight="SemiBold" />
+                            <TextBlock Text="Version 8.4.2  ·  MIT License" Opacity="0.8" FontSize="12" />
+                            <TextBlock Text="Copyright © .NET Foundation and contributors" Opacity="0.7" FontSize="11" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Microsoft.Extensions.Logging" FontWeight="SemiBold" />
+                            <TextBlock Text="MIT License" Opacity="0.8" FontSize="12" />
+                            <TextBlock Text="Copyright © Microsoft Corporation" Opacity="0.7" FontSize="11" />
+                        </StackPanel>
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- System Info tab -->
+            <TabItem Header="System" AutomationProperties.Name="System information tab">
+                <DockPanel Margin="8">
+                    <Button DockPanel.Dock="Bottom" Content="Copy to Clipboard" Click="OnCopySystemInfoClick"
+                            HorizontalAlignment="Left" Margin="0,8,0,0"
+                            AutomationProperties.Name="Copy system information to clipboard" />
+                    <ScrollViewer>
+                        <StackPanel x:Name="SysInfoPanel" Spacing="3" />
+                    </ScrollViewer>
+                </DockPanel>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>

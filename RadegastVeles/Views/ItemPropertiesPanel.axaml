@@ -1,0 +1,110 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC. All rights reserved.
+  LGPL v3 — see LICENSE.txt
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.ItemPropertiesPanel"
+             x:DataType="vm:ItemPropertiesViewModel"
+             AutomationProperties.Name="Item properties panel">
+
+    <ScrollViewer Padding="12">
+        <StackPanel Spacing="8">
+
+            <!-- Name -->
+            <TextBlock Text="Name" FontWeight="SemiBold" />
+            <TextBox Text="{Binding Name, Mode=TwoWay}"
+                     MaxLength="63"
+                     AutomationProperties.Name="Item name" />
+
+            <!-- Description -->
+            <TextBlock Text="Description" FontWeight="SemiBold" />
+            <TextBox Text="{Binding Description, Mode=TwoWay}"
+                     MaxLength="127"
+                     Height="60" TextWrapping="Wrap" AcceptsReturn="True"
+                     AutomationProperties.Name="Item description" />
+
+            <Separator />
+
+            <!-- Creator / Owner -->
+            <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto,Auto">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Type:" Margin="0,0,8,4" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding TypeName}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Creator:" Margin="0,0,8,4" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Creator}" />
+                <Button    Grid.Row="1" Grid.Column="2" Content="Profile…"
+                           Command="{Binding OpenCreatorProfileCommand}"
+                           Padding="6,2" FontSize="11"
+                           AutomationProperties.Name="Open creator profile" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Owner:" Margin="0,0,8,4" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Owner}" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Acquired:" Margin="0,0,8,4" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Acquired}" />
+            </Grid>
+
+            <Separator />
+
+            <!-- You Can -->
+            <TextBlock Text="You Can:" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <CheckBox Content="Modify"   IsChecked="{Binding CanModify}"   IsEnabled="False" />
+                <CheckBox Content="Copy"     IsChecked="{Binding CanCopy}"     IsEnabled="False" />
+                <CheckBox Content="Transfer" IsChecked="{Binding CanTransfer}" IsEnabled="False" />
+            </StackPanel>
+
+            <!-- Next Owner Can -->
+            <TextBlock Text="Next Owner Can:" FontWeight="SemiBold" />
+            <StackPanel Orientation="Horizontal" Spacing="16">
+                <CheckBox Content="Modify"
+                          IsChecked="{Binding NextOwnerModify, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditPerms}"
+                          AutomationProperties.Name="Next owner can modify" />
+                <CheckBox Content="Copy"
+                          IsChecked="{Binding NextOwnerCopy, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditPerms}"
+                          AutomationProperties.Name="Next owner can copy" />
+                <CheckBox Content="Transfer"
+                          IsChecked="{Binding NextOwnerTransfer, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditPerms}"
+                          AutomationProperties.Name="Next owner can transfer" />
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Sharing -->
+            <CheckBox Content="Share with group"
+                      IsChecked="{Binding ShareWithGroup, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEditPerms}"
+                      AutomationProperties.Name="Share with group" />
+            <CheckBox Content="Allow anyone to copy"
+                      IsChecked="{Binding EveryoneCopy, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEditPerms}"
+                      AutomationProperties.Name="Allow anyone to copy" />
+
+            <Separator />
+
+            <!-- UUIDs -->
+            <Expander Header="UUIDs" IsExpanded="False">
+                <StackPanel Spacing="4" Margin="0,4,0,0">
+                    <TextBlock Text="Item UUID:" FontSize="11" />
+                    <SelectableTextBlock Text="{Binding ItemUUID}" FontFamily="Monospace" FontSize="11" />
+                    <TextBlock Text="Asset UUID:" FontSize="11" />
+                    <SelectableTextBlock Text="{Binding AssetUUID}" FontFamily="Monospace" FontSize="11" />
+                </StackPanel>
+            </Expander>
+
+            <!-- Save -->
+            <Button Content="Save Changes"
+                    Command="{Binding SaveCommand}"
+                    HorizontalAlignment="Right"
+                    Margin="0,8,0,0"
+                    AutomationProperties.Name="Save item properties" />
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

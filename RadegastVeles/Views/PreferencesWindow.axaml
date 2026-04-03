@@ -1,0 +1,231 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.PreferencesWindow"
+        x:DataType="vm:PreferencesViewModel"
+        Title="Preferences"
+        Width="540" Height="500"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Preferences window">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="8,4,8,8" Spacing="6">
+            <Button Content="OK" Click="OnOkClick" IsDefault="True" AutomationProperties.Name="OK" />
+            <Button Content="Apply" Click="OnApplyClick" AutomationProperties.Name="Apply" />
+            <Button Content="Cancel" Click="OnCancelClick" IsCancel="True" AutomationProperties.Name="Cancel" />
+        </StackPanel>
+        <TabControl Margin="8,8,8,4" AutomationProperties.Name="Preferences tabs">
+            <TabItem Header="General" AutomationProperties.Name="General preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+                        <TextBlock Text="Image Cache" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Enable image cache" IsChecked="{Binding ImageCacheEnabled}" AutomationProperties.Name="Enable image cache" />
+                        <Grid ColumnDefinitions="160,*,40" IsEnabled="{Binding ImageCacheEnabled}">
+                            <TextBlock Grid.Column="0" Text="Cache expiry (minutes)" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="1" Maximum="1440" Value="{Binding ImageCacheExpireMinutes}" AutomationProperties.Name="Cache expiry in minutes" />
+                            <TextBlock Grid.Column="2" Text="{Binding ImageCacheExpireMinutes}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Grid ColumnDefinitions="160,*,40">
+                            <TextBlock Grid.Column="0" Text="Decode concurrency" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="1" Maximum="{Binding MaxDecodeConcurrency}" Value="{Binding ImageDecodeConcurrency}" AutomationProperties.Name="Image decode concurrency" />
+                            <TextBlock Grid.Column="2" Text="{Binding ImageDecodeConcurrency}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Separator />
+                        <TextBlock Text="Paths" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Chat Logging" FontWeight="SemiBold" />
+                        <CheckBox Content="Enable chat logging" IsChecked="{Binding ChatLoggingEnabled}"
+                                  AutomationProperties.Name="Enable chat logging" />
+                        <TextBlock Text="Chat Log Directory" Opacity="0.7" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding ChatLogDir}"
+                                     Watermark="Default (%APPDATA%\RadegastVeles)"
+                                     IsEnabled="{Binding ChatLoggingEnabled}"
+                                     AutomationProperties.Name="Chat log directory path" />
+                            <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
+                                    Click="OnBrowseChatLogDirClick"
+                                    IsEnabled="{Binding ChatLoggingEnabled}"
+                                    AutomationProperties.Name="Browse for chat log directory" />
+                        </Grid>
+                        <TextBlock Text="Image Cache Directory" Opacity="0.7" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <TextBox Grid.Column="0" Text="{Binding ImageCacheDir}"
+                                     AutomationProperties.Name="Image cache directory path" />
+                            <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
+                                    Click="OnBrowseImageCacheDirClick"
+                                    AutomationProperties.Name="Browse for image cache directory" />
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Audio" AutomationProperties.Name="Audio preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+                        <TextBlock Text="Volumes" FontWeight="SemiBold" FontSize="14" />
+                        <Grid ColumnDefinitions="120,*,40">
+                            <TextBlock Grid.Column="0" Text="Master Volume" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding MasterVolume}" IsEnabled="{Binding SoundSystemAvailable}" AutomationProperties.Name="Master volume slider" />
+                            <TextBlock Grid.Column="2" Text="{Binding MasterVolume, StringFormat='{}{0}%'}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Grid ColumnDefinitions="120,*,40">
+                            <TextBlock Grid.Column="0" Text="Stream Volume" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding StreamVolume}" IsEnabled="{Binding SoundSystemAvailable}" AutomationProperties.Name="Stream volume slider" />
+                            <TextBlock Grid.Column="2" Text="{Binding StreamVolume, StringFormat='{}{0}%'}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Grid ColumnDefinitions="120,*,40">
+                            <TextBlock Grid.Column="0" Text="Object Volume" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding ObjectVolume}" IsEnabled="{Binding SoundSystemAvailable}" AutomationProperties.Name="Object volume slider" />
+                            <TextBlock Grid.Column="2" Text="{Binding ObjectVolume, StringFormat='{}{0}%'}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Grid ColumnDefinitions="120,*,40">
+                            <TextBlock Grid.Column="0" Text="UI Volume" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding UiVolume}" IsEnabled="{Binding SoundSystemAvailable}" AutomationProperties.Name="UI volume slider" />
+                            <TextBlock Grid.Column="2" Text="{Binding UiVolume, StringFormat='{}{0}%'}" VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Separator />
+                        <TextBlock Text="Behavior" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Auto-play parcel audio" IsChecked="{Binding AutoPlay}" AutomationProperties.Name="Auto-play parcel audio" />
+                        <CheckBox Content="Keep URL on parcel change" IsChecked="{Binding KeepUrl}" AutomationProperties.Name="Keep URL on parcel change" />
+                        <CheckBox Content="Enable object sounds" IsChecked="{Binding ObjectSoundsEnabled}" AutomationProperties.Name="Enable object sounds" />
+                        <Separator />
+                        <TextBlock Text="Audio Device" FontWeight="SemiBold" FontSize="14" />
+                        <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" IsEnabled="{Binding SoundSystemAvailable}" HorizontalAlignment="Stretch" AutomationProperties.Name="Audio device selection" />
+                        <Separator />
+                        <TextBlock Text="Audio Profiles" FontWeight="SemiBold" FontSize="14" />
+                        <Grid ColumnDefinitions="*,Auto">
+                            <ComboBox Grid.Column="0" ItemsSource="{Binding AudioProfiles}" SelectedItem="{Binding SelectedProfile}" HorizontalAlignment="Stretch" AutomationProperties.Name="Audio profile selection" />
+                            <Button Grid.Column="1" Content="Load" Margin="4,0,0,0" Command="{Binding LoadProfileCommand}" AutomationProperties.Name="Load audio profile" />
+                        </Grid>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Voice" AutomationProperties.Name="Voice preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+
+                        <!-- Master enable toggle — always accessible regardless of hardware -->
+                        <CheckBox Content="Enable Voice Chat"
+                                  IsChecked="{Binding VoiceEnabled}"
+                                  FontWeight="SemiBold"
+                                  AutomationProperties.Name="Enable voice chat" />
+
+                        <TextBlock Text="Voice chat requires the WebRTC/SDL3 audio backend which was not detected."
+                                   FontSize="11" Opacity="0.65"
+                                   IsVisible="{Binding !VoiceSystemAvailable}" />
+
+                        <!-- Everything below is only functional when hardware is present and voice enabled -->
+                        <StackPanel IsEnabled="{Binding VoiceSystemAvailable}" Spacing="12">
+
+                            <Separator />
+                            <TextBlock Text="Connection" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Automatically connect to parcel voice on login / region change"
+                                      IsChecked="{Binding VoiceAutoConnect}"
+                                      AutomationProperties.Name="Auto-connect to parcel voice" />
+                            <CheckBox Content="Push-to-Talk (hold the Talk button in the status bar to speak)"
+                                      IsChecked="{Binding VoicePushToTalkEnabled}"
+                                      AutomationProperties.Name="Enable push to talk" />
+
+                            <Separator />
+                            <TextBlock Text="Volumes" FontWeight="SemiBold" FontSize="14" />
+                            <Grid ColumnDefinitions="140,*,40">
+                                <TextBlock Grid.Column="0" Text="Speaker Volume" VerticalAlignment="Center" />
+                                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding VoiceOutputVolume}"
+                                        AutomationProperties.Name="Voice speaker volume slider" />
+                                <TextBlock Grid.Column="2" Text="{Binding VoiceOutputVolume, StringFormat='{}{0}%'}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+                            </Grid>
+
+                            <Separator />
+                            <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Input Device" Opacity="0.7" />
+                            <ComboBox ItemsSource="{Binding VoiceInputDevices}"
+                                      SelectedItem="{Binding VoiceSelectedInputDevice, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      AutomationProperties.Name="Voice microphone input device" />
+                            <TextBlock Text="Select the microphone to use for voice chat."
+                                       FontSize="11" Opacity="0.65" />
+
+                            <!-- Mic level meter -->
+                            <TextBlock Text="Input Level" Opacity="0.7" />
+                            <ProgressBar Minimum="0" Maximum="1"
+                                         Value="{Binding Voice.MicLevel}"
+                                         Height="12" CornerRadius="3"
+                                         AutomationProperties.Name="Microphone input level" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Test Microphone"
+                                        Command="{Binding Voice.ToggleMicTestCommand}"
+                                        IsVisible="{Binding Voice.IsMicTestActive, Converter={x:Static BoolConverters.Not}}"
+                                        AutomationProperties.Name="Start microphone test" />
+                                <Button Content="Stop Test"
+                                        Command="{Binding Voice.ToggleMicTestCommand}"
+                                        IsVisible="{Binding Voice.IsMicTestActive}"
+                                        AutomationProperties.Name="Stop microphone test" />
+                                <TextBlock Text="Recording…" VerticalAlignment="Center"
+                                           FontSize="11" Opacity="0.7"
+                                           IsVisible="{Binding Voice.IsMicTestActive}" />
+                            </StackPanel>
+                            <TextBlock Text="Click 'Test Microphone' to verify your mic is working. The level bar will animate when sound is detected."
+                                       FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+                    <TabItem Header="Grids" AutomationProperties.Name="Grid preferences">
+                        <Grid RowDefinitions="*,Auto" Margin="8">
+                            <Grid Grid.Row="0" ColumnDefinitions="180,*">
+                                <!-- Left: grid list + Add/Remove -->
+                                <DockPanel Grid.Column="0" Margin="0,0,8,0">
+                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                                                Spacing="4" Margin="0,6,0,0">
+                                        <Button Content="Add" Command="{Binding AddNewGridCommand}"
+                                                AutomationProperties.Name="Add grid" />
+                                        <Button Content="Remove" Command="{Binding RemoveGridCommand}"
+                                                AutomationProperties.Name="Remove grid" />
+                                    </StackPanel>
+                                    <ListBox ItemsSource="{Binding Grids}"
+                                             SelectedItem="{Binding SelectedGrid}"
+                                             AutomationProperties.Name="Grid list">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Name}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </DockPanel>
+                                <!-- Right: edit form -->
+                                <StackPanel Grid.Column="1" Spacing="6">
+                                    <TextBlock Text="Select a grid or click Add."
+                                               Opacity="0.55" FontStyle="Italic"
+                                               IsVisible="{Binding !IsFormActive}" />
+                                    <StackPanel Spacing="6" IsVisible="{Binding IsFormActive}">
+                                        <TextBlock Text="Grid ID" Opacity="0.7" />
+                                        <TextBox Text="{Binding EditGridId}"
+                                                 IsReadOnly="{Binding !IsEditingNewGrid}"
+                                                 Watermark="auto-generated if blank"
+                                                 AutomationProperties.Name="Grid ID" />
+                                        <TextBlock Text="Name" Opacity="0.7" />
+                                        <TextBox Text="{Binding EditGridName}"
+                                                 AutomationProperties.Name="Grid name" />
+                                        <TextBlock Text="Login URI" Opacity="0.7" />
+                                        <TextBox Text="{Binding EditGridLoginUri}"
+                                                 AutomationProperties.Name="Grid login URI" />
+                                        <Button Content="Save" Command="{Binding SaveGridCommand}"
+                                                HorizontalAlignment="Right"
+                                                AutomationProperties.Name="Save grid" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Grid.Row="1"
+                                       Text="Built-in grids (agni, aditi) cannot be removed."
+                                       FontSize="11" Opacity="0.65" Margin="0,6,0,0" />
+                        </Grid>
+                    </TabItem>
+                </TabControl>
+            </DockPanel>
+        </Window>

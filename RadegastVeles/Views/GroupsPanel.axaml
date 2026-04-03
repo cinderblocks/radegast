@@ -1,0 +1,44 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.GroupsPanel"
+             x:DataType="vm:GroupsViewModel"
+             AutomationProperties.Name="Groups panel">
+    <Grid ColumnDefinitions="*,8,280">
+        <DockPanel Grid.Column="0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4" Spacing="4">
+                <Button Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh groups list" />
+                <TextBlock Text="{Binding GroupCountText}" VerticalAlignment="Center" Margin="8,0,0,0" />
+            </StackPanel>
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4" AutomationProperties.Name="Groups status" />
+            <ListBox x:Name="GroupListBox" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}" AutomationProperties.Name="Groups list" Margin="4,0"
+                     ContextRequested="GroupListBox_ContextRequested">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:GroupEntry">
+                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding DisplayText}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+        <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize groups splitter" />
+        <ScrollViewer Grid.Column="2" Padding="4">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Group Details" FontWeight="SemiBold" FontSize="14" />
+                <TextBlock Text="{Binding SelectedGroup.Name, FallbackValue='(no group selected)'}" FontSize="13" TextWrapping="Wrap" AutomationProperties.Name="Selected group name" />
+                <Separator />
+                <TextBlock Text="Actions" FontWeight="SemiBold" />
+                <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button Content="Activate" Command="{Binding ActivateGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Activate group" />
+                    <Button Content="Info" Command="{Binding GroupInfoCommand}" Margin="0,0,4,4" AutomationProperties.Name="Group info" />
+                    <Button Content="IM" Command="{Binding GroupIMCommand}" Margin="0,0,4,4" AutomationProperties.Name="Group IM" />
+                    <Button Content="Leave" Command="{Binding LeaveGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Leave group" />
+                </WrapPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</UserControl>

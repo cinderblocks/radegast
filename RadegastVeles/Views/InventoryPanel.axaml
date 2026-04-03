@@ -1,0 +1,138 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:views="using:Radegast.Veles.Views"
+             x:Class="Radegast.Veles.Views.InventoryPanel"
+             x:DataType="vm:InventoryViewModel"
+             AutomationProperties.Name="Inventory panel">
+
+    <Grid ColumnDefinitions="*,8,280">
+        <!-- Left: Inventory tree and search -->
+        <DockPanel Grid.Column="0">
+            <!-- Search bar -->
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="4" AutomationProperties.Name="Inventory search controls">
+                <TextBox Grid.Column="0" x:Name="TxtInvSearch" Text="{Binding SearchText, Mode=TwoWay}" Watermark="Search inventory..." AutomationProperties.Name="Inventory search input" />
+                <Button Grid.Column="1" Content="Search" Command="{Binding SearchInventoryCommand}" Margin="4,0,0,0" AutomationProperties.Name="Search inventory" />
+                <Button Grid.Column="2" Content="✕" Command="{Binding ClearSearchCommand}" IsVisible="{Binding HasSearchResults}" Margin="4,0,0,0" AutomationProperties.Name="Clear search results" />
+                <Button Grid.Column="3" Content="Refresh" Command="{Binding RefreshInventoryCommand}" Margin="4,0,0,0" AutomationProperties.Name="Refresh inventory" />
+                <Button Grid.Column="4" x:Name="BtnFilter" Content="&#x1F50D; Filter" Margin="4,0,0,0" AutomationProperties.Name="Open inventory filter" />
+            </Grid>
+
+            <!-- Active filter indicator -->
+            <Border DockPanel.Dock="Top" Background="#FFD0E4FF" Padding="6,3"
+                    IsVisible="{Binding HasActiveFilter}"
+                    AutomationProperties.Name="Active filter indicator">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Text="&#x1F50D; Filter active" VerticalAlignment="Center" />
+                    <Button Grid.Column="1" x:Name="BtnClearFilter" Content="Clear" Margin="8,0,0,0"
+                            AutomationProperties.Name="Clear active inventory filter" />
+                </Grid>
+            </Border>
+
+            <!-- Expand / Collapse toolbar -->
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,4,4" Spacing="4" AutomationProperties.Name="Inventory expand collapse toolbar">
+                <Button Content="Expand All" Command="{Binding ExpandAllCommand}" AutomationProperties.Name="Expand all inventory folders" />
+                <Button Content="Collapse All" Command="{Binding CollapseAllCommand}" AutomationProperties.Name="Collapse all inventory folders" />
+                <Button x:Name="BtnNewWindow" Content="⊞ New Window" AutomationProperties.Name="Open inventory in new window" />
+                <Button x:Name="BtnSort" Content="⇅ Sort" AutomationProperties.Name="Sort inventory" />
+            </StackPanel>
+
+            <!-- Status -->
+            <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" Margin="4" AutomationProperties.Name="Inventory status" />
+
+            <!-- Search results (visible when there are results) -->
+            <ListBox x:Name="SearchResultsList"
+                     ItemsSource="{Binding SearchResults}"
+                     IsVisible="{Binding HasSearchResults}"
+                     AutomationProperties.Name="Inventory search results"
+                     Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:InventorySearchResult">
+                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding DisplayText}" />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <!-- Tree view (visible when no search results showing) -->
+            <TreeView x:Name="InvTreeView"
+                      ItemsSource="{Binding RootNodes}"
+                      SelectedItem="{Binding SelectedNode}"
+                      IsVisible="{Binding !HasSearchResults}"
+                      AutomationProperties.Name="Inventory tree"
+                      Margin="4,0">
+                <TreeView.ItemContainerTheme>
+                    <ControlTheme TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}"
+                                  x:DataType="vm:InvTreeNode">
+                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                    </ControlTheme>
+                </TreeView.ItemContainerTheme>
+                <TreeView.ItemTemplate>
+                    <TreeDataTemplate x:DataType="vm:InvTreeNode" ItemsSource="{Binding Children}">
+                        <StackPanel Orientation="Horizontal" Spacing="4"
+                                    AutomationProperties.Name="{Binding DisplayText}">
+                            <TextBlock Text="{Binding DisplayName}" TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding WornLabel}" IsVisible="{Binding IsWorn}"
+                                       Foreground="#4CAF50" FontSize="11"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </TreeDataTemplate>
+                </TreeView.ItemTemplate>
+            </TreeView>
+        </DockPanel>
+
+        <!-- Splitter -->
+        <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize inventory splitter" />
+
+        <!-- Right: Item details and editor -->
+        <Grid Grid.Column="2">
+            <!-- Item details (shown when no editor is active) -->
+            <ScrollViewer IsVisible="{Binding !HasActiveEditor}" Padding="4">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Item Details" FontWeight="SemiBold" FontSize="14" />
+
+                    <TextBlock Text="Name" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ItemName}" TextWrapping="Wrap" AutomationProperties.Name="Item name" />
+
+                    <TextBlock Text="Description" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ItemDescription}" TextWrapping="Wrap" AutomationProperties.Name="Item description" />
+
+                    <TextBlock Text="Type" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ItemType}" AutomationProperties.Name="Item type" />
+
+                    <TextBlock Text="Creator" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding ItemCreator}" AutomationProperties.Name="Item creator" />
+
+                    <TextBlock Text="Permissions" FontWeight="SemiBold" />
+                    <views:PermissionBadgesControl
+                               NoModify="{Binding ItemNoModify}"
+                               NoCopy="{Binding ItemNoCopy}"
+                               NoTransfer="{Binding ItemNoTransfer}"
+                               AutomationProperties.Name="Item permissions"
+                               ToolTip.Tip="Owner permissions: badge shown when restricted (M=No Modify, C=No Copy, T=No Transfer)" />
+
+                    <Separator Margin="0,4" />
+
+                    <TextBlock Text="Actions" FontWeight="SemiBold" FontSize="14" />
+
+                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
+                        <Button Content="Open" Command="{Binding OpenItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Open item for editing" />
+                        <Button Content="Wear" Command="{Binding WearItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Wear item" />
+                        <Button Content="Give" Command="{Binding GiveItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Give item to another avatar" />
+                        <Button Content="Delete" Command="{Binding DeleteItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Delete item" />
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Editor area (shown when editor is active) -->
+            <ContentControl x:Name="EditorArea"
+                            IsVisible="{Binding HasActiveEditor}"
+                            AutomationProperties.Name="Item editor" />
+        </Grid>
+    </Grid>
+</UserControl>

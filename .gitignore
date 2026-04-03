@@ -14,5 +14,7 @@ compile.bat
 libremetaverse/
 sparkle/
 Radegast/Generated/
+RadegastVeles/Generated/
+RadegastVeles/Generated.cs
 ProductInstallFiles.wxs
 .DS_Store

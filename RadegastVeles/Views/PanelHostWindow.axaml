@@ -1,0 +1,25 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Radegast.Veles.Views.PanelHostWindow"
+        Width="800" Height="600"
+        MinWidth="400" MinHeight="300"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Detached panel window">
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="4,2"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}">
+            <Button Content="&#x2B05; Dock" Click="OnDockClick"
+                    HorizontalAlignment="Left"
+                    Padding="8,4"
+                    FontSize="12"
+                    AutomationProperties.Name="Dock panel back to main window" />
+        </Border>
+        <ContentControl x:Name="PanelContainer" />
+    </DockPanel>
+</Window>

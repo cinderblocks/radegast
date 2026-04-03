@@ -1,0 +1,145 @@
+﻿<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.EstateProfilePanel"
+             x:DataType="vm:EstateProfileViewModel"
+             AutomationProperties.Name="Estate profile panel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
+        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+
+            <!-- Region header -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="{Binding RegionName}" FontSize="20" FontWeight="Bold" TextWrapping="Wrap"
+                               AutomationProperties.Name="Region name" />
+                    <TextBlock Text="{Binding RegionType}" Opacity="0.7"
+                               IsVisible="{Binding RegionType, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Region type" />
+                    <TextBlock Text="{Binding SimVersion}" Opacity="0.5" FontSize="12"
+                               IsVisible="{Binding SimVersion, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Simulator version" />
+                    <TextBlock Text="{Binding DataCenter, StringFormat=Data Center: {0}}" Opacity="0.5" FontSize="12"
+                               IsVisible="{Binding DataCenter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Data center" />
+                    <TextBlock Text="{Binding AccessLevel, StringFormat=Access: {0}}" FontSize="12" Opacity="0.7"
+                               IsVisible="{Binding AccessLevel, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Region access level" />
+                </StackPanel>
+            </Border>
+
+            <!-- Agents and objects -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Population" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="FPS:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Fps}" AutomationProperties.Name="Frames per second" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Dilation:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding TimeDilation}" AutomationProperties.Name="Time dilation" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Main Agents:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding MainAgents}" AutomationProperties.Name="Main agents" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Child Agents:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding ChildAgents}" AutomationProperties.Name="Child agents" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Objects:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding TotalObjects}" AutomationProperties.Name="Total objects" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Active Objects:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding ActiveObjects}" AutomationProperties.Name="Active objects" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Active Scripts:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding ActiveScripts}" AutomationProperties.Name="Active scripts" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Frame timing -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Frame Timing" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Total:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding TotalTime}" AutomationProperties.Name="Total frame time" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Net:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding NetTime}" AutomationProperties.Name="Network time" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Physics:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding PhysicsTime}" AutomationProperties.Name="Physics time" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Simulation:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SimTime}" AutomationProperties.Name="Simulation time" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Agent:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding AgentTime}" AutomationProperties.Name="Agent time" />
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Images:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding ImageTime}" AutomationProperties.Name="Image time" />
+                        <TextBlock Grid.Row="6" Grid.Column="0" Text="Scripts:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding ScriptTime}" AutomationProperties.Name="Script time" />
+                        <TextBlock Grid.Row="7" Grid.Column="0" Text="Spare:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding SpareTime}" AutomationProperties.Name="Spare time" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Network -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Network" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Pending Downloads:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding PendingDownloads}" AutomationProperties.Name="Pending downloads" />
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Pending Uploads:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding PendingUploads}" AutomationProperties.Name="Pending uploads" />
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="In:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding IncomingBps}" AutomationProperties.Name="Incoming bandwidth" />
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Out:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding OutgoingBps}" AutomationProperties.Name="Outgoing bandwidth" />
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Unacked:" FontWeight="SemiBold" />
+                        <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding UnackedBytes}" AutomationProperties.Name="Unacked bytes" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Region flags -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Region Settings" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox IsChecked="{Binding FlagAllowDamage}"    IsEnabled="False" Content="Damage Enabled"   Margin="0,0,8,4" AutomationProperties.Name="Allow damage flag" />
+                        <CheckBox IsChecked="{Binding FlagNoFly}"          IsEnabled="False" Content="No Fly"           Margin="0,0,8,4" AutomationProperties.Name="No fly flag" />
+                        <CheckBox IsChecked="{Binding FlagAllowVoice}"     IsEnabled="False" Content="Voice Enabled"    Margin="0,0,8,4" AutomationProperties.Name="Voice enabled flag" />
+                        <CheckBox IsChecked="{Binding FlagSunFixed}"       IsEnabled="False" Content="Fixed Sun"        Margin="0,0,8,4" AutomationProperties.Name="Fixed sun flag" />
+                        <CheckBox IsChecked="{Binding FlagBlockTerraform}" IsEnabled="False" Content="Block Terraform"  Margin="0,0,8,4" AutomationProperties.Name="Block terraform flag" />
+                        <CheckBox IsChecked="{Binding FlagDirectTeleport}" IsEnabled="False" Content="Direct Teleport"  Margin="0,0,8,4" AutomationProperties.Name="Allow direct teleport flag" />
+                        <CheckBox IsChecked="{Binding FlagRestrictPush}"   IsEnabled="False" Content="Restrict Push"    Margin="0,0,8,4" AutomationProperties.Name="Restrict push flag" />
+                        <CheckBox IsChecked="{Binding FlagSkipScripts}"    IsEnabled="False" Content="Scripts Disabled" Margin="0,0,8,4" AutomationProperties.Name="Skip scripts flag" />
+                        <CheckBox IsChecked="{Binding FlagSkipPhysics}"    IsEnabled="False" Content="Physics Disabled" Margin="0,0,8,0" AutomationProperties.Name="Skip physics flag" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Covenant -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Covenant" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <TextBlock Text="Loading covenant..." IsVisible="{Binding IsCovenantLoading}"
+                               FontStyle="Italic" Opacity="0.6"
+                               AutomationProperties.Name="Loading covenant" />
+                    <ScrollViewer MaxHeight="240" HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto"
+                                  IsVisible="{Binding !IsCovenantLoading}"
+                                  AutomationProperties.Name="Covenant text area">
+                        <TextBlock Text="{Binding CovenantText}" TextWrapping="Wrap"
+                                   AutomationProperties.Name="Covenant text" />
+                    </ScrollViewer>
+                </StackPanel>
+            </Border>
+
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Refresh" Command="{Binding RefreshCommand}"
+                        AutomationProperties.Name="Refresh estate info" />
+            </StackPanel>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

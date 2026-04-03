@@ -1,0 +1,86 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.InventoryFilterWindow"
+        x:DataType="vm:InventoryFilterViewModel"
+        Title="Filter Inventory"
+        Width="380" MinHeight="480"
+        CanResize="True"
+        AutomationProperties.Name="Inventory filter">
+    <ScrollViewer>
+        <StackPanel Margin="12" Spacing="10">
+
+            <!-- Item types -->
+            <TextBlock Text="Show Item Types" FontWeight="SemiBold" />
+            <WrapPanel Orientation="Horizontal">
+                <CheckBox Content="Textures"      IsChecked="{Binding ShowTextures}"      Margin="0,0,8,4" />
+                <CheckBox Content="Snapshots"     IsChecked="{Binding ShowSnapshots}"     Margin="0,0,8,4" />
+                <CheckBox Content="Scripts"       IsChecked="{Binding ShowScripts}"       Margin="0,0,8,4" />
+                <CheckBox Content="Notecards"     IsChecked="{Binding ShowNotecards}"     Margin="0,0,8,4" />
+                <CheckBox Content="Sounds"        IsChecked="{Binding ShowSounds}"        Margin="0,0,8,4" />
+                <CheckBox Content="Objects"       IsChecked="{Binding ShowObjects}"       Margin="0,0,8,4" />
+                <CheckBox Content="Animations"    IsChecked="{Binding ShowAnimations}"    Margin="0,0,8,4" />
+                <CheckBox Content="Gestures"      IsChecked="{Binding ShowGestures}"      Margin="0,0,8,4" />
+                <CheckBox Content="Wearables"     IsChecked="{Binding ShowWearables}"     Margin="0,0,8,4" />
+                <CheckBox Content="Landmarks"     IsChecked="{Binding ShowLandmarks}"     Margin="0,0,8,4" />
+                <CheckBox Content="Calling Cards" IsChecked="{Binding ShowCallingCards}"  Margin="0,0,8,4" />
+            </WrapPanel>
+
+            <Separator />
+
+            <!-- Date range -->
+            <CheckBox Content="Filter by Creation Date" IsChecked="{Binding FilterByDate}" FontWeight="SemiBold" />
+            <Grid ColumnDefinitions="40,*" RowDefinitions="Auto,Auto" IsEnabled="{Binding FilterByDate}" Margin="16,0,0,0">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="From:" VerticalAlignment="Center" Margin="0,0,4,4" />
+                <CalendarDatePicker Grid.Row="0" Grid.Column="1" SelectedDate="{Binding DateFrom}" Margin="0,0,0,4" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="To:" VerticalAlignment="Center" Margin="0,0,4,0" />
+                <CalendarDatePicker Grid.Row="1" Grid.Column="1" SelectedDate="{Binding DateTo}" />
+            </Grid>
+
+            <Separator />
+
+            <!-- Creator -->
+            <CheckBox Content="Filter by Creator" IsChecked="{Binding FilterByCreator}" FontWeight="SemiBold" />
+            <TextBox Watermark="Name or UUID..."
+                     Text="{Binding CreatorFilter, Mode=TwoWay}"
+                     IsEnabled="{Binding FilterByCreator}"
+                     Margin="16,0,0,0" />
+
+            <Separator />
+
+            <!-- Permissions -->
+            <CheckBox Content="Filter by Owner Permissions" IsChecked="{Binding FilterByPermissions}" FontWeight="SemiBold" />
+            <StackPanel IsEnabled="{Binding FilterByPermissions}" Margin="16,0,0,0" Spacing="4">
+                <CheckBox Content="Must have Modify"   IsChecked="{Binding MustHaveModify}" />
+                <CheckBox Content="Must have Copy"     IsChecked="{Binding MustHaveCopy}" />
+                <CheckBox Content="Must have Transfer" IsChecked="{Binding MustHaveTransfer}" />
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Links -->
+            <TextBlock Text="Links" FontWeight="SemiBold" />
+            <StackPanel Spacing="4">
+                <CheckBox Content="Links only (show only linked items)" IsChecked="{Binding LinksOnly}" />
+                <CheckBox Content="Hide links (exclude linked items)"   IsChecked="{Binding HideLinks}" />
+            </StackPanel>
+
+            <Separator />
+
+            <!-- Actions -->
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button Content="Clear Filter" Command="{Binding ClearCommand}"
+                        MinWidth="100" AutomationProperties.Name="Clear inventory filter" />
+                <Button Content="Apply Filter" Command="{Binding ApplyCommand}"
+                        MinWidth="100" Classes="accent"
+                        AutomationProperties.Name="Apply inventory filter" />
+            </StackPanel>
+
+        </StackPanel>
+    </ScrollViewer>
+</Window>

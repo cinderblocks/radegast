@@ -1,0 +1,88 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.UploadMeshWindow"
+        x:DataType="vm:UploadMeshViewModel"
+        Title="Upload Mesh"
+        Width="550" Height="480"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Upload mesh window">
+    <DockPanel LastChildFill="True">
+
+        <!-- Bottom button bar -->
+        <Border DockPanel.Dock="Bottom" Padding="8" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button x:Name="BrowseButton"
+                        Content="Browse..."
+                        MinWidth="90"
+                        AutomationProperties.Name="Browse for mesh files"
+                        Click="OnBrowseClick" />
+                <Button Content="{Binding StartButtonText}"
+                        Command="{Binding StartUploadCommand}"
+                        MinWidth="120"
+                        AutomationProperties.Name="{Binding StartButtonText}" />
+                <Button Content="Cancel Upload"
+                        Command="{Binding CancelUploadCommand}"
+                        MinWidth="100"
+                        IsVisible="{Binding IsUploading}"
+                        AutomationProperties.Name="Cancel mesh upload" />
+                <Button x:Name="CloseButton"
+                        Content="Close"
+                        MinWidth="80"
+                        AutomationProperties.Name="Close window"
+                        Click="OnCloseClick" />
+            </StackPanel>
+        </Border>
+
+        <!-- Main content -->
+        <StackPanel Margin="10" Spacing="8">
+
+            <!-- Include images option -->
+            <CheckBox IsChecked="{Binding IncludeImages, Mode=TwoWay}"
+                      Content="Include textures from Collada file"
+                      AutomationProperties.Name="Include textures from Collada file" />
+
+            <!-- File count -->
+            <TextBlock Text="{Binding FileCount}"
+                       FontSize="12"
+                       Opacity="0.75"
+                       AutomationProperties.Name="Queued file count" />
+
+            <!-- Queued files list -->
+            <TextBlock Text="Queued files:" FontWeight="SemiBold" FontSize="12"
+                       AutomationProperties.Name="Queued files label" />
+            <ListBox ItemsSource="{Binding QueuedFiles}"
+                     Height="130"
+                     AutomationProperties.Name="Queued mesh files list" />
+
+            <!-- Status log -->
+            <TextBlock Text="Status:" FontWeight="SemiBold" FontSize="12"
+                       AutomationProperties.Name="Status log label" />
+            <ScrollViewer Height="140" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto"
+                          AutomationProperties.Name="Status log scroll viewer">
+                <TextBox Text="{Binding StatusLog}"
+                         IsReadOnly="True"
+                         AcceptsReturn="True"
+                         TextWrapping="Wrap"
+                         FontSize="11"
+                         BorderThickness="0"
+                         AutomationProperties.Name="Upload status log" />
+            </ScrollViewer>
+
+            <!-- Upload progress -->
+            <ProgressBar IsIndeterminate="{Binding IsUploading}"
+                         IsVisible="{Binding IsUploading}"
+                         AutomationProperties.Name="Upload progress indicator" />
+
+        </StackPanel>
+    </DockPanel>
+</Window>
