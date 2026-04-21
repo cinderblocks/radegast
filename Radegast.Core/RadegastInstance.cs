@@ -119,6 +119,22 @@ namespace Radegast
         // Cancellation token source for COF initialization retries
         private CancellationTokenSource? _cofInitCts;
 
+        /// <summary>
+        /// Tracks the current state of region crossing operations.
+        /// Used by StateManager to coordinate follow-recovery and other crossing-sensitive logic.
+        /// </summary>
+        public enum RegionCrossingState { None, Crossing, Waiting }
+
+        private RegionCrossingState _crossingState = RegionCrossingState.None;
+        /// <summary>
+        /// Current region crossing state. Set by StateManager during sim crossings.
+        /// </summary>
+        public RegionCrossingState CrossingState
+        {
+            get => _crossingState;
+            set => _crossingState = value;
+        }
+
         #region Events
 
         #region ClientChanged event

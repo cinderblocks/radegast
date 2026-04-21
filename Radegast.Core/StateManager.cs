@@ -91,6 +91,10 @@ namespace Radegast
         // floods the outgoing reliable-UDP queue and degrades the circuit.
         private uint _seatObjectLastRequested = 0;
 
+        // Lock to prevent concurrent follow-recovery tasks during sim crossings
+        private readonly object _followRecoveryLock = new object();
+        private bool _isInRecovery = false;
+
         private Timer? followHeartbeatTimer;
         private DateTime followLastSeen = DateTime.MinValue;
         private const int FollowHeartbeatMs = 3000;
@@ -451,9 +455,9 @@ namespace Radegast
                 {
                     try { Logger.Debug("Follow: Avatar lost, attempting to follow to last known position..."); } catch { }
                     
-                    // Wait up to 5 seconds for avatar to reappear in a neighbor sim or after crossing
+                    // Wait up to 10 seconds for avatar to reappear in a neighbor sim or after crossing
                     int retries = 0;
-                    while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 10)
+                    while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 20)
                     {
                         await Task.Delay(500).ConfigureAwait(false);
                         retries++;
@@ -467,7 +471,7 @@ namespace Radegast
 
                     if (IsFollowing && followLocalID == 0 && followLostToken == token)
                     {
-                        try { Logger.Debug("Follow: Avatar still lost after 5s, attempting fallback teleport."); } catch { }
+                        try { Logger.Debug("Follow: Avatar still lost after 10s, attempting fallback teleport."); } catch { }
                         Client.Self.RequestTeleport(oldRegionHandle, GetLocalPosition(followLastKnownPos, oldRegionHandle));
                         
                         // If still not found after teleport, stop wandering
@@ -652,6 +656,8 @@ namespace Radegast
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
             IsCrossing = true;
+            // Set crossing state for coordination with other components
+            instance.CrossingState = RadegastInstance.RegionCrossingState.Crossing;
             // Reset the seat-object request tracker so the first RequestObject after
             // landing in the new sim fires exactly once for the new local ID.
             _seatObjectLastRequested = 0;
@@ -662,7 +668,7 @@ namespace Radegast
                 {
                     // Wait for region crossing to be finalized in RadegastInstance
                     int retries = 0;
-                    while (instance.CrossingState != RadegastInstance.RegionCrossingState.None && retries < 10)
+                    while (instance.CrossingState != RadegastInstance.RegionCrossingState.None && retries < 20)
                     {
                         await Task.Delay(500).ConfigureAwait(false);
                         retries++;
@@ -671,10 +677,11 @@ namespace Radegast
                     // Fallback delay if we didn't wait at all (e.g. state machine not used for this transition)
                     if (retries == 0)
                     {
-                        await Task.Delay(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                        await Task.Delay(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
                     }
 
                     IsCrossing = false;
+                    instance.CrossingState = RadegastInstance.RegionCrossingState.None;
 
                     // Restart autopilot toward last-known position if follow mode is active.
                     // After a sim crossing the autopilot is reset; Objects_TerseObjectUpdate
@@ -692,6 +699,7 @@ namespace Radegast
                 catch (Exception ex)
                 {
                     IsCrossing = false;
+                    instance.CrossingState = RadegastInstance.RegionCrossingState.None;
                     try { Logger.Warn("Network_SimChanged delayed work failed", ex); } catch { }
                 }
             });
@@ -808,9 +816,9 @@ namespace Radegast
                     {
                         try { Logger.Debug("Follow: Avatar disappeared from sim, attempting to follow to last known position..."); } catch { }
                         
-                        // Wait up to 5 seconds for avatar to reappear in a neighbor sim or after crossing
+                        // Wait up to 10 seconds for avatar to reappear in a neighbor sim or after crossing
                         int retries = 0;
-                        while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 10)
+                        while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 20)
                         {
                             await Task.Delay(500).ConfigureAwait(false);
                             retries++;
@@ -824,7 +832,7 @@ namespace Radegast
 
                         if (IsFollowing && followLocalID == 0 && followLostToken == token)
                         {
-                            try { Logger.Debug("Follow: Avatar still gone after 5s, attempting fallback teleport."); } catch { }
+                            try { Logger.Debug("Follow: Avatar still gone after 10s, attempting fallback teleport."); } catch { }
                             Client.Self.RequestTeleport(oldRegionHandle, GetLocalPosition(followLastKnownPos, oldRegionHandle));
                             
                             // If still not found after teleport, stop wandering
@@ -898,6 +906,9 @@ namespace Radegast
 
         public void SetDefaultCamera()
         {
+            // Skip camera updates during crossings to reduce UDP flooding
+            if (IsCrossing) { return; }
+
             if (!CameraTracksOwnAvatar) { return; }
 
             if (Client.Self.SittingOn != 0)
@@ -1052,23 +1063,24 @@ namespace Radegast
        // }
        //
         private void FollowHeartbeat(object? state)
-{
-    if (!IsFollowing || !Client.Network.Connected) return;
+        {
+            // Skip heartbeat recovery during crossings to avoid conflicts with Network_SimChanged logic
+            if (!IsFollowing || !Client.Network.Connected || IsCrossing) return;
 
-    var silenceMs = (DateTime.UtcNow - followLastSeen).TotalMilliseconds;
-    if (silenceMs < FollowSilenceThresholdMs) return;
+            var silenceMs = (DateTime.UtcNow - followLastSeen).TotalMilliseconds;
+            if (silenceMs < FollowSilenceThresholdMs) return;
 
-    if (followLastKnownPos == Vector3d.Zero) return;
+            if (followLastKnownPos == Vector3d.Zero) return;
 
-    // Don't nudge if we're already within follow distance of the last known position.
-    // This handles a stationary followee: they stop sending TerseObjectUpdates,
-    // but we're already standing next to them, so there's nothing to do.
-    double distToLastKnown = Vector3d.Distance(Client.Self.GlobalPosition, followLastKnownPos);
-    if (distToLastKnown <= FollowDistance) return;
+            // Don't nudge if we're already within follow distance of the last known position.
+            // This handles a stationary followee: they stop sending TerseObjectUpdates,
+            // but we're already standing next to them, so there's nothing to do.
+            double distToLastKnown = Vector3d.Distance(Client.Self.GlobalPosition, followLastKnownPos);
+            if (distToLastKnown <= FollowDistance) return;
 
-    try { Logger.Debug("Follow: heartbeat nudge — target silent and we are far, walking to last known position", Client); } catch { }
-    WalkToFollow(followLastKnownPos);
-}
+            try { Logger.Debug("Follow: heartbeat nudge — target silent and we are far, walking to last known position", Client); } catch { }
+            WalkToFollow(followLastKnownPos);
+        }
 
         #region Look at effect
         private int lastLookAtEffect = 0;
