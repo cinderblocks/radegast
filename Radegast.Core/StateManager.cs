@@ -76,7 +76,25 @@ namespace Radegast
         private bool Sitting = false;
 
         private UUID followID;
+        private uint followLocalID;
+        private ulong followRegionHandle;
+        private Vector3d followLastKnownPos;
+        private int followLostToken = 0;
+        private DateTime followTooFarTime = DateTime.MinValue;
         private bool displayEndWalk = false;
+        private long _lastWalkStartTick = 0;
+        private const int WalkStartDebounceMs = 300;
+
+        // Tracks the last SittingOn local-ID for which we requested object data.
+        // Prevents RequestObject from firing on every AvatarUpdate/TerseObjectUpdate
+        // event while the vehicle object is not yet in the local tracker, which
+        // floods the outgoing reliable-UDP queue and degrades the circuit.
+        private uint _seatObjectLastRequested = 0;
+
+        private Timer? followHeartbeatTimer;
+        private DateTime followLastSeen = DateTime.MinValue;
+        private const int FollowHeartbeatMs = 3000;
+        private const int FollowSilenceThresholdMs = 6000;
 
         internal static readonly ThreadLocal<Random> rnd = new ThreadLocal<Random>(() => new Random());
         private Timer? lookAtTimer;
@@ -201,6 +219,7 @@ namespace Radegast
             client.Objects.AvatarUpdate += Objects_AvatarUpdate;
             client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
             client.Objects.AvatarSitChanged += Objects_AvatarSitChanged;
+            client.Objects.KillObject += Objects_KillObject;
             client.Self.AlertMessage += Self_AlertMessage;
             client.Self.TeleportProgress += Self_TeleportProgress;
             client.Network.SimChanged += Network_SimChanged;
@@ -211,6 +230,7 @@ namespace Radegast
             client.Objects.AvatarUpdate -= Objects_AvatarUpdate;
             client.Objects.TerseObjectUpdate -= Objects_TerseObjectUpdate;
             client.Objects.AvatarSitChanged -= Objects_AvatarSitChanged;
+            client.Objects.KillObject -= Objects_KillObject;
             client.Self.AlertMessage -= Self_AlertMessage;
             client.Self.TeleportProgress -= Self_TeleportProgress;
             client.Network.SimChanged -= Network_SimChanged;
@@ -294,6 +314,7 @@ namespace Radegast
             try
             {
                 RegisterClientEvents(e.Client);
+                lastSimHandle = Client.Network.CurrentSim?.Handle ?? 0;
             }
             catch (Exception ex)
             {
@@ -390,11 +411,75 @@ namespace Radegast
                 var sim = FindSimulatorForLocalID(Client.Self.SittingOn);
                 if (!sim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
                 {
-                    Client.Objects.RequestObject(sim, Client.Self.SittingOn);
+                    // Request object data if we haven't already done so for this local ID.
+                    // SetDefaultCamera makes the same call on every avatar-update event, so
+                    // the shared _seatObjectLastRequested field prevents double-requesting.
+                    uint sittingOn = Client.Self.SittingOn;
+                    if (sittingOn != _seatObjectLastRequested)
+                    {
+                        _seatObjectLastRequested = sittingOn;
+                        Client.Objects.RequestObject(sim, sittingOn);
+                    }
                 }
+            }
+            else
+            {
+                // SittingOn dropped to 0 (standing up or mid-crossing handoff).
+                // Reset so that the next non-zero SittingOn value — either the same
+                // vehicle in the new sim (different local ID) or a new vehicle —
+                // triggers a fresh RequestObject.
+                _seatObjectLastRequested = 0;
             }
 
             SitStateChanged?.Invoke(this, new SitEventArgs(Sitting));
+        }
+
+        private void Objects_KillObject(object sender, KillObjectEventArgs e)
+        {
+            if (IsFollowing && e.ObjectLocalID == followLocalID && followLocalID != 0 && e.Simulator.Handle == followRegionHandle)
+            {
+                uint oldLocalID = followLocalID;
+                ulong oldRegionHandle = followRegionHandle;
+                followLocalID = 0;
+                int token = ++followLostToken;
+
+                // Proactively walk toward the last known position to follow through a region crossing
+                // even if we lost the target locally
+                WalkToFollow(followLastKnownPos);
+
+                Task.Run(async () =>
+                {
+                    try { Logger.Debug("Follow: Avatar lost, attempting to follow to last known position..."); } catch { }
+                    
+                    // Wait up to 5 seconds for avatar to reappear in a neighbor sim or after crossing
+                    int retries = 0;
+                    while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 10)
+                    {
+                        await Task.Delay(500).ConfigureAwait(false);
+                        retries++;
+                        
+                        // Keep walking toward last known position while searching
+                        if (followLocalID == 0 && followLostToken == token)
+                        {
+                            WalkToFollow(followLastKnownPos);
+                        }
+                    }
+
+                    if (IsFollowing && followLocalID == 0 && followLostToken == token)
+                    {
+                        try { Logger.Debug("Follow: Avatar still lost after 5s, attempting fallback teleport."); } catch { }
+                        Client.Self.RequestTeleport(oldRegionHandle, GetLocalPosition(followLastKnownPos, oldRegionHandle));
+                        
+                        // If still not found after teleport, stop wandering
+                        await Task.Delay(5000).ConfigureAwait(false);
+                        if (IsFollowing && followLocalID == 0 && followLostToken == token)
+                        {
+                            try { Logger.Debug("Follow: Avatar lost permanently, stopping follow."); } catch { }
+                            StopFollowing();
+                        }
+                    }
+                });
+            }
         }
 
         /// <summary>
@@ -566,16 +651,47 @@ namespace Radegast
 
         private void Network_SimChanged(object sender, SimChangedEventArgs e)
         {
+            IsCrossing = true;
+            // Reset the seat-object request tracker so the first RequestObject after
+            // landing in the new sim fires exactly once for the new local ID.
+            _seatObjectLastRequested = 0;
+
             Task.Run(async () =>
             {
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+                    // Wait for region crossing to be finalized in RadegastInstance
+                    int retries = 0;
+                    while (instance.CrossingState != RadegastInstance.RegionCrossingState.None && retries < 10)
+                    {
+                        await Task.Delay(500).ConfigureAwait(false);
+                        retries++;
+                    }
+
+                    // Fallback delay if we didn't wait at all (e.g. state machine not used for this transition)
+                    if (retries == 0)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+                    }
+
+                    IsCrossing = false;
+
+                    // Restart autopilot toward last-known position if follow mode is active.
+                    // After a sim crossing the autopilot is reset; Objects_TerseObjectUpdate
+                    // will correct it once the target reappears, but this prevents the gap
+                    // where the follower just stands still at the border.
+                    if (IsFollowing && followLastKnownPos != Vector3d.Zero)
+                    {
+                        try { Logger.Debug("Network_SimChanged: resuming follow walk after crossing", Client); } catch { }
+                        WalkToFollow(followLastKnownPos);
+                    }
+
                     AutoSit.TrySit();
                     PseudoHome.ETGoHome();
                 }
                 catch (Exception ex)
                 {
+                    IsCrossing = false;
                     try { Logger.Warn("Network_SimChanged delayed work failed", ex); } catch { }
                 }
             });
@@ -589,7 +705,8 @@ namespace Radegast
             switch (e.Status)
             {
                 case TeleportStatus.Progress:
-                    instance.MediaManager.PlayUISound(UISounds.Teleport);
+                    instance.MediaManager?.KillAllSounds();
+                    instance.MediaManager?.PlayUISound(UISounds.Teleport);
                     Client.Self.SphereEffect(Client.Self.GlobalPosition, Color4.White, 4f, teleportEffect);
                     break;
                 case TeleportStatus.Finished:
@@ -597,7 +714,7 @@ namespace Radegast
                     SetRandomHeading();
                     break;
                 case TeleportStatus.Failed:
-                    instance.MediaManager.PlayUISound(UISounds.Error);
+                    instance.MediaManager?.PlayUISound(UISounds.Error);
                     Client.Self.SphereEffect(Vector3d.Zero, Color4.White, 0f, teleportEffect);
                     break;
             }
@@ -619,6 +736,7 @@ namespace Radegast
             }
 
             Client.Self.Movement.Camera.Far = instance.GlobalSettings["draw_distance"];
+            lastSimHandle = Client.Network.CurrentSim?.Handle ?? 0;
 
             if (lookAtTimer == null)
             {
@@ -632,73 +750,149 @@ namespace Radegast
             {
                 SetDefaultCamera();
             }
+
+            if (IsFollowing && e.Avatar.ID == followID)
+            {
+                followLastSeen = DateTime.UtcNow;
+                if (followLocalID == 0) followLostToken++;
+                followLocalID = e.Avatar.LocalID;
+                followRegionHandle = e.Simulator.Handle;
+                followLastKnownPos = GlobalPosition(e.Simulator, AvatarPosition(e.Simulator, e.Avatar));
+                followTooFarTime = DateTime.MinValue;
+            }
+        }
+
+        private Vector3 GetLocalPosition(Vector3d globalPosition, ulong regionHandle)
+        {
+            uint regionX, regionY;
+            Utils.LongToUInts(regionHandle, out regionX, out regionY);
+            return new Vector3(
+                (float)(globalPosition.X - regionX),
+                (float)(globalPosition.Y - regionY),
+                (float)globalPosition.Z
+            );
         }
 
         private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
         {
             if (!e.Update.Avatar) { return; }
 
-            if (e.Prim.LocalID == Client.Self.LocalID)
+            if (e.Prim != null && e.Prim.LocalID == Client.Self.LocalID)
             {
                 SetDefaultCamera();
             }
 
             if (!IsFollowing) { return; }
 
-            // Locate the avatar object by local ID across known simulators
+            // Locate the avatar object by local ID in the simulator that sent the update
             Avatar? foundAv = null;
-            Simulator? foundSim = null;
-            try
-            {
-                lock (Client.Network.Simulators)
-                {
-                    foreach (var s in Client.Network.Simulators)
-                    {
-                        if (s == null) continue;
-                        if (s.ObjectsAvatars.TryGetValue(e.Update.LocalID, out var av))
-                        {
-                            foundAv = av;
-                            foundSim = s;
-                            break;
-                        }
-                    }
-                }
-            }
-            catch { }
+            e.Simulator.ObjectsAvatars.TryGetValue(e.Update.LocalID, out foundAv);
+            Simulator foundSim = e.Simulator;
 
             if (foundAv == null)
             {
-                // Not found in tracked avatars; nothing we can do here
+                // Not found in tracked avatars in the sender simulator
+                // Only teleport if this was the avatar we were following and from the sim we expect
+                if (IsFollowing && e.Update.LocalID == followLocalID && followLocalID != 0 && e.Simulator.Handle == followRegionHandle)
+                {
+                    uint oldLocalID = followLocalID;
+                    ulong oldRegionHandle = followRegionHandle;
+                    followLocalID = 0;
+                    int token = ++followLostToken;
+
+                    // Proactively walk toward the last known position to follow through a region crossing
+                    // even if we lost the target locally
+                    WalkToFollow(followLastKnownPos);
+
+                    Task.Run(async () =>
+                    {
+                        try { Logger.Debug("Follow: Avatar disappeared from sim, attempting to follow to last known position..."); } catch { }
+                        
+                        // Wait up to 5 seconds for avatar to reappear in a neighbor sim or after crossing
+                        int retries = 0;
+                        while (IsFollowing && followLocalID == 0 && followLostToken == token && retries < 10)
+                        {
+                            await Task.Delay(500).ConfigureAwait(false);
+                            retries++;
+
+                            // Keep walking toward last known position while searching
+                            if (followLocalID == 0 && followLostToken == token)
+                            {
+                                WalkToFollow(followLastKnownPos);
+                            }
+                        }
+
+                        if (IsFollowing && followLocalID == 0 && followLostToken == token)
+                        {
+                            try { Logger.Debug("Follow: Avatar still gone after 5s, attempting fallback teleport."); } catch { }
+                            Client.Self.RequestTeleport(oldRegionHandle, GetLocalPosition(followLastKnownPos, oldRegionHandle));
+                            
+                            // If still not found after teleport, stop wandering
+                            await Task.Delay(5000).ConfigureAwait(false);
+                            if (IsFollowing && followLocalID == 0 && followLostToken == token)
+                            {
+                                try { Logger.Debug("Follow: Avatar lost permanently, stopping follow."); } catch { }
+                                StopFollowing();
+                            }
+                        }
+                    });
+                }
                 return;
             }
 
             // If this is the avatar we're following, compute its position and update follow
             if (foundAv.ID == followID)
             {
-                var pos = AvatarPosition(foundSim!, foundAv);
-                // Convert to current sim local coordinates if avatar is on another simulator
+                followLastSeen = DateTime.UtcNow;
+                if (followLocalID == 0) followLostToken++;
+                followLocalID = foundAv.LocalID;
+                followRegionHandle = foundSim.Handle;
+                followLastKnownPos = GlobalPosition(foundSim, AvatarPosition(foundSim, foundAv));
+
+                Vector3 relativePos = (foundSim != Client.Network.CurrentSim)
+                    ? PositionHelper.ToLocalPosition(foundSim.Handle, AvatarPosition(foundSim, foundAv))
+                    : AvatarPosition(foundSim, foundAv);
+
                 if (foundSim != Client.Network.CurrentSim)
                 {
-                    try { pos = PositionHelper.ToLocalPosition(foundSim!.Handle, pos); } catch { }
+                    // Target is visible in a neighbour sim and is being tracked normally.
+                    // Walk directly to their last known global position so autopilot can
+                    // handle the sim crossing. Do NOT enter lost-avatar recovery — the
+                    // target is not lost, and doing so spawns concurrent recovery tasks
+                    // on every TerseObjectUpdate, which floods autopilot cancel/restart
+                    // and prevents the fallback teleport from ever firing.
+                    WalkToFollow(followLastKnownPos);
+                    return;
                 }
 
-                FollowUpdate(pos);
+                // Same sim: normal follow steering
+                followTooFarTime = DateTime.MinValue;
+                FollowUpdate(AvatarPosition(foundSim, foundAv));
             }
         }
 
-        private void FollowUpdate(Vector3 pos)
+        private void FollowUpdate(Vector3 relativePos)
         {
-            if (Vector3.Distance(pos, Client.Self.SimPosition) > FollowDistance)
+            // Use global coordinates for distance and direction to avoid sim-wrap artifacts
+            Vector3d myGlb = Client.Self.GlobalPosition;
+            Vector3d targetGlb = GlobalPosition(Client.Network.CurrentSim, relativePos);
+            double dist = Vector3d.Distance(myGlb, targetGlb);
+
+            if (dist > FollowDistance)
             {
-                Vector3 target = pos + Vector3.Normalize(Client.Self.SimPosition - pos) * (FollowDistance - 1f);
-                Client.Self.AutoPilotCancel();
-                Vector3d glb = GlobalPosition(Client.Network.CurrentSim!, target);
-                Client.Self.AutoPilot(glb.X, glb.Y, glb.Z);
+                // Calculate target position in global coordinates
+                Vector3d dir = Vector3d.Normalize(myGlb - targetGlb);
+                Vector3d targetGlbPoint = targetGlb + dir * (FollowDistance - 1.0);
+                
+                // No AutoPilotCancel before AutoPilot — retargeting without cancelling first
+                // avoids generating spurious AutopilotCanceled alerts on every TerseObjectUpdate.
+                Client.Self.AutoPilot(targetGlbPoint.X, targetGlbPoint.Y, targetGlbPoint.Z);
             }
             else
             {
                 Client.Self.AutoPilotCancel();
-                Client.Self.Movement.TurnToward(pos);
+                // Face the target using local coordinates of the current sim
+                Client.Self.Movement.TurnToward(relativePos);
             }
         }
 
@@ -711,9 +905,24 @@ namespace Radegast
                 var sim = FindSimulatorForLocalID(Client.Self.SittingOn);
                 if (!sim.ObjectsPrimitives.ContainsKey(Client.Self.SittingOn))
                 {
-                    // We are sitting but don't have the information about the object we are sitting on
-                    // Request the object from the simulator that should own it
-                    try { Client.Objects.RequestObject(sim, Client.Self.SittingOn); } catch { }
+                    // We are sitting but don't have the information about the object we are
+                    // sitting on. Request it — BUT only once per unique SittingOn value.
+                    // This method fires on every AvatarUpdate and TerseObjectUpdate event;
+                    // without deduplication it floods the reliable-UDP queue with
+                    // RequestObject packets that go unACK'd while the circuit is stressed
+                    // during and after a crossing, causing the broken "half-crossed" state.
+                    uint sittingOn = Client.Self.SittingOn;
+                    if (sittingOn != _seatObjectLastRequested)
+                    {
+                        _seatObjectLastRequested = sittingOn;
+                        try { Client.Objects.RequestObject(sim, sittingOn); } catch { }
+                    }
+                }
+                else
+                {
+                    // Object is now in the tracker; allow a future request if the local ID
+                    // changes (i.e. after the next crossing into a new sim).
+                    _seatObjectLastRequested = 0;
                 }
             }
 
@@ -788,13 +997,25 @@ namespace Radegast
             FollowName = name;
             followID = id;
             IsFollowing = followID != UUID.Zero;
+            followLocalID = 0;
+            followLostToken++;
+            followTooFarTime = DateTime.MinValue;
+            followLastSeen = DateTime.MinValue;
+            followHeartbeatTimer?.Dispose();
 
             if (IsFollowing)
             {
+                followHeartbeatTimer = new Timer(FollowHeartbeat, null, FollowHeartbeatMs, FollowHeartbeatMs);
                 IsWalking = false;
 
-                if (TryFindAvatar(id, out Vector3 target))
+                if (TryFindAvatar(id, out var sim, out Vector3 target))
                 {
+                    if (sim != null)
+                    {
+                        var kvp = sim.ObjectsAvatars.FirstOrDefault(a => a.Value.ID == id);
+                        if (kvp.Value != null) followLocalID = kvp.Value.LocalID;
+                    }
+
                     Client.Self.Movement.TurnToward(target);
                     FollowUpdate(target);
                 }
@@ -804,10 +1025,50 @@ namespace Radegast
 
         public void StopFollowing()
         {
+            followHeartbeatTimer?.Dispose();
+            followHeartbeatTimer = null;
             IsFollowing = false;
             FollowName = string.Empty;
             followID = UUID.Zero;
+            followLocalID = 0;
+            followLostToken++;
+            followTooFarTime = DateTime.MinValue;
         }
+
+     //   private void FollowHeartbeat(object? state)
+      //  {
+        //    if (!IsFollowing || !Client.Network.Connected) return;
+
+          //  var silenceMs = (DateTime.UtcNow - followLastSeen).TotalMilliseconds;
+            //if (silenceMs < FollowSilenceThresholdMs) return; // target recently seen, all good
+
+            // Target has been silent for too long. Walk toward last known position.
+            // This handles: target in unconnected neighbor sim, TerseObjectUpdate gap, etc.
+           // if (followLastKnownPos != Vector3d.Zero)
+           // {
+           //     try { Logger.Debug("Follow: heartbeat nudge — target silent, walking to last known position", Client); } catch { }
+           //     WalkToFollow(followLastKnownPos);
+           // }
+       // }
+       //
+        private void FollowHeartbeat(object? state)
+{
+    if (!IsFollowing || !Client.Network.Connected) return;
+
+    var silenceMs = (DateTime.UtcNow - followLastSeen).TotalMilliseconds;
+    if (silenceMs < FollowSilenceThresholdMs) return;
+
+    if (followLastKnownPos == Vector3d.Zero) return;
+
+    // Don't nudge if we're already within follow distance of the last known position.
+    // This handles a stationary followee: they stop sending TerseObjectUpdates,
+    // but we're already standing next to them, so there's nothing to do.
+    double distToLastKnown = Vector3d.Distance(Client.Self.GlobalPosition, followLastKnownPos);
+    if (distToLastKnown <= FollowDistance) return;
+
+    try { Logger.Debug("Follow: heartbeat nudge — target silent and we are far, walking to last known position", Client); } catch { }
+    WalkToFollow(followLastKnownPos);
+}
 
         #region Look at effect
         private int lastLookAtEffect = 0;
@@ -854,7 +1115,9 @@ namespace Radegast
 
         private Timer? walkTimer;
         private readonly int walkChekInterval = 500;
+        public Vector3d WalkToTarget => walkToTarget;
         private Vector3d walkToTarget;
+        private ulong lastSimHandle;
         private int lastDistance = 0;
         private int lastDistanceChanged = 0;
 
@@ -879,7 +1142,31 @@ namespace Radegast
             }
 
             lastDistanceChanged = Environment.TickCount;
+            lastSimHandle = Client.Network.CurrentSim?.Handle ?? 0;
             Client.Self.AutoPilotCancel();
+            Interlocked.Exchange(ref _lastWalkStartTick, (long)Environment.TickCount);
+            IsWalking = true;
+            Client.Self.AutoPilot(walkToTarget.X, walkToTarget.Y, walkToTarget.Z);
+            FireWalkStateChanged();
+        }
+
+        /// <summary>
+        /// Walk to a global position without interrupting follow mode.
+        /// Used internally by follow-recovery paths so IsFollowing stays true
+        /// across border crossings.
+        /// </summary>
+        private void WalkToFollow(Vector3d globalPos)
+        {
+            walkToTarget = globalPos;
+            // Do NOT clear IsFollowing here — that's what WalkTo does for user-initiated walks.
+            if (walkTimer == null)
+            {
+                walkTimer = new Timer(WalkTimerElapsed, null, walkChekInterval, Timeout.Infinite);
+            }
+            lastDistanceChanged = Environment.TickCount;
+            lastSimHandle = Client.Network.CurrentSim?.Handle ?? 0;
+            Client.Self.AutoPilotCancel();
+            Interlocked.Exchange(ref _lastWalkStartTick, (long)Environment.TickCount);
             IsWalking = true;
             Client.Self.AutoPilot(walkToTarget.X, walkToTarget.Y, walkToTarget.Z);
             FireWalkStateChanged();
@@ -887,16 +1174,41 @@ namespace Radegast
 
         private void WalkTimerElapsed(object sender)
         {
+            Vector3d myPos = Client.Self.GlobalPosition;
+            double distance;
 
-            double distance = Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget);
+            // Z-Axis Stabilization: Use 2D distance if height difference is small (< 2m)
+            if (Math.Abs(myPos.Z - walkToTarget.Z) < 2.0)
+            {
+                distance = Vector3d.Distance(new Vector3d(myPos.X, myPos.Y, 0), new Vector3d(walkToTarget.X, walkToTarget.Y, 0));
+            }
+            else
+            {
+                distance = Vector3d.Distance(myPos, walkToTarget);
+            }
 
             if (distance < 2d)
             {
+                if (IsFollowing)
+                {
+                    // In follow mode, walkToTarget is a snapshot that the target has moved past.
+                    // Don't end the walk machinery; the next TerseObjectUpdate will issue new movement.
+                    walkTimer?.Change(walkChekInterval, Timeout.Infinite);
+                    return;
+                }
+
                 // We're there
                 _ = EndWalkingAsync();
             }
             else
             {
+                // Boundary-Aware Autopilot: Restart if we crossed a sim boundary
+                if (Client.Network.CurrentSim != null && Client.Network.CurrentSim.Handle != lastSimHandle)
+                {
+                    lastSimHandle = Client.Network.CurrentSim.Handle;
+                    Client.Self.AutoPilot(walkToTarget.X, walkToTarget.Y, walkToTarget.Z);
+                }
+
                 if (lastDistance != (int)distance)
                 {
                     lastDistanceChanged = Environment.TickCount;
@@ -916,7 +1228,8 @@ namespace Radegast
         {
             if (e.NotificationId == "AutopilotCanceled")
             {
-                if (IsWalking)
+                // Only cancel walking if we're not in the middle of a debounce window from a fresh WalkTo
+                if (IsWalking && ((long)Environment.TickCount - Interlocked.Read(ref _lastWalkStartTick)) > WalkStartDebounceMs)
                 {
                     _ = EndWalkingAsync();
                 }
@@ -1039,7 +1352,12 @@ namespace Radegast
         /// </summary>
         /// <param name="sit">Sit or unsit state</param>
         /// <param name="target">If <see cref="UUID.Zero"/> or default, sit on ground. Not needed if <see cref="sit"/> is false</param>
-        public void SetSitting(bool sit, UUID target = default)
+        /// <param name="stopAnimations">
+        /// When standing, also stop all non-standard animations.
+        /// Pass <c>false</c> during vehicle crossing recovery to avoid disrupting
+        /// the vehicle's own animation state while forcing the border walk-through.
+        /// </param>
+        public void SetSitting(bool sit, UUID target = default, bool stopAnimations = true)
         {
             if (sit)
             {
@@ -1061,7 +1379,10 @@ namespace Radegast
                 {
                     Sitting = false;
                     Client.Self.Stand();
-                    StopAllAnimations(); // FIXME: Hamfisted. i don't like this...
+                    if (stopAnimations)
+                    {
+                        StopAllAnimations(); // FIXME: Hamfisted. i don't like this...
+                    }
                 }
                 else
                 {
@@ -1228,11 +1549,11 @@ namespace Radegast
             get
             {
                 if (Client.Self.Movement.SitOnGround || Client.Self.SittingOn != 0) { return true; }
-                if (Sitting) {
-                    Logger.Debug("out of sync sitting");
-                    Sitting = false;
+                if (Sitting)
+                {
+                    Logger.Debug("out of sync sitting (internal Sitting is true, but LibOMV Self.SittingOn is 0)");
                 }
-                return false;
+                return Sitting;
             }
         }
 
@@ -1241,6 +1562,14 @@ namespace Radegast
         public string FollowName { get; set; } = string.Empty;
         public float FollowDistance { get; set; } = 3.0f;
         public bool IsWalking { get; private set; } = false;
+
+        /// <summary>
+        /// True while a sim crossing is in progress and settling (cleared after the
+        /// post-crossing delay in Network_SimChanged). AutoSit reads this to suppress
+        /// premature re-sit attempts during the brief handoff window when LibOMV
+        /// transiently reports SittingOn = 0.
+        /// </summary>
+        public bool IsCrossing { get; private set; } = false;
         public AutoSit AutoSit { get; private set; } = null!;
         public LSLHelper LSLHelper { get; private set; } = null!;
         public PseudoHome PseudoHome { get; }
