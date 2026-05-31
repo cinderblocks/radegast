@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
@@ -7,10 +7,13 @@
 	<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 	<UseWindowsForms>true</UseWindowsForms>
 	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
+		<GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
-	<OutputPath>..\bin\$(Configuration)\</OutputPath>
-  </PropertyGroup>
+	<OutputPath>..\bin\Radegast\$(Configuration)\</OutputPath>
+	<Version>2.6.7</Version>
+	<AssemblyVersion>2.6.7.0</AssemblyVersion>
+	<FileVersion>2.6.7.0</FileVersion>
+	</PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <DebugType>full</DebugType>
     <DefineConstants>TRACE;DEBUG</DefineConstants>
@@ -18,27 +21,6 @@
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
     <DebugType>pdbonly</DebugType>
     <DefineConstants>TRACE</DefineConstants>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseLinux|x86'">
-    <DefineConstants>TRACE</DefineConstants>
-    <Optimize>true</Optimize>
-    <DebugType>portable</DebugType>
-    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
-    <Prefer32Bit>true</Prefer32Bit>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseMacOS|x86'">
-    <DefineConstants>TRACE</DefineConstants>
-    <Optimize>true</Optimize>
-    <DebugType>portable</DebugType>
-    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
-    <Prefer32Bit>true</Prefer32Bit>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'ReleaseWindows|x86'">
-    <DefineConstants>TRACE</DefineConstants>
-    <Optimize>true</Optimize>
-    <DebugType>pdbonly</DebugType>
-    <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
-    <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
 	<BugsplatDatabase Condition="'$(BugsplatDatabase)' == ''"></BugsplatDatabase>
@@ -50,13 +32,13 @@
     <PackageReference Include="BugSplatDotNetStandard" Version="4.3.0" />
     <PackageReference Include="C5" Version="3.0.0" />
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="Microsoft.Windows.Compatibility" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Windows.Compatibility" Version="10.0.8" />
     <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.0.6" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
-    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.2" />
+    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.4" />
     <PackageReference Include="System.Console" Version="4.3.1" />
-    <PackageReference Include="System.Resources.Extensions" Version="10.0.5" />
+    <PackageReference Include="System.Resources.Extensions" Version="10.0.8" />
     <PackageReference Include="System.Resources.ResourceManager" Version="4.3.0" />
     <PackageReference Include="System.Runtime" Version="4.3.1" />
     <PackageReference Include="System.Runtime.Extensions" Version="4.3.1" />

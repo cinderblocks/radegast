@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Runtime.InteropServices;
 using SkiaSharp;
 using OpenTK.Graphics.OpenGL4;
 
@@ -32,30 +33,59 @@ public sealed class GlTexture : IDisposable
     public int  TextureId { get; private set; }
     private bool _disposed;
 
+    /// <summary>
+    /// Prepares an <see cref="SKBitmap"/> for GL upload by converting it to
+    /// <see cref="SKColorType.Rgba8888"/> and flipping it vertically.
+    /// Safe to call from any background thread — does no GL work.
+    /// The returned bitmap is a new allocation owned by the caller.
+    /// <paramref name="source"/> is disposed if a conversion copy was required.
+    /// </summary>
+    public static SKBitmap Preprocess(SKBitmap source)
+    {
+        // Step 1: ensure RGBA8888 (required format for GL upload).
+        SKBitmap rgba;
+        bool ownRgba;
+        if (source.ColorType == SKColorType.Rgba8888)
+        {
+            rgba    = source;
+            ownRgba = false;
+        }
+        else
+        {
+            rgba    = source.Copy(SKColorType.Rgba8888)
+                   ?? throw new ArgumentException("Cannot convert bitmap to RGBA8888.");
+            source.Dispose();
+            ownRgba = true;
+        }
+
+        // Step 2: vertical flip — GL (0,0) is bottom-left; bitmap row 0 is top.
+        // Copy rows from source in reverse order directly into the destination
+        // pixel buffer. This bypasses the Skia rasterizer entirely (no canvas,
+        // no paint, no blend) which is safe here because RGBA8888 pixels are
+        // copied verbatim — alpha channels are preserved exactly.
+        var flipped = new SKBitmap(rgba.Width, rgba.Height, rgba.ColorType, rgba.AlphaType);
+        int rowBytes = rgba.RowBytes;
+        int height   = rgba.Height;
+        var src = MemoryMarshal.Cast<byte, byte>(rgba.GetPixelSpan());
+        var dst = MemoryMarshal.Cast<byte, byte>(flipped.GetPixelSpan());
+        for (int y = 0; y < height; y++)
+        {
+            src.Slice((height - 1 - y) * rowBytes, rowBytes)
+               .CopyTo(dst.Slice(y * rowBytes, rowBytes));
+        }
+        if (ownRgba) rgba.Dispose();
+        return flipped;
+    }
+
+    /// <summary>
+    /// Creates a GL texture from a <em>pre-processed</em> bitmap (RGBA8888, vertically
+    /// flipped) produced by <see cref="Preprocess"/>.  Only GL calls are made here —
+    /// no Skia work — so this is safe to call frequently on the GL render thread.
+    /// Ownership of <paramref name="bitmap"/> transfers to this constructor; it is
+    /// disposed before the constructor returns.
+    /// </summary>
     public GlTexture(SKBitmap bitmap)
     {
-        bool ownBitmap = false;
-        if (bitmap.ColorType != SKColorType.Rgba8888)
-        {
-            bitmap    = bitmap.Copy(SKColorType.Rgba8888)
-                     ?? throw new ArgumentException("Cannot convert bitmap to RGBA8888.");
-            ownBitmap = true;
-        }
-
-        // OpenGL places (0,0) at the bottom-left of the texture, but bitmap row 0
-        // is the top row.  Flip vertically so the image appears the right way up —
-        // the same fix the legacy renderer applies before glTexImage2D.
-        var flipped = new SKBitmap(bitmap.Width, bitmap.Height,
-                                   bitmap.ColorType, bitmap.AlphaType);
-        using (var canvas = new SKCanvas(flipped))
-        {
-            canvas.Scale(1f, -1f, 0f, bitmap.Height / 2f);
-            canvas.DrawBitmap(bitmap, 0f, 0f);
-        }
-        if (ownBitmap) bitmap.Dispose();
-        bitmap    = flipped;
-        ownBitmap = true;
-
         TextureId = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, TextureId);
 
@@ -75,7 +105,7 @@ public sealed class GlTexture : IDisposable
         GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
         GL.BindTexture(TextureTarget.Texture2D, 0);
 
-        if (ownBitmap) bitmap.Dispose();
+        bitmap.Dispose();
     }
 
     public void Bind(TextureUnit unit = TextureUnit.Texture0)

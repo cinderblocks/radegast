@@ -18,11 +18,14 @@
  */
 
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using LibreMetaverse.Materials;
 using OpenMetaverse;
+using OpenMetaverse.Assets;
 using OpenMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
@@ -41,19 +44,35 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class PrimMeshBuilder(GridClient client)
 {
-    private readonly MeshmerizerR _mesher = new();
+    private readonly MeshFoundry _mesher = new();
+
+    private readonly Dictionary<UUID, LegacyMaterial?> _materialCache     = new();
+    private readonly object                             _materialCacheLock = new();
+
+    private readonly Dictionary<UUID, AssetMaterial?>   _pbrCache     = new();
+    private readonly object                             _pbrCacheLock = new();
 
     private record RawFace(
-        float[]   Vertices,
-        ushort[]  Indices,
-        TkVector4 Color,
-        bool      Fullbright,
-        float     Glow,
-        bool      HasAlpha,
-        UUID      TextureId,
-        TkMatrix4 Transform,
-        uint      PrimLocalId,
-        int       FaceIndex);
+        float[]       Vertices,
+        int           VerticesLength,
+        ushort[]      Indices,
+        TkVector4     Color,
+        bool          Fullbright,
+        float         Glow,
+        bool          HasAlpha,
+        UUID          TextureId,
+        TkMatrix4     Transform,
+        uint          PrimLocalId,
+        int           FaceIndex,
+        TkVector3     Centroid,
+        bool          IsTwoSided  = false,
+        bool          ForceOpaque = false,
+        float         AlphaCutoff = 0.004f,
+        float         Shiny       = 0f,
+        bool          HasBump     = false,
+        FaceAlphaMode AlphaMode   = FaceAlphaMode.None,
+        UUID          MaterialId  = default,
+        UUID          RenderMaterialId = default);
 
     // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -66,41 +85,73 @@ internal sealed class PrimMeshBuilder(GridClient client)
         uint                    rootLocalId,
         string                  label,
         IProgress<string>?      progress,
-        CancellationToken       ct)
+        CancellationToken       ct,
+        bool                    isHud               = false,
+        DetailLevel             detailLevel         = DetailLevel.High,
+        IProgress<SceneTexturePatch>? texturePatch  = null)
     {
-        var (rawFaces, bMin, bMax) = await TessellateAsync(prims, rootLocalId, progress, ct)
-                                           .ConfigureAwait(false);
+        var (rawFaces, bMin, bMax, flexiPrims) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
+                                                       .ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
 
-        int texCount = CountUniqueTextures(rawFaces);
-        progress?.Report($"Loading textures (0 / {texCount})…");
+        var materials = await FetchMaterialsAsync(rawFaces, ct).ConfigureAwait(false);
 
-        var faces = await FetchTexturesAsync(rawFaces, texCount, progress, ct)
-                          .ConfigureAwait(false);
+        var pbrMaterials = await FetchPBRMaterialsAsync(rawFaces, ct).ConfigureAwait(false);
 
-        return new PrimRenderSubmission
+        // Build texture-free faces immediately so the caller can submit geometry
+        // and make the object visible without waiting for any downloads.
+        var faces = BuildFacesWithoutTextures(rawFaces, materials, pbrMaterials);
+
+        // Mark flexi faces so GlViewportControl.ApplySceneTransformOverrides does NOT
+        // stomp their identity Transform with the per-frame root world matrix — their
+        // vertex buffers are already produced in world space by FlexiPrimAnimator.
+        foreach (var fp in flexiPrims)
         {
-            Label     = label,
-            Faces     = faces.ToArray(),
-            BoundsMin = bMin,
-            BoundsMax = bMax,
+            int end = Math.Min(fp.FaceStart + fp.FaceCount, faces.Count);
+            for (int fi = fp.FaceStart; fi < end; fi++)
+                faces[fi].IsFlexi = true;
+        }
+
+        var submission = new PrimRenderSubmission
+        {
+            Label      = label,
+            Faces      = faces.ToArray(),
+            BoundsMin  = bMin,
+            BoundsMax  = bMax,
+            FlexiPrims = flexiPrims.ToArray(),
         };
+
+        // Stream textures asynchronously in the background — report each patch as it
+        // arrives so the caller can forward it to GlViewportControl.PatchSceneObjectTexture.
+        int texCount = CountUniqueTextures(rawFaces, materials, pbrMaterials);
+        if (texCount > 0)
+        {
+            progress?.Report($"Loading textures (0 / {texCount})…");
+            _ = StreamTexturesAsync(rawFaces, faces, rootLocalId, texCount, progress,
+                                    texturePatch, materials, pbrMaterials, ct);
+        }
+
+        return submission;
     }
 
     // ── Tessellation ──────────────────────────────────────────────────────────────
 
-    private async Task<(List<RawFace> faces, TkVector3 bMin, TkVector3 bMax)> TessellateAsync(
+    private async Task<(List<RawFace> faces, TkVector3 bMin, TkVector3 bMax, List<FlexiPrimInfo> flexiPrims)> TessellateAsync(
         IReadOnlyList<Primitive> prims,
         uint                    rootLocalId,
         IProgress<string>?      progress,
-        CancellationToken       ct)
+        CancellationToken       ct,
+        bool                    isHud       = false,
+        DetailLevel             detailLevel = DetailLevel.High)
     {
-        var faces = new List<RawFace>();
-        var bMin  = new TkVector3(float.MaxValue);
-        var bMax  = new TkVector3(float.MinValue);
+        var faces      = new List<RawFace>();
+        var flexiPrims = new List<FlexiPrimInfo>();
+        var bMin       = new TkVector3(float.MaxValue);
+        var bMax       = new TkVector3(float.MinValue);
 
-        var rootRot = ToTkQuaternion(prims[0].Rotation);
+        var rootPrim = prims.FirstOrDefault(p => p.LocalID == rootLocalId) ?? prims[0];
+        var rootRot = ToTkQuaternion(rootPrim.Rotation);
 
         for (int pi = 0; pi < prims.Count; pi++)
         {
@@ -110,7 +161,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             progress?.Report($"Building mesh ({primNum} / {prims.Count})…");
 
             // ── Sculpt / Mesh / Parametric ────────────────────────────────
-            var mesh = await GetPrimMeshAsync(prim, ct).ConfigureAwait(false);
+            var mesh = await GetPrimMeshAsync(prim, ct, detailLevel).ConfigureAwait(false);
             if (mesh == null) continue;
 
             // ── Build per-prim transform ──────────────────────────────────
@@ -131,7 +182,69 @@ internal sealed class PrimMeshBuilder(GridClient client)
                           * TkMatrix4.CreateFromQuaternion(rootRot);
             }
 
-            AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax);
+            // ── Flexi prim bookkeeping ────────────────────────────────────
+            // For flexi prims we capture raw (prim-local, pre-transform) vertex data
+            // BEFORE calling AppendFaces so that Z stays in [-0.5, 0.5] — the path
+            // parameter the animator needs.  The prim transform is stored in
+            // FlexiPrimInfo.AttachTransform and applied by the animator after each
+            // deformation tick.
+            float[][]? flexiBaseVerts = null;
+            if (prim.Flexible != null && prim.PrimData.PathCurve == PathCurve.Flexible)
+            {
+                int n2 = 0;
+                for (int fi = 0; fi < mesh.Faces.Count; fi++)
+                    if (mesh.Faces[fi].Vertices.Count > 0) n2++;
+                if (n2 > 0)
+                {
+                    flexiBaseVerts = new float[n2][];
+                    int bfi = 0;
+                    for (int fi = 0; fi < mesh.Faces.Count; fi++)
+                    {
+                        var mf = mesh.Faces[fi];
+                        if (mf.Vertices.Count == 0) continue;
+                        var raw = new float[mf.Vertices.Count * 8];
+                        for (int vi = 0; vi < mf.Vertices.Count; vi++)
+                        {
+                            var v = mf.Vertices[vi];
+                            int o = vi * 8;
+                            raw[o]     = v.Position.X; raw[o + 1] = v.Position.Y; raw[o + 2] = v.Position.Z;
+                            raw[o + 3] = v.Normal.X;   raw[o + 4] = v.Normal.Y;   raw[o + 5] = v.Normal.Z;
+                            raw[o + 6] = v.TexCoord.X; raw[o + 7] = v.TexCoord.Y;
+                        }
+                        flexiBaseVerts[bfi++] = raw;
+                    }
+                }
+            }
+
+            int faceStart = faces.Count;
+            // Flexi faces are positioned entirely by the animator via FlexiPrimInfo.AttachTransform;
+            // the GPU must NOT apply the rest-pose prim transform on top of the deformed verts.
+            AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax,
+                        faceTransformOverride: flexiBaseVerts != null ? TkMatrix4.Identity : (TkMatrix4?)null);
+
+            if (flexiBaseVerts != null)
+            {
+                int faceCount = faces.Count - faceStart;
+                if (faceCount > 0 && faceCount == flexiBaseVerts.Length)
+                {
+                    int segments = FlexiPrimAnimator.ComputeSegmentCount(prim.Flexible!.Softness);
+                    int profileVerts = mesh.Faces.Count > 0 && mesh.Faces[0].Vertices.Count > 0
+                        ? mesh.Faces[0].Vertices.Count / Math.Max(1, segments)
+                        : 4;
+
+                    flexiPrims.Add(new FlexiPrimInfo
+                    {
+                        Prim               = prim,
+                        FaceStart          = faceStart,
+                        FaceCount          = faceCount,
+                        BaseVertices       = flexiBaseVerts,
+                        PathSegments       = segments,
+                        ProfileVertexCount = profileVerts,
+                        Scale              = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z),
+                        AttachTransform    = transform,
+                    });
+                }
+            }
         }
 
         if (faces.Count == 0 || bMin.X == float.MaxValue)
@@ -140,7 +253,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             bMax = new TkVector3( 0.5f);
         }
 
-        return (faces, bMin, bMax);
+        return (faces, bMin, bMax, flexiPrims);
     }
 
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct)
@@ -149,10 +262,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
             TaskCreationOptions.RunContinuationsAsynchronously);
         using var reg = ct.Register(() => tcs.TrySetResult(null));
 
-        client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
+        client.Assets.RequestMesh(prim.Sculpt!.SculptTexture, (success, meshAsset) =>
         {
-            if (success && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.High, out var result))
-                tcs.TrySetResult(result);
+            if (success && meshAsset != null)
+                tcs.TrySetResult(_mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData));
             else
                 tcs.TrySetResult(null);
         });
@@ -162,97 +275,524 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     // ── Texture fetching ──────────────────────────────────────────────────────────
 
-    private static int CountUniqueTextures(List<RawFace> faces) =>
-        faces.Select(f => f.TextureId).Where(id => id != UUID.Zero).Distinct().Count();
-
-    private async Task<List<PrimRenderFace>> FetchTexturesAsync(
-        List<RawFace>      rawFaces,
-        int                total,
-        IProgress<string>? progress,
-        CancellationToken  ct,
-        Dictionary<UUID, (UUID AvatarId, string BakeName)>? serverBakedMeta = null)
+    private static int CountUniqueTextures(
+        List<RawFace> faces,
+        Dictionary<UUID, LegacyMaterial>? materials = null,
+        Dictionary<UUID, AssetMaterial>? pbrMaterials = null)
     {
-        var uniqueIds = rawFaces
-            .Select(f => f.TextureId)
-            .Where(id => id != UUID.Zero)
-            .Distinct()
-            .ToList();
+        var ids = new HashSet<UUID>();
+        foreach (var f in faces)
+        {
+            if (f.TextureId != UUID.Zero) ids.Add(f.TextureId);
 
-        int loaded   = 0;
-        var textures = new Dictionary<UUID, SKBitmap?>();
+            // PBR textures take priority over legacy when present.
+            if (pbrMaterials != null && f.RenderMaterialId != UUID.Zero
+                && pbrMaterials.TryGetValue(f.RenderMaterialId, out var pbr))
+            {
+                for (int i = 0; i < AssetMaterial.TEXTURE_COUNT; i++)
+                {
+                    if (pbr.TextureIds[i] != UUID.Zero)
+                        ids.Add(pbr.TextureIds[i]);
+                }
+            }
+            else if (materials != null && f.MaterialId != UUID.Zero
+                && materials.TryGetValue(f.MaterialId, out var mat))
+            {
+                if (mat.NormalMap != UUID.Zero)   ids.Add(mat.NormalMap);
+                if (mat.SpecularMap != UUID.Zero)  ids.Add(mat.SpecularMap);
+            }
+        }
+        return ids.Count;
+    }
 
-        var tasks = uniqueIds.Select(id => Task.Run(async () =>
+    /// <summary>
+    /// Constructs a <see cref="PrimRenderFace"/> list with all material / alpha state
+    /// resolved but <em>no</em> texture bitmaps attached (all texture fields are null).
+    /// Texture delivery is deferred to <see cref="StreamTexturesAsync"/>.
+    /// </summary>
+    private static List<PrimRenderFace> BuildFacesWithoutTextures(
+        List<RawFace>                     rawFaces,
+        Dictionary<UUID, LegacyMaterial>? materials,
+        Dictionary<UUID, AssetMaterial>?  pbrMaterials)
+    {
+        var result = new List<PrimRenderFace>(rawFaces.Count);
+        foreach (var rf in rawFaces)
+        {
+            // Resolve PBR material if present.
+            AssetMaterial? pbr  = null;
+            bool isPBR = pbrMaterials != null && rf.RenderMaterialId != UUID.Zero
+                      && pbrMaterials.TryGetValue(rf.RenderMaterialId, out pbr);
+
+            LegacyMaterial? mat  = null;
+            bool hasMaterial = !isPBR && materials != null && rf.MaterialId != UUID.Zero
+                             && materials.TryGetValue(rf.MaterialId, out mat);
+
+            if (isPBR && pbr != null)
+            {
+                // PBR alpha mode
+                FaceAlphaMode alphaMode;
+                bool hasAlpha;
+                if (rf.ForceOpaque)
+                {
+                    hasAlpha  = false;
+                    alphaMode = FaceAlphaMode.None;
+                }
+                else
+                {
+                    alphaMode = pbr.AlphaMode switch
+                    {
+                        GltfAlphaMode.Blend => FaceAlphaMode.Blend,
+                        GltfAlphaMode.Mask  => FaceAlphaMode.Mask,
+                        _                   => FaceAlphaMode.None,
+                    };
+                    hasAlpha = alphaMode == FaceAlphaMode.Blend;
+                }
+
+                float alphaCutoff = alphaMode == FaceAlphaMode.Mask ? pbr.AlphaCutoff : 0.004f;
+
+                var bcf = pbr.BaseColorFactor;
+                var baseColorFactor = new TkVector4(
+                    bcf.R * rf.Color.X, bcf.G * rf.Color.Y,
+                    bcf.B * rf.Color.Z, bcf.A * rf.Color.W);
+
+                static UvTransform ToUvXform(GltfTextureTransform t) =>
+                    new(t.Offset.X, t.Offset.Y, t.Scale.X, t.Scale.Y, t.Rotation);
+
+                result.Add(new PrimRenderFace
+                {
+                    Vertices                 = rf.Vertices,
+                    VerticesLength           = rf.VerticesLength,
+                    Indices                  = rf.Indices,
+                    Color                    = rf.Color,
+                    Fullbright               = rf.Fullbright,
+                    Glow                     = rf.Glow,
+                    HasAlpha                 = hasAlpha,
+                    AlphaMode                = alphaMode,
+                    AlphaCutoff              = alphaCutoff,
+                    Transform                = rf.Transform,
+                    PrimLocalId              = rf.PrimLocalId,
+                    FaceIndex                = rf.FaceIndex,
+                    Centroid                 = rf.Centroid,
+                    IsTwoSided               = pbr.DoubleSided || rf.IsTwoSided,
+                    IsPBR                    = true,
+                    BaseColorFactor          = baseColorFactor,
+                    MetallicFactor           = pbr.MetallicFactor,
+                    RoughnessFactor          = pbr.RoughnessFactor,
+                    EmissiveFactor           = new TkVector3(
+                        pbr.EmissiveFactor.X, pbr.EmissiveFactor.Y, pbr.EmissiveFactor.Z),
+                    BaseColorUvXform         = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_BASE_COLOR]),
+                    PbrNormalUvXform         = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_NORMAL]),
+                    MetallicRoughnessUvXform = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_METALLIC_ROUGHNESS]),
+                    EmissiveUvXform          = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_EMISSIVE]),
+                });
+            }
+            else
+            {
+                // Legacy path — alpha mode without knowledge of texture alpha yet.
+                FaceAlphaMode legacyAlphaMode;
+                bool legacyHasAlpha;
+                if (rf.ForceOpaque)
+                {
+                    legacyHasAlpha  = false;
+                    legacyAlphaMode = FaceAlphaMode.None;
+                }
+                else if (mat != null && mat.DiffuseAlphaMode != LegacyMaterialAlphaMode.Default)
+                {
+                    legacyAlphaMode = (FaceAlphaMode)(byte)mat.DiffuseAlphaMode;
+                    legacyHasAlpha  = legacyAlphaMode == FaceAlphaMode.Blend;
+                }
+                else
+                {
+                    legacyAlphaMode = rf.AlphaMode;
+                    legacyHasAlpha  = legacyAlphaMode == FaceAlphaMode.Blend;
+                }
+
+                float legacyAlphaCutoff = rf.AlphaCutoff;
+                if (mat != null && legacyAlphaMode == FaceAlphaMode.Mask)
+                    legacyAlphaCutoff = mat.AlphaMaskCutoff / 255f;
+
+                var normalUv  = UvTransform.Default;
+                var specUv    = UvTransform.Default;
+                var specColor = TkVector4.One;
+                float specExp = 0f;
+                float envInt  = 0f;
+                if (mat != null)
+                {
+                    normalUv = new UvTransform(
+                        (float)mat.NormalMapOffsetX, (float)mat.NormalMapOffsetY,
+                        (float)mat.NormalMapRepeatX, (float)mat.NormalMapRepeatY,
+                        (float)mat.NormalMapRotation);
+                    specUv = new UvTransform(
+                        (float)mat.SpecularMapOffsetX, (float)mat.SpecularMapOffsetY,
+                        (float)mat.SpecularMapRepeatX, (float)mat.SpecularMapRepeatY,
+                        (float)mat.SpecularMapRotation);
+                    specColor = new TkVector4(
+                        mat.SpecularColor.R, mat.SpecularColor.G,
+                        mat.SpecularColor.B, mat.SpecularColor.A);
+                    specExp = mat.SpecularExponent / 255f;
+                    envInt  = mat.EnvironmentIntensity / 255f;
+                }
+
+                result.Add(new PrimRenderFace
+                {
+                    Vertices             = rf.Vertices,
+                    VerticesLength       = rf.VerticesLength,
+                    Indices              = rf.Indices,
+                    Color                = rf.Color,
+                    Fullbright           = rf.Fullbright,
+                    Glow                 = rf.Glow,
+                    HasAlpha             = legacyHasAlpha,
+                    AlphaMode            = legacyAlphaMode,
+                    Shiny                = rf.Shiny,
+                    HasBump              = rf.HasBump,
+                    Transform            = rf.Transform,
+                    PrimLocalId          = rf.PrimLocalId,
+                    FaceIndex            = rf.FaceIndex,
+                    Centroid             = rf.Centroid,
+                    IsTwoSided           = rf.IsTwoSided,
+                    AlphaCutoff          = legacyAlphaCutoff,
+                    HasMaterial          = hasMaterial && mat != null,
+                    SpecularColor        = specColor,
+                    SpecularExponent     = specExp,
+                    EnvironmentIntensity = envInt,
+                    NormalUvXform        = normalUv,
+                    SpecularUvXform      = specUv,
+                });
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Downloads each unique texture for the linkset and reports a
+    /// <see cref="SceneTexturePatch"/> per face/slot as each bitmap arrives.
+    /// This runs in the background after the geometry submission has already been
+    /// forwarded to the viewport; the viewport applies each patch on the next frame.
+    /// </summary>
+    // Higher asset-pipeline priority for attachment textures so they arrive before
+    // distant scene-object textures.  Matches the SL viewer's boost for worn content.
+    private const float AttachmentTexturePriority = 200000f;
+
+    // Global cap on concurrent texture downloads across ALL PrimMeshBuilder instances.
+    // Each gate slot spans: network I/O → J2K decode → Preprocess (flip/convert) →
+    // spin-wait inside PatchSceneObjectTexture until the GL queue drains below 2 000.
+    // 8 slots keeps the network pipeline full while bounding peak in-flight bitmap RAM
+    // to ~8 × 4 MB (worst-case 4K RGBA) = ~32 MB, vs. the multi-GB seen without any gate.
+    private static readonly SemaphoreSlim GlobalTextureGate = new(8, 8);
+
+    private async Task StreamTexturesAsync(
+        List<RawFace>                     rawFaces,
+        List<PrimRenderFace>              faces,
+        uint                              rootLocalId,
+        int                               total,
+        IProgress<string>?                progress,
+        IProgress<SceneTexturePatch>?     texturePatch,
+        Dictionary<UUID, LegacyMaterial>? materials,
+        Dictionary<UUID, AssetMaterial>?  pbrMaterials,
+        CancellationToken                 ct,
+        float                             texturePriority = 101300f)
+    {
+        // Build a map from UUID → list of (primLocalId, faceIndex, slot) so a single
+        // download satisfies every face that shares the same texture.
+        // Each entry carries the prim's own LocalID because child prims in a linkset
+        // have PrimLocalId != rootLocalId; the viewport matches by PrimLocalId + FaceIndex.
+        var slotMap = new Dictionary<UUID, List<(uint PrimLocalId, int FaceIndex, TextureSlot Slot)>>();
+
+        for (int fi = 0; fi < rawFaces.Count; fi++)
+        {
+            var rf = rawFaces[fi];
+
+            void Register(UUID id, TextureSlot slot)
+            {
+                if (id == UUID.Zero) return;
+                if (!slotMap.TryGetValue(id, out var list))
+                    slotMap[id] = list = new List<(uint, int, TextureSlot)>();
+                list.Add((rf.PrimLocalId, rf.FaceIndex, slot));
+            }
+
+            if (pbrMaterials != null && rf.RenderMaterialId != UUID.Zero
+                && pbrMaterials.TryGetValue(rf.RenderMaterialId, out var pbr))
+            {
+                Register(pbr.TextureIds[AssetMaterial.TEXTURE_BASE_COLOR], TextureSlot.Albedo);
+                Register(pbr.TextureIds[AssetMaterial.TEXTURE_NORMAL],     TextureSlot.Normal);
+                Register(pbr.TextureIds[AssetMaterial.TEXTURE_METALLIC_ROUGHNESS], TextureSlot.MetallicRoughness);
+                Register(pbr.TextureIds[AssetMaterial.TEXTURE_EMISSIVE],   TextureSlot.Emissive);
+                // Albedo fallback to diffuse TE texture when PBR base-color slot is empty.
+                if (pbr.TextureIds[AssetMaterial.TEXTURE_BASE_COLOR] == UUID.Zero)
+                    Register(rf.TextureId, TextureSlot.Albedo);
+            }
+            else
+            {
+                Register(rf.TextureId, TextureSlot.Albedo);
+                if (materials != null && rf.MaterialId != UUID.Zero
+                    && materials.TryGetValue(rf.MaterialId, out var mat))
+                {
+                    Register(mat.NormalMap,   TextureSlot.Normal);
+                    Register(mat.SpecularMap, TextureSlot.Specular);
+                }
+            }
+        }
+
+        int loaded = 0;
+
+        var tasks = slotMap.Select(kvp => Task.Run(async () =>
+        {
+            // Acquire the global gate — this bounds total in-flight bitmaps across
+            // all linksets so we never hold thousands of decoded SKBitmaps in RAM
+            // while the GL thread drains the upload queue at 5 objects/frame.
+            await GlobalTextureGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var id    = kvp.Key;
+                var slots = kvp.Value;
+
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+
+                // Progressive decode callback: report partial bitmaps as they arrive.
+                // Only send the partial preview to the *first* slot that uses this texture.
+                // Fanning out a full SKBitmap copy to every slot on every progress tick
+                // (potentially N×4 MB every 250 ms) creates enormous GC pressure when
+                // many objects load simultaneously.  The first slot is enough to show
+                // progressive feedback; the final delivery below still patches all slots.
+                IProgress<SKBitmap>? progressiveDecode = (texturePatch != null && slots.Count > 0)
+                    ? new Progress<SKBitmap>(partial =>
+                    {
+                        var (primLocalId, faceIndex, slot) = slots[0];
+                        var copy = partial.Copy(partial.ColorType);
+                        partial.Dispose(); // Copy() is synchronous; dispose source to prevent native memory leak
+                        if (copy != null)
+                            texturePatch.Report(new SceneTexturePatch(primLocalId, faceIndex, slot, copy));
+                    })
+                    : null;
+
+                var bmp = await GridTextureHelper.DownloadSkBitmapAsync(
+                              client, id, progress: progressiveDecode, ct: linked.Token,
+                              priority: texturePriority)
+                                                  .ConfigureAwait(false);
+
+                int n = Interlocked.Increment(ref loaded);
+                progress?.Report($"Loading textures ({n} / {total})…");
+
+                if (bmp == null) return;
+
+                // Final (full-quality) bitmap: report one patch per face/slot that uses it.
+                // Ownership of `bmp` transfers to the last Report call.  If Report throws
+                // (e.g. OCE from PatchSceneObjectTexture) before we reach the last slot,
+                // `bmp` would leak; wrapping in try/finally ensures disposal on any exit.
+                if (texturePatch != null)
+                {
+                    bool bmpOwned = true; // we still own bmp until the last Report succeeds
+                    try
+                    {
+                        for (int si = 0; si < slots.Count; si++)
+                        {
+                            var (primLocalId, faceIndex, slot) = slots[si];
+                            // Last slot takes the original bitmap; earlier ones get a copy.
+                            var delivery = (si < slots.Count - 1) ? bmp.Copy(bmp.ColorType) : bmp;
+                            if (delivery != null)
+                            {
+                                if (si == slots.Count - 1) bmpOwned = false; // transfer ownership
+                                texturePatch.Report(new SceneTexturePatch(primLocalId, faceIndex, slot, delivery));
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        if (bmpOwned) bmp.Dispose();
+                    }
+                }
+                else
+                {
+                    bmp.Dispose();
+                }
+            }
+            finally
+            {
+                GlobalTextureGate.Release();
+            }
+        }, ct)).ToList();
+
+        try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+        catch (OperationCanceledException) { }
+    }
+
+    // ── Material fetching ────────────────────────────────────────────────────────
+
+    // ── Material fetching ────────────────────────────────────────────────────────
+
+    private async Task<Dictionary<UUID, LegacyMaterial>?> FetchMaterialsAsync(
+        List<RawFace>     rawFaces,
+        CancellationToken ct)
+    {
+        var needed = new HashSet<UUID>();
+        foreach (var rf in rawFaces)
+        {
+            if (rf.MaterialId == UUID.Zero) continue;
+            lock (_materialCacheLock)
+            {
+                if (_materialCache.ContainsKey(rf.MaterialId)) continue;
+            }
+            needed.Add(rf.MaterialId);
+        }
+
+        if (needed.Count == 0)
+        {
+            // Return cached results if any faces reference materials already cached.
+            lock (_materialCacheLock)
+            {
+                if (_materialCache.Count == 0) return null;
+                var cached = new Dictionary<UUID, LegacyMaterial>();
+                foreach (var rf in rawFaces)
+                {
+                    if (rf.MaterialId != UUID.Zero
+                        && _materialCache.TryGetValue(rf.MaterialId, out var m) && m != null
+                        && !cached.ContainsKey(rf.MaterialId))
+                        cached[rf.MaterialId] = m;
+                }
+                return cached.Count > 0 ? cached : null;
+            }
+        }
+
+        var sim = client.Network.CurrentSim;
+        if (sim == null) return null;
+
+        try
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+            var fetched = await client.Objects.RequestMaterials(sim, needed, linked.Token)
+                                              .ConfigureAwait(false);
 
-            SKBitmap? bmp;
-            if (serverBakedMeta != null && serverBakedMeta.TryGetValue(id, out var bakeMeta))
-                bmp = await GridTextureHelper.DownloadServerBakedSkBitmapAsync(
-                                client, bakeMeta.AvatarId, id, bakeMeta.BakeName, linked.Token)
-                                             .ConfigureAwait(false);
-            else
-                bmp = await GridTextureHelper.DownloadSkBitmapAsync(client, id, linked.Token)
-                                             .ConfigureAwait(false);
+            var byId = new Dictionary<UUID, LegacyMaterial>();
+            foreach (var mat in fetched)
+                byId[mat.ID] = mat;
 
-            lock (textures) textures[id] = bmp;
-
-            int n = Interlocked.Increment(ref loaded);
-            progress?.Report($"Loading textures ({n} / {total})…");
-        }, ct)).ToList();
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
-
-        return rawFaces.Select(rf =>
-        {
-            SKBitmap? tex = null;
-            if (rf.TextureId != UUID.Zero)
-                lock (textures) textures.TryGetValue(rf.TextureId, out tex);
-
-            bool hasAlpha = rf.HasAlpha
-                         || (tex != null && tex.AlphaType != SKAlphaType.Opaque);
-
-            return new PrimRenderFace
+            lock (_materialCacheLock)
             {
-                Vertices    = rf.Vertices,
-                Indices     = rf.Indices,
-                Color       = rf.Color,
-                Fullbright  = rf.Fullbright,
-                Glow        = rf.Glow,
-                HasAlpha    = hasAlpha,
-                Transform   = rf.Transform,
-                Texture     = tex,
-                PrimLocalId = rf.PrimLocalId,
-                FaceIndex   = rf.FaceIndex,
-            };
-        }).ToList();
+                foreach (var id in needed)
+                    _materialCache[id] = byId.TryGetValue(id, out var m) ? m : null;
+            }
+        }
+        catch
+        {
+            lock (_materialCacheLock)
+            {
+                foreach (var id in needed)
+                    _materialCache.TryAdd(id, null);
+            }
+        }
+
+        // Build the final result dict from cache for all faces in this build.
+        lock (_materialCacheLock)
+        {
+            var result = new Dictionary<UUID, LegacyMaterial>();
+            foreach (var rf in rawFaces)
+            {
+                if (rf.MaterialId != UUID.Zero
+                    && _materialCache.TryGetValue(rf.MaterialId, out var m) && m != null
+                    && !result.ContainsKey(rf.MaterialId))
+                    result[rf.MaterialId] = m;
+            }
+            return result.Count > 0 ? result : null;
+        }
     }
 
     // ── Shared prim helpers ───────────────────────────────────────────────────────
 
+    /// <summary>Fetches GLTF PBR render materials for faces that have a RenderMaterialID.</summary>
+    private async Task<Dictionary<UUID, AssetMaterial>?> FetchPBRMaterialsAsync(
+        List<RawFace>     rawFaces,
+        CancellationToken ct)
+    {
+        var needed = new HashSet<UUID>();
+        foreach (var rf in rawFaces)
+        {
+            if (rf.RenderMaterialId == UUID.Zero) continue;
+            lock (_pbrCacheLock)
+            {
+                if (_pbrCache.ContainsKey(rf.RenderMaterialId)) continue;
+            }
+            needed.Add(rf.RenderMaterialId);
+        }
+
+        if (needed.Count > 0)
+        {
+            var tasks = needed.Select(id => Task.Run(async () =>
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+
+                var tcs = new TaskCompletionSource<AssetMaterial?>(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+                using var reg = linked.Token.Register(() => tcs.TrySetResult(null));
+
+                client.Assets.RequestAsset(id, AssetType.Material, true, (transfer, asset) =>
+                {
+                    if (transfer.Success && asset is AssetMaterial am)
+                    {
+                        am.Decode();
+                        tcs.TrySetResult(am);
+                    }
+                    else
+                        tcs.TrySetResult(null);
+                });
+
+                var result = await tcs.Task;
+                lock (_pbrCacheLock) _pbrCache[id] = result;
+            }, ct)).ToList();
+
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch
+            {
+                lock (_pbrCacheLock)
+                {
+                    foreach (var id in needed) _pbrCache.TryAdd(id, null);
+                }
+            }
+        }
+
+        // Build result dict from cache.
+        lock (_pbrCacheLock)
+        {
+            var result = new Dictionary<UUID, AssetMaterial>();
+            foreach (var rf in rawFaces)
+            {
+                if (rf.RenderMaterialId != UUID.Zero
+                    && _pbrCache.TryGetValue(rf.RenderMaterialId, out var m) && m != null
+                    && !result.ContainsKey(rf.RenderMaterialId))
+                    result[rf.RenderMaterialId] = m;
+            }
+            return result.Count > 0 ? result : null;
+        }
+    }
+
+    // ── Shared prim helpers (continued) ──────────────────────────────────────────
+
     /// <summary>Tessellates a single prim into a <see cref="FacetedMesh"/>.</summary>
-    private async Task<FacetedMesh?> GetPrimMeshAsync(Primitive prim, CancellationToken ct)
+    private async Task<FacetedMesh?> GetPrimMeshAsync(Primitive prim, CancellationToken ct,
+        DetailLevel detailLevel = DetailLevel.High)
     {
         if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero)
         {
             if (prim.Sculpt.Type != SculptType.Mesh)
             {
                 var sculptBmp = await GridTextureHelper.DownloadSkBitmapAsync(
-                    client, prim.Sculpt.SculptTexture, ct).ConfigureAwait(false);
+                    client, prim.Sculpt.SculptTexture, ct: ct).ConfigureAwait(false);
                 if (sculptBmp != null)
                 {
                     using (sculptBmp)
-                        return _mesher.GenerateFacetedSculptMesh(prim, sculptBmp, DetailLevel.High);
+                        return _mesher.GenerateFacetedSculptMesh(prim, sculptBmp, detailLevel);
                 }
                 // Fallback: parametric if sculpt texture unavailable.
-                return _mesher.GenerateFacetedMesh(prim, DetailLevel.High);
+                return _mesher.GenerateFacetedMesh(prim, detailLevel);
             }
             else
             {
                 return await DownloadMeshAsync(prim, ct).ConfigureAwait(false);
             }
         }
-        return _mesher.GenerateFacetedMesh(prim, DetailLevel.High);
+        return _mesher.GenerateFacetedMesh(prim, detailLevel);
     }
 
     /// <summary>
@@ -265,8 +805,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
         TkMatrix4     transform,
         List<RawFace> faces,
         ref TkVector3 bMin,
-        ref TkVector3 bMax)
+        ref TkVector3 bMax,
+        TkMatrix4?    faceTransformOverride = null)
     {
+        var faceTransform = faceTransformOverride ?? transform;
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
             var face = mesh.Faces[fi];
@@ -277,7 +819,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 _mesher.TransformTexCoords(face.Vertices, face.Center, texFace, prim.Scale);
 
             // Pack into interleaved float array: position(3) + normal(3) + uv(2) = 8 floats.
-            float[] verts = new float[face.Vertices.Count * 8];
+            // Rent from the shared pool to avoid LOH pressure; return after faces.Add.
+            int needed = face.Vertices.Count * 8;
+            float[] verts = ArrayPool<float>.Shared.Rent(needed);
+            var centroidSum = TkVector3.Zero;
             for (int vi = 0; vi < face.Vertices.Count; vi++)
             {
                 var v = face.Vertices[vi];
@@ -296,15 +841,24 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     new TkVector3(v.Position.X, v.Position.Y, v.Position.Z), transform);
                 bMin = TkVector3.ComponentMin(bMin, wp);
                 bMax = TkVector3.ComponentMax(bMax, wp);
+                centroidSum += wp;
             }
+            var centroid = face.Vertices.Count > 0
+                ? centroidSum * (1f / face.Vertices.Count)
+                : TkVector3.Zero;
 
             ushort[] indices = face.Indices.ToArray();
 
-            float r = 1f, g = 1f, b = 1f, a = 1f;
-            bool  fullbright = false;
-            float glow       = 0f;
-            bool  hasAlpha   = false;
-            UUID  texId      = UUID.Zero;
+            float         r          = 1f, g = 1f, b = 1f, a = 1f;
+            bool          fullbright = false;
+            float         glow       = 0f;
+            bool          hasAlpha   = false;
+            UUID          texId      = UUID.Zero;
+            float         shiny      = 0f;
+            bool          hasBump    = false;
+            FaceAlphaMode alphaMode  = FaceAlphaMode.None;
+            UUID          materialId = UUID.Zero;
+            UUID          renderMaterialId = UUID.Zero;
 
             if (texFace != null)
             {
@@ -316,272 +870,450 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 glow       = texFace.Glow;
                 hasAlpha   = a < 0.99f;
                 texId      = texFace.TextureID;
+                materialId = texFace.MaterialID;
+                renderMaterialId = texFace.RenderMaterialID;
+
+                shiny = texFace.Shiny switch
+                {
+                    Shininess.Low    => 0.24f,
+                    Shininess.Medium => 0.64f,
+                    Shininess.High   => 0.96f,
+                    _                => 0f,
+                };
+                hasBump   = texFace.Bump != Bumpiness.None;
+                alphaMode = hasAlpha ? FaceAlphaMode.Blend : FaceAlphaMode.None;
             }
 
-            faces.Add(new RawFace(verts, indices,
-                new TkVector4(r, g, b, a), fullbright, glow, hasAlpha, texId, transform,
-                prim.LocalID, fi));
+            // Skip fully-invisible faces — alpha at or below this threshold means
+            // the face will never contribute visible pixels (mirrors SL viewer logic).
+            if (a <= 0.01f) continue;
+
+            faces.Add(new RawFace(verts, needed, indices,
+                new TkVector4(r, g, b, a), fullbright, glow, hasAlpha, texId, faceTransform,
+                prim.LocalID, fi, centroid,
+                Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
+                MaterialId: materialId, RenderMaterialId: renderMaterialId));
         }
     }
 
-    // ── Avatar attachment rendering ───────────────────────────────────────────────
+    // ── Attachment tessellation ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds a <see cref="PrimRenderSubmission"/> from all non-HUD attachment prims
-    /// worn by an avatar.  Each attachment root is positioned using the skeleton's
-    /// bone hierarchy and the attachment-point offsets from <c>avatar_lad.xml</c>,
-    /// matching the transform chain used by the legacy SceneWindow renderer.
+    /// Rigged / fitted mesh skinning data for a single attachment face.
+    /// When non-null, the caller must render the face in avatar-local space
+    /// (its <see cref="PrimRenderFace.Transform"/> is already Identity and its
+    /// vertices are in mesh bind-space) and drive animation through the supplied
+    /// joint names + inverse bind matrices + per-vertex weights.
     /// </summary>
-    public async Task<PrimRenderSubmission> BuildAvatarAttachmentsAsync(
-        IReadOnlyList<Primitive> prims,
-        uint                    avatarLocalId,
-        AvatarSkeleton          skeleton,
-        string                  label,
-        IProgress<string>?      progress,
-        CancellationToken       ct)
+    internal sealed class AttachmentRiggedSkin
     {
-        var (rawFaces, bMin, bMax, serverBakedMeta) = await TessellateAvatarAsync(prims, avatarLocalId, skeleton, progress, ct)
-                                                           .ConfigureAwait(false);
-
-        ct.ThrowIfCancellationRequested();
-
-        int texCount = CountUniqueTextures(rawFaces);
-        progress?.Report($"Loading textures (0 / {texCount})…");
-
-        var faces = await FetchTexturesAsync(rawFaces, texCount, progress, ct, serverBakedMeta)
-                          .ConfigureAwait(false);
-
-        return new PrimRenderSubmission
-        {
-            Label     = label,
-            Faces     = faces.ToArray(),
-            BoundsMin = bMin,
-            BoundsMax = bMax,
-        };
+        public string[]    JointNames      = [];
+        public TkMatrix4[] InvBindMatrices = [];
+        /// <summary>
+        /// Interleaved per-vertex joint indices: <c>Joints[vi * 4 + k]</c> is influence k of vertex vi.
+        /// </summary>
+        public int[]       Joints  = [];
+        /// <summary>
+        /// Interleaved per-vertex weights: <c>Weights[vi * 4 + k]</c> is weight k of vertex vi.
+        /// </summary>
+        public float[]     Weights = [];
     }
 
-    private async Task<(List<RawFace> faces, TkVector3 bMin, TkVector3 bMax, Dictionary<UUID, (UUID AvatarId, string BakeName)> serverBakedMeta)> TessellateAvatarAsync(
-        IReadOnlyList<Primitive> prims,
-        uint                    avatarLocalId,
-        AvatarSkeleton          skeleton,
-        IProgress<string>?      progress,
-        CancellationToken       ct)
+    /// <summary>
+    /// Tessellates an attachment linkset and downloads its textures.
+    /// <paramref name="attachJointMatrix"/> is the precomputed world matrix for the
+    /// attachment joint (bone world matrix combined with the attachment-point default
+    /// offset and rotation from <c>avatar_lad.xml</c>).
+    /// </summary>
+    /// <returns>
+    /// Tuple with the built faces, a parallel list of per-face rigged skin data
+    /// (null entries for non-rigged rigid faces), and the world-space AABB.
+    /// </returns>
+    internal async Task<(List<PrimRenderFace> faces, List<AttachmentRiggedSkin?> riggedSkins, TkVector3 bMin, TkVector3 bMax)>
+        BuildAttachmentFacesAsync(
+            IReadOnlyList<Primitive> prims,
+            TkMatrix4                attachJointMatrix,
+            IProgress<string>?       progress,
+            CancellationToken        ct,
+            Func<UUID, UUID>?        bakedTexResolver    = null,
+            uint                     rootLocalId         = 0,
+            IProgress<SceneTexturePatch>? texturePatch   = null)
     {
-        var faces = new List<RawFace>();
-        var bMin  = new TkVector3(float.MaxValue);
-        var bMax  = new TkVector3(float.MinValue);
+        var (rawFaces, riggedSkins, bMin, bMax) = await TessellateAttachmentAsync(
+            prims, attachJointMatrix, progress, ct, bakedTexResolver).ConfigureAwait(false);
 
-        // Render the avatar body meshes first (T-pose — vertices are in avatar-local space).
-        var characterDir  = System.IO.Path.Combine(OpenMetaverse.Settings.RESOURCE_DIR, "character");
-        var (avatarAgentId, bakeTextures) = ResolveBakeTextures(avatarLocalId);
+        if (rawFaces.Count == 0)
+            return ([], [], bMin, bMax);
 
-        // Build server-baked metadata: textureUUID → (avatarAgentId, bakeName).
-        // These UUIDs require RequestServerBakedImage — RequestImage silently hangs for them.
-        var serverBakedMeta = new Dictionary<UUID, (UUID AvatarId, string BakeName)>();
-        foreach (var (_, _, _, _, bakeIndex, bakeName) in BodyParts)
+        var materials    = await FetchMaterialsAsync(rawFaces, ct).ConfigureAwait(false);
+        var pbrMaterials = await FetchPBRMaterialsAsync(rawFaces, ct).ConfigureAwait(false);
+        var faces        = BuildFacesWithoutTextures(rawFaces, materials, pbrMaterials);
+
+        int texCount = CountUniqueTextures(rawFaces, materials, pbrMaterials);
+        if (texCount > 0 && texturePatch != null)
         {
-            if (bakeTextures != null && bakeIndex < bakeTextures.Length)
-            {
-                var texId = bakeTextures[bakeIndex];
-                if (texId != UUID.Zero && !serverBakedMeta.ContainsKey(texId))
-                    serverBakedMeta[texId] = (avatarAgentId, bakeName);
-            }
+            progress?.Report($"Loading attachment textures (0 / {texCount})…");
+            _ = StreamTexturesAsync(rawFaces, faces, rootLocalId, texCount, progress,
+                                    texturePatch, materials, pbrMaterials, ct,
+                                    texturePriority: AttachmentTexturePriority);
         }
 
-        await Task.Run(() => AppendBodyMeshes(characterDir, skeleton, bakeTextures, faces, ref bMin, ref bMax),
-            ct).ConfigureAwait(false);
+        return (faces, riggedSkins, bMin, bMax);
+    }
 
-        // Process attachment roots first so their transforms are available for children.
-        var roots    = prims.Where(p => p.ParentID == avatarLocalId).ToList();
-        var children = prims.Where(p => p.ParentID != avatarLocalId).ToList();
-        var ordered  = roots.Concat(children).ToList();
+    /// <summary>
+    /// Tessellates each prim in <paramref name="prims"/> into <see cref="RawFace"/>
+    /// entries positioned in avatar-local space via <paramref name="attachJointMatrix"/>.
+    /// <paramref name="prims"/>[0] must be the root prim of the attachment linkset.
+    /// </summary>
+    /// <remarks>
+    /// Rigged/fitted mesh faces (those with per-vertex skin weights in the mesh asset)
+    /// are emitted with <see cref="RawFace.Transform"/> = identity and vertices already
+    /// multiplied by the mesh's BindShapeMatrix.  Their prim transform and the
+    /// attachment joint matrix are ignored — placement is driven entirely by the
+    /// avatar skeleton via the returned <see cref="AttachmentRiggedSkin"/>.
+    /// </remarks>
+    private async Task<(List<RawFace> rawFaces, List<AttachmentRiggedSkin?> riggedSkins, TkVector3 bMin, TkVector3 bMax)>
+        TessellateAttachmentAsync(
+            IReadOnlyList<Primitive> prims,
+            TkMatrix4                attachJointMatrix,
+            IProgress<string>?       progress,
+            CancellationToken        ct,
+            Func<UUID, UUID>?        bakedTexResolver = null)
+    {
+        var rawFaces    = new List<RawFace>();
+        var riggedSkins = new List<AttachmentRiggedSkin?>();
+        var bMin        = new TkVector3(float.MaxValue);
+        var bMax        = new TkVector3(float.MinValue);
 
-        // Maps attachment-root LocalID → world-space (rotation, position) for child lookups.
-        var rootXforms = new Dictionary<uint, (TkQuaternion rot, TkVector3 pos)>();
+        if (prims.Count == 0)
+            return (rawFaces, riggedSkins, bMin, bMax);
 
-        for (int pi = 0; pi < ordered.Count; pi++)
+        var root      = prims[0];
+        var rootScale = new TkVector3(root.Scale.X,    root.Scale.Y,    root.Scale.Z);
+        var rootRot   = ToTkQuaternion(root.Rotation);
+        var rootPos   = new TkVector3(root.Position.X, root.Position.Y, root.Position.Z);
+
+        // Root prim: scale → rotate → translate by user offset → attachment joint transform.
+        var rootWorldMatrix = TkMatrix4.CreateScale(rootScale)
+                            * TkMatrix4.CreateFromQuaternion(rootRot)
+                            * TkMatrix4.CreateTranslation(rootPos)
+                            * attachJointMatrix;
+
+        // Child prims are positioned in root-orientation space; root scale is NOT inherited
+        // (SL linkset semantics: child positions are in metres relative to root centre).
+        var linkSpaceToWorld = TkMatrix4.CreateFromQuaternion(rootRot)
+                             * TkMatrix4.CreateTranslation(rootPos)
+                             * attachJointMatrix;
+
+        for (int pi = 0; pi < prims.Count; pi++)
         {
             ct.ThrowIfCancellationRequested();
-            var prim    = ordered[pi];
-            int primNum = pi + 1;
-            progress?.Report($"Building mesh ({primNum} / {ordered.Count})…");
+            var prim = prims[pi];
 
-            var mesh = await GetPrimMeshAsync(prim, ct).ConfigureAwait(false);
+            var mesh = await GetPrimMeshAsync(prim, ct, DetailLevel.High).ConfigureAwait(false);
             if (mesh == null) continue;
 
-            var scale = new TkVector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
-            var primPos = new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
-            var primRot = ToTkQuaternion(prim.Rotation);
-
             TkMatrix4 transform;
-            if (prim.ParentID == avatarLocalId)
+            if (pi == 0)
             {
-                // Attachment root: use skeleton bone + attachment-point transform.
-                // This mirrors the legacy SceneWindow.PrimPosAndRot attachment chain:
-                //   pos  = bone.getTotalOffset()
-                //   rot  = bone.getTotalRotation()
-                //   pos += apoint.position * rot
-                //   rot *= apoint.rotation
-                //   pos += prim.Position * rot
-                //   rot *= prim.Rotation
-                int apIndex = (int)prim.PrimData.AttachmentPoint;
-                if (skeleton.TryGetAttachmentTransform(apIndex,
-                        out var apOffset, out var apRotation))
-                {
-                    var apOff = new TkVector3(apOffset.X, apOffset.Y, apOffset.Z);
-                    var apRot = ToTkQuaternion(apRotation);
-
-                    // Compose: prim.Position is relative to the attachment point.
-                    var finalPos = apOff
-                                 + TkVector3.Transform(primPos, apRot);
-                    var finalRot = apRot * primRot;
-
-                    transform = TkMatrix4.CreateScale(scale)
-                              * TkMatrix4.CreateFromQuaternion(finalRot)
-                              * TkMatrix4.CreateTranslation(finalPos);
-                    rootXforms[prim.LocalID] = (finalRot, finalPos);
-                }
-                else
-                {
-                    // Unknown attachment point — fall back to raw position.
-                    transform = TkMatrix4.CreateScale(scale)
-                              * TkMatrix4.CreateFromQuaternion(primRot)
-                              * TkMatrix4.CreateTranslation(primPos);
-                    rootXforms[prim.LocalID] = (primRot, primPos);
-                }
-            }
-            else if (rootXforms.TryGetValue(prim.ParentID, out var parent))
-            {
-                // Child of attachment root: position is relative to the root.
-                var worldPos = parent.pos
-                             + TkVector3.Transform(primPos, parent.rot);
-                var worldRot = parent.rot * primRot;
-
-                transform = TkMatrix4.CreateScale(scale)
-                          * TkMatrix4.CreateFromQuaternion(worldRot)
-                          * TkMatrix4.CreateTranslation(worldPos);
+                transform = rootWorldMatrix;
             }
             else
             {
-                continue;
+                var childScale = new TkVector3(prim.Scale.X,    prim.Scale.Y,    prim.Scale.Z);
+                var childRot   = ToTkQuaternion(prim.Rotation);
+                var childPos   = new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
+                transform = TkMatrix4.CreateScale(childScale)
+                          * TkMatrix4.CreateFromQuaternion(childRot)
+                          * TkMatrix4.CreateTranslation(childPos)
+                          * linkSpaceToWorld;
             }
 
-            AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax);
+            AppendAttachmentFaces(mesh, prim, transform, rawFaces, riggedSkins,
+                                  ref bMin, ref bMax, bakedTexResolver);
         }
 
-        if (faces.Count == 0 || bMin.X == float.MaxValue)
+        if (rawFaces.Count == 0 || bMin.X >= float.MaxValue)
         {
             bMin = new TkVector3(-0.5f);
             bMax = new TkVector3( 0.5f);
         }
 
-        return (faces, bMin, bMax, serverBakedMeta);
+        return (rawFaces, riggedSkins, bMin, bMax);
     }
 
-    // ── Body mesh rendering ───────────────────────────────────────────────────────
-
-    // (meshTypeName, filename, fallback color RGBA, bone name for offset — null means avatar origin, AvatarTextureIndex face slot for bake, SSB bake layer name)
-    private static readonly (string TypeName, string File, TkVector4 Color, string? BoneName, int BakeIndex, string BakeName)[] BodyParts =
-    [
-        ("lowerBodyMesh",    "avatar_lower_body.llm",  new TkVector4(0.80f, 0.67f, 0.53f, 1f), null,         10, "lower"), // LowerBaked
-        ("upperBodyMesh",    "avatar_upper_body.llm",  new TkVector4(0.80f, 0.67f, 0.53f, 1f), null,          9, "upper"), // UpperBaked
-        ("headMesh",         "avatar_head.llm",        new TkVector4(0.80f, 0.67f, 0.53f, 1f), null,          8, "head"),  // HeadBaked
-        ("hairMesh",         "avatar_hair.llm",        new TkVector4(0.20f, 0.15f, 0.10f, 1f), null,         20, "hair"),  // HairBaked
-        ("eyeBallRightMesh", "avatar_eye.llm",         new TkVector4(0.40f, 0.65f, 0.85f, 1f), "mEyeRight",  11, "eyes"), // EyesBaked
-        ("eyeBallLeftMesh",  "avatar_eye.llm",         new TkVector4(0.40f, 0.65f, 0.85f, 1f), "mEyeLeft",   11, "eyes"), // EyesBaked
-        ("eyelashMesh",      "avatar_eyelashes.llm",   new TkVector4(0.10f, 0.08f, 0.06f, 1f), "mHead",       8, "head"), // HeadBaked
-    ];
-
-    private static void AppendBodyMeshes(
-        string          characterDir,
-        AvatarSkeleton  skeleton,
-        UUID[]?         bakeTextures,
-        List<RawFace>   faces,
-        ref TkVector3   bMin,
-        ref TkVector3   bMax)
+    /// <summary>
+    /// Attachment-specific face packing.  Delegates to <see cref="AppendFaces"/> for
+    /// rigid faces; for rigged faces (those carrying per-vertex skin weights) it
+    /// bypasses the prim transform, applies only the mesh's <c>BindShapeMatrix</c>,
+    /// and emits a parallel <see cref="AttachmentRiggedSkin"/> entry.
+    /// </summary>
+    private void AppendAttachmentFaces(
+        FacetedMesh                    mesh,
+        Primitive                      prim,
+        TkMatrix4                      transform,
+        List<RawFace>                  faces,
+        List<AttachmentRiggedSkin?>    riggedSkins,
+        ref TkVector3                  bMin,
+        ref TkVector3                  bMax,
+        Func<UUID, UUID>?              bakedTexResolver = null)
     {
-        for (int partIndex = 0; partIndex < BodyParts.Length; partIndex++)
+        // Non-rigged meshes: reuse the shared rigid path.
+        if (mesh.SkinData == null || mesh.SkinData.JointNames.Length == 0)
         {
-            var (typeName, file, color, boneName, bakeIndex, _) = BodyParts[partIndex];
-            var path = System.IO.Path.Combine(characterDir, file);
-            if (!System.IO.File.Exists(path)) continue;
+            int before = faces.Count;
+            AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax);
+            for (int i = before; i < faces.Count; i++) riggedSkins.Add(null);
+            return;
+        }
 
-            var mesh = new LindenMesh(typeName);
-            try { mesh.LoadMesh(path); }
-            catch { continue; }
+        // Pre-build per-joint InvBindMatrices once per submission — shared across all
+        // faces of this mesh.  The skinning formula we use is
+        //   v_anim = v_bind × invBind × animBone
+        // where v_bind = BindShapeMatrix × raw_vertex (so BindShapeMatrix is baked into
+        // the vertex, not into invBind).
+        var jointInvBind = BuildInvBindMatrices(mesh.SkinData);
 
-            if (mesh.NumVertices == 0 || mesh.NumFaces == 0) continue;
+        // Use the stored BindShapeMatrix from the mesh asset.  The IBM was baked by the
+        // exporter as Invert(bone_world × Scale(s)), so IBM.Row0.Length = 1/s = 39.37.
+        // The stored BSM encodes the mesh's PositionDomain-to-world-space mapping:
+        // its scale converts from the normalised [-0.5, 0.5] decoded vertex range to the
+        // per-axis prim dimensions, and its translation carries the mesh centre offset so
+        // that v_bind × IBM × bone_world places vertices at the correct avatar-space Z.
+        // Using a uniform Scale(0.0254) instead would discard the translation and give
+        // v_anim ≈ v_raw (dress rendered at origin, not on the avatar).
+        var bindShape = FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
 
-            // Bone offset — eye and eyelash meshes are in bone-local space.
-            var boneOff = TkVector3.Zero;
-            if (boneName != null && skeleton.TryGetBoneOffset(boneName, out var off))
-                boneOff = new TkVector3(off.X, off.Y, off.Z);
+        for (int fi = 0; fi < mesh.Faces.Count; fi++)
+        {
+            var face = mesh.Faces[fi];
+            if (face.Vertices.Count == 0) continue;
 
-            float[] verts = new float[mesh.NumVertices * 8];
-            for (int vi = 0; vi < mesh.NumVertices; vi++)
+            var texFace = prim.Textures?.GetFace((uint)fi);
+            if (texFace != null)
+                _mesher.TransformTexCoords(face.Vertices, face.Center, texFace, prim.Scale);
+
+            // Face has no per-vertex weights: treat as rigid (uses prim transform).
+            if (face.Weights == null || face.Weights.Count == 0)
             {
-                var v = mesh.Vertices[vi];
+                int before = faces.Count;
+                AppendSingleFace(mesh, fi, prim, transform, faces, ref bMin, ref bMax);
+                for (int i = before; i < faces.Count; i++) riggedSkins.Add(null);
+                continue;
+            }
+
+            // Rigged face: bake BindShapeMatrix into the vertex so v_bind is in the
+            // mesh's bind-space (matches the SL viewer's applyBindShape step).
+            int      nv      = face.Vertices.Count;
+            int      nv8     = nv * 8;
+            float[]  verts   = ArrayPool<float>.Shared.Rent(nv8);
+            var      centSum = TkVector3.Zero;
+            int      nv4     = nv * 4;
+            int[]    joints  = new int  [nv4];
+            float[]  weights = new float[nv4];
+
+            for (int vi = 0; vi < nv; vi++)
+            {
+                var v = face.Vertices[vi];
+                var bp = TkVector4.TransformRow(
+                    new TkVector4(v.Position.X, v.Position.Y, v.Position.Z, 1f), bindShape);
+                var bn = TkVector4.TransformRow(
+                    new TkVector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), bindShape);
+
                 int o = vi * 8;
-                var pos = new TkVector3(v.Coord.X, v.Coord.Y, v.Coord.Z) + boneOff;
-                verts[o + 0] = pos.X;
-                verts[o + 1] = pos.Y;
-                verts[o + 2] = pos.Z;
-                verts[o + 3] = v.Normal.X;
-                verts[o + 4] = v.Normal.Y;
-                verts[o + 5] = v.Normal.Z;
+                verts[o    ] = bp.X; verts[o + 1] = bp.Y; verts[o + 2] = bp.Z;
+                verts[o + 3] = bn.X; verts[o + 4] = bn.Y; verts[o + 5] = bn.Z;
                 verts[o + 6] = v.TexCoord.X;
                 verts[o + 7] = v.TexCoord.Y;
 
-                bMin = TkVector3.ComponentMin(bMin, pos);
-                bMax = TkVector3.ComponentMax(bMax, pos);
-            }
+                // Bind-space AABB (rigged faces don't use a prim transform, so the bind-space
+                // position IS the avatar-local resting position — good enough for framing).
+                var wp = new TkVector3(bp.X, bp.Y, bp.Z);
+                bMin = TkVector3.ComponentMin(bMin, wp);
+                bMax = TkVector3.ComponentMax(bMax, wp);
+                centSum += wp;
 
-            ushort[] indices = new ushort[mesh.NumFaces * 3];
-            for (int fi = 0; fi < mesh.NumFaces; fi++)
+                var vw = vi < face.Weights.Count ? face.Weights[vi] : default;
+                int si = vi * 4;
+                joints[si]     = vw.Joint0;  weights[si]     = vw.Weight0;
+                joints[si + 1] = vw.Joint1;  weights[si + 1] = vw.Weight1;
+                joints[si + 2] = vw.Joint2;  weights[si + 2] = vw.Weight2;
+                joints[si + 3] = vw.Joint3;  weights[si + 3] = vw.Weight3;
+
+                NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
+                    ref joints[si],     ref weights[si],
+                    ref joints[si + 1], ref weights[si + 1],
+                    ref joints[si + 2], ref weights[si + 2],
+                    ref joints[si + 3], ref weights[si + 3]);
+            }
+            var centroid = centSum * (1f / nv);
+            ushort[] indices = face.Indices.ToArray();
+
+            // Extract TE colour / material / alpha — same logic as AppendFaces.
+            float r = 1f, g = 1f, b = 1f, a = 1f;
+            bool  fullbright = false;
+            float glow       = 0f;
+            bool  hasAlpha   = false;
+            UUID  texId      = UUID.Zero;
+            float shiny      = 0f;
+            bool  hasBump    = false;
+            FaceAlphaMode alphaMode = FaceAlphaMode.None;
+            UUID  materialId = UUID.Zero;
+            UUID  renderMaterialId = UUID.Zero;
+            if (texFace != null)
             {
-                indices[fi * 3 + 0] = (ushort)mesh.Faces[fi].Indices[0];
-                indices[fi * 3 + 1] = (ushort)mesh.Faces[fi].Indices[1];
-                indices[fi * 3 + 2] = (ushort)mesh.Faces[fi].Indices[2];
+                r = texFace.RGBA.R; g = texFace.RGBA.G; b = texFace.RGBA.B; a = texFace.RGBA.A;
+                fullbright = texFace.Fullbright;
+                glow       = texFace.Glow;
+                hasAlpha   = a < 0.99f;
+                texId      = texFace.TextureID;
+                if (bakedTexResolver != null) texId = bakedTexResolver(texId);
+                materialId = texFace.MaterialID;
+                renderMaterialId = texFace.RenderMaterialID;
+                shiny = texFace.Shiny switch
+                {
+                    Shininess.Low    => 0.24f,
+                    Shininess.Medium => 0.64f,
+                    Shininess.High   => 0.96f,
+                    _                => 0f,
+                };
+                hasBump   = texFace.Bump != Bumpiness.None;
+                alphaMode = hasAlpha ? FaceAlphaMode.Blend : FaceAlphaMode.None;
             }
+            if (a <= 0.01f) continue;
 
-            // Use the avatar's baked texture when available; fall back to a flat skin/hair colour.
-            var texId      = bakeTextures != null && bakeIndex < bakeTextures.Length
-                             ? bakeTextures[bakeIndex]
-                             : UUID.Zero;
-            var faceColor  = texId != UUID.Zero ? TkVector4.One : color;
-
-            faces.Add(new RawFace(verts, indices, faceColor,
-                false, 0f, false, texId, TkMatrix4.Identity, 0, partIndex));
+            faces.Add(new RawFace(verts, nv8, indices,
+                new TkVector4(r, g, b, a), fullbright, glow, hasAlpha, texId,
+                TkMatrix4.Identity,          // rigged faces: drawn in avatar-local bind space
+                prim.LocalID, fi, centroid,
+                Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
+                MaterialId: materialId, RenderMaterialId: renderMaterialId));
+            riggedSkins.Add(new AttachmentRiggedSkin
+            {
+                JointNames      = mesh.SkinData.JointNames,
+                InvBindMatrices = jointInvBind,
+                Joints          = joints,
+                Weights         = weights,
+            });
         }
     }
 
-    private (UUID AvatarAgentId, UUID[]?) ResolveBakeTextures(uint avatarLocalId)
+    /// <summary>
+    /// Packs a single face (by index) through the same pipeline as <see cref="AppendFaces"/>.
+    /// Used when a rigged mesh contains mixed rigid + rigged faces.
+    /// </summary>
+    private void AppendSingleFace(
+        FacetedMesh   mesh,
+        int           faceIndex,
+        Primitive     prim,
+        TkMatrix4     transform,
+        List<RawFace> faces,
+        ref TkVector3 bMin,
+        ref TkVector3 bMax)
     {
-        var sim = client.Network.CurrentSim;
-        if (sim == null) return (UUID.Zero, null);
-
-        Avatar? av = null;
-        foreach (var a in sim.ObjectsAvatars.Values)
+        // Build a temporary single-face FacetedMesh view and forward.  This keeps all of
+        // the TE/material extraction in AppendFaces authoritative without duplicating it.
+        var singleFaceMesh = new FacetedMesh
         {
-            if (a?.LocalID == avatarLocalId) { av = a; break; }
+            Prim    = mesh.Prim,
+            Path    = mesh.Path,
+            Profile = mesh.Profile,
+            Faces   = new List<Face> { mesh.Faces[faceIndex] },
+        };
+        int before = faces.Count;
+        AppendFaces(singleFaceMesh, prim, transform, faces, ref bMin, ref bMax);
+        // Patch the face index so downstream renders refer to the correct face on the prim.
+        for (int i = before; i < faces.Count; i++)
+        {
+            faces[i] = faces[i] with { FaceIndex = faceIndex };
+        }
+    }
+
+    /// <summary>Converts a 16-element row-major float array to an OpenTK Matrix4.</summary>
+    private static TkMatrix4 FloatsToMatrix(float[] f)
+    {
+        if (f == null || f.Length < 16) return TkMatrix4.Identity;
+        return new TkMatrix4(
+            f[ 0], f[ 1], f[ 2], f[ 3],
+            f[ 4], f[ 5], f[ 6], f[ 7],
+            f[ 8], f[ 9], f[10], f[11],
+            f[12], f[13], f[14], f[15]);
+    }
+
+    /// <summary>
+    /// Builds the per-joint inverse bind matrix array used for rigged skinning.
+    /// The SL mesh format supplies one 4×4 (16 floats, row-major, row-vector) per joint.
+    /// When the asset contains <see cref="MeshSkinData.AltInverseBindMatrices"/> (i.e. the
+    /// mesh was uploaded with joint position overrides), those are preferred over the regular
+    /// <see cref="MeshSkinData.InverseBindMatrices"/>.  This matches the SL viewer branch:
+    /// <c>use_alt_ibm = skin.mJointOverrides.size() &gt; 0</c>.
+    /// </summary>
+    private static TkMatrix4[] BuildInvBindMatrices(MeshSkinData skin)
+    {
+        int n = skin.JointNames.Length;
+        var result = new TkMatrix4[n];
+
+        // Prefer alt IBMs when present — they account for custom joint positions baked
+        // into the mesh by the uploader (e.g. a dress whose skeleton was exported at a
+        // non-standard joint position).  Using the regular IBMs for such a mesh will
+        // produce explosive distortion because the IBM is in the wrong bind-pose space.
+        bool useAlt = skin.AltInverseBindMatrices.Length >= n * 16;
+        var  raw    = useAlt ? skin.AltInverseBindMatrices : skin.InverseBindMatrices;
+        int  have   = raw.Length / 16;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (i < have)
+            {
+                int b = i * 16;
+                result[i] = new TkMatrix4(
+                    raw[b    ], raw[b + 1], raw[b + 2], raw[b + 3],
+                    raw[b + 4], raw[b + 5], raw[b + 6], raw[b + 7],
+                    raw[b + 8], raw[b + 9], raw[b +10], raw[b +11],
+                    raw[b +12], raw[b +13], raw[b +14], raw[b +15]);
+            }
+            else
+            {
+                result[i] = TkMatrix4.Identity;
+            }
         }
 
-        if (av?.Textures?.FaceTextures == null) return (UUID.Zero, null);
+        return result;
+    }
 
-        var result = new UUID[av.Textures.FaceTextures.Length];
-        for (int i = 0; i < av.Textures.FaceTextures.Length; i++)
+    private static void NormalizeSkinWeights(
+        int jointCount,
+        ref int j0, ref float w0,
+        ref int j1, ref float w1,
+        ref int j2, ref float w2,
+        ref int j3, ref float w3)
+    {
+        if ((uint)j0 >= (uint)jointCount) w0 = 0f;
+        if ((uint)j1 >= (uint)jointCount) w1 = 0f;
+        if ((uint)j2 >= (uint)jointCount) w2 = 0f;
+        if ((uint)j3 >= (uint)jointCount) w3 = 0f;
+
+        w0 = Math.Clamp(w0, 0f, 1f);
+        w1 = Math.Clamp(w1, 0f, 1f);
+        w2 = Math.Clamp(w2, 0f, 1f);
+        w3 = Math.Clamp(w3, 0f, 1f);
+
+        float sum = w0 + w1 + w2 + w3;
+        if (sum > 1e-6f)
         {
-            var texFace = av.Textures.FaceTextures[i];
-            if (texFace != null
-                && texFace.TextureID != UUID.Zero
-                && texFace.TextureID != AppearanceManager.DEFAULT_AVATAR_TEXTURE)
-                result[i] = texFace.TextureID;
+            float inv = 1f / sum;
+            w0 *= inv; w1 *= inv; w2 *= inv; w3 *= inv;
+            return;
         }
-        return (av.ID, result);
+
+        j0 = 0; j1 = 0; j2 = 0; j3 = 0;
+        w0 = jointCount > 0 ? 1f : 0f;
+        w1 = 0f; w2 = 0f; w3 = 0f;
     }
 
     // ── Utility ───────────────────────────────────────────────────────────────────
 
-    private static TkQuaternion ToTkQuaternion(OpenMetaverse.Quaternion q) =>
+    private static TkQuaternion ToTkQuaternion(Quaternion q) =>
         new(q.X, q.Y, q.Z, q.W);
 }

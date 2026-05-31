@@ -1,0 +1,118 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.AppearancePanel"
+             x:DataType="vm:AppearanceViewModel"
+             AutomationProperties.Name="Appearance panel">
+
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
+        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+
+            <!-- Current Outfit -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Grid.Column="0"
+                                   Text="Current Outfit"
+                                   FontSize="14" FontWeight="SemiBold"
+                                   VerticalAlignment="Center"
+                                   AutomationProperties.Name="Current outfit heading" />
+                        <Button Grid.Column="1"
+                                Content="&#x21BB; Refresh"
+                                Command="{Binding RefreshOutfitCommand}"
+                                MinWidth="72"
+                                AutomationProperties.Name="Refresh outfit" />
+                    </Grid>
+
+                    <TextBlock Text="No wearables found."
+                               IsVisible="{Binding !HasWornItems}"
+                               Opacity="0.6" FontStyle="Italic"
+                               AutomationProperties.Name="No wearables indicator" />
+
+                    <ItemsControl ItemsSource="{Binding WornItems}" IsVisible="{Binding HasWornItems}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:WornItemEntry">
+                                <Grid ColumnDefinitions="24,120,*" Margin="0,2">
+                                    <TextBlock Grid.Column="0"
+                                               Text="{Binding Icon}"
+                                               FontSize="14" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding TypeLabel}"
+                                               FontWeight="SemiBold"
+                                               VerticalAlignment="Center"
+                                               Margin="4,0" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding ItemName}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"
+                                               Opacity="0.8" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <!-- Hover Height -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Hover Height"
+                               FontSize="14" FontWeight="SemiBold"
+                               AutomationProperties.Name="Hover height heading" />
+                    <TextBlock Text="Adjust how high or low your avatar hovers above the ground."
+                               Opacity="0.7" TextWrapping="Wrap" FontSize="12" />
+                    <Grid ColumnDefinitions="*,8,56,8,Auto" VerticalAlignment="Center">
+                        <Slider Grid.Column="0"
+                                Minimum="-2" Maximum="2"
+                                Value="{Binding HoverHeight}"
+                                TickFrequency="0.5"
+                                IsSnapToTickEnabled="False"
+                                AutomationProperties.Name="Hover height slider" />
+                        <TextBlock Grid.Column="2"
+                                   Text="{Binding HoverHeightText}"
+                                   HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontFamily="Monospace"
+                                   AutomationProperties.Name="Hover height value" />
+                        <Button Grid.Column="4"
+                                Content="Apply"
+                                Command="{Binding ApplyHoverHeightCommand}"
+                                IsEnabled="{Binding !IsBusy}"
+                                MinWidth="64"
+                                AutomationProperties.Name="Apply hover height" />
+                    </Grid>
+                    <TextBlock Text="Range: -2.0 (lower) to +2.0 (higher)"
+                               FontSize="11" Opacity="0.5" />
+                </StackPanel>
+            </Border>
+
+            <!-- Appearance Actions -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Appearance"
+                               FontSize="14" FontWeight="SemiBold"
+                               AutomationProperties.Name="Appearance actions heading" />
+                    <TextBlock Text="Rebake textures if your avatar appears gray or blurry to you or others."
+                               Opacity="0.7" TextWrapping="Wrap" FontSize="12" />
+                    <Button Content="Rebake Textures"
+                            Command="{Binding RebakeTexturesCommand}"
+                            IsEnabled="{Binding !IsBusy}"
+                            MinWidth="140"
+                            AutomationProperties.Name="Rebake textures" />
+                </StackPanel>
+            </Border>
+
+            <!-- Status -->
+            <TextBlock Text="{Binding StatusText}"
+                       IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                       Opacity="0.7" FontSize="12" Margin="4,0,4,4"
+                       AutomationProperties.Name="Status" />
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

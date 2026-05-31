@@ -1,0 +1,167 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:views="using:Radegast.Veles.Views"
+             x:Class="Radegast.Veles.Views.MarketplacePanel"
+             x:DataType="vm:MarketplaceViewModel"
+             AutomationProperties.Name="Marketplace panel">
+
+    <DockPanel>
+
+        <!-- Toolbar -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="6,4">
+            <Button Content="Sync Listings"
+                    Command="{Binding SyncListingsCommand}"
+                    AutomationProperties.Name="Sync marketplace listings" />
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
+                       AutomationProperties.Name="Marketplace status" />
+        </StackPanel>
+
+        <!-- Detail panel for selected listing -->
+        <Border DockPanel.Dock="Right" Width="260" Padding="8"
+                BorderThickness="1,0,0,0" BorderBrush="{DynamicResource SystemBaseMediumLowColor}">
+            <ScrollViewer>
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Listing Details" FontWeight="SemiBold" FontSize="13" />
+
+                    <TextBlock Text="{Binding SelectedListing.FolderName, TargetNullValue='(none selected)', FallbackValue='(none selected)'}"
+                               FontSize="12" TextWrapping="Wrap"
+                               AutomationProperties.Name="Selected listing folder name" />
+
+                    <StackPanel Orientation="Horizontal" Spacing="4"
+                                IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding SelectedListing.StatusBadgeText}" FontSize="11" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding SelectedListing.StatusLabel}" FontSize="11" VerticalAlignment="Center"
+                                   AutomationProperties.Name="Listing status" />
+                    </StackPanel>
+
+                    <Separator IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                    <StackPanel Spacing="4"
+                                IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <TextBlock Text="{Binding SelectedListing.Title, StringFormat='Title: {0}', TargetNullValue='', FallbackValue=''}"
+                                   TextWrapping="Wrap" AutomationProperties.Name="Listing title" />
+                        <TextBlock Text="{Binding SelectedListing.PriceLinden, StringFormat='Price: L${0:N0}', FallbackValue=''}"
+                                   AutomationProperties.Name="Listing price" />
+                        <TextBlock Text="{Binding SelectedListing.LocalStockCount, StringFormat='Local stock: {0}', FallbackValue=''}"
+                                   AutomationProperties.Name="Local stock count" />
+                        <TextBlock Text="{Binding SelectedListing.StockCount, StringFormat='Server stock: {0}', FallbackValue=''}"
+                                   AutomationProperties.Name="Server stock count" />
+                        <TextBlock Text="{Binding SelectedListing.ListingId, StringFormat='Listing ID: {0}', TargetNullValue='Listing ID: (none)', FallbackValue=''}"
+                                   AutomationProperties.Name="Listing ID" />
+                        <TextBlock Text="{Binding SelectedListing.LastSyncUtc, StringFormat='Last sync: {0:g}', FallbackValue=''}"
+                                   FontSize="10" Opacity="0.7"
+                                   AutomationProperties.Name="Last sync time" />
+                    </StackPanel>
+
+                    <Border Background="DarkOrange" CornerRadius="3" Padding="6,4"
+                            IsVisible="{Binding SelectedListing.HasValidationWarnings, FallbackValue=False}">
+                        <TextBlock Text="{Binding SelectedListing.ValidationSummary}" FontSize="10"
+                                   Foreground="White" TextWrapping="Wrap"
+                                   AutomationProperties.Name="Validation warnings" />
+                    </Border>
+
+                    <TextBlock Text="Update pending..." FontSize="10" Opacity="0.7"
+                               IsVisible="{Binding SelectedListing.IsUpdatePending, FallbackValue=False}"
+                               AutomationProperties.Name="Update pending" />
+
+                    <Separator IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}" />
+
+                    <WrapPanel Orientation="Horizontal"
+                               IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}">
+                        <Button Content="Activate"
+                                Command="{Binding ActivateListingCommand}"
+                                CommandParameter="{Binding SelectedListing}"
+                                Margin="0,0,4,4"
+                                AutomationProperties.Name="Activate listing" />
+                        <Button Content="Deactivate"
+                                Command="{Binding DeactivateListingCommand}"
+                                CommandParameter="{Binding SelectedListing}"
+                                Margin="0,0,4,4"
+                                AutomationProperties.Name="Deactivate listing" />
+                        <Button Content="Register"
+                                Command="{Binding CreateListingCommand}"
+                                CommandParameter="{Binding SelectedListing}"
+                                Margin="0,0,4,4"
+                                AutomationProperties.Name="Register listing with SLM" />
+                        <Button Content="Delete"
+                                Command="{Binding DeleteListingCommand}"
+                                CommandParameter="{Binding SelectedListing}"
+                                Margin="0,0,4,4"
+                                AutomationProperties.Name="Delete listing from SLM" />
+                        <Button Content="Web"
+                                Command="{Binding OpenListingOnWebCommand}"
+                                CommandParameter="{Binding SelectedListing}"
+                                Margin="0,0,4,4"
+                                AutomationProperties.Name="Open listing on marketplace website" />
+                    </WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Filter tabs + listing list -->
+        <DockPanel>
+            <TabControl DockPanel.Dock="Top" SelectedIndex="{Binding SelectedFilterIndex}"
+                        AutomationProperties.Name="Listing filter tabs">
+                <TabItem Header="All" AutomationProperties.Name="All listings tab" />
+                <TabItem Header="Active" AutomationProperties.Name="Active listings tab" />
+                <TabItem Header="Inactive" AutomationProperties.Name="Inactive listings tab" />
+                <TabItem Header="Unregistered" AutomationProperties.Name="Unregistered listings tab" />
+            </TabControl>
+
+            <ListBox ItemsSource="{Binding AllListings}"
+                     SelectedItem="{Binding SelectedListing}"
+                     IsVisible="{Binding SelectedFilterIndex, Converter={x:Static vm:MarketplaceFilterConverters.IsAll}}"
+                     AutomationProperties.Name="All listings"
+                     Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MarketplaceListingRecord">
+                        <views:MarketplaceListingRow />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ListBox ItemsSource="{Binding ActiveListings}"
+                     SelectedItem="{Binding SelectedListing}"
+                     IsVisible="{Binding SelectedFilterIndex, Converter={x:Static vm:MarketplaceFilterConverters.IsActive}}"
+                     AutomationProperties.Name="Active listings"
+                     Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MarketplaceListingRecord">
+                        <views:MarketplaceListingRow />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ListBox ItemsSource="{Binding InactiveListings}"
+                     SelectedItem="{Binding SelectedListing}"
+                     IsVisible="{Binding SelectedFilterIndex, Converter={x:Static vm:MarketplaceFilterConverters.IsInactive}}"
+                     AutomationProperties.Name="Inactive listings"
+                     Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MarketplaceListingRecord">
+                        <views:MarketplaceListingRow />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <ListBox ItemsSource="{Binding UnassociatedListings}"
+                     SelectedItem="{Binding SelectedListing}"
+                     IsVisible="{Binding SelectedFilterIndex, Converter={x:Static vm:MarketplaceFilterConverters.IsUnassociated}}"
+                     AutomationProperties.Name="Unregistered listings"
+                     Margin="4,0">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:MarketplaceListingRecord">
+                        <views:MarketplaceListingRow />
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </DockPanel>
+
+    </DockPanel>
+</UserControl>

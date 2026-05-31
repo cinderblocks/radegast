@@ -81,7 +81,7 @@ namespace Radegast
             Client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
         }
 
-        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+        private void Objects_TerseObjectUpdate(object? sender, TerseObjectUpdateEventArgs e)
         {
             if (e.Update.Avatar && e.Update.LocalID == Client.Self.LocalID) {
                 AgentPosition = e.Update.Position;

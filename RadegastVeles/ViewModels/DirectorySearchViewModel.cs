@@ -533,7 +533,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         var classifiedId = e.ClassifiedID;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_selectedClassified?.ClassifiedID != classifiedId) return;
+            if (SelectedClassified?.ClassifiedID != classifiedId) return;
             ClassifiedDetailDescription = desc;
             ClassifiedDetailLocation = locationText;
             ClassifiedDetailPoster = posterName;

@@ -65,7 +65,7 @@
             </Grid>
 
             <!-- Worn indicator -->
-            <Border Background="#FF107C10" CornerRadius="4" Padding="8,4"
+            <Border Background="{DynamicResource VelesBadgeAttached}" CornerRadius="4" Padding="8,4"
                     IsVisible="{Binding IsWorn}" HorizontalAlignment="Center">
                 <TextBlock Text="&#x1F4CC; Currently Worn" Foreground="White" FontWeight="SemiBold"
                            AutomationProperties.Name="Currently worn badge" />
@@ -92,7 +92,7 @@
                 </ItemsControl>
             </StackPanel>
             <TextBlock Text="Loading textures..." IsVisible="{Binding IsLoadingTextures}"
-                       Opacity="0.6" AutomationProperties.Name="Loading textures indicator" />
+                       Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Loading textures indicator" />
         </StackPanel>
 
     </DockPanel>

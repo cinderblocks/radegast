@@ -20,6 +20,7 @@
 using System;
 using Avalonia.Controls;
 using Avalonia.Controls.Notifications;
+using Avalonia.Threading;
 
 namespace Radegast.Veles.Core;
 
@@ -49,8 +50,7 @@ public static class VelesNotificationService
 
     /// <summary>
     /// Displays a toast notification. Safe to call from any thread —
-    /// the call is marshalled to the UI thread automatically via
-    /// <see cref="WindowNotificationManager"/>.
+    /// the call is marshalled to the UI thread automatically.
     /// </summary>
     public static void Show(
         string title,
@@ -58,10 +58,12 @@ public static class VelesNotificationService
         NotificationType type = NotificationType.Information,
         TimeSpan? expiration = null)
     {
-        _manager?.Show(new Notification(
-            title,
-            message,
-            type,
-            expiration ?? TimeSpan.FromSeconds(5)));
+        var manager = _manager;
+        if (manager == null) return;
+        var notification = new Notification(title, message, type, expiration ?? TimeSpan.FromSeconds(5));
+        if (Dispatcher.UIThread.CheckAccess())
+            manager.Show(notification);
+        else
+            Dispatcher.UIThread.Post(() => manager.Show(notification));
     }
 }

@@ -61,6 +61,14 @@ public partial class ScriptEditorViewModel : ObservableObject, IDisposable
 
     private void LoadScript()
     {
+        if (_item.AssetUUID == UUID.Zero)
+        {
+            IsLoading = false;
+            ScriptText = string.Empty;
+            StatusText = "Ready";
+            SaveCommand.NotifyCanExecuteChanged();
+            return;
+        }
         IsLoading = true;
         StatusText = "Loading...";
         Client.Assets.RequestInventoryAsset(_item, true, UUID.Random(), OnAssetReceived);

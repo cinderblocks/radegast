@@ -27,7 +27,7 @@
             <TextBlock Text="&#x1F3B5;" FontSize="48" HorizontalAlignment="Center" AutomationProperties.Name="Sound icon" />
             <TextBlock Text="{Binding SoundName}" FontSize="14" HorizontalAlignment="Center" TextWrapping="Wrap" AutomationProperties.Name="Sound name label" />
             <TextBlock IsVisible="{Binding !SoundSystemAvailable}" Text="Sound system unavailable"
-                       Foreground="OrangeRed" HorizontalAlignment="Center"
+                       Foreground="{DynamicResource VelesWarningForeground}" HorizontalAlignment="Center"
                        AutomationProperties.Name="Sound system unavailable warning" />
         </StackPanel>
     </DockPanel>

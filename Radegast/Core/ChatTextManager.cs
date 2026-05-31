@@ -36,8 +36,12 @@ namespace Radegast
     {
         public event EventHandler<ChatLineAddedArgs> ChatLineAdded;
 
+        private const int ChatPageSize = 100;
+        internal const string LoadMoreChatUri = "radegast://loadmorechat";
+
         private bool showTimestamps;
         private readonly List<ChatBufferItem> textBuffer;
+        private int _historyDisplayStart;
 
         public ChatTextManager(RadegastInstanceForms instance, ITextPrinter textPrinter)
             : base(instance, textPrinter)
@@ -375,12 +379,56 @@ namespace Radegast
 
         public override void ReprintAllText()
         {
-            TextPrinter.ClearText();
+            // Reset to most-recent page when settings change
+            ReprintFromOffset(Math.Max(0, textBuffer.Count - ChatPageSize));
+        }
 
-            foreach (ChatBufferItem item in textBuffer)
+        public void LoadMoreHistory()
+        {
+            int newStart;
+            lock (SyncChat)
             {
-                ProcessBufferItem(item, false);
+                newStart = Math.Max(0, _historyDisplayStart - ChatPageSize);
             }
+            ReprintFromOffset(newStart);
+        }
+
+        private void ReprintFromOffset(int startIndex)
+        {
+            lock (SyncChat)
+            {
+                _historyDisplayStart = startIndex;
+                TextPrinter.ClearText();
+
+                if (_historyDisplayStart > 0)
+                {
+                    PrintLoadMoreLink();
+                }
+
+                for (int i = _historyDisplayStart; i < textBuffer.Count; i++)
+                {
+                    ProcessBufferItem(textBuffer[i], false);
+                }
+            }
+        }
+
+        private void PrintLoadMoreLink()
+        {
+            if (FontSettings.ContainsKey("History"))
+            {
+                var fontSetting = FontSettings["History"];
+                TextPrinter.ForeColor = fontSetting.ForeColor;
+                TextPrinter.BackColor = fontSetting.BackColor;
+                TextPrinter.Font = fontSetting.Font;
+            }
+            else
+            {
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
+            }
+            TextPrinter.InsertLink($"[ Load {Math.Min(_historyDisplayStart, ChatPageSize)} more messages... ]", LoadMoreChatUri);
+            TextPrinter.PrintTextLine(string.Empty);
         }
     }
 

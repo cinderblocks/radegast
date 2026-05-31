@@ -1,4 +1,4 @@
-﻿<!--
+<!--
   Radegast Metaverse Client
   Copyright (c) 2026, Sjofn LLC
   All rights reserved.
@@ -72,7 +72,15 @@
                             Command="{Binding TouchCommand}"
                             Margin="0,0,8,0" MinWidth="60"
                             ToolTip.Tip="Send a touch event to the selected HUD"
-                            AutomationProperties.Name="Touch HUD" />
+                            AutomationProperties.Name="Touch HUD"
+                            Classes.touching="{Binding IsTouching}">
+                        <Button.Styles>
+                            <Style Selector="Button.touching">
+                                <Setter Property="Background" Value="#3390FF" />
+                                <Setter Property="Foreground" Value="White" />
+                            </Style>
+                        </Button.Styles>
+                    </Button>
 
                     <Button Content="&#x27F3; Reset Camera"
                             Command="{Binding ResetCameraCommand}"

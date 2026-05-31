@@ -237,8 +237,8 @@ public partial class ObjectContentsViewModel : ObservableObject, IDisposable
         StatusText = $"Adding '{item.Name}'…";
 
         // Refresh the list after a short delay to pick up the new item
-        _ = System.Threading.Tasks.Task.Delay(2000).ContinueWith(_ =>
-            Avalonia.Threading.Dispatcher.UIThread.Post(() => RefreshCommand.Execute(null)));
+        _ = Task.Delay(2000).ContinueWith(_ =>
+            Dispatcher.UIThread.Post(() => RefreshCommand.Execute(null)));
     }
 }
 

@@ -79,7 +79,10 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     [ObservableProperty] private GroupMemberEntry? _selectedMember;
     [ObservableProperty] private bool _canEject;
     [ObservableProperty] private bool _canInvite;
-    [ObservableProperty] private string _inviteAvatarIdText = string.Empty;
+    [ObservableProperty] private bool _canAssignMember;
+    [ObservableProperty] private bool _canRemoveMember;
+    [ObservableProperty] private AvatarPickerEntry? _pickedInviteAvatar;
+    [ObservableProperty] private string _pickedInviteName = string.Empty;
     [ObservableProperty] private GroupRoleEntry? _selectedInviteRole;
     [ObservableProperty] private string _inviteStatusText = string.Empty;
 
@@ -95,7 +98,8 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     [ObservableProperty] private string _editRoleTitle = string.Empty;
     [ObservableProperty] private string _editRoleDescription = string.Empty;
     public ObservableCollection<GroupPowerEntry> EditRolePowers { get; } = [];
-    public ObservableCollection<string> SelectedRoleMembers { get; } = [];
+    public ObservableCollection<GroupRoleMemberEntry> SelectedRoleMembers { get; } = [];
+    [ObservableProperty] private bool _isNotEveryoneRole;
     private List<KeyValuePair<UUID, UUID>>? _roleMembers;
     private UUID _groupRolesRequestId;
     private UUID _groupRolesMembersRequestId;
@@ -113,6 +117,13 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     [ObservableProperty] private bool _showNewNoticeForm;
     [ObservableProperty] private string _newNoticeSubject = string.Empty;
     [ObservableProperty] private string _newNoticeBody = string.Empty;
+
+    private InventoryPickerEntry? _newNoticeAttachment;
+    public InventoryPickerEntry? NewNoticeAttachment
+    {
+        get => _newNoticeAttachment;
+        set => SetProperty(ref _newNoticeAttachment, value);
+    }
 
     // ── Banned tab ────────────────────────────────────────────────────────────
     public ObservableCollection<GroupBanEntry> BannedMembers { get; } = [];
@@ -185,6 +196,8 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         CanDeleteRole    = HasPower(GroupPowers.DeleteRole);
         CanEditRoleProps = HasPower(GroupPowers.RoleProperties);
         CanEditRolePowers = HasPower(GroupPowers.ChangeActions);
+        CanAssignMember  = HasPower(GroupPowers.AssignMember) || HasPower(GroupPowers.AssignMemberLimited);
+        CanRemoveMember  = HasPower(GroupPowers.RemoveMember);
         CanSendNotices   = HasPower(GroupPowers.SendNotices);
     }
 
@@ -335,6 +348,7 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         EditRoleTitle       = value?.Title ?? string.Empty;
         EditRoleDescription = value?.Description ?? string.Empty;
         IsNewRole           = false;
+        IsNotEveryoneRole   = value?.RoleID != UUID.Zero;
         PopulateEditRolePowers(value?.Powers ?? GroupPowers.None);
         RefreshSelectedRoleMembers();
     }
@@ -358,12 +372,13 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         var roleId = SelectedRole.RoleID;
         if (roleId == UUID.Zero)
         {
-            foreach (var m in Members) SelectedRoleMembers.Add(m.Name);
+            foreach (var m in Members)
+                SelectedRoleMembers.Add(new GroupRoleMemberEntry(m.AgentID, m.Name));
         }
         else
         {
             foreach (var kvp in _roleMembers.Where(kv => kv.Key == roleId))
-                SelectedRoleMembers.Add(_instance.Names.Get(kvp.Value));
+                SelectedRoleMembers.Add(new GroupRoleMemberEntry(kvp.Value, _instance.Names.Get(kvp.Value)));
         }
     }
 
@@ -561,18 +576,54 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     }
 
     [RelayCommand]
+    private void PickInviteAvatar()
+    {
+        _instance.ShowAvatarPicker("Invite to Group", entry =>
+        {
+            PickedInviteAvatar = entry;
+            PickedInviteName   = entry.Name;
+        });
+    }
+
+    [RelayCommand]
+    private void ClearInvitePick()
+    {
+        PickedInviteAvatar = null;
+        PickedInviteName   = string.Empty;
+        InviteStatusText   = string.Empty;
+    }
+
+    [RelayCommand]
     private void InviteMember()
     {
-        if (!CanInvite) return;
-        if (!UUID.TryParse(InviteAvatarIdText.Trim(), out var agentId))
-        {
-            InviteStatusText = "Invalid UUID.";
-            return;
-        }
+        if (!CanInvite || PickedInviteAvatar == null) return;
         var roleIds = new List<UUID> { SelectedInviteRole?.RoleID ?? UUID.Zero };
-        Client.Groups.Invite(GroupID, roleIds, agentId);
-        InviteAvatarIdText = string.Empty;
+        Client.Groups.Invite(GroupID, roleIds, PickedInviteAvatar.Id);
+        PickedInviteAvatar = null;
+        PickedInviteName   = string.Empty;
         InviteStatusText   = "Invitation sent.";
+    }
+
+    [RelayCommand]
+    private void AddMemberToRole()
+    {
+        if (SelectedRole == null || SelectedRole.RoleID == UUID.Zero || !CanAssignMember) return;
+        var role = SelectedRole;
+        _instance.ShowAvatarPicker($"Add to role: {role.Name}", entry =>
+        {
+            Client.Groups.AddToRole(GroupID, role.RoleID, entry.Id);
+            _ = Task.Delay(1000).ContinueWith(_ =>
+                Dispatcher.UIThread.Post(() =>
+                    _groupRolesMembersRequestId = Client.Groups.RequestGroupRolesMembers(GroupID)));
+        });
+    }
+
+    [RelayCommand]
+    private void RemoveMemberFromRole(GroupRoleMemberEntry? entry)
+    {
+        if (entry == null || SelectedRole == null || SelectedRole.RoleID == UUID.Zero || !CanRemoveMember) return;
+        Client.Groups.RemoveFromRole(GroupID, SelectedRole.RoleID, entry.AgentID);
+        SelectedRoleMembers.Remove(entry);
     }
 
     [RelayCommand]
@@ -642,6 +693,7 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         SelectedNotice    = null;
         NewNoticeSubject  = string.Empty;
         NewNoticeBody     = string.Empty;
+        NewNoticeAttachment = null;
     }
 
     [RelayCommand]
@@ -650,22 +702,46 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         ShowNewNoticeForm = false;
         NewNoticeSubject  = string.Empty;
         NewNoticeBody     = string.Empty;
+        NewNoticeAttachment = null;
     }
 
     [RelayCommand]
     private void SendNotice()
     {
         if (string.IsNullOrWhiteSpace(NewNoticeSubject)) return;
-        Client.Groups.SendGroupNotice(GroupID, new GroupNotice
+        var notice = new GroupNotice
         {
             Subject = NewNoticeSubject,
             Message = NewNoticeBody
-        });
+        };
+        if (_newNoticeAttachment != null)
+        {
+            notice.OwnerID     = Client.Self.AgentID;
+            notice.AttachmentID = _newNoticeAttachment.ItemId;
+        }
+        Client.Groups.SendGroupNotice(GroupID, notice);
         ShowNewNoticeForm = false;
         NewNoticeSubject  = string.Empty;
         NewNoticeBody     = string.Empty;
+        NewNoticeAttachment = null;
         StatusText = "Notice sent.";
         Client.Groups.RequestGroupNoticesList(GroupID);
+    }
+
+    [RelayCommand]
+    private void PickNoticeAttachment()
+    {
+        _instance.ShowInventoryPicker(
+            "Select notice attachment",
+            null,
+            entry => { NewNoticeAttachment = entry; },
+            item => (item.Permissions.OwnerMask & PermissionMask.Transfer) != 0);
+    }
+
+    [RelayCommand]
+    private void ClearNoticeAttachment()
+    {
+        NewNoticeAttachment = null;
     }
 
     [RelayCommand]
@@ -773,3 +849,4 @@ public record GroupTitleEntry(UUID RoleID, string Title, bool IsSelected);
 public record GroupMemberEntry(UUID AgentID, string Name, string Title);
 public record GroupNoticeEntry(UUID NoticeID, string Subject, string FromName, string Date);
 public record GroupBanEntry(UUID Id, string Name, string BanDate);
+public record GroupRoleMemberEntry(UUID AgentID, string Name);

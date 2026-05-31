@@ -18,9 +18,15 @@
  */
 
 using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using OpenMetaverse;
+using OpenMetaverse.Assets;
+using OpenMetaverse.Messages.Linden;
+using Radegast.Veles.Plugins;
 using Radegast.Veles.ViewModels;
 using Radegast.Veles.Views;
 
@@ -28,7 +34,18 @@ namespace Radegast.Veles.Core;
 
 public sealed class RadegastInstanceAvalonia : RadegastInstance
 {
+    private bool _initialCapsFetched;
+    private System.Threading.Timer? _renderInfoTimer;
+    private System.Threading.Timer? _viewerStatsTimer;
+    private DateTime _loginTime;
+    private int _regionsVisited;
     public event EventHandler<NotificationChatEventArgs>? NotificationInChat;
+
+    /// <summary>Per-account credentials store; set by the app after successful login.</summary>
+    internal CredentialManager? CredentialManager { get; set; }
+
+    /// <summary>Identifies the logged-in account as "username:gridId"; set by the app after login.</summary>
+    internal string? AccountKey { get; set; }
 
     /// <summary>Raised when any part of the UI requests opening a P2P IM session.</summary>
     public event EventHandler<IMRequestedEventArgs>? IMRequested;
@@ -43,6 +60,26 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <summary>Ask the IM system to open (or focus) a group chat session.</summary>
     public void RequestGroupIM(UUID groupId, string groupName)
         => GroupIMRequested?.Invoke(this, new GroupIMRequestedEventArgs(groupId, groupName));
+
+    /// <summary>Raised when any part of the UI requests showing an avatar on the world map.</summary>
+    public event EventHandler<UUID>? ShowOnMapRequested;
+
+    /// <summary>Navigate to the World Map tab and locate the given agent.</summary>
+    public void ShowOnMap(UUID agentId)
+        => ShowOnMapRequested?.Invoke(this, agentId);
+
+    /// <summary>Open the group picker and call <paramref name="onSelected"/> with the chosen group.</summary>
+    public void ShowGroupPicker(string title, Action<GroupPickerEntry> onSelected)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new GroupPickerViewModel(this);
+            var window = new GroupPickerWindow { DataContext = vm, Title = title };
+            vm.Selected += (_, entry) => { onSelected(entry); window.Close(); };
+            vm.Cancelled += (_, _) => window.Close();
+            window.Show();
+        });
+    }
 
     /// <summary>Open the Pay dialog for an avatar or an in-world object.</summary>
     public void OpenPayWindow(UUID targetId, string name, bool isObject = false, Simulator? sim = null)
@@ -68,6 +105,18 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <summary>The active voice session manager (set by MainViewModel after login).</summary>
     public VoiceViewModel? Voice { get; internal set; }
 
+    /// <summary>The active media / audio manager (set by MainViewModel after login).</summary>
+    public MediaViewModel? Media { get; internal set; }
+
+    /// <summary>The plugin manager for this session.</summary>
+    public PluginManager PluginManager { get; private set; } = null!;
+
+    /// <summary>Initialise the plugin manager. Called after construction.</summary>
+    internal void InitPluginManager()
+    {
+        PluginManager = new PluginManager(this);
+    }
+
     internal RadegastInstanceAvalonia(string appName, GridClient client)
         : base(appName, client, new NetComAvalonia(client))
     {
@@ -88,8 +137,87 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         client.Self.ScriptQuestion += Self_ScriptQuestion;
         client.Self.LoadURL += Self_LoadURL;
         client.Self.TeleportProgress += Self_TeleportProgress;
+        client.Network.EventQueueRunning += Network_EventQueueRunning;
         NetCom.InstantMessageReceived += NetCom_InstantMessageReceived;
         NetCom.AlertMessageReceived += NetCom_AlertMessageReceived;
+        client.Friends.CallingCardOffered += Friends_CallingCardOffered;
+    }
+
+    private void Network_EventQueueRunning(object? sender, EventQueueRunningEventArgs e)
+    {
+        _regionsVisited++;
+
+        // ViewerBenefits, AgentPreferences, and ProductInfo are account-level — fetch once per login session.
+        if (!_initialCapsFetched)
+        {
+            _initialCapsFetched = true;
+            _loginTime = DateTime.UtcNow;
+            _ = Task.Run(() => Client.Self.GetViewerBenefitsAsync());
+            _ = Task.Run(() => Client.Self.GetAgentPreferencesAsync());
+            _ = Task.Run(() => Client.Self.GetProductInfoAsync());
+
+            // Send viewer stats after 1 minute, then every 5 minutes — matching SL C++ behaviour.
+            _viewerStatsTimer = new System.Threading.Timer(
+                _ => _ = Task.Run(SendViewerStatsAsync),
+                null,
+                TimeSpan.FromMinutes(1),
+                TimeSpan.FromMinutes(5));
+        }
+
+        // AvatarRenderInfo is region-scoped — only act on the sim we are actually entering.
+        if (e.Simulator != Client.Network.CurrentSim) return;
+
+        // GET: populate Client.Self.AvatarRenderInfo with the region's current complexity data.
+        _ = Task.Run(() => Client.Self.GetAvatarRenderInfoAsync());
+
+        // POST: report local render weights on a 60-second interval, matching SL C++ behaviour.
+        // Veles has no renderer, so we report weight=0 / tooComplex=false for self only.
+        _renderInfoTimer?.Dispose();
+        _renderInfoTimer = new System.Threading.Timer(
+            _ => _ = Task.Run(() => Client.Self.PostAvatarRenderInfoAsync(0, false)),
+            null,
+            TimeSpan.FromSeconds(60),
+            TimeSpan.FromSeconds(60));
+    }
+
+    private async Task SendViewerStatsAsync()
+    {
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        long memKb;
+        try { memKb = Process.GetCurrentProcess().WorkingSet64 / 1024L; }
+        catch { memKb = 0L; }
+
+        var stats = new ViewerStatsMessage
+        {
+            SessionID         = Client.Self.SessionID,
+            AgentFPS          = 0f,
+            AgentLanguage     = CultureInfo.CurrentCulture.Name,
+            AgentMemoryUsed   = memKb,
+            AgentPing         = sim.Stats.LastLag,
+            RegionsVisited    = _regionsVisited,
+            AgentRuntime      = (float)(DateTime.UtcNow - _loginTime).TotalSeconds,
+            SimulatorFPS      = sim.Stats.FPS,
+            AgentStartTime    = _loginTime,
+            AgentVersion      = NetCom.LoginOptions.Version,
+            AgentsInView      = sim.Stats.Agents,
+            MiscVersion       = 1f,
+            VertexBuffersEnabled = false,
+            InKbytes          = sim.Stats.GetRecvBytes() / 1024f,
+            InPackets         = sim.Stats.GetRecvPackets(),
+            OutKbytes         = sim.Stats.GetSentBytes() / 1024f,
+            OutPackets        = sim.Stats.GetSentPackets(),
+            StatsFailedResends = sim.Stats.GetResentPackets(),
+            SystemOS          = Environment.OSVersion.ToString(),
+            SystemCPU         = string.Empty,
+            SystemGPU         = string.Empty,
+            SystemGPUVendor   = string.Empty,
+            SystemGPUVersion  = string.Empty,
+            MiscString1       = string.Empty,
+        };
+
+        await Client.Self.SendViewerStatsAsync(stats);
     }
 
     private void Self_ScriptDialog(object? sender, ScriptDialogEventArgs e)
@@ -197,6 +325,13 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         }
     }
 
+    private void Friends_CallingCardOffered(object? sender, CallingCardOfferedEventArgs e)
+    {
+        var vm = NotificationViewModel.ForCallingCardOffer(Client, e);
+        NotificationReceived?.Invoke(this, vm);
+        MediaManager.PlayUISound(UISounds.Alert);
+    }
+
     public override void ShowNotificationInChat(string message, ChatBufferTextStyle style = ChatBufferTextStyle.ObjectChat, bool highlight = false)
     {
         NotificationInChat?.Invoke(this, new NotificationChatEventArgs(message, style, highlight));
@@ -230,11 +365,53 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
             window.Show();
         });
     }
+
+    public void ShowAvatarPicker(string title, Action<AvatarPickerEntry> onSelected)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new AvatarPickerViewModel(this);
+            var window = new AvatarPickerWindow { DataContext = vm, Title = title };
+            vm.Selected += (_, entry) => { onSelected(entry); window.Close(); };
+            vm.Cancelled += (_, _) => window.Close();
+            window.Show();
+        });
+    }
+
+    public void ShowInventoryPicker(string title, AssetType[]? allowedTypes, Action<InventoryPickerEntry> onSelected, Func<InventoryItem, bool>? itemFilter = null)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new InventoryPickerViewModel(this, allowedTypes, itemFilter);
+            var window = new InventoryPickerWindow { DataContext = vm, Title = title };
+            vm.Selected += (_, entry) => { onSelected(entry); window.Close(); };
+            vm.Cancelled += (_, _) => window.Close();
+            window.Show();
+        });
+    }
+
     public void ShowLandProfile()
     {
         Dispatcher.UIThread.Post(() =>
         {
             var vm = new LandProfileViewModel(this);
+            var panel = new LandProfilePanel { DataContext = vm };
+            var window = new ProfileWindow("Land Info", panel);
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(LandProfileViewModel.ParcelName))
+                    window.Title = $"Land - {vm.ParcelName}";
+            };
+            window.Show();
+        });
+    }
+
+    public void ShowLandProfile(float rx, float ry)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new LandProfileViewModel(this, loadCurrentParcel: false);
+            vm.LoadParcelAtPosition(rx, ry);
             var panel = new LandProfilePanel { DataContext = vm };
             var window = new ProfileWindow("Land Info", panel);
             vm.PropertyChanged += (_, e) =>
@@ -287,13 +464,35 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         });
     }
 
+    public void ShowChangeDisplayName()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var window = new SetDisplayNameWindow(Client);
+            window.Show();
+        });
+    }
+
+    public void ShowAppearance()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new AppearanceViewModel(this);
+            var panel = new AppearancePanel { DataContext = vm };
+            var window = new ProfileWindow("Appearance", panel);
+            window.Width = 520;
+            window.Height = 620;
+            window.Show();
+        });
+    }
+
     public void ShowObjectContents(UUID objectId, uint localId, string objectName)
     {
         Dispatcher.UIThread.Post(() =>
         {
             var vm = new ObjectContentsViewModel(this, objectId, localId, objectName);
-            var panel = new Views.ObjectContentsPanel { DataContext = vm };
-            var window = new Views.ProfileWindow($"Contents - {objectName}", panel);
+            var panel = new ObjectContentsPanel { DataContext = vm };
+            var window = new ProfileWindow($"Contents - {objectName}", panel);
             window.Show();
         });
     }
@@ -303,28 +502,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         Dispatcher.UIThread.Post(() =>
         {
             var vm     = new PrimViewerViewModel(this, rootLocalId);
-            var panel  = new Views.PrimViewerPanel { DataContext = vm };
-            var window = new Views.ProfileWindow($"3D View — {objectName}", panel);
-            window.Closed += (_, _) => vm.Dispose();
-            window.Width  = 640;
-            window.Height = 520;
-            window.Show();
-        });
-    }
-
-    public void ShowAvatarViewer(UUID agentId, string agentName)
-    {
-        var sim = Client.Network.CurrentSim;
-        if (sim == null) return;
-        bool avatarKnown = agentId == Client.Self.AgentID
-            || sim.ObjectsAvatars.Values.Any(av => av?.ID == agentId);
-        if (!avatarKnown) return;
-
-        Dispatcher.UIThread.Post(() =>
-        {
-            var vm     = new AvatarViewerViewModel(this, agentId, agentName);
-            var panel  = new Views.AvatarViewerPanel { DataContext = vm };
-            var window = new Views.ProfileWindow($"3D View — {agentName}", panel);
+            var panel  = new PrimViewerPanel { DataContext = vm };
+            var window = new ProfileWindow($"3D View — {objectName}", panel);
             window.Closed += (_, _) => vm.Dispose();
             window.Width  = 640;
             window.Height = 520;
@@ -337,11 +516,26 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         Dispatcher.UIThread.Post(() =>
         {
             var vm     = new HudViewerViewModel(this);
-            var panel  = new Views.HudViewerPanel { DataContext = vm };
-            var window = new Views.ProfileWindow("HUD Viewer", panel);
+            var panel  = new HudViewerPanel { DataContext = vm };
+            var window = new ProfileWindow("HUD Viewer", panel);
             window.Closed += (_, _) => vm.Dispose();
             window.Width  = 820;
             window.Height = 560;
+            window.Show();
+        });
+    }
+
+    public void ShowAvatarViewer(UUID avatarId, string avatarName)
+    {
+        if (avatarId == UUID.Zero) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm     = new AvatarViewerViewModel(this, avatarId);
+            var panel  = new AvatarViewerPanel { DataContext = vm };
+            var window = new ProfileWindow($"3D Avatar — {avatarName}", panel);
+            window.Closed += (_, _) => vm.Dispose();
+            window.Width  = 640;
+            window.Height = 520;
             window.Show();
         });
     }
@@ -356,8 +550,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         Dispatcher.UIThread.Post(() =>
         {
             var vm = new MuteListViewModel(this);
-            var panel = new Views.MuteListPanel { DataContext = vm };
-            var window = new Views.ProfileWindow("Mute List", panel);
+            var panel = new MuteListPanel { DataContext = vm };
+            var window = new ProfileWindow("Mute List", panel);
             window.Closed += (_, _) => vm.Dispose();
             window.Show();
         });
@@ -368,20 +562,124 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         Dispatcher.UIThread.Post(() =>
         {
             var vm = new TextureViewerViewModel(this, textureId, name);
-            var panel = new Views.TextureViewerPanel { DataContext = vm };
-            var window = new Views.ProfileWindow($"Texture - {name}", panel);
+            var panel = new TextureViewerPanel { DataContext = vm };
+            var window = new ProfileWindow($"Texture - {name}", panel);
             window.Show();
         });
     }
 
+    public void CreateAndOpenNotecard()
+    {
+        var parentId = Client.Inventory.FindFolderForType(FolderType.Notecard);
+        Client.Inventory.RequestCreateItem(parentId, "New Notecard", string.Empty,
+            AssetType.Notecard, UUID.Random(), InventoryType.Notecard, PermissionMask.All,
+            (success, item) =>
+            {
+                if (!success || item is not InventoryNotecard nc) return;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var vm = new NotecardViewModel(this, nc);
+                    var panel = new NotecardPanel { DataContext = vm };
+                    var window = new ProfileWindow($"Notecard - {nc.Name}", panel);
+                    vm.PropertyChanged += (_, e) =>
+                    {
+                        if (e.PropertyName == nameof(NotecardViewModel.NotecardName))
+                            window.Title = $"Notecard - {vm.NotecardName}";
+                    };
+                    window.Closed += (_, _) => vm.Dispose();
+                    window.Show();
+                });
+            });
+    }
+
+    public void CreateAndOpenScript()
+    {
+        var parentId = Client.Inventory.FindFolderForType(FolderType.LSLText);
+        Client.Inventory.RequestCreateItem(parentId, "New Script", string.Empty,
+            AssetType.LSLText, UUID.Random(), InventoryType.LSL, PermissionMask.All,
+            (success, item) =>
+            {
+                if (!success || item is not InventoryLSL lsl) return;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var vm = new ScriptEditorViewModel(this, lsl);
+                    var panel = new ScriptEditorPanel { DataContext = vm };
+                    var window = new ProfileWindow($"Script - {lsl.Name}", panel);
+                    vm.PropertyChanged += (_, e) =>
+                    {
+                        if (e.PropertyName == nameof(ScriptEditorViewModel.ScriptName))
+                            window.Title = $"Script - {vm.ScriptName}";
+                    };
+                    window.Closed += (_, _) => vm.Dispose();
+                    window.Show();
+                });
+            });
+    }
+
+    public void CreateAndOpenLandmark()
+    {
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        var simName = sim.Name;
+        var parcelName = State.Parcel?.Name;
+        var landmarkName = !string.IsNullOrWhiteSpace(parcelName) ? parcelName : simName;
+        var parentId = Client.Inventory.FindFolderForType(FolderType.Landmark);
+        Client.Inventory.RequestCreateItem(parentId, landmarkName, string.Empty,
+            AssetType.Landmark, UUID.Random(), InventoryType.Landmark, PermissionMask.All,
+            (success, item) =>
+            {
+                if (!success || item is not InventoryLandmark lm) return;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var vm = new LandmarkViewModel(this, lm);
+                    var panel = new LandmarkPanel { DataContext = vm };
+                    var window = new ProfileWindow($"Landmark - {lm.Name}", panel);
+                    window.Closed += (_, _) => vm.Dispose();
+                    window.Show();
+                });
+            });
+    }
+
+    public void CreateAndOpenGesture()
+    {
+        var parentId = Client.Inventory.FindFolderForType(FolderType.Gesture);
+        Client.Inventory.RequestCreateItem(parentId, "New Gesture", string.Empty,
+            AssetType.Gesture, UUID.Random(), InventoryType.Gesture, PermissionMask.All,
+            (success, item) =>
+            {
+                if (!success || item is not InventoryGesture gesture) return;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    var vm = new GestureViewModel(this, gesture);
+                    var panel = new GesturePanel { DataContext = vm };
+                    var window = new ProfileWindow($"Gesture - {gesture.Name}", panel);
+                    vm.PropertyChanged += (_, e) =>
+                    {
+                        if (e.PropertyName == nameof(GestureViewModel.GestureName))
+                            window.Title = $"Gesture - {vm.GestureName}";
+                    };
+                    window.Closed += (_, _) => vm.Dispose();
+                    window.Show();
+                });
+            });
+    }
+
     public override void CleanUp()
     {
+        PluginManager?.Dispose();
+        _renderInfoTimer?.Dispose();
+        _renderInfoTimer = null;
+        _viewerStatsTimer?.Dispose();
+        _viewerStatsTimer = null;
         Client.Self.ScriptDialog -= Self_ScriptDialog;
         Client.Self.ScriptQuestion -= Self_ScriptQuestion;
         Client.Self.LoadURL -= Self_LoadURL;
         Client.Self.TeleportProgress -= Self_TeleportProgress;
+        Client.Network.EventQueueRunning -= Network_EventQueueRunning;
         NetCom.InstantMessageReceived -= NetCom_InstantMessageReceived;
         NetCom.AlertMessageReceived -= NetCom_AlertMessageReceived;
+        Client.Friends.CallingCardOffered -= Friends_CallingCardOffered;
         ChatLog.Dispose();
         base.CleanUp();
     }

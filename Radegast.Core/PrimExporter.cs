@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -62,7 +62,7 @@ namespace Radegast
 
 		public void ExportToFile(string filename, uint localID)
 		{
-			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename),Path.GetFileNameWithoutExtension(filename));
+			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename)!, Path.GetFileNameWithoutExtension(filename));
 			Directory.CreateDirectory(ExportDirectory);
 			
 			// Search all connected simulators for the prim
@@ -278,7 +278,7 @@ namespace Radegast
             return PrimsWaiting.Count == 0;
         }
 
-        private void Objects_OnObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
+        private void Objects_OnObjectPropertiesFamily(object? sender, ObjectPropertiesFamilyEventArgs e)
 		{
 			Properties = new Primitive.ObjectProperties();
 			Properties.SetFamilyProperties(e.Properties);
@@ -292,7 +292,7 @@ namespace Radegast
 			}
 		}
 
-        private void Objects_OnObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_OnObjectProperties(object? sender, ObjectPropertiesEventArgs e)
 		{
 			if (e.Properties.ObjectID == Properties.ObjectID)
 			{

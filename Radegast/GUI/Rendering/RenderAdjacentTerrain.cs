@@ -49,13 +49,13 @@ namespace Radegast.Rendering
         private bool terrainInProgress = false;
         private bool terrainTextureNeedsUpdate = false;
         private float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f;
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
 
         public RenderAdjacentTerrain(RadegastInstanceForms instance, Simulator simulator)
         {
             Instance = instance;
             targetSim = simulator;
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
         }
 
         public void ResetTerrain()

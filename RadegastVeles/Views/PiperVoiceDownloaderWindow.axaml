@@ -1,0 +1,116 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.PiperVoiceDownloaderWindow"
+        x:DataType="vm:PiperVoiceDownloaderViewModel"
+        Title="Download Piper Voice Model"
+        Width="640" Height="520"
+        CanResize="True"
+        MinWidth="480" MinHeight="400"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Piper voice downloader window">
+    <DockPanel Margin="10">
+
+        <!-- Bottom bar -->
+        <StackPanel DockPanel.Dock="Bottom" Spacing="6">
+            <ProgressBar Value="{Binding Progress}" Minimum="0" Maximum="100"
+                         Height="12" CornerRadius="3"
+                         IsVisible="{Binding IsDownloading}"
+                         AutomationProperties.Name="Download progress" />
+            <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                       TextWrapping="Wrap" AutomationProperties.Name="Status text" />
+            <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                <Button Content="Fetch Voices"
+                        Command="{Binding FetchVoicesCommand}"
+                        IsEnabled="{Binding IsFetching, Converter={x:Static BoolConverters.Not}}"
+                        AutomationProperties.Name="Fetch available voices" />
+                <Button Content="Download Selected"
+                        Click="OnDownloadClick"
+                        IsEnabled="{Binding CanDownload}"
+                        AutomationProperties.Name="Download selected voice" />
+                <Button Content="Cancel Download"
+                        Command="{Binding CancelDownloadCommand}"
+                        IsVisible="{Binding IsDownloading}"
+                        AutomationProperties.Name="Cancel download" />
+                <Button Content="Close"
+                        Click="OnCloseClick"
+                        AutomationProperties.Name="Close window" />
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Filters -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,12,Auto,*" Margin="0,0,0,6">
+            <TextBlock Grid.Column="0" Text="Language" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Languages}"
+                      SelectedItem="{Binding LanguageFilter, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      AutomationProperties.Name="Filter by language" />
+            <TextBlock Grid.Column="3" Text="Quality" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox Grid.Column="4" ItemsSource="{Binding Qualities}"
+                      SelectedItem="{Binding QualityFilter, Mode=TwoWay}"
+                      HorizontalAlignment="Stretch"
+                      AutomationProperties.Name="Filter by quality" />
+        </Grid>
+
+        <!-- Voice list + detail -->
+        <Grid ColumnDefinitions="*,220">
+            <ListBox Grid.Column="0" Margin="0,0,6,0"
+                     ItemsSource="{Binding FilteredVoices}"
+                     SelectedItem="{Binding SelectedVoice, Mode=TwoWay}"
+                     AutomationProperties.Name="Voice list">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PiperVoiceEntry">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold" />
+                            <TextBlock FontSize="11" Foreground="{DynamicResource VelesMutedForeground}">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="{}{0} · {1} · {2}">
+                                        <Binding Path="Language" />
+                                        <Binding Path="Quality" />
+                                        <Binding Path="SizeText" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <Border Grid.Column="1"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
+                    BorderThickness="1" CornerRadius="4" Padding="10"
+                    IsVisible="{Binding SelectedVoice, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Selected Voice" FontWeight="SemiBold" FontSize="13" />
+                    <Separator />
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Name" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" />
+                        <TextBlock Text="{Binding SelectedVoice.DisplayName}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Language" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" />
+                        <TextBlock Text="{Binding SelectedVoice.Language}" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Quality" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" />
+                        <TextBlock Text="{Binding SelectedVoice.Quality}" />
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Download size" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" />
+                        <TextBlock Text="{Binding SelectedVoice.SizeText}" />
+                    </StackPanel>
+                    <StackPanel Spacing="4"
+                                IsVisible="{Binding DownloadedPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="Saved to" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" />
+                        <TextBlock Text="{Binding DownloadedPath}" TextWrapping="Wrap" FontSize="11" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

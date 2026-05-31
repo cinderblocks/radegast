@@ -18,9 +18,11 @@
  */
 
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using OpenMetaverse;
+using OpenMetaverse.Marketplace;
 using Radegast.Veles.ViewModels;
 using InvClipboard = Radegast.Veles.Core.InventoryClipboard;
 
@@ -34,18 +36,22 @@ public static class InventoryMenuBuilder
     /// <param name="vm">The inventory view model.</param>
     /// <param name="node">The node that was right-clicked.</param>
     /// <param name="renameAction">Async delegate that shows the rename dialog.</param>
-    public static ContextMenu Build(InventoryViewModel vm, InvTreeNode node, Func<Task> renameAction)
+    /// <param name="marketplace">Optional marketplace view model for marketplace-aware actions.</param>
+    public static ContextMenu Build(InventoryViewModel vm, InvTreeNode node, Func<Task> renameAction,
+        MarketplaceViewModel? marketplace = null)
     {
         var menu = new ContextMenu();
         if (node.IsLibrary)
         {
             BuildLibraryMenu(menu, vm, node);
+            TrimSep(menu);
             return menu;
         }
         if (node.IsFolder)
-            BuildFolderMenu(menu, vm, node, renameAction);
+            BuildFolderMenu(menu, vm, node, renameAction, marketplace);
         else
             BuildItemMenu(menu, vm, node, renameAction);
+        TrimSep(menu);
         return menu;
     }
 
@@ -85,12 +91,82 @@ public static class InventoryMenuBuilder
 
     // ── Folder menu ─────────────────────────────────────────────────────────
 
-    private static void BuildFolderMenu(ContextMenu menu, InventoryViewModel vm, InvTreeNode node, Func<Task> renameAction)
+    private static void BuildFolderMenu(ContextMenu menu, InventoryViewModel vm, InvTreeNode node,
+        Func<Task> renameAction, MarketplaceViewModel? marketplace = null)
     {
-        Add(menu, "New Folder",   () => vm.CreateFolderCommand.Execute(null));
-        Add(menu, "New Notecard", () => vm.CreateNotecardCommand.Execute(null));
-        Add(menu, "New Script",   () => vm.CreateScriptCommand.Execute(null));
-        Sep(menu);
+        var role = node.MarketplaceRole;
+
+        // ── Marketplace listings root ─────────────────────────────────────────
+        if (role == MarketplaceFolderRole.ListingsRoot)
+        {
+            if (marketplace != null)
+                Add(menu, "Sync Listings", () => marketplace.SyncListingsCommand.Execute(null));
+            TrimSep(menu);
+            return;
+        }
+
+        // ── Marketplace listing folder ────────────────────────────────────────
+        if (role == MarketplaceFolderRole.Listing)
+        {
+            Add(menu, "New Folder",   () => vm.CreateFolderCommand.Execute(null));
+            Sep(menu);
+            if (marketplace != null)
+            {
+                var record = marketplace.AllListings.FirstOrDefault(
+                    r => r.ListingFolderUUID == node.ItemId);
+                Add(menu, "Activate",   () => marketplace.ActivateListingCommand.Execute(record));
+                Add(menu, "Deactivate", () => marketplace.DeactivateListingCommand.Execute(record));
+                Sep(menu);
+                Add(menu, "Register with SLM",  () => marketplace.CreateListingCommand.Execute(record));
+                Add(menu, "Delete from SLM",    () => marketplace.DeleteListingCommand.Execute(record));
+                Sep(menu);
+                Add(menu, "Open on Marketplace", () => marketplace.OpenListingOnWebCommand.Execute(record));
+            }
+            TrimSep(menu);
+            return;
+        }
+
+        // ── Marketplace version / stock / content — read-only structure ───────
+        if (role == MarketplaceFolderRole.Version
+            || role == MarketplaceFolderRole.Stock
+            || role == MarketplaceFolderRole.Content)
+        {
+            Add(menu, "New Folder",   () => vm.CreateFolderCommand.Execute(null));
+            Add(menu, "New Notecard", () => vm.CreateNotecardCommand.Execute(null));
+            Add(menu, "New Script",   () => vm.CreateScriptCommand.Execute(null));
+            Sep(menu);
+            if (InvClipboard.HasContent)
+                Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
+            TrimSep(menu);
+            return;
+        }
+
+        // ── Standard (non-marketplace) folder ────────────────────────────────
+
+        // My Outfits: offer to snapshot the current outfit as a new saved outfit
+        if (node.FolderKind == FolderType.MyOutfits)
+        {
+            Add(menu, "Save Current Outfit...", () => vm.RequestSaveCurrentOutfitCommand.Execute(null));
+            Sep(menu);
+        }
+
+        bool isProtected = vm.IsProtectedFolder(node);
+        bool isLocked    = isProtected || vm.IsRootSystemFolder(node);
+        bool noCreate    = node.FolderKind is FolderType.Trash
+                                           or FolderType.CurrentOutfit
+                                           or FolderType.Inbox;
+
+        if (!noCreate)
+        {
+            Add(menu, "New Folder", () => vm.CreateFolderCommand.Execute(null));
+            // Favorites is landmark-only; Notecard/Script creation is not appropriate there
+            if (node.FolderKind != FolderType.Favorites)
+            {
+                Add(menu, "New Notecard", () => vm.CreateNotecardCommand.Execute(null));
+                Add(menu, "New Script",   () => vm.CreateScriptCommand.Execute(null));
+            }
+            Sep(menu);
+        }
 
         if (vm.IsTrashFolder(node))
         {
@@ -102,36 +178,47 @@ public static class InventoryMenuBuilder
             Add(menu, "Restore from Trash", () => vm.RestoreFromTrashCommand.Execute(null));
             Sep(menu);
         }
-        else
+        else if (!isProtected)
         {
             Add(menu, "Empty Folder", () => vm.EmptyFolderCommand.Execute(null));
             Sep(menu);
         }
 
-        // Clipboard
-        Add(menu, "Cut\tCtrl+X",   () => vm.CutItemCommand.Execute(null));
-        Add(menu, "Copy\tCtrl+C",  () => vm.CopyItemCommand.Execute(null));
+        // Clipboard — protected and root system folders cannot be cut; folder Copy is not server-supported
+        if (!isLocked)
+            Add(menu, "Cut\tCtrl+X", () => vm.CutItemCommand.Execute(null));
         if (InvClipboard.HasContent)
             Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
         if (InvClipboard.HasContent && !InvClipboard.IsFolder)
             Add(menu, "Paste as Link", () => vm.PasteLinkItemCommand.Execute(null));
         Sep(menu);
 
-        Add(menu, "Add to Outfit",    () => vm.WearFolderCommand.Execute(null));
-        Add(menu, "Replace Outfit",   () => vm.ReplaceOutfitCommand.Execute(null));
-        Add(menu, "Take Off All",     () => vm.RemoveFolderFromOutfitCommand.Execute(null));
-        Sep(menu);
+        if (!isProtected)
+        {
+            bool canWear    = vm.FolderCanBeWorn(node);
+            bool canTakeOff = vm.FolderCanBeTakenOff(node);
+            if (canWear)
+            {
+                Add(menu, "Add to Outfit",  () => vm.WearFolderCommand.Execute(null));
+                Add(menu, "Replace Outfit", () => vm.ReplaceOutfitCommand.Execute(null));
+            }
+            if (canTakeOff)
+                Add(menu, "Take Off All",   () => vm.RemoveFolderFromOutfitCommand.Execute(null));
+            if (canWear || canTakeOff)
+                Sep(menu);
+        }
 
         if (!vm.IsSystemFolder(node))
             Add(menu, "Rename\tF2", () => _ = renameAction());
 
-        Add(menu, "Delete", () => vm.DeleteItemCommand.Execute(null));
+        if (!isLocked)
+            Add(menu, "Delete", () => vm.DeleteItemCommand.Execute(null));
         Sep(menu);
 
-        Add(menu, "Properties\tCtrl+P", () => vm.ShowPropertiesCommand.Execute(null));
+        Add(menu, "Properties...\tCtrl+P", () => vm.ShowPropertiesCommand.Execute(null));
     }
 
-    // ── Item menu ───────────────────────────────────────────────────────────
+    // ── Item menu
 
     private static void BuildItemMenu(ContextMenu menu, InventoryViewModel vm, InvTreeNode node, Func<Task> renameAction)
     {
@@ -194,7 +281,8 @@ public static class InventoryMenuBuilder
 
         // Clipboard
         Add(menu, "Cut\tCtrl+X",   () => vm.CutItemCommand.Execute(null));
-        Add(menu, "Copy\tCtrl+C",  () => vm.CopyItemCommand.Execute(null));
+        if (vm.CanCopyItem(node))
+            Add(menu, "Copy\tCtrl+C",  () => vm.CopyItemCommand.Execute(null));
         if (InvClipboard.HasContent)
             Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
         if (InvClipboard.HasContent && !InvClipboard.IsFolder)
@@ -232,10 +320,10 @@ public static class InventoryMenuBuilder
         }
 
         Sep(menu);
-        Add(menu, "Properties\tCtrl+P", () => vm.ShowPropertiesCommand.Execute(null));
+        Add(menu, "Properties...\tCtrl+P", () => vm.ShowPropertiesCommand.Execute(null));
     }
 
-    // ── Helpers ─────────────────────────────────────────────────────────────
+    // ── Helpers
 
     private static void BuildWearOnSubmenu(MenuItem parent, InventoryViewModel vm)
     {
@@ -272,7 +360,17 @@ public static class InventoryMenuBuilder
         menu.Items.Add(item);
     }
 
-    private static void Sep(ContextMenu menu) => menu.Items.Add(new Separator());
+    private static void Sep(ContextMenu menu)
+    {
+        if (menu.Items.Count > 0 && menu.Items[^1] is not Separator)
+            menu.Items.Add(new Separator());
+    }
+
+    private static void TrimSep(ContextMenu menu)
+    {
+        while (menu.Items.Count > 0 && menu.Items[^1] is Separator)
+            menu.Items.RemoveAt(menu.Items.Count - 1);
+    }
 
     private static bool IsWearable(string typeName) => typeName is
         "Shape" or "Skin" or "Hair" or "Eyes" or "Shirt" or "Pants" or

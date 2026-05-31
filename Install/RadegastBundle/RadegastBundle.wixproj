@@ -1,4 +1,5 @@
-﻿<Project Sdk="WixToolset.Sdk/6.0.0">
+<Project>
+  <Import Project="Sdk.props" Sdk="WixToolset.Sdk" Version="6.0.0" Condition="'$(Configuration)' != 'Disabled'" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <ProductVersion Condition=" '$(ProductVersion)' == '' ">3.1.0</ProductVersion>
@@ -41,4 +42,6 @@
   <Target Name="SignBundle" DependsOnTargets="FindSignTool">
     <Exec Command="&quot;$(SignToolPath)signtool.exe&quot; sign /fd SHA256 /sm /sha1 688eef6260f0fff81e1d46e2605c8039833a92bb /t http://timestamp.comodoca.com/authenticode &quot;@(SignBundle)&quot;" />
   </Target>-->
+  <Import Project="Sdk.targets" Sdk="WixToolset.Sdk" Version="6.0.0" Condition="'$(Configuration)' != 'Disabled'" />
+  <Import Project="..\DisabledBuild.targets" Condition="'$(Configuration)' == 'Disabled'" />
 </Project>

@@ -59,17 +59,48 @@ public partial class PreferencesWindow : Window
 
     private async void OnBrowseChatLogDirClick(object? sender, RoutedEventArgs e)
     {
-        var folders = await TopLevel.GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
+        var folders = await GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
             new FolderPickerOpenOptions { Title = "Select chat log directory", AllowMultiple = false });
         if (folders is [var folder] && DataContext is PreferencesViewModel vm)
             vm.ChatLogDir = folder.Path.LocalPath;
     }
 
-    private async void OnBrowseImageCacheDirClick(object? sender, RoutedEventArgs e)
+    private async void OnBrowseAssetCacheDirClick(object? sender, RoutedEventArgs e)
     {
-        var folders = await TopLevel.GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions { Title = "Select image cache directory", AllowMultiple = false });
+        var folders = await GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
+            new FolderPickerOpenOptions { Title = "Select asset cache directory", AllowMultiple = false });
         if (folders is [var folder] && DataContext is PreferencesViewModel vm)
-            vm.ImageCacheDir = folder.Path.LocalPath;
+            vm.AssetCacheDir = folder.Path.LocalPath;
+    }
+
+    private async void OnBrowseTextureDiskCacheDirClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
+            new FolderPickerOpenOptions { Title = "Select texture disk cache directory", AllowMultiple = false });
+        if (folders is [var folder] && DataContext is PreferencesViewModel vm)
+            vm.TextureDiskCacheDir = folder.Path.LocalPath;
+    }
+
+    private async void OnBrowseTtsModelDirClick(object? sender, RoutedEventArgs e)
+    {
+        var folders = await GetTopLevel(this)!.StorageProvider.OpenFolderPickerAsync(
+            new FolderPickerOpenOptions { Title = "Select Piper TTS model directory", AllowMultiple = false });
+        if (folders is [var folder] && DataContext is PreferencesViewModel vm)
+            vm.Voice?.VoiceSynth.SetModelDirectory(folder.Path.LocalPath);
+    }
+
+    private async void OnDownloadVoiceModelClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not PreferencesViewModel vm) return;
+
+        string voicesDir = vm.Voice?.VoiceSynth.VoicesDirectory ?? string.Empty;
+
+        var dlg = new PiperVoiceDownloaderWindow
+        {
+            DownloadRootDirectory = voicesDir,
+        };
+        dlg.VoiceDownloaded += path => vm.Voice?.VoiceSynth.SetModelDirectory(path);
+        dlg.DataContext = new PiperVoiceDownloaderViewModel();
+        await dlg.ShowDialog(this);
     }
 }

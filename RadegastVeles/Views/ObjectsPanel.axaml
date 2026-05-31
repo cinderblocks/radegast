@@ -16,7 +16,7 @@
         <DockPanel Grid.Column="0">
             <!-- Search and filter bar -->
             <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto" Margin="4" AutomationProperties.Name="Object search controls">
-                <TextBox Grid.Column="0" x:Name="TxtObjectSearch" Text="{Binding SearchText, Mode=TwoWay}" Watermark="Search objects..." AutomationProperties.Name="Object search input" />
+                <TextBox Grid.Column="0" x:Name="TxtObjectSearch" Text="{Binding SearchText, Mode=TwoWay}" PlaceholderText="Search objects..." AutomationProperties.Name="Object search input" />
                 <Button Grid.Column="1" Content="Clear" Command="{Binding ClearSearchCommand}" Margin="4,0,0,0" AutomationProperties.Name="Clear search" />
                 <ComboBox Grid.Column="2" ItemsSource="{Binding FilterOptions}" SelectedIndex="{Binding FilterIndex}" Margin="4,0,0,0" MinWidth="90" AutomationProperties.Name="Object filter" />
                 <Button Grid.Column="3" Content="Refresh" Command="{Binding RefreshCommand}" Margin="4,0,0,0" AutomationProperties.Name="Refresh object list" />
@@ -42,7 +42,36 @@
             </DockPanel>
 
             <!-- Object list -->
-            <ListBox ItemsSource="{Binding Objects}" SelectedItem="{Binding SelectedObject}" AutomationProperties.Name="Nearby objects list" Margin="4,0">
+            <ListBox x:Name="ObjectsList"
+                     ItemsSource="{Binding Objects}" SelectedItem="{Binding SelectedObject}"
+                     AutomationProperties.Name="Nearby objects list" Margin="4,0"
+                     PointerPressed="ObjectsList_PointerPressed">
+                <ListBox.ContextMenu>
+                    <ContextMenu x:CompileBindings="False">
+                        <MenuItem Header="Touch"    Command="{Binding TouchObjectCommand}" />
+                        <MenuItem Header="{Binding SitButtonText}" Command="{Binding SitOnCommand}" />
+                        <Separator />
+                        <MenuItem Header="Walk To"  Command="{Binding WalkToCommand}"
+                                  IsVisible="{Binding IsRezzedObject}" />
+                        <MenuItem Header="Turn To"  Command="{Binding TurnToCommand}" />
+                        <MenuItem Header="{Binding PointButtonText}" Command="{Binding PointAtCommand}"
+                                  IsVisible="{Binding IsRezzedObject}" />
+                        <Separator />
+                        <MenuItem Header="Contents" Command="{Binding ViewContentsCommand}" />
+                        <MenuItem Header="View 3D"  Command="{Binding View3DCommand}" />
+                        <Separator />
+                        <MenuItem Header="Take"     Command="{Binding TakeObjectCommand}" />
+                        <MenuItem Header="Pay"      Command="{Binding PayObjectCommand}" />
+                        <MenuItem Header="{Binding BuyButtonText}" Command="{Binding BuyObjectCommand}"
+                                  IsVisible="{Binding IsForSale}" />
+                        <Separator />
+                        <MenuItem Header="{Binding MuteButtonText}" Command="{Binding MuteObjectCommand}" />
+                        <Separator />
+                        <MenuItem Header="Delete"   Command="{Binding DeleteObjectCommand}" />
+                        <MenuItem Header="Return"   Command="{Binding ReturnObjectCommand}"
+                                  IsVisible="{Binding IsRezzedObject}" />
+                    </ContextMenu>
+                </ListBox.ContextMenu>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:ObjectEntry">
                         <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding DisplayText}" />
@@ -55,32 +84,50 @@
         <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent" AutomationProperties.Name="Resize objects splitter" />
 
         <!-- Right: Details and actions -->
-        <ScrollViewer Grid.Column="2" Padding="4,4,8,4">
+        <DockPanel Grid.Column="2">
+
+            <!-- Collapsible object minimap docked below the details -->
+            <Expander DockPanel.Dock="Bottom" Header="Object Map" IsExpanded="True"
+                      HorizontalAlignment="Stretch"
+                      Padding="4,0,8,4"
+                      AutomationProperties.Name="Objects minimap area">
+                <controls:ObjectMinimapControl
+                    Entries="{Binding MapEntries}"
+                    BackgroundImage="{Binding ObjectMapTile}"
+                    SelectedObjectId="{Binding SelectedObjectMapId}"
+                    SelfX="{Binding SelfX}"
+                    SelfY="{Binding SelfY}"
+                    HorizontalAlignment="Stretch" />
+            </Expander>
+
+            <ScrollViewer Padding="4,4,8,4">
             <StackPanel Spacing="0"
                         IsVisible="{Binding SelectedObject, Converter={x:Static ObjectConverters.IsNotNull}}">
 
                 <!-- ── Actions ────────────────────────────────────── -->
-                <TextBlock Text="Actions" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
-                <WrapPanel Orientation="Horizontal" Margin="0,0,0,8">
-                    <Button Content="Touch"    Command="{Binding TouchObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Touch object" />
-                    <Button Content="{Binding SitButtonText}" Command="{Binding SitOnCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Sit on or stand up from object" />
-                    <Button Content="Walk To"  Command="{Binding WalkToCommand}"        Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Walk to object" />
-                    <Button Content="Turn To"  Command="{Binding TurnToCommand}"        Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Turn toward object" />
-                    <Button Content="{Binding PointButtonText}" Command="{Binding PointAtCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Point at object" />
-                    <Button Content="Contents" Command="{Binding ViewContentsCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="View object contents" />
-                    <Button Content="View 3D"  Command="{Binding View3DCommand}"       Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="View object in 3D" />
-                    <Button Content="Take"     Command="{Binding TakeObjectCommand}"    Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Take object into inventory" />
-                    <Button Content="Pay"      Command="{Binding PayObjectCommand}"     Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Pay object" />
-                    <Button Content="{Binding BuyButtonText}" Command="{Binding BuyObjectCommand}"
-                            IsVisible="{Binding IsForSale}"
-                            Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="{Binding BuyButtonText}" />
-                    <Button Content="{Binding MuteButtonText}" Command="{Binding MuteObjectCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="{Binding MuteButtonText}" />
-                    <Button Content="Delete"  Command="{Binding DeleteObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Delete object" />
-                    <Button Content="Return"  Command="{Binding ReturnObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Return object to owner" />
-                </WrapPanel>
+                <Expander Header="Actions" IsExpanded="True" Margin="0,0,0,4"
+                          HorizontalAlignment="Stretch">
+                    <WrapPanel Orientation="Horizontal" Margin="0,4,0,0">
+                        <Button Content="Touch"    Command="{Binding TouchObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Touch object" />
+                        <Button Content="{Binding SitButtonText}" Command="{Binding SitOnCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Sit on or stand up from object" />
+                        <Button Content="Walk To"  Command="{Binding WalkToCommand}"        Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Walk to object" />
+                        <Button Content="Turn To"  Command="{Binding TurnToCommand}"        Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Turn toward object" />
+                        <Button Content="{Binding PointButtonText}" Command="{Binding PointAtCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Point at object" />
+                        <Button Content="Contents" Command="{Binding ViewContentsCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="View object contents" />
+                        <Button Content="View 3D"  Command="{Binding View3DCommand}"       Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="View object in 3D" />
+                        <Button Content="Take"     Command="{Binding TakeObjectCommand}"    Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Take object into inventory" />
+                        <Button Content="Pay"      Command="{Binding PayObjectCommand}"     Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Pay object" />
+                        <Button Content="{Binding BuyButtonText}" Command="{Binding BuyObjectCommand}"
+                                IsVisible="{Binding IsForSale}"
+                                Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="{Binding BuyButtonText}" />
+                        <Button Content="{Binding MuteButtonText}" Command="{Binding MuteObjectCommand}" Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="{Binding MuteButtonText}" />
+                        <Button Content="Delete"  Command="{Binding DeleteObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Delete object" />
+                        <Button Content="Return"  Command="{Binding ReturnObjectCommand}"   Margin="0,0,4,4" MinWidth="68" AutomationProperties.Name="Return object to owner" />
+                    </WrapPanel>
+                </Expander>
 
                 <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumLowBrush}"
-                        BorderThickness="0,1,0,0" Margin="0,0,0,10" />
+                        BorderThickness="0,1,0,0" Margin="0,4,0,10" />
 
                 <!-- ── Name & Description ─────────────────────────── -->
                 <TextBlock Text="Name" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,2" />
@@ -129,7 +176,7 @@
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Hover Text" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Top"
                                IsVisible="{Binding ObjectHoverText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding ObjectHoverText}"
-                               TextWrapping="Wrap" Opacity="0.8"
+                               TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}"
                                IsVisible="{Binding ObjectHoverText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                AutomationProperties.Name="Object hover text" />
 
@@ -146,14 +193,14 @@
                         BorderThickness="0,1,0,0" Margin="0,0,0,8" />
                 <TextBlock Text="Permissions" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,4" />
                 <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,4,Auto" Margin="0,0,0,8">
-                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Owner" FontSize="11" Opacity="0.65" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Owner" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" VerticalAlignment="Center" />
                     <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="10">
                         <CheckBox IsChecked="{Binding OwnerCanModify}" IsEnabled="False" Content="Modify" AutomationProperties.Name="Owner can modify" />
                         <CheckBox IsChecked="{Binding OwnerCanCopy}"   IsEnabled="False" Content="Copy"   AutomationProperties.Name="Owner can copy" />
                         <CheckBox IsChecked="{Binding OwnerCanTransfer}" IsEnabled="False" Content="Resell" AutomationProperties.Name="Owner can transfer" />
                     </StackPanel>
 
-                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Next" FontSize="11" Opacity="0.65" VerticalAlignment="Center" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Next" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" VerticalAlignment="Center" />
                     <StackPanel Grid.Row="2" Grid.Column="2" Orientation="Horizontal" Spacing="10">
                         <CheckBox IsChecked="{Binding NextOwnerModify, Mode=TwoWay}" IsEnabled="{Binding CanEditProperties}" Content="Modify" AutomationProperties.Name="Next owner can modify" />
                         <CheckBox IsChecked="{Binding NextOwnerCopy, Mode=TwoWay}"   IsEnabled="{Binding CanEditProperties}" Content="Copy"   AutomationProperties.Name="Next owner can copy" />
@@ -168,7 +215,7 @@
                 <StackPanel Spacing="4" IsVisible="{Binding CanEditProperties}">
                     <TextBlock Text="Transform" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,2" />
 
-                    <TextBlock Text="Position" FontSize="11" Opacity="0.65" />
+                    <TextBlock Text="Position" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" />
                     <Grid ColumnDefinitions="14,4,*,8,14,4,*,8,14,4,*">
                         <TextBlock Grid.Column="0"  Text="X" VerticalAlignment="Center" FontSize="11" />
                         <NumericUpDown Grid.Column="2"  Value="{Binding PosX, Mode=TwoWay}" FormatString="0.000" Increment="0.1" AutomationProperties.Name="Position X" />
@@ -178,7 +225,7 @@
                         <NumericUpDown Grid.Column="10" Value="{Binding PosZ, Mode=TwoWay}" FormatString="0.000" Increment="0.1" AutomationProperties.Name="Position Z" />
                     </Grid>
 
-                    <TextBlock Text="Rotation °" FontSize="11" Opacity="0.65" Margin="0,4,0,0" />
+                    <TextBlock Text="Rotation °" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" Margin="0,4,0,0" />
                     <Grid ColumnDefinitions="14,4,*,8,14,4,*,8,14,4,*">
                         <TextBlock Grid.Column="0"  Text="X" VerticalAlignment="Center" FontSize="11" />
                         <NumericUpDown Grid.Column="2"  Value="{Binding RotX, Mode=TwoWay}" FormatString="0.0" Increment="1" AutomationProperties.Name="Rotation X" />
@@ -188,7 +235,7 @@
                         <NumericUpDown Grid.Column="10" Value="{Binding RotZ, Mode=TwoWay}" FormatString="0.0" Increment="1" AutomationProperties.Name="Rotation Z" />
                     </Grid>
 
-                    <TextBlock Text="Scale" FontSize="11" Opacity="0.65" Margin="0,4,0,0" />
+                    <TextBlock Text="Scale" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" Margin="0,4,0,0" />
                     <Grid ColumnDefinitions="14,4,*,8,14,4,*,8,14,4,*">
                         <TextBlock Grid.Column="0"  Text="X" VerticalAlignment="Center" FontSize="11" />
                         <NumericUpDown Grid.Column="2"  Value="{Binding ScaleX, Mode=TwoWay}" FormatString="0.000" Increment="0.01" Minimum="0.001" AutomationProperties.Name="Scale X" />
@@ -205,5 +252,6 @@
 
             </StackPanel>
         </ScrollViewer>
+        </DockPanel>
     </Grid>
 </UserControl>

@@ -200,7 +200,7 @@ namespace Radegast
             return true;
         }
 
-        private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
+        private void Objects_ObjectUpdate(object? sender, PrimEventArgs e)
         {
             if ((e.Prim.Flags & PrimFlags.CreateSelected) == 0)
                 return; // We received an update for an object we didn't create

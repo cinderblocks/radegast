@@ -1,0 +1,16 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="!(bind.Property.ProductName)">
+        <Directory Id="VelesPluginsFolder" Name="plugins" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="!(bind.Property.ProductName)" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="APPLICATIONDATAFOLDER" Name="!(bind.Property.ProductName)" />
+    </StandardDirectory>
+  </Fragment>
+</Wix>

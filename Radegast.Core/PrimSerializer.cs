@@ -135,7 +135,7 @@ namespace Radegast
             return true;
         }
 
-        private void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_ObjectProperties(object? sender, ObjectPropertiesEventArgs e)
         {
             lock (PrimsWaiting)
             {

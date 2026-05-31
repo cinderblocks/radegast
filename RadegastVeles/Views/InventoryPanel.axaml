@@ -16,7 +16,7 @@
         <DockPanel Grid.Column="0">
             <!-- Search bar -->
             <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="4" AutomationProperties.Name="Inventory search controls">
-                <TextBox Grid.Column="0" x:Name="TxtInvSearch" Text="{Binding SearchText, Mode=TwoWay}" Watermark="Search inventory..." AutomationProperties.Name="Inventory search input" />
+                <TextBox Grid.Column="0" x:Name="TxtInvSearch" Text="{Binding SearchText, Mode=TwoWay}" PlaceholderText="Search inventory..." AutomationProperties.Name="Inventory search input" />
                 <Button Grid.Column="1" Content="Search" Command="{Binding SearchInventoryCommand}" Margin="4,0,0,0" AutomationProperties.Name="Search inventory" />
                 <Button Grid.Column="2" Content="✕" Command="{Binding ClearSearchCommand}" IsVisible="{Binding HasSearchResults}" Margin="4,0,0,0" AutomationProperties.Name="Clear search results" />
                 <Button Grid.Column="3" Content="Refresh" Command="{Binding RefreshInventoryCommand}" Margin="4,0,0,0" AutomationProperties.Name="Refresh inventory" />
@@ -38,8 +38,10 @@
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,0,4,4" Spacing="4" AutomationProperties.Name="Inventory expand collapse toolbar">
                 <Button Content="Expand All" Command="{Binding ExpandAllCommand}" AutomationProperties.Name="Expand all inventory folders" />
                 <Button Content="Collapse All" Command="{Binding CollapseAllCommand}" AutomationProperties.Name="Collapse all inventory folders" />
-                <Button x:Name="BtnNewWindow" Content="⊞ New Window" AutomationProperties.Name="Open inventory in new window" />
-                <Button x:Name="BtnSort" Content="⇅ Sort" AutomationProperties.Name="Sort inventory" />
+                <Button x:Name="BtnNewWindow" Content="&#x229E; New Window" AutomationProperties.Name="Open inventory in new window" />
+                <Button x:Name="BtnSort" Content="&#x21C5; Sort" AutomationProperties.Name="Sort inventory" />
+                <Button x:Name="BtnMarketplace" Content="&#x1F6D2; Marketplace" AutomationProperties.Name="Open marketplace" />
+                <Button x:Name="BtnOutfit" Content="&#x1F457; Outfit" AutomationProperties.Name="Open current outfit editor" />
             </StackPanel>
 
             <!-- Status -->
@@ -122,9 +124,14 @@
 
                     <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
                         <Button Content="Open" Command="{Binding OpenItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Open item for editing" />
-                        <Button Content="Wear" Command="{Binding WearItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Wear item" />
+                        <Button Content="Wear" Command="{Binding WearItemCommand}" IsVisible="{Binding ShowWearActions}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Wear item (replaces existing of same type)" />
+                        <Button Content="Add" Command="{Binding WearAddItemCommand}" IsVisible="{Binding ShowWearAddAction}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Add item as additional layer or attachment" />
+                        <Button Content="Touch" Command="{Binding TouchAttachmentCommand}" IsVisible="{Binding ShowTouchAction}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Touch worn attachment" />
+                        <Button Content="📋 SLURL" Command="{Binding CopyLandmarkSlurlCommand}" IsVisible="{Binding ShowLandmarkActions}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Copy landmark SLURL to clipboard" />
+                        <Button Content="🗺 Map" Command="{Binding ShowLandmarkOnMapCommand}" IsVisible="{Binding ShowLandmarkActions}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Show landmark on map" />
+                        <Button Content="&#x1F310; Rez in World" Command="{Binding RestoreToWorldCommand}" IsVisible="{Binding ShowRestoreToWorld}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Restore object from trash to world" />
                         <Button Content="Give" Command="{Binding GiveItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Give item to another avatar" />
-                        <Button Content="Delete" Command="{Binding DeleteItemCommand}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Delete item" />
+                        <Button Content="Delete" Command="{Binding DeleteItemCommand}" IsVisible="{Binding ShowDeleteAction}" Margin="0,0,4,4" MinWidth="72" AutomationProperties.Name="Delete item" />
                     </WrapPanel>
                 </StackPanel>
             </ScrollViewer>

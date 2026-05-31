@@ -72,6 +72,7 @@ namespace Radegast
             this.label3 = new System.Windows.Forms.Label();
             this.btnLogin = new System.Windows.Forms.Button();
             this.pnlLoggingIn = new System.Windows.Forms.Panel();
+            this.btnCancelLogin = new System.Windows.Forms.Button();
             this.proLogin = new System.Windows.Forms.ProgressBar();
             this.lblLoginStatus = new System.Windows.Forms.Label();
             this.panel1 = new System.Windows.Forms.Panel();
@@ -235,6 +236,7 @@ namespace Radegast
             this.pnlLoggingIn.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
             this.pnlLoggingIn.Controls.Add(this.proLogin);
             this.pnlLoggingIn.Controls.Add(this.lblLoginStatus);
+            this.pnlLoggingIn.Controls.Add(this.btnCancelLogin);
             this.pnlLoggingIn.Location = new System.Drawing.Point(128, 3);
             this.pnlLoggingIn.Name = "pnlLoggingIn";
             this.pnlLoggingIn.Size = new System.Drawing.Size(554, 94);
@@ -263,6 +265,17 @@ namespace Radegast
             this.lblLoginStatus.TabIndex = 12;
             this.lblLoginStatus.Text = "Login status goes here.";
             this.lblLoginStatus.TextAlign = System.Drawing.ContentAlignment.TopCenter;
+            // 
+            // btnCancelLogin
+            // 
+            this.btnCancelLogin.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Right)));
+            this.btnCancelLogin.Location = new System.Drawing.Point(470, 62);
+            this.btnCancelLogin.Name = "btnCancelLogin";
+            this.btnCancelLogin.Size = new System.Drawing.Size(80, 23);
+            this.btnCancelLogin.TabIndex = 13;
+            this.btnCancelLogin.Text = "Cancel";
+            this.btnCancelLogin.UseVisualStyleBackColor = true;
+            this.btnCancelLogin.Click += new System.EventHandler(this.btnCancelLogin_Click);
             // 
             // panel1
             // 
@@ -365,6 +378,7 @@ namespace Radegast
         public System.Windows.Forms.Panel pnlLoggingIn;
         public System.Windows.Forms.Label lblLoginStatus;
         public System.Windows.Forms.ProgressBar proLogin;
+        public System.Windows.Forms.Button btnCancelLogin;
         public System.Windows.Forms.ComboBox cbxGrid;
         public System.Windows.Forms.Label label5;
         public System.Windows.Forms.TextBox txtCustomLoginUri;

@@ -19,6 +19,7 @@
 
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using Radegast.Veles.Controls;
 using Radegast.Veles.ViewModels;

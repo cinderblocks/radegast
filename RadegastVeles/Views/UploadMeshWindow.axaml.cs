@@ -38,7 +38,7 @@ public partial class UploadMeshWindow : Window
 
     private async void OnBrowseClick(object? sender, RoutedEventArgs e)
     {
-        var files = await TopLevel.GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
+        var files = await GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
             new FilePickerOpenOptions
             {
                 Title = "Select Collada mesh files",

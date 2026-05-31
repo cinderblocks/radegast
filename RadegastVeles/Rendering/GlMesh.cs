@@ -48,6 +48,15 @@ public sealed class GlMesh : IDisposable
     private const int Stride = 32; // 8 floats × 4 bytes
 
     public GlMesh(float[] vertices, ushort[] indices)
+        : this(vertices, vertices.Length, indices) { }
+
+    /// <summary>
+    /// Creates a mesh using only the first <paramref name="verticesLength"/> floats of
+    /// <paramref name="vertices"/>, which may be an oversized ArrayPool-rented buffer.
+    /// The caller is responsible for returning the rented buffer to the pool after this
+    /// constructor returns.
+    /// </summary>
+    public GlMesh(float[] vertices, int verticesLength, ushort[] indices)
     {
         _indexCount = indices.Length;
         _cpuIndices = indices;
@@ -60,7 +69,7 @@ public sealed class GlMesh : IDisposable
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
         GL.BufferData(BufferTarget.ArrayBuffer,
-            vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
+            verticesLength * sizeof(float), vertices, BufferUsageHint.DynamicDraw);
 
         GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
         GL.BufferData(BufferTarget.ElementArrayBuffer,
@@ -87,6 +96,32 @@ public sealed class GlMesh : IDisposable
         GL.DrawElements(PrimitiveType.Triangles, _indexCount,
             DrawElementsType.UnsignedShort, 0);
         GL.BindVertexArray(0);
+    }
+
+    /// <summary>
+    /// Replace the vertex buffer contents in-place (animated LBS update).
+    /// Must be called on the GL thread. <paramref name="verts"/> must have the
+    /// same length as the original array passed to the constructor.
+    /// </summary>
+    public void UpdateVertices(float[] verts)
+    {
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero,
+            verts.Length * sizeof(float), verts);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
+    }
+
+    /// <summary>
+    /// Replace the vertex buffer contents in-place using only the first
+    /// <paramref name="vertsLength"/> floats of an oversized (e.g. ArrayPool-rented) buffer.
+    /// Must be called on the GL thread.
+    /// </summary>
+    public void UpdateVertices(float[] verts, int vertsLength)
+    {
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        GL.BufferSubData(BufferTarget.ArrayBuffer, IntPtr.Zero,
+            vertsLength * sizeof(float), verts);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
     }
 
     /// <summary>Draw edges as GL_LINES (ES wireframe fallback).</summary>

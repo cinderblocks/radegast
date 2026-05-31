@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -33,7 +34,7 @@ namespace Radegast.Veles.ViewModels;
 /// <summary>
 /// ViewModel for the 3D prim (object) viewer.
 /// Fetches the root prim and its linkset children from the current simulator,
-/// tessellates them with <c>MeshmerizerR</c>, fetches face textures from the
+/// tessellates them with <c>MeshFoundry</c>, fetches face textures from the
 /// asset server, and submits a <see cref="PrimRenderSubmission"/> to the
 /// <see cref="GlViewportControl"/> for rendering.
 /// </summary>
@@ -51,22 +52,33 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
     // Saved so ResetCamera can re-submit without re-fetching.
     private PrimRenderSubmission? _lastSubmission;
 
+    private ParticleViewerDriver? _particles;
+    private FlexiPrimAnimator?    _flexi;
+
     [ObservableProperty] private string _objectName   = "Loading…";
     [ObservableProperty] private string _statusText   = string.Empty;
     [ObservableProperty] private bool   _isLoading    = true;
     [ObservableProperty] private bool   _hasError;
     [ObservableProperty] private string _errorText    = string.Empty;
     [ObservableProperty] private bool   _wireframe;
+    [ObservableProperty] private bool   _ssaoEnabled;
 
     partial void OnWireframeChanged(bool value)
     {
         _viewport?.Wireframe = value;
     }
 
+    partial void OnSsaoEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.SsaoEnabled = value;
+    }
+
     public PrimViewerViewModel(RadegastInstanceAvalonia instance, uint rootLocalId)
     {
         _instance    = instance;
         _rootLocalId = rootLocalId;
+        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
         _builder     = new PrimMeshBuilder(Client);
 
         if (Client.Network.CurrentSim?.ObjectsPrimitives.TryGetValue(rootLocalId, out var p) == true)
@@ -82,12 +94,30 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
     /// </summary>
     public void SetViewport(GlViewportControl viewport)
     {
-        _viewport          = viewport;
-        _viewport.Wireframe = Wireframe;
+        if (_viewport != null)
+            _viewport.FaceClicked -= OnFaceClicked;
+
+        _viewport           = viewport;
+        _viewport.Wireframe  = Wireframe;
+        _viewport.SsaoEnabled = SsaoEnabled;
+        _viewport.FaceClicked += OnFaceClicked;
 
         // If geometry was already loaded before the viewport was attached, send it now.
         if (_lastSubmission != null)
+        {
             _viewport.Submit(_lastSubmission);
+
+            // (Re)start flexi-prim animation if it was not started during LoadAsync
+            // because the viewport was not yet attached at that time.
+            if (_flexi == null && _lastSubmission.FlexiPrims.Length > 0)
+            {
+                var vp = _viewport;
+                _flexi = new FlexiPrimAnimator(_lastSubmission, vp.ScheduleVertexUpdate);
+                _flexi.Start();
+            }
+        }
+
+        _particles?.SetViewport(viewport);
     }
 
     [RelayCommand]
@@ -100,8 +130,8 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
     [RelayCommand] private void OrbitRight() => _viewport?.OrbitStep( 15f,   0f);
     [RelayCommand] private void OrbitUp()    => _viewport?.OrbitStep(  0f, -10f);
     [RelayCommand] private void OrbitDown()  => _viewport?.OrbitStep(  0f,  10f);
-    [RelayCommand] private void ZoomIn()     => _viewport?.ZoomStep( 1f);
-    [RelayCommand] private void ZoomOut()    => _viewport?.ZoomStep(-1f);
+    [RelayCommand] private void ZoomIn()     => _viewport?.ZoomStep( 1.5f);
+    [RelayCommand] private void ZoomOut()    => _viewport?.ZoomStep(-1.5f);
 
     // ── Loading pipeline ────────────────────────────────────────────────────────
 
@@ -115,17 +145,16 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             var sim = Client.Network.CurrentSim
                       ?? throw new InvalidOperationException("Not connected to a simulator.");
 
-            var prims = new List<Primitive>();
-
             if (!sim.ObjectsPrimitives.TryGetValue(_rootLocalId, out var root))
                 throw new InvalidOperationException($"Prim {_rootLocalId} not found in simulator.");
 
-            prims.Add(root);
-            foreach (var p in sim.ObjectsPrimitives.Values)
-            {
-                if (p.ParentID == _rootLocalId)
-                    prims.Add(p);
-            }
+            // Root first, then children sorted by LocalID for deterministic
+            // tessellation order. ObjectsPrimitives is a ConcurrentDictionary
+            // whose iteration order is undefined.
+            var prims = sim.ObjectsPrimitives.Values
+                .Where(p => p.LocalID == _rootLocalId || p.ParentID == _rootLocalId)
+                .OrderBy(p => p.LocalID == _rootLocalId ? 0u : p.LocalID)
+                .ToList();
 
             var progress = new Progress<string>(msg =>
                 Dispatcher.UIThread.Post(() => StatusText = msg));
@@ -134,6 +163,25 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
                                            .ConfigureAwait(false);
 
             _lastSubmission = submission;
+
+            // Start particle simulation for emitter prims.
+            _particles?.Dispose();
+            // Use rootLocalId as key; world pos is zero since the object viewer
+            // renders in object-local space (no world translation needed).
+            _particles = new ParticleViewerDriver(Client, prims, (ulong)_rootLocalId,
+                OpenTK.Mathematics.Vector3.Zero);
+            if (_viewport != null) _particles.SetViewport(_viewport);
+            _particles.Start();
+
+            // Start flexi-prim animation if the linkset contains any flexi prims.
+            _flexi?.Dispose();
+            _flexi = null;
+            if (submission.FlexiPrims.Length > 0 && _viewport != null)
+            {
+                var vp = _viewport;
+                _flexi = new FlexiPrimAnimator(submission, vp.ScheduleVertexUpdate);
+                _flexi.Start();
+            }
 
             Dispatcher.UIThread.Post(() =>
             {
@@ -158,14 +206,65 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
         }
     }
 
+    // ── Touch handling ────────────────────────────────────────────────────────────
+
+    private void OnFaceClicked(uint primLocalId, int faceIndex, FaceHitInfo hit)
+    {
+        var sim = Client.Network.CurrentSim;
+        string primLabel;
+        if (sim != null && sim.ObjectsPrimitives.TryGetValue(primLocalId, out var clickedPrim))
+        {
+            var name = clickedPrim.Properties?.Name;
+            var isRoot = primLocalId == _rootLocalId;
+            primLabel = string.IsNullOrWhiteSpace(name)
+                ? (isRoot ? "root" : "child prim")
+                : $"\"{name}\"";
+        }
+        else
+        {
+            primLabel = $"prim {primLocalId}";
+        }
+        StatusText = $"Touched face {faceIndex} of {primLabel}.";
+        _ = GrabFaceAsync(primLocalId, faceIndex, hit);
+    }
+
+    private async Task GrabFaceAsync(uint localId, int faceIndex, FaceHitInfo hit)
+    {
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        static OpenMetaverse.Vector3 ToOmv(OpenTK.Mathematics.Vector3 v) => new(v.X, v.Y, v.Z);
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await Client.Objects.ClickObjectAsync(
+                sim, localId,
+                ToOmv(hit.UvCoord),
+                ToOmv(hit.StCoord),
+                faceIndex,
+                ToOmv(hit.Position),
+                ToOmv(hit.Normal),
+                ToOmv(hit.Binormal),
+                cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+    }
+
     // ── Disposal ─────────────────────────────────────────────────────────────────
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        if (_viewport != null)
+            _viewport.FaceClicked -= OnFaceClicked;
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+        _particles?.Dispose();
+        _particles = null;
+        _flexi?.Dispose();
+        _flexi = null;
     }
 }

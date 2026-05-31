@@ -1,0 +1,36 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.OutfitEditPanel"
+             x:DataType="vm:OutfitEditViewModel"
+             AutomationProperties.Name="Current outfit editor">
+    <DockPanel>
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsLoading}" Height="3" />
+        <Border DockPanel.Dock="Bottom" Padding="4">
+            <Grid ColumnDefinitions="Auto,Auto,*">
+                <Button Grid.Column="0" x:Name="BtnSaveAs" Content="Save As..." Margin="0,0,4,0" AutomationProperties.Name="Save current outfit as new outfit" />
+                <Button Grid.Column="1" Content="Refresh" Command="{Binding RefreshCommand}" AutomationProperties.Name="Refresh current outfit" />
+                <TextBlock Grid.Column="2" Text="{Binding StatusText}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextTrimming="CharacterEllipsis" AutomationProperties.Name="Outfit status" />
+            </Grid>
+        </Border>
+        <ListBox ItemsSource="{Binding WornItems}" AutomationProperties.Name="Currently worn items">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:OutfitWornItem">
+                    <Grid ColumnDefinitions="26,*,28" VerticalAlignment="Center" Margin="0,1">
+                        <TextBlock Grid.Column="0" Text="{Binding TypeIcon}" VerticalAlignment="Center" FontSize="14" AutomationProperties.Name="{Binding TypeIcon}" />
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding Name}" />
+                            <TextBlock Text="{Binding SlotLabel}" FontSize="10" Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="{Binding SlotLabel}" />
+                        </StackPanel>
+                        <Button Grid.Column="2" Content="x" IsVisible="{Binding CanRemove}" Command="{Binding RemoveCommand}" Width="24" Height="24" Padding="0" ToolTip.Tip="Remove from outfit" AutomationProperties.Name="Remove from outfit" />
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</UserControl>

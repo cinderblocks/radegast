@@ -1,4 +1,4 @@
-﻿<!--
+<!--
   Radegast Metaverse Client
   Copyright (c) 2026, Sjofn LLC
   All rights reserved.
@@ -66,6 +66,9 @@
                 <Button Content="Pay" Command="{Binding PayCommand}"
                         Margin="0,0,6,6"
                         AutomationProperties.Name="Pay this avatar" />
+                <Button Content="Share Item&#x2026;" Command="{Binding ShareItemCommand}"
+                        Margin="0,0,6,6"
+                        AutomationProperties.Name="Open inventory picker to share an item with this avatar" />
                 <Button Content="{Binding MuteButtonText}" Command="{Binding ToggleMuteCommand}"
                         Margin="0,0,6,6"
                         AutomationProperties.Name="{Binding MuteButtonText}" />
@@ -82,7 +85,10 @@
             <!-- Edit / Save / Cancel buttons — own profile only -->
             <WrapPanel IsVisible="{Binding CanBeginEdit}" Orientation="Horizontal">
                 <Button Content="Edit Profile" Command="{Binding BeginEditCommand}"
+                        Margin="0,0,6,0"
                         AutomationProperties.Name="Edit your profile" />
+                <Button Content="Change Display Name" Command="{Binding ChangeDisplayNameCommand}"
+                        AutomationProperties.Name="Change your display name" />
             </WrapPanel>
             <WrapPanel IsVisible="{Binding IsEditingOwnProfile}" Orientation="Horizontal">
                 <Button Content="Save Profile" Command="{Binding SaveProfileCommand}"
@@ -114,7 +120,7 @@
                              IsVisible="{Binding IsEditing}"
                              AcceptsReturn="True" TextWrapping="Wrap"
                              MinHeight="80" MaxHeight="240"
-                             Watermark="About me..."
+                             PlaceholderText="About me..."
                              AutomationProperties.Name="About text edit" />
                 </StackPanel>
             </Border>
@@ -134,7 +140,7 @@
                     </StackPanel>
                     <TextBox Text="{Binding WebUrl}"
                              IsVisible="{Binding IsEditing}"
-                             Watermark="https://..."
+                             PlaceholderText="https://..."
                              AutomationProperties.Name="Web URL edit" />
                 </StackPanel>
             </Border>
@@ -159,7 +165,7 @@
                              IsVisible="{Binding IsEditing}"
                              AcceptsReturn="True" TextWrapping="Wrap"
                              MinHeight="60" MaxHeight="200"
-                             Watermark="About my first life..."
+                             PlaceholderText="About my first life..."
                              AutomationProperties.Name="First life text edit" />
                 </StackPanel>
             </Border>
@@ -206,7 +212,7 @@
                                 <CheckBox Content="Be Hired"  IsChecked="{Binding WantToBeHired}"  Margin="0,0,8,4" AutomationProperties.Name="Want to be hired" />
                                 <CheckBox Content="Hire"      IsChecked="{Binding WantToHire}"     Margin="0,0,8,4" AutomationProperties.Name="Want to hire" />
                             </WrapPanel>
-                            <TextBox Text="{Binding WantToText}" Watermark="Tell others what you want to do..."
+                            <TextBox Text="{Binding WantToText}" PlaceholderText="Tell others what you want to do..."
                                      AutomationProperties.Name="Want to text" />
                         </StackPanel>
                         <StackPanel Spacing="4">
@@ -219,12 +225,12 @@
                                 <CheckBox Content="Scripting"         IsChecked="{Binding SkillScripting}"       Margin="0,0,8,4" AutomationProperties.Name="Skill: scripting" />
                                 <CheckBox Content="Custom Characters" IsChecked="{Binding SkillCustomCharacters}" Margin="0,0,8,4" AutomationProperties.Name="Skill: custom characters" />
                             </WrapPanel>
-                            <TextBox Text="{Binding SkillsText}" Watermark="Describe your skills..."
+                            <TextBox Text="{Binding SkillsText}" PlaceholderText="Describe your skills..."
                                      AutomationProperties.Name="Skills text" />
                         </StackPanel>
                         <StackPanel Spacing="4">
                             <TextBlock Text="Languages" FontWeight="SemiBold" FontSize="12" Opacity="0.6" />
-                            <TextBox Text="{Binding LanguagesText}" Watermark="e.g. English, Español..."
+                            <TextBox Text="{Binding LanguagesText}" PlaceholderText="e.g. English, Español..."
                                      AutomationProperties.Name="Languages text" />
                         </StackPanel>
                     </StackPanel>
@@ -266,11 +272,11 @@
                                             <!-- Edit mode -->
                                             <StackPanel Spacing="4"
                                                         IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsEditingOwnProfile}">
-                                                <TextBox Text="{Binding Name}" Watermark="Pick title..."
+                                                <TextBox Text="{Binding Name}" PlaceholderText="Pick title..."
                                                          AutomationProperties.Name="Pick name" />
                                                 <TextBox Text="{Binding Description}" AcceptsReturn="True"
                                                          TextWrapping="Wrap" MinHeight="60" MaxHeight="120"
-                                                         Watermark="Description..."
+                                                         PlaceholderText="Description..."
                                                          AutomationProperties.Name="Pick description" />
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                                     <Button Content="Save Pick"
@@ -331,14 +337,14 @@
                                                     IsVisible="{Binding $parent[UserControl].((vm:AvatarProfileViewModel)DataContext).IsEditingOwnProfile}">
                                             <StackPanel Spacing="4">
                                                 <TextBlock Text="Title" FontSize="11" Opacity="0.6" />
-                                                <TextBox Text="{Binding Name}" Watermark="Classified title..."
+                                                <TextBox Text="{Binding Name}" PlaceholderText="Classified title..."
                                                          AutomationProperties.Name="Classified title" />
                                             </StackPanel>
                                             <StackPanel Spacing="4">
                                                 <TextBlock Text="Description" FontSize="11" Opacity="0.6" />
                                                 <TextBox Text="{Binding Description}" AcceptsReturn="True"
                                                          TextWrapping="Wrap" MinHeight="60" MaxHeight="160"
-                                                         Watermark="Describe your classified..."
+                                                         PlaceholderText="Describe your classified..."
                                                          AutomationProperties.Name="Classified description" />
                                             </StackPanel>
                                             <Grid ColumnDefinitions="*,12,Auto" RowDefinitions="Auto,8,Auto">
@@ -409,7 +415,7 @@
                 <StackPanel Spacing="6">
                     <TextBlock Text="Notes" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
                     <TextBox Text="{Binding Notes}" AcceptsReturn="True" MinHeight="60"
-                             TextWrapping="Wrap" Watermark="Private notes about this person..."
+                             TextWrapping="Wrap" PlaceholderText="Private notes about this person..."
                              AutomationProperties.Name="Notes text" />
                     <Button Content="Save Notes" Command="{Binding SaveNotesCommand}"
                             HorizontalAlignment="Right"

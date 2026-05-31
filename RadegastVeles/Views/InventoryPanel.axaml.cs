@@ -24,6 +24,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
+using OpenMetaverse.Marketplace;
 using Radegast.Veles.Controls;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
@@ -37,9 +38,11 @@ public partial class InventoryPanel : UserControl
     private PanelHostWindow? _activeHostWindow;
     private readonly InventoryFilterViewModel _filterVm = new();
     private InventoryFilterWindow? _filterWindow;
+    private Window? _outfitWindow;
 
     // Drag-source tracking
     private Point? _dragStartPos;
+    private PointerPressedEventArgs? _dragPressedArgs;
     private bool _dragging;
 
     public InventoryPanel()
@@ -88,6 +91,7 @@ public partial class InventoryPanel : UserControl
 
         _vm.EditorRequested     += OnEditorRequested;
         _vm.PropertiesRequested += OnPropertiesRequested;
+        _vm.SaveCurrentOutfitRequested += OnSaveCurrentOutfitRequested;
 
         var btnFilter = this.FindControl<Button>("BtnFilter");
         if (btnFilter != null) btnFilter.Click += BtnFilter_Click;
@@ -101,6 +105,14 @@ public partial class InventoryPanel : UserControl
         var btnSort = this.FindControl<Button>("BtnSort");
         if (btnSort != null) btnSort.Click += BtnSort_Click;
 
+        var btnMarketplace = this.FindControl<Button>("BtnMarketplace");
+        if (btnMarketplace != null)
+            btnMarketplace.Click += (_, _) =>
+                (TopLevel.GetTopLevel(this) as MainWindow)?.OpenOrActivateMarketplace();
+
+        var btnOutfit = this.FindControl<Button>("BtnOutfit");
+        if (btnOutfit != null) btnOutfit.Click += BtnOutfit_Click;
+
         _filterVm.FilterApplied += async (_, _) => { if (_vm != null) await _vm.ApplyFilterAsync(_filterVm); };
         _filterVm.FilterCleared += (_, _) => _vm?.ClearFilter();
     }
@@ -112,7 +124,11 @@ public partial class InventoryPanel : UserControl
         {
             _vm.EditorRequested     -= OnEditorRequested;
             _vm.PropertiesRequested -= OnPropertiesRequested;
+            _vm.SaveCurrentOutfitRequested -= OnSaveCurrentOutfitRequested;
         }
+
+        _outfitWindow?.Close();
+        _outfitWindow = null;
 
         _filterWindow?.Close();
         _filterWindow = null;
@@ -206,7 +222,8 @@ public partial class InventoryPanel : UserControl
 
         // Ensure selection reflects what was right-clicked
         _vm.SelectedNode = node;
-        treeView.ContextMenu = InventoryMenuBuilder.Build(_vm, node, BeginRenameAsync);
+        var marketplace = (TopLevel.GetTopLevel(this) as Window)?.DataContext as MainViewModel;
+        treeView.ContextMenu = InventoryMenuBuilder.Build(_vm, node, BeginRenameAsync, marketplace?.Marketplace);
     }
 
     private static InvTreeNode? FindNodeFromSource(Visual? source, Visual treeViewRoot)
@@ -239,7 +256,8 @@ public partial class InventoryPanel : UserControl
         if (lb.SelectedItem is not InventorySearchResult result) return;
         if (!_vm.TrySelectNode(result.ItemId) || _vm.SelectedNode == null) return;
 
-        lb.ContextMenu = InventoryMenuBuilder.Build(_vm, _vm.SelectedNode, BeginRenameAsync);
+        var marketplace = (TopLevel.GetTopLevel(this) as Window)?.DataContext as MainViewModel;
+        lb.ContextMenu = InventoryMenuBuilder.Build(_vm, _vm.SelectedNode, BeginRenameAsync, marketplace?.Marketplace);
     }
 
     // ── Search box ───────────────────────────────────────────────────────────
@@ -279,6 +297,54 @@ public partial class InventoryPanel : UserControl
         {
             _filterWindow.Activate();
         }
+    }
+
+    // ── Outfit editor window ─────────────────────────────────────────────────
+
+    private void BtnOutfit_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_outfitWindow != null)
+        {
+            _outfitWindow.Activate();
+            return;
+        }
+        if (_vm?.Instance == null) return;
+
+        var outfitVm = new OutfitEditViewModel(_vm.Instance);
+        var panel = new OutfitEditPanel { DataContext = outfitVm };
+        _outfitWindow = new Window
+        {
+            Title = "Current Outfit",
+            Content = panel,
+            Width = 320,
+            Height = 500,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        _outfitWindow.Closed += (_, _) =>
+        {
+            outfitVm.Dispose();
+            _outfitWindow = null;
+        };
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        if (owner != null)
+            _outfitWindow.Show(owner);
+        else
+            _outfitWindow.Show();
+    }
+
+    private void OnSaveCurrentOutfitRequested(object? sender, EventArgs e)
+    {
+        _ = BeginSaveOutfitAsync();
+    }
+
+    private async Task BeginSaveOutfitAsync()
+    {
+        var parentWindow = TopLevel.GetTopLevel(this) as Window;
+        if (parentWindow == null || _vm == null) return;
+        var dialog = new RenameDialog("My Outfit") { Title = "Save Outfit As" };
+        await dialog.ShowDialog(parentWindow);
+        if (!string.IsNullOrWhiteSpace(dialog.Result))
+            await _vm.SaveCurrentOutfitAsync(dialog.Result);
     }
 
     // ── Editor management ────────────────────────────────────────────────────
@@ -453,13 +519,23 @@ public partial class InventoryPanel : UserControl
     private void InvTree_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         var pt = e.GetCurrentPoint(sender as Control);
-        _dragStartPos = pt.Properties.IsLeftButtonPressed ? e.GetPosition(sender as Control) : null;
+        if (pt.Properties.IsLeftButtonPressed)
+        {
+            _dragStartPos = e.GetPosition(sender as Control);
+            _dragPressedArgs = e;
+        }
+        else
+        {
+            _dragStartPos = null;
+            _dragPressedArgs = null;
+        }
         _dragging = false;
     }
 
     private void InvTree_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         _dragStartPos = null;
+        _dragPressedArgs = null;
         _dragging = false;
     }
 
@@ -497,7 +573,7 @@ public partial class InventoryPanel : UserControl
         var data = new DataTransfer();
         data.Add(item);
         var effect = node.IsFolder ? DragDropEffects.Move : DragDropEffects.Copy | DragDropEffects.Move;
-        await DragDrop.DoDragDropAsync(e, data, effect);
+        await DragDrop.DoDragDropAsync(_dragPressedArgs!, data, effect);
         _dragging = false;
     }
 
@@ -520,13 +596,27 @@ public partial class InventoryPanel : UserControl
         }
         else
         {
-            e.DragEffects = DragDropEffects.Move;
-            // Visual highlight via pseudo-class
-            if (!ReferenceEquals(target, _dropHighlightNode))
+            var token = e.DataTransfer.TryGetValue(InventoryDragData.Format);
+            var draggedNode = token != null ? InventoryDragData.PeekNode(token) : null;
+            var store = _vm.Instance.Client.Inventory.Store;
+            bool blocked = draggedNode != null && (
+                !IsMarketplaceMoveAllowed(draggedNode, target, store) ||
+                (draggedNode.IsFolder && InventoryViewModel.IsAncestorOrSelf(draggedNode, target)) ||
+                target.IsLibrary);
+            if (blocked)
             {
-                ClearDropHighlight();
-                _dropHighlightNode = target;
-                HighlightFolderNode(target, true);
+                e.DragEffects = DragDropEffects.None;
+            }
+            else
+            {
+                e.DragEffects = DragDropEffects.Move;
+                // Visual highlight via pseudo-class
+                if (!ReferenceEquals(target, _dropHighlightNode))
+                {
+                    ClearDropHighlight();
+                    _dropHighlightNode = target;
+                    HighlightFolderNode(target, true);
+                }
             }
         }
         e.Handled = true;
@@ -546,6 +636,9 @@ public partial class InventoryPanel : UserControl
         if (targetFolder == null || ReferenceEquals(targetFolder, draggedNode)) return;
         // Library is read-only — no drops into it
         if (targetFolder.IsLibrary) return;
+        // Marketplace folder hierarchy rules
+        var store = _vm.Instance.Client.Inventory.Store;
+        if (!IsMarketplaceMoveAllowed(draggedNode, targetFolder, store)) return;
 
         _ = _vm.MoveNodeToFolder(draggedNode, targetFolder);
         e.Handled = true;
@@ -566,6 +659,35 @@ public partial class InventoryPanel : UserControl
         // For now just expand/collapse to give visual feedback (lightweight)
         // Real highlight would require a dedicated IsDropTarget property on InvTreeNode
         _ = on; // suppress unused warning — visual feedback deferred to future binding
+    }
+
+    private static bool IsMarketplaceMoveAllowed(InvTreeNode dragged, InvTreeNode target, OpenMetaverse.Inventory? store)
+    {
+        if (store == null) return true;
+
+        var targetRole = MarketplaceFolderClassifier.GetRole(target.ItemId, store);
+        var targetIsMarketplace = targetRole != MarketplaceFolderRole.None;
+
+        // Items (non-folders) may be dragged freely — populating a listing is valid
+        if (!dragged.IsFolder) return true;
+
+        var draggedRole = MarketplaceFolderClassifier.GetRole(dragged.ItemId, store);
+        var draggedIsMarketplace = draggedRole != MarketplaceFolderRole.None;
+
+        // Block: regular folder → marketplace folder (would corrupt the hierarchy)
+        if (!draggedIsMarketplace && targetIsMarketplace) return false;
+
+        // Block: marketplace folder → outside marketplace (would orphan it)
+        if (draggedIsMarketplace && !targetIsMarketplace) return false;
+
+        // Within marketplace: only Listing folders may be repositioned (into ListingsRoot)
+        if (draggedIsMarketplace && draggedRole != MarketplaceFolderRole.Listing) return false;
+
+        // A Listing folder may only be dropped directly into the ListingsRoot
+        if (draggedRole == MarketplaceFolderRole.Listing
+            && targetRole != MarketplaceFolderRole.ListingsRoot) return false;
+
+        return true;
     }
 
     private static InvTreeNode? FindFolderNodeUnderPointer(Visual? source, Visual? root)

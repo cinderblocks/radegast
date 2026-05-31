@@ -1,0 +1,217 @@
+name: CI Release macOS DMG
+
+on:
+  release:
+    types: [published]
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
+  TAG_NAME: ${{ github.event.release.tag_name }}
+  PUBLISH_DIR: publish
+  VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
+
+jobs:
+  build-macos:
+    name: Build macOS per-arch
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
+        dotnet: ['8.0.x']
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ matrix.dotnet }}-${{ hashFiles('**/*.csproj', '**/*.sln') }}
+          restore-keys: nuget-${{ matrix.dotnet }}-
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ matrix.dotnet }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('package-lock.json') }}
+          restore-keys: npm-
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish for macOS (osx-${{ matrix.arch }})
+        run: |
+          set -e
+          RID=osx-${{ matrix.arch }}
+          mkdir -p $PUBLISH_DIR/$RID
+          if [ -n "$VELES_PROJECT" ] && [ -f "$VELES_PROJECT" ]; then
+            echo "Publishing Veles project ($VELES_PROJECT) with PublishSingleFile=false and PublishTrimmed=false"
+            dotnet publish "$VELES_PROJECT" -c Release -r $RID --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -o $PUBLISH_DIR/$RID
+          else
+            echo "Veles project not found; doing generic dotnet publish"
+            dotnet publish -c Release -r $RID --self-contained true -o $PUBLISH_DIR/$RID
+          fi
+
+      - name: Create minimal .app wrapper if none exists
+        run: |
+          set -e
+          RID=osx-${{ matrix.arch }}
+          PUB_DIR=$PUBLISH_DIR/$RID
+          APP_NAME="${REPO_NAME}.app"
+          APP_DIR="$PUB_DIR/$APP_NAME"
+          if [ -d "$PUB_DIR" ]; then
+            if ls "$PUB_DIR"/*.app 1> /dev/null 2>&1; then
+              echo ".app bundle already present for $RID"
+            else
+              echo "Creating minimal .app wrapper: $APP_DIR"
+              mkdir -p "$APP_DIR/Contents/MacOS"
+              cat > "$APP_DIR/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleName</key><string>${REPO_NAME}</string>
+    <key>CFBundleExecutable</key><string>${REPO_NAME}</string>
+    <key>CFBundleIdentifier</key><string>com.${{ github.repository_owner }}.${REPO_NAME}</string>
+    <key>CFBundleVersion</key><string>${TAG_NAME}</string>
+  </dict>
+</plist>
+EOF
+              cp -R "$PUB_DIR"/* "$APP_DIR/Contents/MacOS/" || true
+              chmod -R +x "$APP_DIR/Contents/MacOS" || true
+            fi
+          else
+            echo "Publish directory not found: $PUB_DIR"
+            exit 1
+          fi
+
+      - name: Upload publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-${{ matrix.arch }}
+          path: $PUBLISH_DIR/osx-${{ matrix.arch }}
+
+      - name: Create per-arch DMG (optional)
+        run: |
+          set -e
+          RID=osx-${{ matrix.arch }}
+          SRC_APP=$(ls $PUBLISH_DIR/$RID/*.app 2>/dev/null | head -n 1 || true)
+          if [ -z "$SRC_APP" ]; then
+            SRC_APP="$PUBLISH_DIR/$RID"
+          fi
+          DIST_DIR=dist/$RID
+          mkdir -p "$DIST_DIR"
+          DMG_PATH="$DIST_DIR/${REPO_NAME}-${TAG_NAME}-$RID.dmg"
+          npx --yes create-dmg "$SRC_APP" "$DMG_PATH" --overwrite || (
+            echo "create-dmg failed for $RID; creating fallback tar.gz"
+            tar -czf "$DIST_DIR/${REPO_NAME}-${TAG_NAME}-$RID.tar.gz" -C "$PUBLISH_DIR/$RID" .
+          )
+
+      - name: Upload per-arch DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: dist/osx-${{ matrix.arch }}/*
+
+  build-universal:
+    name: Build universal macOS DMG
+    needs: build-macos
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download x64 publish
+        uses: actions/download-artifact@v4
+        with:
+          name: publish-x64
+          path: publish-x64
+
+      - name: Download arm64 publish
+        uses: actions/download-artifact@v4
+        with:
+          name: publish-arm64
+          path: publish-arm64
+
+      - name: Create universal .app
+        run: |
+          set -e
+          # Find .app for each arch (fallback to folder)
+          X64_APP=$(ls publish-x64/*.app 2>/dev/null | head -n 1 || true)
+          ARM_APP=$(ls publish-arm64/*.app 2>/dev/null | head -n 1 || true)
+          WORK=universal
+          mkdir -p $WORK
+          if [ -n "$X64_APP" ] && [ -n "$ARM_APP" ]; then
+            # Copy x64 app as base
+            cp -R "$X64_APP" "$WORK/${REPO_NAME}.app"
+            BASE_APP="$WORK/${REPO_NAME}.app"
+            X64_EXE=$(ls "$X64_APP/Contents/MacOS" | head -n 1)
+            ARM_EXE=$(ls "$ARM_APP/Contents/MacOS" | head -n 1)
+            BASE_EXE="$BASE_APP/Contents/MacOS/$X64_EXE"
+            X64_EXE_PATH="$X64_APP/Contents/MacOS/$X64_EXE"
+            ARM_EXE_PATH="$ARM_APP/Contents/MacOS/$ARM_EXE"
+            if [ -f "$X64_EXE_PATH" ] && [ -f "$ARM_EXE_PATH" ]; then
+              echo "Creating universal executable: $BASE_EXE"
+              lipo -create "$X64_EXE_PATH" "$ARM_EXE_PATH" -output "$BASE_EXE" || true
+              chmod +x "$BASE_EXE"
+            else
+              echo "Could not find architecture-specific executables; leaving x64 binary as-is"
+            fi
+          else
+            # If no .app bundles, try to combine published folders into a single app-like dir
+            echo "One or both .app bundles not found; creating simple app from publish folders"
+            mkdir -p "$WORK/${REPO_NAME}.app/Contents/MacOS"
+            cp -R publish-x64/* "$WORK/${REPO_NAME}.app/Contents/MacOS/" || true
+            chmod -R +x "$WORK/${REPO_NAME}.app/Contents/MacOS" || true
+          fi
+
+      - name: Create universal DMG
+        run: |
+          set -e
+          SRC_APP=$(ls universal/${REPO_NAME}.app 2>/dev/null | head -n 1 || true)
+          if [ -z "$SRC_APP" ]; then
+            echo "Universal app not found: universal/${REPO_NAME}.app"
+            exit 1
+          fi
+          mkdir -p dist
+          DMG_PATH=dist/${REPO_NAME}-${TAG_NAME}-universal.dmg
+          npx --yes create-dmg "$SRC_APP" "$DMG_PATH" --overwrite
+
+      - name: Upload universal DMG to GitHub Release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: dist/${REPO_NAME}-${TAG_NAME}-universal.dmg
+          asset_name: ${REPO_NAME}-${TAG_NAME}-universal.dmg
+          asset_content_type: application/octet-stream
+
+      - name: Upload debug artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal-debug-${{ TAG_NAME }}
+          path: |
+            universal/**
+            dist/**

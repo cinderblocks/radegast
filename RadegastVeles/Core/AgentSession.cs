@@ -18,6 +18,7 @@
  */
 
 using System;
+using Radegast.Veles.Plugins;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Core;
@@ -27,6 +28,7 @@ public sealed class AgentSession : IDisposable
     public Guid Id { get; } = Guid.NewGuid();
     public RadegastInstanceAvalonia Instance { get; }
     public MainViewModel ViewModel { get; }
+    public PluginManager PluginManager => Instance.PluginManager;
 
     public string AgentName => Instance.Client.Self.Name;
     public bool IsConnected => Instance.Client.Network.Connected;
@@ -35,6 +37,11 @@ public sealed class AgentSession : IDisposable
     {
         Instance = instance;
         ViewModel = new MainViewModel(instance);
+
+        // Initialise and start the plugin system
+        instance.InitPluginManager();
+        instance.PluginManager.LoadPluginsFromDirectory();
+        instance.PluginManager.StartAll();
     }
 
     public void Dispose()
@@ -44,6 +51,6 @@ public sealed class AgentSession : IDisposable
         {
             Instance.NetCom.Logout();
         }
-        Instance.NetCom.Dispose();
+        Instance.CleanUp();
     }
 }

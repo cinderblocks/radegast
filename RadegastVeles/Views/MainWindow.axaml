@@ -10,14 +10,14 @@
         x:Class="Radegast.Veles.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
-        Width="1024" Height="768"
+        Width="1200" Height="768"
         AutomationProperties.Name="Radegast Veles main window">
 
     <DockPanel>
         <!-- Menu bar -->
         <Menu DockPanel.Dock="Top" AutomationProperties.Name="Main menu">
             <MenuItem Header="_File" AutomationProperties.Name="File menu">
-                <MenuItem Header="_Preferences" AutomationProperties.Name="Preferences"
+                <MenuItem Header="_Preferences..." AutomationProperties.Name="Preferences"
                           Click="OnPreferencesClick" />
                 <Separator />
                 <MenuItem Header="_Logout" AutomationProperties.Name="Logout agent"
@@ -28,12 +28,31 @@
                 <MenuItem Header="E_xit" AutomationProperties.Name="Exit application"
                           Click="OnExitClick" />
             </MenuItem>
-            <MenuItem Header="_World" AutomationProperties.Name="World menu">
-                <MenuItem Header="_My Profile" AutomationProperties.Name="Open my profile"
+            <MenuItem Header="_Me" AutomationProperties.Name="Me menu">
+                <MenuItem Header="_My Profile..." AutomationProperties.Name="Open my profile"
                           Click="OnShowMyProfileClick" />
-                <MenuItem Header="_My 3D Avatar" AutomationProperties.Name="View my avatar in 3D"
+                <MenuItem Header="_HUD Viewer..." AutomationProperties.Name="Open HUD viewer"
+                          Click="OnShowHudViewerClick" />
+                <MenuItem Header="My 3D _Avatar..." AutomationProperties.Name="Open 3D avatar viewer"
                           Click="OnShowMyAvatarViewerClick" />
-                <MenuItem Header="_Search" AutomationProperties.Name="Open search"
+                <Separator />
+                <MenuItem Header="_Appearance..." AutomationProperties.Name="Open appearance editor"
+                          Click="OnAppearanceClick" />
+                <MenuItem Header="Change _Display Name..." AutomationProperties.Name="Change display name"
+                          Click="OnChangeDisplayNameClick" />
+                <Separator />
+                <MenuItem Header="_Away" AutomationProperties.Name="Toggle away status"
+                          IsChecked="{Binding IsAway}"
+                          Click="OnAwayClick" />
+                <MenuItem Header="_Busy" AutomationProperties.Name="Toggle busy status"
+                          IsChecked="{Binding IsBusy}"
+                          Click="OnBusyClick" />
+                <Separator />
+                <MenuItem Header="_Mute List..." AutomationProperties.Name="Show mute list"
+                          Click="OnShowMuteListClick" />
+            </MenuItem>
+            <MenuItem Header="_World" AutomationProperties.Name="World menu">
+                <MenuItem Header="_Search..." AutomationProperties.Name="Open search"
                           Click="OnShowSearchClick" />
                 <Separator />
                 <MenuItem Header="_Nearby" AutomationProperties.Name="Show nearby tab"
@@ -50,21 +69,22 @@
                           Click="OnShowFriendsClick" />
                 <MenuItem Header="_Groups" AutomationProperties.Name="Show groups tab"
                           Click="OnShowGroupsClick" />
-                <MenuItem Header="_Media" AutomationProperties.Name="Show media tab"
-                          Click="OnShowMediaClick" />
+                <MenuItem Header="Mar_ketplace" AutomationProperties.Name="Show marketplace tab"
+                          Click="OnShowMarketplaceClick" />
                 <Separator />
-                <MenuItem Header="_Mute List" AutomationProperties.Name="Show mute list"
-                          Click="OnShowMuteListClick" />
+                <MenuItem Header="_Scene Viewer" AutomationProperties.Name="Open 3D scene viewer"
+                          Click="OnShowSceneViewerClick" />
                 <Separator />
-                <MenuItem Header="_Land Info" AutomationProperties.Name="Show land info"
+                <MenuItem Header="Teleport _Home" AutomationProperties.Name="Teleport home"
+                          InputGesture="Ctrl+Shift+H"
+                          Click="OnTeleportHomeClick" />
+                <Separator />
+                <MenuItem Header="_Land Info..." AutomationProperties.Name="Show land info"
                           Click="OnShowLandInfoClick" />
-                <MenuItem Header="_Land Holdings" AutomationProperties.Name="Show land holdings"
+                <MenuItem Header="_Land Holdings..." AutomationProperties.Name="Show land holdings"
                           Click="OnShowLandHoldingsClick" />
-                <MenuItem Header="_Region Info" AutomationProperties.Name="Show region info"
+                <MenuItem Header="_Region Info..." AutomationProperties.Name="Show region info"
                           Click="OnShowEstateInfoClick" />
-                <Separator />
-                <MenuItem Header="_HUD Viewer" AutomationProperties.Name="Open HUD viewer"
-                          Click="OnShowHudViewerClick" />
             </MenuItem>
             <MenuItem Header="_Create" AutomationProperties.Name="Create menu">
                 <MenuItem Header="Upload _Image..." AutomationProperties.Name="Upload image"
@@ -75,9 +95,24 @@
                           Click="OnUploadSoundClick" />
                 <MenuItem Header="Upload _Animation..." AutomationProperties.Name="Upload animation"
                           Click="OnUploadAnimationClick" />
+                <Separator />
+                <MenuItem Header="New _Notecard..." AutomationProperties.Name="Create new notecard"
+                          Click="OnCreateNotecardClick" />
+                <MenuItem Header="New _Script..." AutomationProperties.Name="Create new script"
+                          Click="OnCreateScriptClick" />
+                <MenuItem Header="New _Gesture..." AutomationProperties.Name="Create new gesture"
+                          Click="OnCreateGestureClick" />
+                <MenuItem Header="New _Landmark..." AutomationProperties.Name="Create landmark at current position"
+                          Click="OnCreateLandmarkClick" />
+            </MenuItem>
+            <MenuItem Header="_Plugins" AutomationProperties.Name="Plugins menu"
+                      x:Name="PluginsMenu">
+                <MenuItem Header="Plugin _Manager..." AutomationProperties.Name="Open plugin manager"
+                          Click="OnPluginManagerClick" />
             </MenuItem>
             <MenuItem Header="_Help" AutomationProperties.Name="Help menu">
-                <MenuItem Header="_Log Viewer" AutomationProperties.Name="Open log viewer"
+                <MenuItem Header="_Log Viewer / Debug Console..." AutomationProperties.Name="Open log viewer"
+                          InputGesture="Ctrl+Alt+D"
                           Click="OnLogViewerClick" />
                 <Separator />
                 <MenuItem Header="_Website" AutomationProperties.Name="Open project website"
@@ -85,7 +120,10 @@
                 <MenuItem Header="_Issue Tracker" AutomationProperties.Name="Open issue tracker"
                           Click="OnIssueTrackerClick" />
                 <Separator />
-                <MenuItem Header="_About Radegast Veles" AutomationProperties.Name="About Radegast Veles"
+                <MenuItem Header="_Keyboard Shortcuts..." AutomationProperties.Name="Keyboard shortcuts"
+                          Click="OnKeyboardShortcutsClick" />
+                <Separator />
+                <MenuItem Header="_About Radegast Veles..." AutomationProperties.Name="About Radegast Veles"
                           Click="OnAboutClick" />
             </MenuItem>
         </Menu>
@@ -108,16 +146,42 @@
                 <Style Selector="Button.locationLink TextBlock">
                     <Setter Property="TextDecorations" Value="Underline" />
                 </Style>
+                <!-- PTT button styles -->
+                <Style Selector="Button.ptt /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="#CC2222" />
+                    <Setter Property="CornerRadius" Value="4" />
+                </Style>
+                <Style Selector="Button.ptt TextBlock">
+                    <Setter Property="Foreground" Value="White" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                </Style>
+                <Style Selector="Button.ptt:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                    <Setter Property="Background" Value="#DD3333" />
+                </Style>
                 <!-- PTT button: highlight while actively transmitting -->
                 <Style Selector="Button.active /template/ ContentPresenter#PART_ContentPresenter">
-                    <Setter Property="Background" Value="{DynamicResource SystemAccentColor}" />
+                    <Setter Property="Background" Value="#22BB44" />
+                    <Setter Property="CornerRadius" Value="4" />
                 </Style>
                 <Style Selector="Button.active TextBlock">
                     <Setter Property="Foreground" Value="White" />
+                    <Setter Property="FontWeight" Value="Bold" />
                 </Style>
             </Grid.Styles>
 
-            <TextBlock Grid.Column="0" Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Status message" />
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Status message" />
+                <Border Background="Goldenrod" CornerRadius="3" Padding="4,1"
+                        IsVisible="{Binding IsAway}" VerticalAlignment="Center"
+                        AutomationProperties.Name="Away status indicator">
+                    <TextBlock Text="Away" FontSize="10" Foreground="White" FontWeight="SemiBold" />
+                </Border>
+                <Border Background="Firebrick" CornerRadius="3" Padding="4,1"
+                        IsVisible="{Binding IsBusy}" VerticalAlignment="Center"
+                        AutomationProperties.Name="Busy status indicator">
+                    <TextBlock Text="Busy" FontSize="10" Foreground="White" FontWeight="SemiBold" />
+                </Border>
+            </StackPanel>
 
             <!-- Voice controls (always visible when voice hardware is available and enabled) -->
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
@@ -144,22 +208,20 @@
                 <!-- PTT button (only when connected and PTT mode on) -->
                 <Button x:Name="PttButton"
                         IsVisible="{Binding Voice.PushToTalkButtonVisible}"
+                        Classes="ptt"
                         Classes.active="{Binding Voice.IsPushToTalking}"
-                        MinHeight="20" Padding="6,1" FontSize="11"
-                        ToolTip.Tip="Hold to talk"
+                        MinHeight="22" Padding="8,2" FontSize="11"
+                        ToolTip.Tip="{Binding Voice.PttButtonTooltip}"
                         AutomationProperties.Name="Push to talk"
                         PointerPressed="OnPttPointerPressed"
                         PointerReleased="OnPttPointerReleased">
-                    <StackPanel Orientation="Horizontal" Spacing="3">
-                        <TextBlock Text="🎤" />
-                        <TextBlock Text="Talk" />
-                    </StackPanel>
+                    <TextBlock Text="{Binding Voice.PttButtonLabel}" />
                 </Button>
                 <!-- Mic mute toggle (only when connected and PTT mode off) -->
                 <Button Content="{Binding Voice.MicIcon}"
                         Command="{Binding Voice.ToggleMicCommand}"
                         IsVisible="{Binding Voice.MicMuteButtonVisible}"
-                        MinWidth="24" MinHeight="20" Padding="2,0" FontSize="12"
+                        MinHeight="20" Padding="6,1" FontSize="11"
                         ToolTip.Tip="Toggle microphone mute"
                         AutomationProperties.Name="Toggle microphone mute" />
                 <!-- Separator dot when connected -->
@@ -231,7 +293,7 @@
                         <TextBlock Text="IMs" VerticalAlignment="Center" />
                         <TextBlock Text="●" Foreground="OrangeRed" FontSize="8"
                                    VerticalAlignment="Center"
-                                   IsVisible="{Binding IM.HasUnreadAny}"
+                                   IsVisible="{Binding IM.HasUnread}"
                                    AutomationProperties.Name="" />
                         <Button Content="⏏" FontSize="10" Padding="2"
                                 Click="OnUndockIMClick"
@@ -337,25 +399,26 @@
                     </ContentControl.ContentTemplate>
                 </ContentControl>
             </TabItem>
-            <TabItem AutomationProperties.Name="Media tab">
+            <TabItem AutomationProperties.Name="Scene viewer tab"
+                     IsVisible="{Binding IsSceneViewerOpen}">
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="4">
-                        <TextBlock Text="Media" VerticalAlignment="Center" />
-                        <Button Content="⏏" FontSize="10" Padding="2"
-                                Click="OnUndockMediaClick"
-                                ToolTip.Tip="Detach panel to own window"
-                                AutomationProperties.Name="Detach media panel" />
+                        <TextBlock Text="Scene Viewer" VerticalAlignment="Center" />
+                        <Button Content="✕" FontSize="10" Padding="2"
+                                Click="OnCloseSceneViewerClick"
+                                ToolTip.Tip="Close scene viewer (releases GPU resources)"
+                                AutomationProperties.Name="Close scene viewer" />
                     </StackPanel>
                 </TabItem.Header>
-                <ContentControl Content="{Binding Media}">
+                <ContentControl Content="{Binding SceneViewer}">
                     <ContentControl.ContentTemplate>
-                        <DataTemplate x:DataType="vm:MediaViewModel">
-                            <views:MediaPanel />
+                        <DataTemplate x:DataType="vm:SceneViewerViewModel">
+                            <views:SceneViewerPanel />
                         </DataTemplate>
                     </ContentControl.ContentTemplate>
                 </ContentControl>
             </TabItem>
-        </TabControl>
+            </TabControl>
 
         <!-- Notification overlay: bottom-right of content area -->
         <ContentControl Content="{Binding Notifications}"

@@ -55,4 +55,22 @@ public partial class ObjectsPanel : UserControl
             e.Handled = true;
         }
     }
+
+    private void ObjectsList_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(null).Properties.IsRightButtonPressed) return;
+        if (sender is not ListBox lb) return;
+
+        // Ensure the item under the pointer is selected before the context menu fires.
+        var source = e.Source as Control;
+        while (source is not null)
+        {
+            if (source is ListBoxItem item)
+            {
+                lb.SelectedItem = item.DataContext;
+                return;
+            }
+            source = source.Parent as Control;
+        }
+    }
 }

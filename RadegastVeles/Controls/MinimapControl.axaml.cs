@@ -25,6 +25,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using OpenMetaverse;
@@ -77,6 +78,8 @@ public partial class MinimapControl : UserControl
     public event Action<float, float>? WalkToRequested;
     /// <summary>Fired when the user right-clicks and chooses Teleport To. x/y are region coordinates (0–256).</summary>
     public event Action<float, float>? TeleportRequested;
+    /// <summary>Fired when the user chooses "About Land…" from the context menu. x/y are region coordinates (0–256).</summary>
+    public event Action<float, float>? AboutLandRequested;
 
     private Canvas? _canvas;
     private Border? _hoverTooltip;
@@ -157,6 +160,11 @@ public partial class MinimapControl : UserControl
             tpItem.Click += (_, _) => TeleportRequested?.Invoke(rx, ry);
             menu.Items.Add(walkItem);
             menu.Items.Add(tpItem);
+
+            menu.Items.Add(new Separator());
+            var landItem = new MenuItem { Header = "About Land…" };
+            landItem.Click += (_, _) => AboutLandRequested?.Invoke(rx, ry);
+            menu.Items.Add(landItem);
 
             var sim = SimName;
             if (!string.IsNullOrEmpty(sim))

@@ -34,12 +34,10 @@ using System;
 using System.Reflection;
 using System.Threading;
 using CoreJ2K;
-using CoreJ2K.Util;
 using OpenTK.Graphics;
 using OpenTK.Platform;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
-using OpenMetaverse.Imaging;
 using SkiaSharp;
 
 namespace Radegast.Rendering
@@ -207,7 +205,6 @@ namespace Radegast.Rendering
         {
             byte[] imageBytes = null;
             SKBitmap skBitmap = null;
-            InterleavedImage j2kImage = null;
 
             if (item.TextureData != null || item.LoadAssetFromCache)
             {
@@ -219,30 +216,32 @@ namespace Radegast.Rendering
 
                 try
                 {
-                    j2kImage = J2kImage.FromBytes(item.TextureData);
+                    skBitmap = J2kImage.DecodeToImage<SKBitmap>(item.TextureData);
                 }
                 catch
                 {
-                    j2kImage = null;
+                    skBitmap = null;
                 }
 
-                if (j2kImage != null)
+                if (skBitmap != null)
                 {
-                    var mi = new ManagedImage(j2kImage);
-
                     var hasAlpha = false;
                     var fullAlpha = false;
                     var isMask = false;
-                    if ((mi.Channels & ManagedImage.ImageChannels.Alpha) != 0)
+                    if (skBitmap.AlphaType != SKAlphaType.Opaque && skBitmap.Info.IsOpaque == false)
                     {
                         fullAlpha = true;
                         isMask = true;
 
-                        foreach (var b in mi.Alpha)
+                        for (var y = 0; y < skBitmap.Height; y++)
                         {
-                            if (b < 255) hasAlpha = true;
-                            if (b != 0) fullAlpha = false;
-                            if (b != 0 && b != 255) isMask = false;
+                            for (var x = 0; x < skBitmap.Width; x++)
+                            {
+                                var a = skBitmap.GetPixel(x, y).Alpha;
+                                if (a < 255) hasAlpha = true;
+                                if (a != 0) fullAlpha = false;
+                                if (a != 0 && a != 255) isMask = false;
+                            }
                         }
                     }
 
@@ -251,8 +250,6 @@ namespace Radegast.Rendering
                     item.Data.TextureInfo.IsMask = isMask;
 
                     imageBytes = item.TextureData;
-
-                    try { skBitmap = j2kImage.As<SKBitmap>(); } catch { skBitmap = null; }
 
                     if (CacheDecodedTextures)
                     {
@@ -263,11 +260,6 @@ namespace Radegast.Rendering
 
             if (imageBytes != null)
             {
-                if (skBitmap == null)
-                {
-                    try { skBitmap = j2kImage.As<SKBitmap>(); } catch { skBitmap = null; }
-                }
-
                 if (skBitmap != null)
                 {
                     // Flip vertically for OpenGL

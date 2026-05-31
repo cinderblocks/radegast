@@ -1,0 +1,15 @@
+# Normalize all text files to LF on checkout.
+* text=auto eol=lf
+
+# Explicit binary types: no end-of-line conversion.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.bmp   binary
+*.dll   binary
+*.exe   binary
+*.pdb   binary
+*.zip   binary
+*.rtf   binary

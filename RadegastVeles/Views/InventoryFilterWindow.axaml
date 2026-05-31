@@ -46,7 +46,7 @@
 
             <!-- Creator -->
             <CheckBox Content="Filter by Creator" IsChecked="{Binding FilterByCreator}" FontWeight="SemiBold" />
-            <TextBox Watermark="Name or UUID..."
+            <TextBox PlaceholderText="Name or UUID..."
                      Text="{Binding CreatorFilter, Mode=TwoWay}"
                      IsEnabled="{Binding FilterByCreator}"
                      Margin="16,0,0,0" />

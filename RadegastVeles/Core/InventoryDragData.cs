@@ -45,11 +45,16 @@ public static class InventoryDragData
         return token;
     }
 
+    /// <summary>Looks up the node for <paramref name="token"/> without removing it from the pending set.</summary>
+    public static InvTreeNode? PeekNode(string token)
+    {
+        _pending.TryGetValue(token, out var node);
+        return node;
+    }
+
     /// <summary>Retrieves and removes the node associated with <paramref name="token"/>.</summary>
     public static InvTreeNode? GetNode(string token)
     {
-        if (!_pending.TryGetValue(token, out var node)) return null;
-        _pending.Remove(token);
-        return node;
+        return !_pending.Remove(token, out var node) ? null : node;
     }
 }

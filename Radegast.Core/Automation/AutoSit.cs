@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -115,9 +115,9 @@ namespace Radegast.Automation
             }
         }
 
-        public void PrimitiveContextAction(object sender, EventArgs e)
+        public void PrimitiveContextAction(object? sender, EventArgs e)
         {
-            Primitive prim = (Primitive)sender;
+            Primitive prim = (Primitive)sender!;
             Preferences = new AutoSitPreferences
             {
                 Primitive = prim.ID,
@@ -131,7 +131,7 @@ namespace Radegast.Automation
             }
         }
 
-        public void Objects_ObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        public void Objects_ObjectProperties(object? sender, ObjectPropertiesEventArgs e)
         {
             if (Preferences == null || e.Properties.ObjectID != Preferences.Primitive) return;
 

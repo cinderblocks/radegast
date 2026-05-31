@@ -1,0 +1,108 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <?include ..\VelesBuildProperties.wxi?>
+  <?define productVersion=!(bind.FileVersion.RadegastVeles.Executable) ?>
+  <?define UpgradeCode="{C9F8E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
+
+  <Package Name="$(var.productName)"
+           Language="1033"
+           Compressed="yes"
+           Version="$(var.productVersion)"
+           Manufacturer="$(var.companyName)"
+           UpgradeCode="$(var.UpgradeCode)"
+           InstallerVersion="500">
+    <SummaryInformation Description="$(var.productDesc)"
+                        Keywords="virtual world,3D,secondlife,opensimulator,avalonia"
+                        Manufacturer="$(var.companyName)"
+                        Comments="$(var.copyright)" />
+
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      AllowDowngrades="yes" />
+    <MediaTemplate EmbedCab="true" CompressionLevel="high" />
+    <Icon Id="Veles.ico" SourceFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico" />
+
+    <Property Id="ApplicationFolderName" Value="$(var.productName)" />
+    <Property Id="WixAppFolder" Value="WixPerMachineFolder" />
+
+    <Property Id="INSTALLDIR" Secure="yes" />
+    <Property Id="DESKTOPSHORTCUT" Secure="yes" Value="1" />
+    <Property Id="STARTMENUSHORTCUT" Secure="yes" Value="1" />
+    <Property Id="REGISTERPROTOCOLS" Secure="yes" Value="1" />
+    <Property Id="REGISTERFILEASSOC" Secure="yes" Value="0" />
+    <Property Id="CLEAN_USERDATA" Secure="yes" Value="0" />
+
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+    <Property Id="MsiLogging" Value="voicewarmup" />
+
+    <Property Id="ARPCOMMENTS" Value="$(var.productDesc)" />
+    <Property Id="ARPCONTACT" Value="$(var.companyName)" />
+    <Property Id="ARPPRODUCTICON" Value="Veles.ico" />
+    <Property Id="ARPHELPLINK" Value="$(var.aboutUrl)" />
+    <Property Id="ARPURLINFOABOUT" Value="$(var.aboutUrl)" />
+    <Property Id="ARPURLUPDATEINFO" Value="$(var.aboutUrl)" />
+    <Property Id="ARPREADME" Value="$(var.aboutUrl)" />
+    <Property Id="ARPSIZE" Value="$(var.totalFileSize)" />
+    <Property Id="ARPNOMODIFY" Value="1" Secure="yes" />
+    <Property Id="ARPNOREPAIR" Value="1" Secure="yes" />
+
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch $(var.productName)" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+
+    <!-- .NET 8 Desktop Runtime detection via registry.
+         RadegastVeles targets net8.0 (framework-dependent by default).
+         For self-contained publish builds this check can be omitted. -->
+    <Property Id="DOTNET8INSTALLED">
+      <RegistrySearch Id="DotNet8DesktopSearch"
+                      Root="HKLM"
+                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App"
+                      Type="raw" />
+    </Property>
+    <Launch
+      Condition="Installed OR DOTNET8INSTALLED"
+      Message="!(loc.MissingDotNet8)" />
+
+    <util:CloseApplication Id="CloseVeles"
+                           Target="RadegastVeles.exe"
+                           CloseMessage="yes"
+                           Description="Radegast Veles must be closed to continue installation."
+                           RebootPrompt="no"
+                           TerminateProcess="0"
+                           Timeout="5" />
+
+    <Feature Id="ProductFeature" Title="Radegast Veles" Level="1">
+      <ComponentGroupRef Id="Veles.Components" />
+      <ComponentRef Id="VelesApplicationShortcut" />
+      <ComponentRef Id="VelesWebsiteShortcut" />
+      <ComponentRef Id="VelesDesktopShortcut" />
+      <ComponentRef Id="VelesSLURLProtocolHandler" />
+      <ComponentRef Id="VelesFileAssociations" />
+      <ComponentRef Id="VelesRegistryEntries" />
+      <ComponentRef Id="VelesUninstallCleanup" />
+
+      <Feature Id="PluginsFeature" Title="Plugins" Description="Optional plugins that extend Radegast Veles." Level="1">
+        <Feature Id="Plugin.Automation" Title="Automation Plugin" Description="Provides scripting and automation capabilities." Level="1">
+          <ComponentGroupRef Id="Plugin.Automation" />
+        </Feature>
+        <Feature Id="Plugin.Discord"
+          <ComponentGroupRef Id="Plugin.Discord" />
+        </Feature>
+        <Feature Id="Plugin.Email" Title="Email Plugin" Description="Email functionality." Level="1">
+          <ComponentGroupRef Id="Plugin.Email" />
+        </Feature>
+        <Feature Id="Plugin.ImportExport" Title="Import/Export Plugin" Description="Import and export support for inventory and regions." Level="1">
+          <ComponentGroupRef Id="Plugin.ImportExport" />
+        </Feature>
+        <Feature Id="Plugin.IRC" Title="IRC Plugin" Description="IRC chat integration." Level="1">
+          <ComponentGroupRef Id="Plugin.IRC" />
+        </Feature>
+        <Feature Id="Plugin.OllamaChat" Title="Ollama Chat Plugin" Description="AI chat via a local Ollama server." Level="1">
+          <ComponentGroupRef Id="Plugin.OllamaChat" />
+        </Feature>
+      </Feature>
+    </Feature>
+
+    <?include UI.wxi?>
+  </Package>
+</Wix>

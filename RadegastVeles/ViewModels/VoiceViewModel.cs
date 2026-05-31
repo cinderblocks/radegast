@@ -18,8 +18,10 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading.Tasks;
+using Avalonia.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -35,10 +37,10 @@ namespace Radegast.Veles.ViewModels;
 /// Created once per login in <see cref="MainViewModel"/> and exposed through
 /// <see cref="NearbyViewModel.Voice"/> so <see cref="Views.ChatPanel"/> can bind to it.
 /// </summary>
-public partial class VoiceViewModel : ObservableObject, IDisposable
+public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private VoiceManager? _voice;
+    // Internal so VoiceSynthViewModel can access the audio device for injection.
+    internal VoiceManager? _voice;
 
     /// <summary>True when the SDL3 audio backend initialised successfully.</summary>
     [ObservableProperty]
@@ -77,6 +79,10 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isPushToTalking;
 
+    /// <summary>Key used to trigger push-to-talk. Defaults to LeftAlt (common PTT convention).</summary>
+    [ObservableProperty]
+    private Key _pttKey = Key.LeftAlt;
+
     /// <summary>Live microphone input level, 0–1 (RMS). Updates ~20fps while recording.</summary>
     [ObservableProperty]
     private float _micLevel;
@@ -86,7 +92,13 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
     private bool _isMicTestActive;
 
     public string ConnectLabel => IsConnected ? "Leave Voice" : "Join Voice";
-    public string MicIcon      => IsMicMuted  ? "🔇"          : "🎤";
+    public string MicIcon      => IsMicMuted  ? "Muted"        : "Talk";
+
+    /// <summary>Label displayed on the PTT button (mic emoji + state).</summary>
+    public string PttButtonLabel => IsPushToTalking ? "🎙 Live" : "🎙 Talk";
+
+    /// <summary>Tooltip shown on the PTT button including the hotkey hint.</summary>
+    public string PttButtonTooltip => $"Hold to talk  [{_pttKey}]";
 
     /// <summary>True when voice hardware is available AND the user has voice enabled.</summary>
     public bool IsVisibleInUI          => IsAvailable && VoiceEnabled;
@@ -115,13 +127,41 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
     /// <summary>Avatars currently in the same voice channel.</summary>
     public ObservableCollection<VoiceParticipant> Participants { get; } = [];
 
+    /// <summary>Fired on the UI thread when a peer joins the voice channel.</summary>
+    public event Action<UUID>? PeerJoined;
+    /// <summary>Fired on the UI thread when a peer leaves the voice channel.</summary>
+    public event Action<UUID>? PeerLeft;
+    /// <summary>Fired on the UI thread when a peer's speaking state changes.</summary>
+    public event Action<UUID, VoiceSession.PeerAudioState>? PeerAudioUpdated;
+    /// <summary>Fired on the UI thread when a group/conference voice session is joined.</summary>
+    public event Action<UUID>? GroupVoiceJoined;
+    /// <summary>Fired on the UI thread when a group/conference voice session ends or fails.</summary>
+    public event Action<UUID>? GroupVoiceLeft;
+
+    /// <summary>Sensible key choices offered in the PTT key picker.</summary>
+    public static IReadOnlyList<Key> PttKeyOptions { get; } =
+    [
+        Key.LeftAlt, Key.RightAlt,
+        Key.LeftCtrl, Key.RightCtrl,
+        Key.LeftShift, Key.RightShift,
+        Key.F1, Key.F2, Key.F3, Key.F4, Key.F5,
+        Key.F6, Key.F7, Key.F8, Key.F9, Key.F10,
+        Key.CapsLock, Key.Tab,
+        Key.Insert, Key.Home, Key.End,
+        Key.PageUp, Key.PageDown,
+        Key.OemTilde, Key.Back,
+    ];
+
     private float _micLevelSmooth;
     private long _lastMicLevelTick;
     private bool _micTestStartedRecording;
 
-    public VoiceViewModel(RadegastInstanceAvalonia instance)
+    /// <summary>Voice-synthesis service that injects synthesised speech into voice.</summary>
+    public VoiceSynthViewModel VoiceSynth { get; }
+
+    public VoiceViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
+        VoiceSynth = new VoiceSynthViewModel(instance, this);
         try
         {
             _voice = new VoiceManager(instance.Client);
@@ -152,6 +192,9 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         OutputVolume = s["voice_output_volume"].Type != OSDType.Unknown ? s["voice_output_volume"].AsInteger() : 80;
         var savedDevice = s["voice_input_device"].AsString();
         SelectedInputDevice = string.IsNullOrEmpty(savedDevice) ? "(Default)" : savedDevice;
+        if (s["voice_ptt_key"].Type != OSDType.Unknown &&
+            Enum.TryParse<Key>(s["voice_ptt_key"].AsString(), out var savedKey))
+            PttKey = savedKey;
 
         if (_voice != null)
         {
@@ -168,6 +211,7 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         s["voice_push_to_talk"]  = OSD.FromBoolean(PushToTalkEnabled);
         s["voice_auto_connect"]  = OSD.FromBoolean(AutoConnect);
         s["voice_output_volume"] = OSD.FromInteger(OutputVolume);
+        s["voice_ptt_key"]       = OSD.FromString(PttKey.ToString());
         var deviceToSave = SelectedInputDevice == "(Default)" ? string.Empty : SelectedInputDevice;
         s["voice_input_device"]  = OSD.FromString(deviceToSave);
 
@@ -190,6 +234,17 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
 
     // ── Public API used by other ViewModels ───────────────────────────────
 
+    /// <summary>
+    /// Called once after login. If <see cref="AutoConnect"/> is enabled and voice is
+    /// available, automatically joins parcel voice so the user does not have to press
+    /// "Join Voice" manually.
+    /// </summary>
+    internal async Task TryAutoConnectAsync()
+    {
+        if (AutoConnect && VoiceEnabled && IsAvailable && !IsConnected)
+            await Connect();
+    }
+
     internal async Task JoinGroupVoiceAsync(UUID groupId)
     {
         if (_voice == null) return;
@@ -201,6 +256,20 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
     {
         if (_voice == null) return;
         try { await _voice.LeaveGroupVoice(groupId); }
+        catch { }
+    }
+
+    internal async Task JoinConferenceVoiceAsync(UUID sessionId)
+    {
+        if (_voice == null) return;
+        try { await _voice.JoinConferenceVoice(sessionId); }
+        catch (Exception ex) { StatusText = $"Conference voice failed: {ex.Message}"; }
+    }
+
+    internal async Task LeaveConferenceVoiceAsync(UUID sessionId)
+    {
+        if (_voice == null) return;
+        try { await _voice.LeaveConferenceVoice(sessionId); }
         catch { }
     }
 
@@ -278,6 +347,16 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         }
     }
 
+    partial void OnIsPushToTalkingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(PttButtonLabel));
+    }
+
+    partial void OnPttKeyChanged(Key value)
+    {
+        OnPropertyChanged(nameof(PttButtonTooltip));
+    }
+
     /// <summary>Called by the UI's PointerPressed event on the PTT button. Unmutes the mic.</summary>
     public void StartPushToTalk()
     {
@@ -340,7 +419,12 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         _voice.PeerAudioUpdated             += OnPeerAudioUpdated;
         _voice.OnP2PCallIncoming            += OnP2PCallIncoming;
         _voice.OnGroupVoiceJoined           += OnGroupVoiceJoined;
+        _voice.OnGroupVoiceLeft             += OnGroupVoiceLeft;
+        _voice.OnGroupVoiceJoinFailed       += OnGroupVoiceJoinFailed;
+        _voice.OnReprovisionSucceeded       += OnReprovisionSucceeded;
+        _voice.OnReprovisionFailed          += OnReprovisionFailed;
         _voice.AudioDevice.OnAudioSourceEncodedSample += OnEncodedSampleReceived;
+        _instance.Names.NameUpdated += OnNamesUpdated;
     }
 
     private void UnwireEvents()
@@ -355,7 +439,12 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         _voice.PeerAudioUpdated             -= OnPeerAudioUpdated;
         _voice.OnP2PCallIncoming            -= OnP2PCallIncoming;
         _voice.OnGroupVoiceJoined           -= OnGroupVoiceJoined;
+        _voice.OnGroupVoiceLeft             -= OnGroupVoiceLeft;
+        _voice.OnGroupVoiceJoinFailed       -= OnGroupVoiceJoinFailed;
+        _voice.OnReprovisionSucceeded       -= OnReprovisionSucceeded;
+        _voice.OnReprovisionFailed          -= OnReprovisionFailed;
         _voice.AudioDevice.OnAudioSourceEncodedSample -= OnEncodedSampleReceived;
+        _instance.Names.NameUpdated -= OnNamesUpdated;
     }
 
     // ── Event handlers ────────────────────────────────────────────────────
@@ -365,11 +454,21 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         {
             IsConnected = true;
             StatusText  = "Connected";
-            // In PTT mode, start with mic muted
-            if (PushToTalkEnabled && _voice != null)
+            VoiceSynth.OnVoiceConnected();
+            if (_voice != null)
             {
-                IsMicMuted = true;
-                _voice.AudioDevice.MicMute = true;
+                if (PushToTalkEnabled)
+                {
+                    // PTT mode: keep mic muted until the Talk button is held
+                    IsMicMuted = true;
+                    _voice.AudioDevice.MicMute = true; // ensures StopRecording()
+                }
+                else
+                {
+                    // Open-mic mode: start recording immediately on connect
+                    IsMicMuted = false;
+                    _voice.AudioDevice.MicMute = false; // calls StartRecording()
+                }
             }
         });
 
@@ -381,18 +480,20 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
             IsPushToTalking = false;
             Participants.Clear();
             StatusText = "Disconnected";
+            VoiceSynth.OnVoiceDisconnected();
         });
 
     private void OnRegionTransitionCompleted()
-        => Dispatcher.UIThread.Post(async () =>
+        => Dispatcher.UIThread.Post(() =>
         {
             // Participants from the old region are stale
             Participants.Clear();
             IsConnected = false;
             StatusText  = "Reconnecting...";
-            if (AutoConnect)
-                await Connect();
-            // PeerConnectionReady will set IsConnected = true when the new session is ready
+            // VoiceManager.ReprovisionForNewRegion() already created and provisioned the new
+            // session before firing this event. Do NOT call ConnectPrimaryRegion() here —
+            // that would race a second session against the one the manager already started.
+            // PeerConnectionReady will set IsConnected = true when the new session connects.
         });
 
     private void OnRegionTransitionFailed(Exception ex)
@@ -409,6 +510,19 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         {
             if (!TryGetParticipant(peerId, out _))
                 Participants.Add(new VoiceParticipant(peerId, name));
+            PeerJoined?.Invoke(peerId);
+        });
+    }
+
+    private void OnNamesUpdated(object? sender, UUIDNameReplyEventArgs e)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            foreach (var kvp in e.Names)
+            {
+                if (TryGetParticipant(kvp.Key, out var p))
+                    p!.Name = kvp.Value;
+            }
         });
     }
 
@@ -423,6 +537,7 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
                     break;
                 }
             }
+            PeerLeft?.Invoke(peerId);
         });
 
     private void OnPeerAudioUpdated(UUID peerId, VoiceSession.PeerAudioState state)
@@ -432,21 +547,59 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         {
             if (TryGetParticipant(peerId, out var p))
                 p!.IsSpeaking = speaking;
+            PeerAudioUpdated?.Invoke(peerId, state);
         });
     }
 
     private void OnP2PCallIncoming(UUID callerId)
     {
         var name = _instance.Names.Get(callerId);
-        var vm = NotificationViewModel.ForGenericMessage(
-            "Incoming Voice Call",
-            $"{name} is calling you.");
+        var vm = NotificationViewModel.ForVoiceCallIncoming(
+            name,
+            onAccept: async () =>
+            {
+                if (_voice == null) return;
+                var ok = await _voice.AcceptIncomingP2PCall(callerId);
+                if (!ok)
+                    Dispatcher.UIThread.Post(() => StatusText = $"Could not connect voice call from {name}");
+            },
+            onDecline: () => _voice?.DeclineIncomingP2PCall(callerId));
         Dispatcher.UIThread.Post(() =>
             _instance.RaiseNotification(vm));
     }
 
     private void OnGroupVoiceJoined(UUID groupId)
-        => Dispatcher.UIThread.Post(() => IsConnected = true);
+        => Dispatcher.UIThread.Post(() =>
+        {
+            IsConnected = true;
+            GroupVoiceJoined?.Invoke(groupId);
+        });
+
+    private void OnGroupVoiceLeft(UUID groupId)
+        => Dispatcher.UIThread.Post(() => GroupVoiceLeft?.Invoke(groupId));
+
+    private void OnGroupVoiceJoinFailed(UUID groupId, Exception ex)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            StatusText = $"Group voice failed: {ex.Message}";
+            GroupVoiceLeft?.Invoke(groupId);
+        });
+
+    private void OnReprovisionSucceeded()
+        => Dispatcher.UIThread.Post(() =>
+        {
+            StatusText = "Reconnected";
+        });
+
+    private void OnReprovisionFailed(Exception ex)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            IsConnected    = false;
+            IsMicMuted     = false;
+            IsPushToTalking = false;
+            Participants.Clear();
+            StatusText = $"Voice reconnect failed: {ex.Message}";
+        });
 
     private void OnEncodedSampleReceived(uint durationRtpUnits, byte[] sample)
     {
@@ -484,6 +637,7 @@ public partial class VoiceViewModel : ObservableObject, IDisposable
         UnwireEvents();
         try { _voice?.Disconnect(); } catch { }
         _voice = null;
+        VoiceSynth.Dispose();
     }
 }
 

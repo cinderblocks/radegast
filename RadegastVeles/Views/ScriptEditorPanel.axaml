@@ -11,8 +11,8 @@
              x:Class="Radegast.Veles.Views.ScriptEditorPanel"
              x:DataType="vm:ScriptEditorViewModel"
              AutomationProperties.Name="Script editor">
-    <DockPanel>
-        <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="4,2">
+    <Grid RowDefinitions="Auto,*,Auto,Auto,Auto">
+        <Border Grid.Row="0" BorderThickness="0,0,0,1" Padding="4,2">
             <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="{Binding ScriptName}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" AutomationProperties.Name="Script name" />
                 <Button Content="Save to SL" Command="{Binding SaveCommand}" Margin="0,0,4,0" MinWidth="76" AutomationProperties.Name="Save script to Second Life" />
@@ -24,29 +24,37 @@
                 <TextBlock Text="{Binding CursorColumn, StringFormat={}Col {0}}" VerticalAlignment="Center" AutomationProperties.Name="Cursor column number" />
             </WrapPanel>
         </Border>
-        <Border DockPanel.Dock="Bottom" IsVisible="{Binding HasCompileOutput}" BorderThickness="0,1,0,0" MaxHeight="120" Padding="4">
+        <avaloniaEdit:TextEditor Grid.Row="1"
+                                 x:Name="ScriptEditor"
+                                 ShowLineNumbers="True"
+                                 FontFamily="Courier New, Consolas, Monospace"
+                                 FontSize="13"
+                                 WordWrap="False"
+                                 AutomationProperties.Name="Script text editor"
+                                 Margin="0" />
+        <Border Grid.Row="2" IsVisible="{Binding HasCompileOutput}" BorderThickness="0,1,0,0" MaxHeight="120" Padding="4">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <TextBlock Text="{Binding CompileOutput}" FontFamily="Courier New, Consolas, Monospace" TextWrapping="Wrap" AutomationProperties.Name="Compile output" />
             </ScrollViewer>
         </Border>
-        <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="4,2">
-            <TextBlock Grid.Column="0" Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Script editor status" />
-            <ProgressBar Grid.Column="1" IsVisible="{Binding IsLoading}" IsIndeterminate="True" Width="80" Height="8" VerticalAlignment="Center" AutomationProperties.Name="Loading indicator" />
-        </Grid>
-        <ContentControl DockPanel.Dock="Bottom" Content="{Binding Metadata}">
+        <ContentControl Grid.Row="3" Content="{Binding Metadata}">
             <ContentControl.ContentTemplate>
                 <DataTemplate x:DataType="vm:ItemMetadataViewModel">
                     <views:ItemMetadataPanel />
                 </DataTemplate>
             </ContentControl.ContentTemplate>
         </ContentControl>
-        <avaloniaEdit:TextEditor x:Name="ScriptEditor"
-                                 ShowLineNumbers="True"
-                                 FontFamily="Courier New, Consolas, Monospace"
-                                 FontSize="13"
-                                 WordWrap="False"
-                                 IsReadOnly="{Binding IsLoading}"
-                                 AutomationProperties.Name="Script text editor"
-                                 Margin="0" />
-    </DockPanel>
+        <Grid Grid.Row="4" ColumnDefinitions="*,Auto" Margin="4,2">
+            <TextBlock Grid.Column="0"
+                       Text="{Binding StatusText}"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Script editor status" />
+            <ProgressBar Grid.Column="1"
+                         IsVisible="{Binding IsLoading}"
+                         IsIndeterminate="True"
+                         Width="80" Height="8"
+                         VerticalAlignment="Center"
+                         AutomationProperties.Name="Loading indicator" />
+        </Grid>
+    </Grid>
 </UserControl>

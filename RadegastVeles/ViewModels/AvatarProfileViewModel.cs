@@ -33,14 +33,10 @@ using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class AvatarProfileViewModel : ObservableObject, IDisposable, IChatContext
+public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable, IChatContext
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
-
     public UUID AgentID { get; }
     public bool IsOwnProfile => AgentID == Client.Self.AgentID;
-    public RadegastInstanceAvalonia Instance => _instance;
 
     [ObservableProperty] private string _displayName = string.Empty;
     [ObservableProperty] private string _bornOn = string.Empty;
@@ -145,9 +141,8 @@ public partial class AvatarProfileViewModel : ObservableObject, IDisposable, ICh
     private Avatar.AvatarProperties? _properties;
     private bool _gotProperties;
 
-    public AvatarProfileViewModel(RadegastInstanceAvalonia instance, string name, UUID agentId)
+    public AvatarProfileViewModel(RadegastInstanceAvalonia instance, string name, UUID agentId) : base(instance)
     {
-        _instance = instance;
         AgentID = agentId;
         DisplayName = name;
         AgentIdText = agentId.ToString();
@@ -466,7 +461,14 @@ public partial class AvatarProfileViewModel : ObservableObject, IDisposable, ICh
         }
         if (!httpOk)
             Client.Self.UpdateProfileNotes(AgentID, Notes);
-        _instance.ShowNotificationInChat($"Notes saved for {DisplayName}.");
+        VelesNotificationService.Show("Profile", $"Notes saved for {DisplayName}.");
+    }
+
+    [RelayCommand]
+    private void ChangeDisplayName()
+    {
+        if (!IsOwnProfile) return;
+        _instance.ShowChangeDisplayName();
     }
 
     [RelayCommand]
@@ -708,6 +710,21 @@ public partial class AvatarProfileViewModel : ObservableObject, IDisposable, ICh
         {
             setter(bitmap);
         });
+    }
+
+    [RelayCommand]
+    private void ShareItem()
+    {
+        if (IsOwnProfile) return;
+        _instance.ShowInventoryPicker(
+            $"Share item with {DisplayName}",
+            null,
+            entry =>
+            {
+                Client.Inventory.GiveItem(entry.ItemId, entry.Name, entry.AssetType, AgentID, true);
+                _instance.ShowNotificationInChat($"Offered '{entry.Name}' to {DisplayName}.");
+            },
+            item => (item.Permissions.OwnerMask & PermissionMask.Transfer) != 0);
     }
 
     /// <summary>

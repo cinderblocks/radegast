@@ -113,7 +113,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private void Restrictions_RestrictionUpdated(object sender, LibreMetaverse.RLV.EventArguments.RestrictionUpdatedEventArgs e)
+        private void Restrictions_RestrictionUpdated(object? sender, LibreMetaverse.RLV.EventArguments.RestrictionUpdatedEventArgs e)
         {
             if (EnabledDebugCommands)
             {
@@ -122,7 +122,7 @@ namespace Radegast.Core.RLV
         }
 
         #region Item Reporting
-        private async void Objects_KillObject(object sender, KillObjectEventArgs e)
+        private async void Objects_KillObject(object? sender, KillObjectEventArgs e)
         {
             if (!Enabled)
             {
@@ -154,7 +154,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private async void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
+        private async void Objects_AttachmentUpdate(object? sender, PrimEventArgs e)
         {
             if (!Enabled)
             {
@@ -338,7 +338,7 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                if (!UUID.TryParse(attachItemID.ToString()!, out var attachmentId))
                 {
                     continue;
                 }
@@ -381,7 +381,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private async void CleanupTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        private async void CleanupTimer_Elapsed(object? sender, System.Timers.ElapsedEventArgs e)
         {
             if (!Enabled)
             {

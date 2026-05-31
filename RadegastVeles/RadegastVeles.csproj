@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyTitle>Radegast Veles</AssemblyTitle>
     <RootNamespace>Radegast.Veles</RootNamespace>
     <AssemblyName>RadegastVeles</AssemblyName>
@@ -9,12 +9,17 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
-    <OutputPath>..\bin\$(Configuration)\</OutputPath>
+    <OutputPath>..\bin\Veles\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <ApplicationIcon>..\Radegast\radegast.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>BenchmarkSuite1</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugType>full</DebugType>
     <DefineConstants>TRACE;DEBUG</DefineConstants>
@@ -30,20 +35,32 @@
     <Compile Remove="Generated\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="11.3.13" />
-    <PackageReference Include="Avalonia.AvaloniaEdit" Version="11.4.1" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.13" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.13" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.13" />
+    <PackageReference Include="Avalonia" Version="12.0.3" />
+    <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.3" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.3" />
     <PackageReference Include="BugSplatDotNetStandard" Version="4.3.0" />
     <PackageReference Include="OpenTK.Graphics" Version="4.9.4" />
     <PackageReference Include="OpenTK.Mathematics" Version="4.9.4" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.11" />
-    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="2.6.4" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.8" />
+    <!-- sherpa-onnx: managed API + platform-specific native runtimes -->
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-x64" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-x64" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.2" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.2" />
+    <PackageReference Include="SharpCompress" Version="0.48.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
+    <ProjectReference Include="..\Radegast.Veles.PluginApi\Radegast.Veles.PluginApi.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.RLV\LibreMetaverse.RLV.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Rendering.MeshFoundry\LibreMetaverse.Rendering.MeshFoundry.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Voice.WebRTC\LibreMetaverse.Voice.WebRTC.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\radegast.ico" />
@@ -52,5 +69,10 @@
   <Import Project="AutogenerateFiles.targets" />
   <Target Name="GenerateVelesFiles" BeforeTargets="BeforeBuild">
     <GenerateFile Filename="$(ProjectDir)Generated.cs" />
+  </Target>
+  <Target Name="CopyNativeAssemblies" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x64&quot; &quot;$(OutDir)dll\x64\&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x86&quot; &quot;$(OutDir)dll\x86\&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\arm64&quot; &quot;$(OutDir)dll\arm64\&quot; /E/I" />
   </Target>
 </Project>

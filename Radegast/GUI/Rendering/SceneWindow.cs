@@ -126,7 +126,7 @@ namespace Radegast.Rendering
         private RenderAvatar myself;
 
         private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
 
         private OpenTK.Graphics.GraphicsMode GLMode = null;
 
@@ -204,7 +204,7 @@ namespace Radegast.Rendering
             };
             genericTaskThread.Start();
 
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
             renderTimer = new System.Diagnostics.Stopwatch();
             renderTimer.Start();
 

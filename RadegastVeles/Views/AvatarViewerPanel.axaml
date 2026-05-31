@@ -10,59 +10,133 @@
              x:Class="Radegast.Veles.Views.AvatarViewerPanel"
              x:DataType="vm:AvatarViewerViewModel"
              AutomationProperties.Name="3D avatar viewer">
+
     <DockPanel>
+
+        <!-- Toolbar -->
         <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="6,3">
             <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <TextBlock Text="{Binding AvatarName}" FontWeight="SemiBold" VerticalAlignment="Center"
-                           Margin="0,0,12,0" AutomationProperties.Name="Avatar name" />
-                <ToggleButton IsChecked="{Binding IsTpose}" Content="T-Pose" Margin="0,0,8,0"
-                              ToolTip.Tip="Toggle T-Pose / Current Pose (body mesh rendering pending)"
-                              AutomationProperties.Name="Toggle T-Pose" />
-                <Button Content="&#x27F3; Reset Camera" Command="{Binding ResetCameraCommand}"
-                        Margin="0,0,8,0" MinWidth="110" ToolTip.Tip="Return camera to front-on view"
+
+                <TextBlock Text="{Binding AvatarName}"
+                           FontWeight="SemiBold" VerticalAlignment="Center"
+                           Margin="0,0,12,0"
+                           AutomationProperties.Name="Avatar name" />
+
+                <Button Content="&#x27F3; Reset Camera"
+                        Command="{Binding ResetCameraCommand}"
+                        Margin="0,0,8,0" MinWidth="110"
+                        ToolTip.Tip="Return camera to default orbit position"
                         AutomationProperties.Name="Reset camera" />
-                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,6,0" VerticalAlignment="Center">
-                    <Grid ColumnDefinitions="26,2,26,2,26" RowDefinitions="22,2,22" VerticalAlignment="Center">
+
+                <!-- Orbit buttons: arrow cross -->
+                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,6,0"
+                        VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="26,2,26,2,26" RowDefinitions="22,2,22"
+                          VerticalAlignment="Center">
                         <Button Grid.Row="0" Grid.Column="2" Content="&#x2191;" Command="{Binding OrbitUpCommand}"
-                                Width="26" Height="22" Padding="0" HorizontalContentAlignment="Center"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
                                 ToolTip.Tip="Orbit up (10&#xB0;)" />
                         <Button Grid.Row="2" Grid.Column="0" Content="&#x2190;" Command="{Binding OrbitLeftCommand}"
-                                Width="26" Height="22" Padding="0" HorizontalContentAlignment="Center"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
                                 ToolTip.Tip="Orbit left (15&#xB0;)" />
                         <Button Grid.Row="2" Grid.Column="2" Content="&#x2193;" Command="{Binding OrbitDownCommand}"
-                                Width="26" Height="22" Padding="0" HorizontalContentAlignment="Center"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
                                 ToolTip.Tip="Orbit down (10&#xB0;)" />
                         <Button Grid.Row="2" Grid.Column="4" Content="&#x2192;" Command="{Binding OrbitRightCommand}"
-                                Width="26" Height="22" Padding="0" HorizontalContentAlignment="Center"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
                                 ToolTip.Tip="Orbit right (15&#xB0;)" />
                     </Grid>
                 </Border>
-                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,8,0" VerticalAlignment="Center">
+
+                <!-- Zoom buttons -->
+                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="0,0,8,0"
+                        VerticalAlignment="Center">
                     <StackPanel Orientation="Vertical" Spacing="1" VerticalAlignment="Center">
-                        <Button Content="+" Command="{Binding ZoomInCommand}" Width="26" Height="22" Padding="0"
-                                HorizontalContentAlignment="Center" ToolTip.Tip="Zoom in" />
-                        <Button Content="&#x2212;" Command="{Binding ZoomOutCommand}" Width="26" Height="22" Padding="0"
-                                HorizontalContentAlignment="Center" ToolTip.Tip="Zoom out" />
+                        <Button Content="+" Command="{Binding ZoomInCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Zoom in" />
+                        <Button Content="&#x2212;" Command="{Binding ZoomOutCommand}"
+                                Width="26" Height="22" Padding="0"
+                                HorizontalContentAlignment="Center"
+                                ToolTip.Tip="Zoom out" />
                     </StackPanel>
                 </Border>
+
+                <CheckBox Content="Wireframe"
+                          IsChecked="{Binding Wireframe}"
+                          VerticalAlignment="Center"
+                          Margin="0,0,6,0"
+                          AutomationProperties.Name="Toggle wireframe overlay" />
+
+                <!-- Pose mode selector -->
+                <Border BorderThickness="1,0,0,0" Padding="8,0,8,0"
+                        VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="Pose:" VerticalAlignment="Center" />
+                        <ComboBox SelectedIndex="{Binding PoseModeIndex}"
+                                  MinWidth="130" VerticalAlignment="Center"
+                                  ToolTip.Tip="Switch between live animation, A-pose reference, and T-pose bind pose"
+                                  AutomationProperties.Name="Pose mode">
+                            <ComboBoxItem Content="Live animation" />
+                            <ComboBoxItem Content="A-pose" />
+                            <ComboBoxItem Content="T-pose" />
+                        </ComboBox>
+                    </StackPanel>
+                </Border>
+
+                <Border BorderThickness="1,0,0,0" Padding="8,0,0,0"
+                        VerticalAlignment="Center">
+                    <Button Content="&#x27F3; Refresh"
+                            Command="{Binding RefreshCommand}"
+                            MinWidth="80"
+                            ToolTip.Tip="Reload avatar mesh and textures"
+                            AutomationProperties.Name="Refresh avatar" />
+                </Border>
+
             </WrapPanel>
         </Border>
+
+        <!-- Status bar -->
         <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" Padding="6,2">
-            <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Grid.Column="0" Text="{Binding StatusText}" VerticalAlignment="Center"
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0"
+                           Text="{Binding StatusText}"
+                           VerticalAlignment="Center"
                            AutomationProperties.Name="Status" />
-                <ProgressBar Grid.Column="1" IsVisible="{Binding IsLoading}" IsIndeterminate="True"
-                             Width="80" Height="10" Margin="8,0,0,0"
+                <TextBlock Grid.Column="1"
+                           Text="{Binding PoseHintText}"
+                           Opacity="0.5" FontSize="11"
+                           VerticalAlignment="Center"
+                           Margin="12,0,8,0"
+                           AutomationProperties.Name="Pose mode note" />
+                <ProgressBar Grid.Column="2"
+                             IsVisible="{Binding IsLoading}"
+                             IsIndeterminate="True"
+                             Width="80" Height="10"
                              AutomationProperties.Name="Loading indicator" />
             </Grid>
         </Border>
-        <Border DockPanel.Dock="Top" IsVisible="{Binding HasError}" Background="#CC0000"
-                Padding="8,4" Margin="0,0,0,2">
-            <TextBlock Text="{Binding ErrorText}" Foreground="White" TextWrapping="Wrap"
+
+        <!-- Error overlay -->
+        <Border DockPanel.Dock="Top"
+                IsVisible="{Binding HasError}"
+                Background="#CC0000" Padding="8,4" Margin="0,0,0,2">
+            <TextBlock Text="{Binding ErrorText}"
+                       Foreground="White" TextWrapping="Wrap"
                        AutomationProperties.Name="Error message" />
         </Border>
-        <rendering:GlViewportControl x:Name="Viewport" HorizontalAlignment="Stretch"
+
+        <!-- 3-D viewport -->
+        <rendering:GlViewportControl x:Name="Viewport"
+                                     Wireframe="{Binding Wireframe}"
+                                     HorizontalAlignment="Stretch"
                                      VerticalAlignment="Stretch"
-                                     AutomationProperties.Name="3D viewport" />
+                                     AutomationProperties.Name="3D avatar viewport" />
+
     </DockPanel>
 </UserControl>

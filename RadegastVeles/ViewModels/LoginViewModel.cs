@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -61,6 +62,12 @@ public partial class LoginViewModel : ObservableObject
     private bool _isLoggingIn;
 
     [ObservableProperty]
+    private bool _isMfaRequired;
+
+    [ObservableProperty]
+    private string _mfaToken = string.Empty;
+
+    [ObservableProperty]
     private bool _isCustomGrid;
 
     [ObservableProperty]
@@ -72,18 +79,20 @@ public partial class LoginViewModel : ObservableObject
     [ObservableProperty]
     private SavedAccount? _selectedSavedAccount;
 
+    [ObservableProperty]
+    private LoginLocationItem? _selectedLocationItem;
+
     public ObservableCollection<Grid> Grids { get; } = new();
     public ObservableCollection<SavedAccount> SavedAccounts { get; } = new();
+    public ObservableCollection<LoginLocationItem> LocationItems { get; } = new();
 
-    public ObservableCollection<string> LocationOptions { get; } = new()
+    partial void OnSelectedLocationItemChanged(LoginLocationItem? value)
     {
-        "Home",
-        "Last Location",
-        "Custom…"
-    };
-
-    partial void OnSelectedLocationIndexChanged(int value)
-        => IsCustomLocation = value == 2;
+        if (value == null) return;
+        if (value.Kind == LoginLocationKind.Favorite && value.Location != null)
+            CustomLocation = value.Location;
+        IsCustomLocation = value.Kind == LoginLocationKind.Custom;
+    }
 
     public LoginViewModel(CredentialManager credentialManager)
     {
@@ -97,16 +106,20 @@ public partial class LoginViewModel : ObservableObject
             SavedAccounts.Add(account);
         }
 
-        // Pre-populate with the last-used account
+        // Pre-populate with the last-used account (triggers OnSelectedSavedAccountChanged
+        // which rebuilds LocationItems with that account's favorites)
         if (SavedAccounts.Count > 0)
         {
             SelectedSavedAccount = SavedAccounts[0];
         }
+        else
+        {
+            RebuildLocationItems([]);
+        }
 
-        // Restore previously saved start-location selection.
+        // Restore previously saved start-location selection
         var (savedIdx, savedCustom) = _credentialManager.LoadLoginPreferences();
-        SelectedLocationIndex = savedIdx;
-        CustomLocation = savedCustom;
+        RestoreLocationPreference(savedIdx, savedCustom);
     }
 
     private void EnsureInstance()
@@ -150,6 +163,28 @@ public partial class LoginViewModel : ObservableObject
         if (pwd != null) Password = pwd;
 
         RememberCredentials = true;
+        IsMfaRequired = false;
+        MfaToken = string.Empty;
+
+        // Rebuild location items with this account's saved favorites
+        var accountKey = $"{value.Username.ToLowerInvariant()}:{value.GridId}";
+        var favs = _credentialManager.GetFavoriteLocations(accountKey);
+        var currentItem = SelectedLocationItem;
+        RebuildLocationItems(favs);
+
+        // Preserve selection kind across account switches
+        if (currentItem != null)
+        {
+            SelectedLocationItem = currentItem.Kind switch
+            {
+                LoginLocationKind.Home => LocationItems[0],
+                LoginLocationKind.Last => LocationItems[1],
+                LoginLocationKind.Favorite => LocationItems.FirstOrDefault(
+                    i => i.Kind == LoginLocationKind.Favorite && i.Location == currentItem.Location)
+                    ?? LocationItems[1],
+                _ => LocationItems[^1]
+            };
+        }
     }
 
     [RelayCommand]
@@ -160,6 +195,43 @@ public partial class LoginViewModel : ObservableObject
         _credentialManager.RemoveAccount(SelectedSavedAccount.Username, SelectedSavedAccount.GridId);
         SavedAccounts.Remove(SelectedSavedAccount);
         SelectedSavedAccount = null;
+    }
+
+    private void RebuildLocationItems(List<(string Name, string Location)> favorites)
+    {
+        LocationItems.Clear();
+        LocationItems.Add(new LoginLocationItem("Home", LoginLocationKind.Home));
+        LocationItems.Add(new LoginLocationItem("Last Location", LoginLocationKind.Last));
+        foreach (var (name, location) in favorites)
+            LocationItems.Add(new LoginLocationItem(name, LoginLocationKind.Favorite, location));
+        LocationItems.Add(new LoginLocationItem("Custom\u2026", LoginLocationKind.Custom));
+        SelectedLocationItem = LocationItems[1]; // default to Last Location
+    }
+
+    private void RestoreLocationPreference(int savedIdx, string savedCustom)
+    {
+        if (savedIdx == 0)
+        {
+            SelectedLocationItem = LocationItems[0];
+        }
+        else if (savedIdx == 1)
+        {
+            SelectedLocationItem = LocationItems[1];
+        }
+        else
+        {
+            var fav = LocationItems.FirstOrDefault(
+                i => i.Kind == LoginLocationKind.Favorite && i.Location == savedCustom);
+            if (fav != null)
+            {
+                SelectedLocationItem = fav;
+            }
+            else
+            {
+                SelectedLocationItem = LocationItems[^1];
+                CustomLocation = savedCustom;
+            }
+        }
     }
 
     [RelayCommand]
@@ -174,6 +246,21 @@ public partial class LoginViewModel : ObservableObject
         EnsureInstance();
 
         var netCom = _instance!.NetCom;
+
+        // MFA challenge was issued — retry with only the token; hash already set by LoginResponseCallback.
+        if (IsMfaRequired)
+        {
+            if (string.IsNullOrWhiteSpace(MfaToken))
+            {
+                StatusText = "Please enter your authenticator code.";
+                return;
+            }
+            netCom.LoginOptions.MfaToken = MfaToken;
+            IsLoggingIn = true;
+            StatusText = "Verifying authenticator code...";
+            netCom.Login();
+            return;
+        }
 
         string[] parts = Regex.Split(Username.Trim(), @"[. ]+");
         if (parts.Length >= 2)
@@ -192,12 +279,12 @@ public partial class LoginViewModel : ObservableObject
         netCom.LoginOptions.Version = "Radegast Veles 0.1";
         netCom.AgreeToTos = true;
 
-        switch (SelectedLocationIndex)
+        switch (SelectedLocationItem?.Kind)
         {
-            case 0:
+            case LoginLocationKind.Home:
                 netCom.LoginOptions.StartLocation = StartLocationType.Home;
                 break;
-            case 1:
+            case LoginLocationKind.Last:
                 netCom.LoginOptions.StartLocation = StartLocationType.Last;
                 break;
             default:
@@ -223,23 +310,47 @@ public partial class LoginViewModel : ObservableObject
 
         IsLoggingIn = true;
         StatusText = "Logging in...";
-        _credentialManager.SaveLoginPreferences(SelectedLocationIndex, CustomLocation);
+        var prefIdx = SelectedLocationItem?.Kind switch
+        {
+            LoginLocationKind.Home => 0,
+            LoginLocationKind.Last => 1,
+            _ => 2
+        };
+        _credentialManager.SaveLoginPreferences(prefIdx, CustomLocation);
+
+        // Load saved MFA hash for silent MFA (empty token = use cached hash only).
+        var savedGridId = SelectedGrid?.ID == "custom" ? "custom" : SelectedGrid?.ID ?? string.Empty;
+        netCom.LoginOptions.MfaHash = _credentialManager.GetMfaHash(Username.Trim(), savedGridId) ?? string.Empty;
+        netCom.LoginOptions.MfaToken = string.Empty;
+
         netCom.Login();
     }
 
     [RelayCommand]
     private void CancelLogin()
     {
-        if (_instance != null && (_instance.NetCom.IsLoggingIn || _instance.NetCom.IsLoggedIn))
+        if (_instance != null && _instance.NetCom.IsLoggingIn)
         {
-            _instance.NetCom.Logout();
+            _instance.NetCom.CancelLogin();
         }
         IsLoggingIn = false;
+        IsMfaRequired = false;
+        MfaToken = string.Empty;
         StatusText = "Login cancelled.";
     }
 
     private void NetCom_ClientLoginStatus(object? sender, LoginProgressEventArgs e)
     {
+        // MFA challenge: server wants a TOTP token, hash already updated in LoginOptions by NetComAvalonia.
+        if (e.FailReason == "mfa_challenge")
+        {
+            IsMfaRequired = true;
+            IsLoggingIn = false;
+            MfaToken = string.Empty;
+            StatusText = "Enter your authenticator code.";
+            return;
+        }
+
         StatusText = e.Status switch
         {
             LoginStatus.Success => "Login successful!",
@@ -250,19 +361,25 @@ public partial class LoginViewModel : ObservableObject
         if (e.Status == LoginStatus.Success)
         {
             IsLoggingIn = false;
+            IsMfaRequired = false;
 
             if (RememberCredentials && SelectedGrid != null)
             {
                 var gridId = SelectedGrid.ID;
                 var gridName = SelectedGrid.Name;
                 _credentialManager.SaveAccount(Username, Password, gridId, gridName);
+
+                // Persist the updated MFA hash returned by the server for future silent MFA.
+                var mfaHash = _instance!.NetCom.LoginOptions.MfaHash;
+                if (!string.IsNullOrEmpty(mfaHash))
+                    _credentialManager.SaveMfaHash(Username, gridId, mfaHash);
             }
 
             Cleanup();
 
             var instance = _instance!;
             _instance = null; // Transfer ownership
-            LoginSucceeded?.Invoke(this, new AgentLoginSucceededEventArgs(instance));
+            LoginSucceeded?.Invoke(this, new AgentLoginSucceededEventArgs(instance, Username, SelectedGrid?.ID ?? string.Empty));
         }
         else if (e.Status == LoginStatus.Failed)
         {
@@ -305,12 +422,34 @@ public partial class LoginViewModel : ObservableObject
     }
 }
 
+public enum LoginLocationKind { Home, Last, Favorite, Custom }
+
+public sealed class LoginLocationItem
+{
+    public string Name { get; }
+    public LoginLocationKind Kind { get; }
+    public string? Location { get; }
+
+    public LoginLocationItem(string name, LoginLocationKind kind, string? location = null)
+    {
+        Name = name;
+        Kind = kind;
+        Location = location;
+    }
+
+    public override string ToString() => Name;
+}
+
 public class AgentLoginSucceededEventArgs : EventArgs
 {
     public RadegastInstanceAvalonia Instance { get; }
+    public string Username { get; }
+    public string GridId { get; }
 
-    public AgentLoginSucceededEventArgs(RadegastInstanceAvalonia instance)
+    public AgentLoginSucceededEventArgs(RadegastInstanceAvalonia instance, string username, string gridId)
     {
         Instance = instance;
+        Username = username;
+        GridId = gridId;
     }
 }

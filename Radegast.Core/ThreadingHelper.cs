@@ -51,7 +51,7 @@ namespace Radegast
                         var handleProp = invoker.GetType().GetProperty("IsHandleCreated");
                         if (handleProp != null)
                         {
-                            hasHandle = (bool)handleProp.GetValue(invoker);
+                            hasHandle = (bool)handleProp.GetValue(invoker)!;
                         }
                     }
                     catch { }
@@ -89,7 +89,7 @@ namespace Radegast
                         var handleProp = invoker.GetType().GetProperty("IsHandleCreated");
                         if (handleProp != null)
                         {
-                            hasHandle = (bool)handleProp.GetValue(invoker);
+                            hasHandle = (bool)handleProp.GetValue(invoker)!;
                         }
                     }
                     catch { }
@@ -156,7 +156,7 @@ namespace Radegast
 
                 if (cancellationToken.CanBeCanceled)
                 {
-                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state).TrySetCanceled(), tcs, useSynchronizationContext: false);
+                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state!).TrySetCanceled(), tcs, useSynchronizationContext: false);
                 }
             }
             else
@@ -213,7 +213,7 @@ namespace Radegast
 
                 if (cancellationToken.CanBeCanceled)
                 {
-                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state).TrySetCanceled(), tcs, useSynchronizationContext: false);
+                    cancellationToken.Register(state => ((TaskCompletionSource<bool>)state!).TrySetCanceled(), tcs, useSynchronizationContext: false);
                 }
             }
             else

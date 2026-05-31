@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -98,7 +98,7 @@ namespace Radegast
 
             try
             {
-                string sysGridsFile = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "grids.xml");
+                string sysGridsFile = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "grids.xml");
                 OSDArray sysGrids = (OSDArray)OSDParser.DeserializeLLSDXml(File.ReadAllText(sysGridsFile));
                 foreach (var grid in sysGrids)
                 {

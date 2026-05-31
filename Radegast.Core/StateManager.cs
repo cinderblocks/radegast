@@ -280,7 +280,7 @@ namespace Radegast
             _disposed = true;
         }
 
-        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             try
             {
@@ -379,7 +379,7 @@ namespace Radegast
             return Client.Network.CurrentSim!;
         }
 
-        private void Objects_AvatarSitChanged(object sender, AvatarSitChangedEventArgs e)
+        private void Objects_AvatarSitChanged(object? sender, AvatarSitChangedEventArgs e)
         {
             if (e.Avatar.LocalID != Client.Self.LocalID) return;
 
@@ -560,11 +560,11 @@ namespace Radegast
 
         public void SetRandomHeading()
         {
-            Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.Value.NextDouble(), true);
+            Client.Self.Movement.UpdateFromHeading(Utils.TWO_PI * rnd.Value!.NextDouble(), true);
             LookInFront();
         }
 
-        private void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object? sender, SimChangedEventArgs e)
         {
             Task.Run(async () =>
             {
@@ -582,7 +582,7 @@ namespace Radegast
             Client.Self.Movement.SetFOVVerticalAngle(FOVVerticalAngle);
         }
 
-        private void Self_TeleportProgress(object sender, TeleportEventArgs e)
+        private void Self_TeleportProgress(object? sender, TeleportEventArgs e)
         {
             if (!Client.Network.Connected) return;
 
@@ -603,7 +603,7 @@ namespace Radegast
             }
         }
 
-        private void Netcom_ClientDisconnected(object sender, DisconnectedEventArgs e)
+        private void Netcom_ClientDisconnected(object? sender, DisconnectedEventArgs e)
         {
             IsTyping = Away = IsBusy = IsWalking = false;
 
@@ -611,7 +611,7 @@ namespace Radegast
             lookAtTimer = null;
         }
 
-        private void Netcom_ClientConnected(object sender, EventArgs e)
+        private void Netcom_ClientConnected(object? sender, EventArgs e)
         {
             if (!instance.GlobalSettings.ContainsKey("draw_distance"))
             {
@@ -626,7 +626,7 @@ namespace Radegast
             }
         }
 
-        private void Objects_AvatarUpdate(object sender, AvatarUpdateEventArgs e)
+        private void Objects_AvatarUpdate(object? sender, AvatarUpdateEventArgs e)
         {
             if (e.Avatar.LocalID == Client.Self.LocalID)
             {
@@ -634,7 +634,7 @@ namespace Radegast
             }
         }
 
-        private void Objects_TerseObjectUpdate(object sender, TerseObjectUpdateEventArgs e)
+        private void Objects_TerseObjectUpdate(object? sender, TerseObjectUpdateEventArgs e)
         {
             if (!e.Update.Avatar) { return; }
 
@@ -825,12 +825,12 @@ namespace Radegast
                 LookAtType.Idle, lookAtEffect);
         }
 
-        private void LookAtTimerTick(object state)
+        private void LookAtTimerTick(object? state)
         {
             LookInFront();
         }
 
-        private void Netcom_ChatReceived(object sender, ChatEventArgs e)
+        private void Netcom_ChatReceived(object? sender, ChatEventArgs e)
         {
             //somehow it can be too early (when Radegast is loaded from running bot)
             if (instance.GlobalSettings==null) return;
@@ -885,7 +885,7 @@ namespace Radegast
             FireWalkStateChanged();
         }
 
-        private void WalkTimerElapsed(object sender)
+        private void WalkTimerElapsed(object? sender)
         {
 
             double distance = Vector3d.Distance(Client.Self.GlobalPosition, walkToTarget);
@@ -912,7 +912,7 @@ namespace Radegast
             }
         }
 
-        private void Self_AlertMessage(object sender, AlertMessageEventArgs e)
+        private void Self_AlertMessage(object? sender, AlertMessageEventArgs e)
         {
             if (e.NotificationId == "AutopilotCanceled")
             {
@@ -1129,13 +1129,13 @@ namespace Radegast
 
         }
 
-        private void BeamTimer_Elapsed(object sender, EventArgs e)
+        private void BeamTimer_Elapsed(object? sender, EventArgs e)
         {
             if (beamID == null) return;
 
             try
             {
-                Client.Self.SphereEffect(GlobalPosition(targetPrim), beamColors[beamRandom.Value.Next(0, 3)], 0.85f, sphereID);
+                Client.Self.SphereEffect(GlobalPosition(targetPrim), beamColors[beamRandom.Value!.Next(0, 3)], 0.85f, sphereID);
                 int i = 0;
                 for (i = 0; i < numBeams; i++)
                 {
@@ -1152,7 +1152,7 @@ namespace Radegast
                         cross.Normalize();
                         scatter = GlobalPosition(targetPrim) + cross * (i * 0.2d) * (i % 2 == 0 ? 1 : -1);
                     }
-                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Value.Next(0, 3)], 1.0f, beamID[i]);
+                    Client.Self.BeamEffect(Client.Self.AgentID, UUID.Zero, scatter, beamColors[beamRandom.Value!.Next(0, 3)], 1.0f, beamID[i]);
                 }
 
                 for (int j = 1; j < numBeams; j++)

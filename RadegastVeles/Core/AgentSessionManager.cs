@@ -57,8 +57,7 @@ public sealed class AgentSessionManager : IDisposable
     {
         foreach (var session in _sessions.ToArray())
         {
-            session.Dispose();
+            RemoveSession(session);
         }
-        _sessions.Clear();
     }
 }

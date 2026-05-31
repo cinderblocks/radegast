@@ -1,0 +1,58 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.KeyboardShortcutsWindow"
+        x:DataType="vm:KeyboardShortcutsViewModel"
+        Title="Keyboard Shortcuts"
+        Width="620" Height="460"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Keyboard shortcuts window">
+
+    <DockPanel Margin="12">
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Chat commands (type in the Nearby chat box)"
+                   FontSize="13" FontWeight="SemiBold"
+                   Margin="0,0,0,12" />
+
+        <!-- Header row -->
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="140,*,200"
+              Margin="0,0,0,2">
+            <TextBlock Grid.Column="0" Text="Command" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="1" Text="Description" FontWeight="SemiBold" />
+            <TextBlock Grid.Column="2" Text="Usage" FontWeight="SemiBold" />
+        </Grid>
+
+        <Separator DockPanel.Dock="Top" Margin="0,0,0,4" />
+
+        <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Shortcuts}"
+                          AutomationProperties.Name="Shortcuts list">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Vertical" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ShortcutEntry">
+                        <Grid ColumnDefinitions="140,*,200" Margin="0,2">
+                            <TextBlock Grid.Column="0" Text="{Binding Command}"
+                                      FontFamily="Courier New, Consolas, monospace"
+                                      TextWrapping="Wrap" />
+                            <TextBlock Grid.Column="1" Text="{Binding Description}"
+                                      TextWrapping="Wrap" Margin="4,0" />
+                            <TextBlock Grid.Column="2" Text="{Binding Usage}"
+                                      FontFamily="Courier New, Consolas, monospace"
+                                      TextWrapping="Wrap" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+
+</Window>

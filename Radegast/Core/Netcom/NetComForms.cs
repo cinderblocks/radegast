@@ -173,6 +173,11 @@ namespace Radegast
 
         public void Login()
         {
+            if (IsLoggingIn)
+            {
+                Client.Network.AbortLogin();
+            }
+
             IsLoggingIn = true;
 
 
@@ -235,6 +240,13 @@ namespace Radegast
             loginParams.Token = LoginOptions.MfaToken;
 
             Client.Network.BeginLogin(loginParams);
+        }
+
+        public void CancelLogin()
+        {
+            if (!IsLoggingIn) { return; }
+            Client.Network.AbortLogin();
+            IsLoggingIn = false;
         }
 
         public void Logout()
@@ -322,6 +334,7 @@ namespace Radegast
             if (e.Status == LoginStatus.Success)
             {
                 IsLoggedIn = true;
+                IsLoggingIn = false;
                 Client.Self.RequestBalance();
                 if (CanSyncInvoke)
                 {
@@ -331,6 +344,11 @@ namespace Radegast
                 {
                     OnClientConnected(EventArgs.Empty);
                 }
+            }
+
+            if (e.Status == LoginStatus.Failed)
+            {
+                IsLoggingIn = false;
             }
 
             LoginProgressEventArgs ea = new LoginProgressEventArgs(e.Status, e.Message, string.Empty);

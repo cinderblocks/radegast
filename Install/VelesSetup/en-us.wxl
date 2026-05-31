@@ -1,0 +1,74 @@
+<!-- Override WixUI localisation strings to render white text over the dark branding bitmaps.
+     WiX v6 does not permit redefining library TextStyle IDs, so we use new style names
+     (WixUI_Font_Title_White / WixUI_Font_Bigger_White / WixUI_Font_Normal_White) defined in UI.wxi
+     and replace the {\WixUI_Font_Title} / {\WixUI_Font_Bigger} style tags in every string that
+     appears over a dark image.
+
+     Excluded: AdvancedWelcomeEulaDlgDescriptionPerMachine/PerUser sit at Y=202,
+     well below the 44 px banner, on a white dialog body background. -->
+<WixLocalization Culture="en-us" Language="1033" xmlns="http://wixtoolset.org/schemas/v4/wxl">
+
+    <!-- ── Inner dialog banner titles ({\WixUI_Font_Title} → {\WixUI_Font_Title_White}) ── -->
+    <String Id="AdvancedWelcomeEulaDlgTitle"    Value="{\WixUI_Font_Title_White}Please read the [ProductName] License Agreement" />
+    <String Id="BrowseDlgTitle"                 Value="{\WixUI_Font_Title_White}Change destination folder" />
+    <String Id="CustomizeDlgTitle"              Value="{\WixUI_Font_Title_White}Custom Setup" />
+    <String Id="DiskCostDlgTitle"               Value="{\WixUI_Font_Title_White}Disk Space Requirements" />
+    <String Id="FeaturesDlgTitle"               Value="{\WixUI_Font_Title_White}Product Features" />
+    <String Id="FilesInUseTitle"                Value="{\WixUI_Font_Title_White}Files in Use" />
+    <String Id="InstallDirDlgTitle"             Value="{\WixUI_Font_Title_White}Destination Folder" />
+    <String Id="InstallScopeDlgTitle"           Value="{\WixUI_Font_Title_White}Installation Scope" />
+    <String Id="LicenseAgreementDlgTitle"       Value="{\WixUI_Font_Title_White}End-User License Agreement" />
+    <String Id="MaintenanceTypeDlgTitle"        Value="{\WixUI_Font_Title_White}Change, repair, or remove installation" />
+    <String Id="MsiRMFilesInUseTitle"           Value="{\WixUI_Font_Title_White}Files in Use" />
+    <String Id="OutOfDiskDlgTitle"              Value="{\WixUI_Font_Title_White}Out of Disk Space" />
+    <String Id="OutOfRbDiskDlgTitle"            Value="{\WixUI_Font_Title_White}Out of Disk Space" />
+    <String Id="ProgressDlgTitleInstalling"     Value="{\WixUI_Font_Title_White}Installing [ProductName]" />
+    <String Id="ProgressDlgTitleChanging"       Value="{\WixUI_Font_Title_White}Changing [ProductName]" />
+    <String Id="ProgressDlgTitleRepairing"      Value="{\WixUI_Font_Title_White}Repairing [ProductName]" />
+    <String Id="ProgressDlgTitleRemoving"       Value="{\WixUI_Font_Title_White}Removing [ProductName]" />
+    <String Id="ProgressDlgTitleUpdating"       Value="{\WixUI_Font_Title_White}Updating [ProductName]" />
+    <String Id="SetupTypeDlgTitle"              Value="{\WixUI_Font_Title_White}Choose Setup Type" />
+    <String Id="VerifyReadyDlgInstallTitle"     Value="{\WixUI_Font_Title_White}Ready to install [ProductName]" />
+    <String Id="VerifyReadyDlgChangeTitle"      Value="{\WixUI_Font_Title_White}Ready to change [ProductName]" />
+    <String Id="VerifyReadyDlgRepairTitle"      Value="{\WixUI_Font_Title_White}Ready to repair [ProductName]" />
+    <String Id="VerifyReadyDlgRemoveTitle"      Value="{\WixUI_Font_Title_White}Ready to remove [ProductName]" />
+    <String Id="VerifyReadyDlgUpdateTitle"      Value="{\WixUI_Font_Title_White}Ready to update [ProductName]" />
+    <String Id="WelcomeEulaDlgTitle"            Value="{\WixUI_Font_Title_White}Please read the [ProductName] License Agreement" />
+
+    <!-- ── Welcome / exit / error dialog titles ({\WixUI_Font_Bigger} → {\WixUI_Font_Bigger_White}) ── -->
+    <String Id="ExitDialogTitle"                Value="{\WixUI_Font_Bigger_White}Completed the [ProductName] Setup Wizard" />
+    <String Id="FatalErrorTitle"                Value="{\WixUI_Font_Bigger_White}[ProductName] Setup Wizard ended prematurely" />
+    <String Id="MaintenanceWelcomeDlgTitle"     Value="{\WixUI_Font_Bigger_White}Welcome to the [ProductName] Setup Wizard" />
+    <String Id="PrepareDlgTitle"                Value="{\WixUI_Font_Bigger_White}Welcome to the [ProductName] Setup Wizard" />
+    <String Id="ResumeDlgTitle"                 Value="{\WixUI_Font_Bigger_White}Resuming the [ProductName] Setup Wizard" />
+    <String Id="UserExitTitle"                  Value="{\WixUI_Font_Bigger_White}[ProductName] Setup Wizard was interrupted" />
+    <String Id="WelcomeDlgTitle"                Value="{\WixUI_Font_Bigger_White}Welcome to the [ProductName] Setup Wizard" />
+
+    <!-- ── Banner-area description text (within 44 px banner, {\WixUI_Font_Normal_White}) ── -->
+    <String Id="BrowseDlgDescription"           Value="{\WixUI_Font_Normal_White}Browse to the destination folder" />
+    <String Id="CustomizeDlgDescription"        Value="{\WixUI_Font_Normal_White}Select the way you want features to be installed." />
+    <String Id="DiskCostDlgDescription"         Value="{\WixUI_Font_Normal_White}The disk space required for the installation of the selected features." />
+    <String Id="FeaturesDlgDescription"         Value="{\WixUI_Font_Normal_White}Select the way you want features to be installed." />
+    <String Id="FilesInUseDescription"          Value="{\WixUI_Font_Normal_White}Some files that need to be updated are currently in use." />
+    <String Id="InstallDirDlgDescription"       Value="{\WixUI_Font_Normal_White}Click Next to install to the default folder or click Change to choose another." />
+    <String Id="InstallScopeDlgDescription"     Value="{\WixUI_Font_Normal_White}Choose the installation scope and folder" />
+    <String Id="LicenseAgreementDlgDescription" Value="{\WixUI_Font_Normal_White}Please read the following license agreement carefully" />
+    <String Id="MaintenanceTypeDlgDescription"  Value="{\WixUI_Font_Normal_White}Select the operation you wish to perform." />
+    <String Id="MsiRMFilesInUseDescription"     Value="{\WixUI_Font_Normal_White}Some files that need to be updated are currently in use." />
+    <String Id="OutOfDiskDlgDescription"        Value="{\WixUI_Font_Normal_White}Disk space required for the installation exceeds available disk space." />
+    <String Id="OutOfRbDiskDlgDescription"      Value="{\WixUI_Font_Normal_White}Disk space required for the installation exceeds available disk space." />
+    <String Id="SetupTypeDlgDescription"        Value="{\WixUI_Font_Normal_White}Choose the setup type that best suits your needs" />
+
+    <!-- ── Full-dialog bitmap descriptions (over dialog.png, {\WixUI_Font_Normal_White}) ── -->
+    <String Id="ExitDialogDescription"          Value="{\WixUI_Font_Normal_White}Click the Finish button to exit the Setup Wizard." />
+    <String Id="FatalErrorDescription1"         Value="{\WixUI_Font_Normal_White}[ProductName] Setup Wizard ended prematurely because of an error. Your system has not been modified. To install this program at a later time, run Setup Wizard again." />
+    <String Id="FatalErrorDescription2"         Value="Click the Finish button to exit the Setup Wizard." />
+    <String Id="MaintenanceWelcomeDlgDescription" Value="{\WixUI_Font_Normal_White}The Setup Wizard allows you to change the way [ProductName] features are installed on your computer or to remove it from your computer. Click Next to continue or Cancel to exit the Setup Wizard." />
+    <String Id="PrepareDlgDescription"          Value="{\WixUI_Font_Normal_White}Please wait while the Setup Wizard prepares to guide you through the installation." />
+    <String Id="ResumeDlgDescription"           Value="{\WixUI_Font_Normal_White}The Setup Wizard will complete the installation of [ProductName] on your computer. Click Install to continue or Cancel to exit the Setup Wizard." />
+    <String Id="UserExitDescription1"           Value="{\WixUI_Font_Normal_White}[ProductName] setup was interrupted. Your system has not been modified. To install this program at a later time, please run the installation again." />
+    <String Id="UserExitDescription2"           Value="Click the Finish button to exit the Setup Wizard." />
+    <String Id="WelcomeDlgDescription"          Value="{\WixUI_Font_Normal_White}The Setup Wizard will install [ProductName] on your computer. Click Next to continue or Cancel to exit the Setup Wizard." />
+    <String Id="WelcomeUpdateDlgDescriptionUpdate" Value="{\WixUI_Font_Normal_White}The Setup Wizard will update [ProductName] on your computer. Click Next to continue or Cancel to exit the Setup Wizard." />
+
+</WixLocalization>

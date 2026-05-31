@@ -37,7 +37,7 @@ public partial class UploadImageWindow : Window
 
     private async void OnBrowseClick(object? sender, RoutedEventArgs e)
     {
-        var files = await TopLevel.GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
+        var files = await GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
             new FilePickerOpenOptions
             {
                 Title = "Select image to upload",

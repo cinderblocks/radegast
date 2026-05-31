@@ -535,6 +535,18 @@ namespace Radegast
             }
         }
 
+        private void btnCancelLogin_Click(object sender, EventArgs e)
+        {
+            NetCom.CancelLogin();
+            pnlLoginPrompt.Visible = true;
+            pnlLoggingIn.Visible = false;
+            proLogin.Visible = false;
+            btnLogin.Text = "Login";
+            btnLogin.Enabled = true;
+            lblLoginStatus.Text = "Login cancelled.";
+            lblLoginStatus.ForeColor = Color.FromKnownColor(KnownColor.ControlText);
+        }
+
         #region IRadegastTabControl Members
 
         public void RegisterTab(RadegastTab tab)

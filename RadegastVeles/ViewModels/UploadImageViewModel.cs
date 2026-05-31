@@ -61,6 +61,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         _instance = instance;
         instance.NetCom.ClientConnected += NetCom_ClientConnected;
         instance.NetCom.ClientDisconnected += NetCom_ClientDisconnected;
+        Client.Self.ViewerBenefitsUpdated += Self_ViewerBenefitsUpdated;
         RefreshUploadButtonText();
     }
 
@@ -307,6 +308,11 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         StatusLog += message + Environment.NewLine;
     }
 
+    private void Self_ViewerBenefitsUpdated(object? sender, ViewerBenefitsEventArgs e)
+    {
+        Dispatcher.UIThread.Post(RefreshUploadButtonText);
+    }
+
     private void NetCom_ClientConnected(object? sender, EventArgs e)
     {
         Dispatcher.UIThread.Post(() =>
@@ -329,6 +335,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
     {
         _instance.NetCom.ClientConnected -= NetCom_ClientConnected;
         _instance.NetCom.ClientDisconnected -= NetCom_ClientDisconnected;
+        Client.Self.ViewerBenefitsUpdated -= Self_ViewerBenefitsUpdated;
 
         _uploadCts?.Cancel();
         _uploadCts?.Dispose();

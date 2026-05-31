@@ -19,8 +19,10 @@
 
 using System;
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -32,6 +34,10 @@ namespace Radegast.Veles.Views;
 public partial class ChatPanel : UserControl
 {
     private NearbyViewModel? _vm;
+
+    // Typing-indicator debounce: sends StopTyping ~5 s after last keystroke
+    private DispatcherTimer? _typingStopTimer;
+    private bool _isSendingTyping;
 
     public ChatPanel()
     {
@@ -51,6 +57,7 @@ public partial class ChatPanel : UserControl
         {
             minimap.WalkToRequested += (x, y) => _vm.WalkToPoint(x, y);
             minimap.TeleportRequested += (x, y) => _vm.TeleportToPoint(x, y);
+            minimap.AboutLandRequested += (x, y) => _vm.Instance.ShowLandProfile(x, y);
         }
 
         // Wire movement button press/release
@@ -61,11 +68,12 @@ public partial class ChatPanel : UserControl
         WireMovementButton("BtnJump", v => _vm.SetJump(v));
         WireMovementButton("BtnCrouch", v => _vm.SetCrouch(v));
 
-        // Wire chat input keyboard
+        // Wire chat input keyboard and typing indicator
         var chatInput = this.FindControl<TextBox>("ChatInputBox");
         if (chatInput != null)
         {
             chatInput.KeyDown += ChatInputBox_KeyDown;
+            chatInput.TextChanged += ChatInputBox_TextChanged;
             chatInput.Focus();
         }
 
@@ -117,6 +125,44 @@ public partial class ChatPanel : UserControl
         btn.AddHandler(PointerCaptureLostEvent, (_, _) => setter(false));
     }
 
+    private void ChatInputBox_TextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_vm == null) return;
+
+        var hasText = sender is TextBox tb && !string.IsNullOrEmpty(tb.Text);
+
+        if (hasText)
+        {
+            if (!_isSendingTyping)
+            {
+                _isSendingTyping = true;
+                _vm.NotifyTypingStarted();
+            }
+
+            if (_typingStopTimer == null)
+            {
+                _typingStopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _typingStopTimer.Tick += (_, _) => StopTypingLocally();
+            }
+            _typingStopTimer.Stop();
+            _typingStopTimer.Start();
+        }
+        else
+        {
+            StopTypingLocally();
+        }
+    }
+
+    private void StopTypingLocally()
+    {
+        _typingStopTimer?.Stop();
+        if (_isSendingTyping)
+        {
+            _isSendingTyping = false;
+            _vm?.NotifyTypingStopped();
+        }
+    }
+
     private void ChatInputBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (_vm == null) return;
@@ -124,10 +170,17 @@ public partial class ChatPanel : UserControl
         switch (e.Key)
         {
             case Key.Enter when e.KeyModifiers == KeyModifiers.None:
+                StopTypingLocally();
                 _vm.SendChatCommand.Execute(null);
                 e.Handled = true;
                 break;
+            case Key.Enter when e.KeyModifiers == KeyModifiers.Shift:
+                StopTypingLocally();
+                _vm.SendWhisperCommand.Execute(null);
+                e.Handled = true;
+                break;
             case Key.Enter when e.KeyModifiers == KeyModifiers.Control:
+                StopTypingLocally();
                 _vm.SendShoutCommand.Execute(null);
                 e.Handled = true;
                 break;
@@ -140,6 +193,25 @@ public partial class ChatPanel : UserControl
                 e.Handled = true;
                 break;
         }
+    }
+
+    private void OnChatLineContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not WrapPanel panel || panel.DataContext is not ChatLine line) return;
+        var copyItem = new MenuItem { Header = "Copy" };
+        copyItem.Click += async (_, _) =>
+        {
+            var chatLog = this.FindControl<ListBox>("ChatLog");
+            var lines = chatLog?.SelectedItems?.OfType<ChatLine>().ToList();
+            // If nothing is selected (or only this row) fall back to the right-clicked line
+            if (lines == null || lines.Count == 0) lines = [line];
+            var text = string.Join(Environment.NewLine, lines.Select(l => l.AutomationText));
+            IClipboard? clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null) await clipboard.SetTextAsync(text);
+        };
+        var menu = new ContextMenu { Items = { copyItem } };
+        menu.Open(panel);
+        e.Handled = true;
     }
 
     private void OnChatNameClick(object? sender, RoutedEventArgs e)

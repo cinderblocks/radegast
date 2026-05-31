@@ -48,22 +48,22 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
-          msbuild radegast.sln /t:Restore /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }}
+          msbuild radegast.sln /t:Restore /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }}
 
       - name: Build solution
         shell: pwsh
         run: |
-          Write-Host "Building Radegast for ${{ matrix.platform }}..."
-          msbuild radegast.sln /m /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /v:minimal
+          Write-Host "Building Radegast Veles for ${{ matrix.platform }}..."
+          msbuild radegast.sln /m /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /v:minimal
 
       - name: Build installer
         shell: pwsh
         run: |
-          Write-Host "Building MSI installer for ${{ matrix.platform }}"
-          msbuild Install\RadegastSetup\RadegastSetup.wixproj /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          Write-Host "Building Radegast Veles MSI installer for ${{ matrix.platform }}"
+          msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
-          Write-Host "Building Bundle (bootstrapper) for ${{ matrix.platform }}"
-          msbuild Install\RadegastBundle\RadegastBundle.wixproj /p:Configuration=ReleaseWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          Write-Host "Building Radegast Veles Bundle (bootstrapper) for ${{ matrix.platform }}"
+          msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
       - name: Collect artifacts
         shell: pwsh
@@ -77,30 +77,30 @@ jobs:
 
           # Copy main application binaries
           Write-Host "Copying application binaries..."
-          Copy-Item -Path "bin\ReleaseWindows\*" -Destination "$artifactDir\" -Recurse -Force -Exclude @("*.pdb", "*.xml", "*.vshost.*")
+          Copy-Item -Path "bin\Veles\Release\*" -Destination "$artifactDir\" -Recurse -Force -Exclude @("*.pdb", "*.xml", "*.vshost.*")
 
           # Collect PDB files separately for symbols package
           Write-Host "Collecting PDB files..."
           $pdbDir = "$artifactDir\symbols"
           New-Item -ItemType Directory -Path $pdbDir -Force | Out-Null
-          Get-ChildItem -Path "bin\ReleaseWindows" -Filter "*.pdb" -Recurse | Copy-Item -Destination $pdbDir -Force
+          Get-ChildItem -Path "bin\Veles\Release" -Filter "*.pdb" -Recurse | Copy-Item -Destination $pdbDir -Force
 
-          # Copy MSI installer if it exists (WiX outputs to en-US subdirectory)
-          $msiPath = "bin\Packages\en-US\RadegastSetup_$platform.msi"
-          if (Test-Path $msiPath) {
-            Write-Host "Copying MSI installer: $msiPath"
-            Copy-Item -Path $msiPath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.msi" -Force
+          # Copy Radegast Veles MSI installer
+          $velesMsiPath = "bin\Packages\en-US\RadegastVelesSetup_$platform.msi"
+          if (Test-Path $velesMsiPath) {
+            Write-Host "Copying Radegast Veles MSI installer: $velesMsiPath"
+            Copy-Item -Path $velesMsiPath -Destination "$artifactDir\RadegastVelesSetup_${platform}_${version}.msi" -Force
           } else {
-            Write-Warning "MSI installer not found at: $msiPath"
+            Write-Warning "Radegast Veles MSI installer not found at: $velesMsiPath"
           }
 
-          # Copy Bundle exe if it exists
-          $bundlePath = "bin\Packages\RadegastBundle_$platform.exe"
-          if (Test-Path $bundlePath) {
-            Write-Host "Copying Bundle installer: $bundlePath"
-            Copy-Item -Path $bundlePath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.exe" -Force
+          # Copy Radegast Veles Bundle exe
+          $velesBundlePath = "bin\Packages\RadegastVelesBundle_$platform.exe"
+          if (Test-Path $velesBundlePath) {
+            Write-Host "Copying Radegast Veles Bundle installer: $velesBundlePath"
+            Copy-Item -Path $velesBundlePath -Destination "$artifactDir\RadegastVelesBundle_${platform}_${version}.exe" -Force
           } else {
-            Write-Warning "Bundle installer not found at: $bundlePath"
+            Write-Warning "Radegast Veles Bundle installer not found at: $velesBundlePath"
           }
 
       
@@ -130,14 +130,14 @@ jobs:
           New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
           # Copy MSI to temp directory for appcast generation
-          $msi = "$artifactDir\RadegastSetup_${platform}_${version}.msi"
+          $msi = "$artifactDir\RadegastVelesSetup_${platform}_${version}.msi"
           if (Test-Path $msi) {
             Copy-Item $msi -Destination $tempDir -Force
 
             # Generate appcast (matching AppVeyor configuration)
             try {
               netsparkle-generate-appcast `
-                -n Radegast `
+                -n RadegastVeles `
                 -e msi `
                 -a $tempDir `
                 --output-type json `
@@ -174,12 +174,12 @@ jobs:
           $artifactDir = "artifacts\$platform"
 
           # Create tar.bz2 (tbz) of binaries (matching AppVeyor)
-          Write-Host "Creating Radegast_${platform}_${version}.tbz using 7z"
+          Write-Host "Creating RadegastVeles_${platform}_${version}.tbz using 7z"
           Push-Location "$artifactDir"
 
           # Use 7-Zip to create a tar stream and compress with bzip2 to avoid tar hangs on Windows
-          $tarName = "..\Radegast_${platform}_${version}.tar"
-          $tbzName = "..\Radegast_${platform}_${version}.tbz"
+          $tarName = "..\RadegastVeles_${platform}_${version}.tar"
+          $tbzName = "..\RadegastVeles_${platform}_${version}.tbz"
 
           try {
             Write-Host "Creating intermediate tar: $tarName"
@@ -200,15 +200,15 @@ jobs:
             Remove-Item $tarName -Force -ErrorAction SilentlyContinue
           } catch {
             Write-Warning "Compression with 7z failed: $_. Attempting native tar fallback."
-            & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
+            & tar -cjf "..\RadegastVeles_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="*.exe" *
           }
 
           Pop-Location
 
           # Create zip of symbols
           if (Test-Path "$artifactDir\symbols") {
-            Write-Host "Creating Radegast_${platform}_${version}_symbols.zip"
-            Compress-Archive -Path "$artifactDir\symbols\*" -DestinationPath "artifacts\Radegast_${platform}_${version}_symbols.zip" -Force
+            Write-Host "Creating RadegastVeles_${platform}_${version}_symbols.zip"
+            Compress-Archive -Path "$artifactDir\symbols\*" -DestinationPath "artifacts\RadegastVeles_${platform}_${version}_symbols.zip" -Force
           }
 
       - name: Generate SHA256 checksums
@@ -238,7 +238,7 @@ jobs:
       - name: Generate SBOM (Software Bill of Materials)
         uses: anchore/sbom-action@v0
         with:
-          path: ./bin/ReleaseWindows
+          path: ./bin/Veles/Release
           format: spdx-json
           output-file: artifacts/${{ matrix.platform }}/sbom.spdx.json
           upload-artifact: false
@@ -254,8 +254,8 @@ jobs:
           Write-Host "Verifying release artifacts for $platform..."
 
           $expected = @(
-            "RadegastSetup_${platform}_${version}.exe",
-            "RadegastSetup_${platform}_${version}.msi",
+            "RadegastVelesBundle_${platform}_${version}.exe",
+            "RadegastVelesSetup_${platform}_${version}.msi",
             "SHA256SUMS.txt"
           )
 
@@ -287,21 +287,21 @@ jobs:
           }
 
           # Check for tbz and symbols
-          $tarball = "artifacts\Radegast_${platform}_${version}.tbz"
-          $symbols = "artifacts\Radegast_${platform}_${version}_symbols.zip"
+          $tarball = "artifacts\RadegastVeles_${platform}_${version}.tbz"
+          $symbols = "artifacts\RadegastVeles_${platform}_${version}_symbols.zip"
 
           if (Test-Path $tarball) {
             $size = [math]::Round((Get-Item $tarball).Length / 1MB, 2)
-            Write-Host "  ✓ Radegast_${platform}_${version}.tbz ($size MB)"
+            Write-Host "  ✓ RadegastVeles_${platform}_${version}.tbz ($size MB)"
           } else {
-            $missing += "Radegast_${platform}_${version}.tbz"
+            $missing += "RadegastVeles_${platform}_${version}.tbz"
           }
 
           if (Test-Path $symbols) {
             $size = [math]::Round((Get-Item $symbols).Length / 1MB, 2)
-            Write-Host "  ✓ Radegast_${platform}_${version}_symbols.zip ($size MB)"
+            Write-Host "  ✓ RadegastVeles_${platform}_${version}_symbols.zip ($size MB)"
           } else {
-            $missing += "Radegast_${platform}_${version}_symbols.zip"
+            $missing += "RadegastVeles_${platform}_${version}_symbols.zip"
           }
 
           if ($missing.Count -gt 0) {
@@ -315,12 +315,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Make artifact name unique per job/run to avoid 409 Conflict when multiple matrix jobs upload
-          name: radegast-${{ matrix.platform }}-${{ env.TAG_VERSION }}-${{ github.run_id }}
+          name: radegast-veles-${{ matrix.platform }}-${{ env.TAG_VERSION }}-${{ github.run_id }}
           path: |
-            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tbz
-            artifacts\Radegast_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols.zip
-            artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
-            artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
+            artifacts\RadegastVeles_${{ matrix.platform }}_${{ env.TAG_VERSION }}.tbz
+            artifacts\RadegastVeles_${{ matrix.platform }}_${{ env.TAG_VERSION }}_symbols.zip
+            artifacts\${{ matrix.platform }}\RadegastVelesSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
+            artifacts\${{ matrix.platform }}\RadegastVelesBundle_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
             artifacts\${{ matrix.platform }}\SHA256SUMS.txt
             artifacts\${{ matrix.platform }}\appcast.json
             artifacts\${{ matrix.platform }}\appcast.json.signature
@@ -542,7 +542,7 @@ jobs:
           $results = @()
           foreach ($zip in $zipFiles) {
             Write-Host "`nProcessing $($zip.Name)"
-            $platform = if ($zip.Name -match "Radegast_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
+            $platform = if ($zip.Name -match "RadegastVeles_(.+?)_${{ env.TAG_VERSION }}_symbols.zip") { $matches[1] } else { ($zip.Name -split '_')[1] }
 
             $tempDir = Join-Path $env:TEMP ("bugsplat_" + $platform)
             Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -568,7 +568,7 @@ jobs:
                 '--request', 'POST', 'https://app.bugsplat.com/api/versions',
                 '--header', "Authorization: Bearer $token",
                 '--data-urlencode', "dbName=$($env:BUGSPLAT_DATABASE)",
-                '--data-urlencode', 'appName=Radegast',
+                '--data-urlencode', 'appName=RadegastVeles',
                 '--data-urlencode', "appVersion=$appVersion",
                 '--data-urlencode', "size=$($pdb.Length)",
                 '--data-urlencode', "symFileName=$($pdb.Name)"
@@ -641,26 +641,25 @@ jobs:
 
           # Create release notes
           $releaseNotes = @"
-          # Radegast $version
+          # Radegast Veles $version
 
           ## Download
 
           Choose the installer or archive for your platform:
 
           ### Windows Installers (Recommended)
-          - **RadegastSetup_x86_${version}.msi** - For 32-bit Windows (most compatible)
-          - **RadegastSetup_x64_${version}.msi** - For 64-bit Windows
-          - **RadegastSetup_ARM64_${version}.msi** - For Windows on ARM64
+          - **RadegastVelesSetup_x64_${version}.msi** - For 64-bit Windows
+          - **RadegastVelesSetup_ARM64_${version}.msi** - For Windows on ARM64
 
           ### Portable Archives
-          - **Radegast_x86_${version}.tbz** - 32-bit portable
-          - **Radegast_x64_${version}.tbz** - 64-bit portable  
-          - **Radegast_ARM64_${version}.tbz** - ARM64 portable
+          - **RadegastVeles_x64_${version}.tbz** - 64-bit portable
+          - **RadegastVeles_ARM64_${version}.tbz** - ARM64 portable
+          - **RadegastVeles_x86_${version}.tbz** - 32-bit portable
 
           ### Debug Symbols (for developers)
-          - **Radegast_x86_${version}_symbols.zip**
-          - **Radegast_x64_${version}_symbols.zip**
-          - **Radegast_ARM64_${version}_symbols.zip**
+          - **RadegastVeles_x86_${version}_symbols.zip**
+          - **RadegastVeles_x64_${version}_symbols.zip**
+          - **RadegastVeles_ARM64_${version}_symbols.zip**
 
           ## Changes in this Release
 
@@ -669,8 +668,7 @@ jobs:
           ## Installation Notes
 
           - Windows 10 or later is recommended
-          - .NET Framework 4.8 is required (usually pre-installed on Windows 10/11)
-          - Choose x86 version if unsure about your Windows architecture
+          - .NET 10 or later is required
 
           ## Support
 
@@ -689,7 +687,7 @@ jobs:
         with:
           draft: true
           prerelease: false
-          name: Radegast ${{ env.TAG_VERSION }}
+          name: Radegast Veles ${{ env.TAG_VERSION }}
           tag_name: ${{ env.TAG }}
           body_path: release-notes.md
           # include files in release-files and any nested directories

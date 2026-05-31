@@ -29,7 +29,7 @@
                     <StackPanel VerticalAlignment="Center" Spacing="4">
                         <TextBlock Text="{Binding MaterialName}" FontSize="14" FontWeight="SemiBold"
                                    TextWrapping="Wrap" AutomationProperties.Name="Material name" />
-                        <Border Background="#795548" CornerRadius="3" Padding="5,2" HorizontalAlignment="Left">
+                        <Border Background="{DynamicResource VelesBadgeMaterial}" CornerRadius="3" Padding="5,2" HorizontalAlignment="Left">
                             <TextBlock Text="GLTF PBR Material" FontSize="11" Foreground="White" />
                         </Border>
                     </StackPanel>

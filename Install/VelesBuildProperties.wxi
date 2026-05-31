@@ -1,0 +1,10 @@
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <?define productName="Radegast Veles"?>
+  <?define productDesc="A modern cross-platform client for Second Life and OpenSimulator"?>
+  <?define companyName="Sjofn, LLC"?>
+  <?define aboutUrl="https://radegast.life/"?>
+  <?define copyright="Copyright (c) 2006-2026 Sjofn LLC."?>
+  <?define totalFileSize="100"?>
+
+</Include>

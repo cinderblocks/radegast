@@ -1,0 +1,55 @@
+<Project>
+  <Import Project="Sdk.props" Sdk="WixToolset.Sdk" Version="6.0.0" Condition="'$(Configuration)' != 'Disabled'" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
+    <ProductVersion Condition=" '$(ProductVersion)' == '' ">1.0.0</ProductVersion>
+    <OutputName>RadegastVelesBundle_$(Platform)</OutputName>
+    <OutputPath>..\..\bin\Packages\</OutputPath>
+    <OutputType>Bundle</OutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.NetFx.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Bal.wixext" Version="6.0.2" />
+  </ItemGroup>
+  <PropertyGroup>
+    <DotNet10RuntimeLocalPath>$(MSBuildProjectDirectory)\windowsdesktop-runtime-10.0-win-x64.exe</DotNet10RuntimeLocalPath>
+    <DefineConstants>$(DefineConstants);DotNet10RuntimeLocalPath=$(DotNet10RuntimeLocalPath)</DefineConstants>
+  </PropertyGroup>
+  <Target Name="DownloadDotNet10Runtime" BeforeTargets="CoreCompile">
+    <Exec Condition="!Exists('$(DotNet10RuntimeLocalPath)')"
+          Command="powershell -NoProfile -Command &quot;Invoke-WebRequest -Uri 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe' -OutFile '$(DotNet10RuntimeLocalPath)'&quot;" />
+  </Target>
+  <ItemGroup>
+    <None Include="..\VelesBuildProperties.wxi" />
+    <None Include="..\..\LICENSE.rtf" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\VelesSetup\VelesSetup.wixproj" DoNotHarvest="True" />
+    <ProjectReference Include="..\..\RadegastVeles\RadegastVeles.csproj" DoNotHarvest="True" />
+  </ItemGroup>
+  <Target Name="FindSignTool">
+    <PropertyGroup>
+      <WindowsKitsRoot>$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'KitsRoot10', null, RegistryView.Registry32, RegistryView.Default))</WindowsKitsRoot>
+      <WindowsKitsRoot Condition="'$(WindowsKitsRoot)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'KitsRoot81', null, RegistryView.Registry32, RegistryView.Default))</WindowsKitsRoot>
+      <WindowsKitsRoot Condition="'$(WindowsKitsRoot)' == ''">$([MSBuild]::GetRegistryValueFromView('HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows Kits\Installed Roots', 'KitsRoot', null, RegistryView.Registry32, RegistryView.Default))</WindowsKitsRoot>
+      <SignToolPath Condition="'$(SignToolPath)' == '' And '$(Platform)' == 'AnyCPU' and Exists('$(WindowsKitsRoot)bin\x64\signtool.exe')">$(WindowsKitsRoot)bin\x64\</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' And Exists('$(WindowsKitsRoot)bin\$(Platform)\signtool.exe')">$(WindowsKitsRoot)bin\$(Platform)\</SignToolPath>
+      <SignToolPathBin Condition="'$(SignToolPath)' == ''">$([System.IO.Directory]::GetDirectories('$(WindowsKitsRoot)bin',"10.0.*"))</SignToolPathBin>
+      <SignToolPathLen Condition="'$(SignToolPathBin)' != ''">$(SignToolPathBin.Split(';').Length)</SignToolPathLen>
+      <SignToolPathIndex Condition="'$(SignToolPathLen)' != ''">$([MSBuild]::Add(-1, $(SignToolPathLen)))</SignToolPathIndex>
+      <SignToolPathBase Condition="'$(SignToolPathIndex)' != ''">$(SignToolPathBin.Split(';').GetValue($(SignToolPathIndex)))\</SignToolPathBase>
+      <SignToolPath Condition="'$(SignToolPath)' == '' And '$(SignToolPathBase)' != '' And '$(Platform)' == 'AnyCPU'">$(SignToolPathBase)x64\</SignToolPath>
+      <SignToolPath Condition="'$(SignToolPath)' == '' And '$(SignToolPathBase)' != ''">$(SignToolPathBase)$(Platform)\</SignToolPath>
+    </PropertyGroup>
+  </Target>
+  <!--
+  <Target Name="SignBundleEngine" DependsOnTargets="FindSignTool">
+    <Exec Command="&quot;$(SignToolPath)signtool.exe&quot; sign /fd SHA256 /sm /sha1 688eef6260f0fff81e1d46e2605c8039833a92bb /t http://timestamp.comodoca.com/authenticode &quot;@(SignBundleEngine)&quot;" />
+  </Target>
+  <Target Name="SignBundle" DependsOnTargets="FindSignTool">
+    <Exec Command="&quot;$(SignToolPath)signtool.exe&quot; sign /fd SHA256 /sm /sha1 688eef6260f0fff81e1d46e2605c8039833a92bb /t http://timestamp.comodoca.com/authenticode &quot;@(SignBundle)&quot;" />
+  </Target>-->
+  <Import Project="Sdk.targets" Sdk="WixToolset.Sdk" Version="6.0.0" Condition="'$(Configuration)' != 'Disabled'" />
+  <Import Project="..\DisabledBuild.targets" Condition="'$(Configuration)' == 'Disabled'" />
+</Project>

@@ -1,0 +1,19 @@
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+    <WixVariable Id="WixUILicenseRtf" Value="..\..\LICENSE.rtf" />
+
+    <!-- Custom branding images (create these files to enable custom branding) -->
+    <WixVariable Id="WixUIBannerBmp" Value="assets\banner.png"/>
+    <WixVariable Id="WixUIDialogBmp" Value="assets\dialog.png"/>
+
+    <!-- White text styles for dark branding images.
+         All three are new names — WiX v6 does not allow overriding library TextStyle IDs.
+         Applied via en-us.wxl string overrides on all controls that render over the bitmaps. -->
+    <UI>
+        <TextStyle Id="WixUI_Font_Title_White"  FaceName="Tahoma" Size="9"  Bold="yes" Red="255" Green="255" Blue="255" />
+        <TextStyle Id="WixUI_Font_Bigger_White" FaceName="Tahoma" Size="12"            Red="255" Green="255" Blue="255" />
+        <TextStyle Id="WixUI_Font_Normal_White" FaceName="Tahoma" Size="8"             Red="255" Green="255" Blue="255" />
+    </UI>
+
+    <ui:WixUI Id="WixUI_Advanced" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+</Include>

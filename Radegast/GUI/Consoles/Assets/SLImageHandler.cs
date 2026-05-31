@@ -345,7 +345,7 @@ namespace Radegast
                     {
                         try
                         {
-                            return J2kImage.FromBytes(data).As<SKBitmap>().ToBitmap();
+                            return J2kImage.DecodeToImage<SKBitmap>(data).ToBitmap();
                         }
                         catch (Exception)
                         {

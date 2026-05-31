@@ -34,10 +34,14 @@ namespace Radegast
     {
         public bool DingOnAllIncoming = false;
 
+        private const int IMPageSize = 100;
+        internal const string LoadMoreIMUri = "radegast://loadmoreim";
+
         private readonly IMTextManagerType Type;
         private readonly string sessionName;
         private bool AutoResponseSent = false;
         private ArrayList textBuffer;
+        private int _historyDisplayStart;
 
         private bool showTimestamps;
 
@@ -433,10 +437,50 @@ namespace Radegast
 
         public override void ReprintAllText()
         {
+            ReprintFromOffset(Math.Max(0, textBuffer.Count - IMPageSize));
+        }
+
+        public void LoadMoreHistory()
+        {
+            int newStart = Math.Max(0, _historyDisplayStart - IMPageSize);
+            ReprintFromOffset(newStart);
+        }
+
+        private void ReprintFromOffset(int startIndex)
+        {
+            _historyDisplayStart = startIndex;
             TextPrinter.ClearText();
+
+            if (_historyDisplayStart > 0)
+            {
+                PrintLoadMoreLink();
+            }
+
             PrintLastLog();
-            foreach (object obj in textBuffer)
-                ProcessIM(obj, false);
+
+            for (int i = _historyDisplayStart; i < textBuffer.Count; i++)
+            {
+                ProcessIM(textBuffer[i], false);
+            }
+        }
+
+        private void PrintLoadMoreLink()
+        {
+            if (FontSettings.ContainsKey("History"))
+            {
+                var fontSetting = FontSettings["History"];
+                TextPrinter.ForeColor = fontSetting.ForeColor;
+                TextPrinter.BackColor = fontSetting.BackColor;
+                TextPrinter.Font = fontSetting.Font;
+            }
+            else
+            {
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
+            }
+            TextPrinter.InsertLink($"[ Load {Math.Min(_historyDisplayStart, IMPageSize)} more messages... ]", LoadMoreIMUri);
+            TextPrinter.PrintTextLine(string.Empty);
         }
 
         public void CleanUp()

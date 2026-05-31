@@ -17,7 +17,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
 using OpenMetaverse;
 using Radegast.Veles.Core;
@@ -34,6 +36,58 @@ public static class GroupMenuBuilder
         {
             Header = groupName,
             Command = new RelayCommand(() => instance.ShowGroupProfile(groupId))
+        });
+
+        menu.Items.Add(new Separator());
+
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Activate",
+            Command = new RelayCommand(() => instance.Client.Groups.ActivateGroup(groupId))
+        });
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Group IM",
+            Command = new RelayCommand(() => instance.RequestGroupIM(groupId, groupName))
+        });
+
+        bool isMuted = instance.Client.Self.MuteList.Values
+            .Any(m => m.Type == MuteType.Group && m.ID == groupId);
+        if (isMuted)
+        {
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Unmute Group",
+                Command = new RelayCommand(() =>
+                    instance.Client.Self.RemoveMuteListEntry(groupId, groupName))
+            });
+        }
+        else
+        {
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Mute Group",
+                Command = new RelayCommand(() =>
+                    instance.Client.Self.UpdateMuteListEntry(MuteType.Group, groupId, groupName))
+            });
+        }
+
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Leave Group",
+            Command = new RelayCommand(() => instance.Client.Groups.LeaveGroup(groupId))
+        });
+        menu.Items.Add(new MenuItem
+        {
+            Header = "Invite Member\u2026",
+            Command = new RelayCommand(() =>
+                instance.ShowAvatarPicker($"Invite to {groupName}", entry =>
+                {
+                    instance.Client.Groups.Invite(groupId,
+                        new System.Collections.Generic.List<OpenMetaverse.UUID> { OpenMetaverse.UUID.Zero },
+                        entry.Id);
+                    instance.ShowNotificationInChat($"Invited {entry.Name} to {groupName}.");
+                }))
         });
 
         menu.Items.Add(new Separator());

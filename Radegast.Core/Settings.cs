@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -33,7 +33,7 @@ namespace Radegast
         protected readonly string SettingsFile;
         protected readonly OSDMap SettingsData;
 
-        public delegate void SettingChangedCallback(object sender, SettingsEventArgs e);
+        public delegate void SettingChangedCallback(object? sender, SettingsEventArgs e);
         public event SettingChangedCallback? OnSettingChanged;
 
         public Settings(string fileName)

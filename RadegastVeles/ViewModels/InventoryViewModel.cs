@@ -25,21 +25,21 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OpenMetaverse;
+using OpenMetaverse.Assets;
+using OpenMetaverse.Marketplace;
 using Radegast.Veles.Core;
 using InvClipboard = Radegast.Veles.Core.InventoryClipboard;
 using InvClipboardMode = Radegast.Veles.Core.InventoryClipboardMode;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class InventoryViewModel : ObservableObject, IDisposable
+public partial class InventoryViewModel : ClientAwareViewModelBase
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
-    public RadegastInstanceAvalonia Instance => _instance;
     private Inventory Inventory => Client.Inventory.Store!;
 
     private CancellationTokenSource? _searchCts;
@@ -117,6 +117,27 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _hasSearchResults;
 
+    // ── Action button visibility (bound to IsVisible in AXAML) ───────────────
+    // Each reflects whether the action is meaningful for the currently selected item.
+
+    /// <summary>True when the selected item can be worn or attached (wearable or object).</summary>
+    [ObservableProperty] private bool _showWearActions;
+
+    /// <summary>True when the selected item is a clothing layer that can be added on top (not bodypart/physics).</summary>
+    [ObservableProperty] private bool _showWearAddAction;
+
+    /// <summary>True when the selected item is a worn attachment that can be touched.</summary>
+    [ObservableProperty] private bool _showTouchAction;
+
+    /// <summary>True when the selected item is a landmark (SLURL copy / show on map).</summary>
+    [ObservableProperty] private bool _showLandmarkActions;
+
+    /// <summary>True when the selected object item is in the Trash and can be restored to the world.</summary>
+    [ObservableProperty] private bool _showRestoreToWorld;
+
+    /// <summary>True when the Delete action should be shown (hidden for worn links in COF).</summary>
+    [ObservableProperty] private bool _showDeleteAction;
+
     // Suppresses "Received:" notifications while inventory is loading at login
     private bool _inventoryLoaded;
 
@@ -145,13 +166,10 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void SetSort(InventorySortMode mode) => CurrentSort = mode;
 
-    public InventoryViewModel(RadegastInstanceAvalonia instance)
+    public InventoryViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
-
         _wornSlots = BuildWornSlots();
         RegisterClientEvents(Client);
-        _instance.ClientChanged += Instance_ClientChanged;
 
         // Build initial tree from whatever is in the store
         BuildTree();
@@ -160,7 +178,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         StartInventoryTraversal();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         _traversalCts?.Cancel();
         _traversalCts?.Dispose();
@@ -169,36 +187,39 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
             _itemReceivedBatchTimer?.Dispose();
             _itemReceivedBatchTimer = null;
         }
-        UnregisterClientEvents(Client);
-        _instance.ClientChanged -= Instance_ClientChanged;
+        base.Dispose();
         _searchCts?.Cancel();
         _searchCts?.Dispose();
     }
 
-    private void RegisterClientEvents(GridClient client)
+    protected override void RegisterClientEvents(GridClient client)
     {
         client.Inventory.FolderUpdated += Inventory_FolderUpdated;
         client.Inventory.ItemReceived += Inventory_ItemReceived;
+        client.Inventory.Store?.InventoryObjectAdded += Inventory_ObjectAdded;
+        client.Inventory.Store?.InventoryObjectRemoved += Inventory_ObjectRemoved;
         client.Self.TeleportProgress += Self_TeleportProgress;
         client.Appearance.AppearanceSet += Appearance_AppearanceSet;
         client.Appearance.AgentWearablesReply += Appearance_AgentWearablesReply;
         client.Objects.ObjectUpdate += Objects_ObjectUpdate;
+        client.Objects.KillObjects += Objects_KillObjects;
     }
 
-    private void UnregisterClientEvents(GridClient client)
+    protected override void UnregisterClientEvents(GridClient client)
     {
         client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
         client.Inventory.ItemReceived -= Inventory_ItemReceived;
+        client.Inventory.Store?.InventoryObjectAdded -= Inventory_ObjectAdded;
+        client.Inventory.Store?.InventoryObjectRemoved -= Inventory_ObjectRemoved;
         client.Self.TeleportProgress -= Self_TeleportProgress;
         client.Appearance.AppearanceSet -= Appearance_AppearanceSet;
         client.Appearance.AgentWearablesReply -= Appearance_AgentWearablesReply;
         client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
+        client.Objects.KillObjects -= Objects_KillObjects;
     }
 
-    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
+    protected override void OnClientChanged(GridClient oldClient, GridClient newClient)
     {
-        UnregisterClientEvents(e.OldClient);
-        RegisterClientEvents(e.Client);
         Dispatcher.UIThread.Post(() =>
         {
             BuildTree();
@@ -241,13 +262,13 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         }
     }
 
-    private int CountItems(OpenMetaverse.InventoryNode? node)
+    private int CountItems(InventoryNode? node)
     {
         if (node == null) return 0;
         int count = node.Data is InventoryItem ? 1 : 0;
         if (node.Nodes == null) return count;
 
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try
         {
             children = node.Nodes.Values.ToList();
@@ -277,6 +298,9 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                         : string.Empty;
 
         var folderKind = item is InventoryFolder f ? f.PreferredType : FolderType.None;
+        var marketplaceRole = item is InventoryFolder
+            ? MarketplaceFolderClassifier.GetRole(item.UUID, Inventory)
+            : MarketplaceFolderRole.None;
 
         var node = new InvTreeNode
         {
@@ -284,6 +308,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
             ItemId = item.UUID,
             IsFolder = item is InventoryFolder,
             FolderKind = folderKind,
+            MarketplaceRole = marketplaceRole,
             IsLibrary = isLibrary,
             TypeName = GetInventoryTypeName(item),
             IsWorn = isWorn,
@@ -337,8 +362,17 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
     #region Selection
 
+    private InvTreeNode? _trackedNode;
+
     partial void OnSelectedNodeChanged(InvTreeNode? value)
     {
+        // Unsubscribe from the previously tracked node's property changes.
+        if (_trackedNode != null)
+            _trackedNode.PropertyChanged -= SelectedNode_PropertyChanged;
+        _trackedNode = value;
+        if (value != null)
+            value.PropertyChanged += SelectedNode_PropertyChanged;
+
         if (value == null)
         {
             ItemName = string.Empty;
@@ -348,6 +382,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
             ItemNoModify   = false;
             ItemNoCopy     = false;
             ItemNoTransfer = false;
+            ShowWearActions    = false;
+            ShowWearAddAction  = false;
+            ShowTouchAction    = false;
+            ShowLandmarkActions = false;
+            ShowRestoreToWorld = false;
+            ShowDeleteAction   = false;
             return;
         }
 
@@ -375,10 +415,41 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
             ItemNoTransfer = false;
         }
 
+        // Action button visibility
+        bool isWearable = invItem is InventoryWearable;
+        bool isObject   = invItem is InventoryObject or InventoryAttachment;
+        bool isLandmark = invItem is InventoryLandmark;
+        bool isInCof    = !value.IsFolder && invItem != null && IsCofItem(value);
+        bool isInTrash  = !value.IsFolder && IsInsideTrash(value);
+
+        // Hide Wear/WearAdd for items whose parent is COF — matches SL viewer isCOFFolder() guard
+        ShowWearActions   = !value.IsFolder && (isWearable || isObject) && !isInCof;
+        ShowWearAddAction = !value.IsFolder && !isInCof && (
+            isObject ||
+            (isWearable && invItem is InventoryWearable w &&
+             w.AssetType != AssetType.Bodypart && w.WearableType != WearableType.Physics));
+        ShowTouchAction    = !value.IsFolder && isObject && value.IsWorn;
+        ShowLandmarkActions = !value.IsFolder && isLandmark;
+        // Restore to World: only for object items sitting in the Trash
+        ShowRestoreToWorld = isInTrash && isObject;
+        // Hide Delete for worn links in COF (SL viewer: "Don't allow delete as a direct option from COF folder")
+        ShowDeleteAction   = !(isInCof && value.IsLink && value.IsWorn);
+
         OpenItemCommand.NotifyCanExecuteChanged();
 
         if (CanOpenItem())
             OpenItem();
+    }
+
+    private void SelectedNode_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // IsWorn toggling changes whether Touch is relevant.
+        if (e.PropertyName is nameof(InvTreeNode.IsWorn) && SelectedNode != null)
+        {
+            Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var item);
+            bool isObject = item is InventoryObject or InventoryAttachment;
+            ShowTouchAction = !SelectedNode.IsFolder && isObject && SelectedNode.IsWorn;
+        }
     }
 
     #endregion
@@ -439,7 +510,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void SearchNode(OpenMetaverse.InventoryNode? node, string searchLower, List<InventorySearchResult> results, CancellationToken token)
+    private void SearchNode(InventoryNode? node, string searchLower, List<InventorySearchResult> results, CancellationToken token)
     {
         if (node == null || token.IsCancellationRequested) return;
 
@@ -460,7 +531,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
         if (node.Nodes == null) return;
 
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try
         {
             children = node.Nodes.Values.ToList();
@@ -487,13 +558,54 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         {
             if (_instance.COF != null)
             {
-                _instance.COF.AddToOutfit(invItem, true, CancellationToken.None);
-                _instance.ShowNotificationInChat($"Wearing {invItem.Name}...");
+                // Matches SL "Wear" semantics:
+                //   Wearables (all types including layerable clothing) → replace=true:
+                //     replaces the existing item(s) of the same wearable type.
+                //     Bodyparts and Physics are replace-only by definition.
+                //   Attachments (InventoryObject) → replace=false:
+                //     additive by default, matching SL's InventoryAddAttachmentBehavior=false.
+                //     Use WearAtPoint to explicitly replace at a given point.
+                bool replace = invItem is not InventoryObject;
+                _instance.COF.AddToOutfit(invItem, replace, CancellationToken.None);
+                VelesNotificationService.Show("Outfit", $"Wearing {invItem.Name}...");
             }
             else
             {
-                _instance.ShowNotificationInChat("Outfit manager not available yet.");
+                VelesNotificationService.Show("Outfit", "Outfit manager not available yet.");
             }
+        }
+    }
+
+    /// <summary>
+    /// Adds a clothing layer on top of existing layers without replacing them, or adds an
+    /// attachment additively. Matches SL's "Wear Add" (wear_add) action.
+    /// No-op for bodyparts and Physics which cannot be layered.
+    /// </summary>
+    [RelayCommand]
+    private void WearAddItem()
+    {
+        if (SelectedNode == null || SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
+
+        if (invItem is InventoryWearable wearable)
+        {
+            // Bodyparts and Physics cannot be layered — use Wear (replace) instead.
+            if (wearable.AssetType == AssetType.Bodypart || wearable.WearableType == WearableType.Physics)
+                return;
+        }
+        else if (invItem is not InventoryObject)
+        {
+            return;
+        }
+
+        if (_instance.COF != null)
+        {
+            _instance.COF.AddToOutfit(invItem, false, CancellationToken.None);
+            VelesNotificationService.Show("Outfit", $"Adding {invItem.Name}...");
+        }
+        else
+        {
+            VelesNotificationService.Show("Outfit", "Outfit manager not available yet.");
         }
     }
 
@@ -508,6 +620,17 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     private async Task DeleteItem()
     {
         if (SelectedNode == null) return;
+        if (SelectedNode.IsFolder && (IsProtectedFolder(SelectedNode) || IsRootSystemFolder(SelectedNode)))
+        {
+            _instance.ShowNotificationInChat($"Cannot delete the '{SelectedNode.Name}' system folder.");
+            return;
+        }
+
+        if (!SelectedNode.IsFolder && SelectedNode.IsWorn)
+        {
+            _instance.ShowNotificationInChat($"Cannot delete '{SelectedNode.Name}' while it is being worn.");
+            return;
+        }
 
         Inventory.TryGetValue(SelectedNode.ItemId, out InventoryBase? invItem);
 
@@ -581,7 +704,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
         if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
 
-        CommunityToolkit.Mvvm.ComponentModel.ObservableObject editorVm;
+        ObservableObject editorVm;
         if (invItem is InventoryLSL lslItem)
             editorVm = new ScriptEditorViewModel(_instance, lslItem);
         else if (invItem is InventoryNotecard ncItem)
@@ -660,6 +783,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                 break;
             case "Object":
             case "Attachment":
+                // Matches SL LLObjectBridge::openItem(): attach if unworn, detach if worn.
+                if (SelectedNode.IsWorn)
+                    RemoveFromOutfit();
+                else
+                    WearItem();
+                break;
             case "Material":
             case "Settings":
                 if (CanOpenItem()) OpenItem();
@@ -736,6 +865,86 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         _instance.ShowNotificationInChat($"Teleporting to {lm.Name}...");
     }
 
+    /// <summary>
+    /// Copies a secondlife:// SLURL for this landmark to the clipboard.
+    /// Requires the landmark asset to be downloaded and the region handle resolved.
+    /// </summary>
+    [RelayCommand]
+    private void CopyLandmarkSlurl()
+    {
+        if (SelectedNode == null || SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryLandmark>(SelectedNode.ItemId, out var lm)) return;
+
+        Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        {
+            if (!transfer.Success || asset is not AssetLandmark decoded) return;
+            decoded.Decode();
+
+            Client.Grid.RegionHandleReply += HandleSlurlRegionReply;
+            Client.Grid.RequestRegionHandle(decoded.RegionID);
+
+            void HandleSlurlRegionReply(object? sender, RegionHandleReplyEventArgs e)
+            {
+                if (e.RegionID != decoded.RegionID) return;
+                Client.Grid.RegionHandleReply -= HandleSlurlRegionReply;
+
+                // Look up region name from our known regions cache.
+                string regionName = "Unknown";
+                if (Client.Grid.RegionsByHandleReadOnly.TryGetValue(e.RegionHandle, out var region))
+                    regionName = region.Name;
+
+                var pos = decoded.Position;
+                var slurl = $"secondlife://{Uri.EscapeDataString(regionName)}/{(int)pos.X}/{(int)pos.Y}/{(int)pos.Z}";
+
+                Dispatcher.UIThread.Post(async () =>
+                {
+                    if (TopLevel != null)
+                        await TopLevel.SetTextAsync(slurl);
+                    _instance.ShowNotificationInChat($"SLURL copied: {slurl}");
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Opens the landmark location in the default browser via a secondlife:// SLURL,
+    /// which the SL viewer or a mapping site can handle.
+    /// </summary>
+    [RelayCommand]
+    private void ShowLandmarkOnMap()
+    {
+        if (SelectedNode == null || SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryLandmark>(SelectedNode.ItemId, out var lm)) return;
+
+        Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        {
+            if (!transfer.Success || asset is not AssetLandmark decoded) return;
+            decoded.Decode();
+
+            Client.Grid.RegionHandleReply += HandleMapRegionReply;
+            Client.Grid.RequestRegionHandle(decoded.RegionID);
+
+            void HandleMapRegionReply(object? sender, RegionHandleReplyEventArgs e)
+            {
+                if (e.RegionID != decoded.RegionID) return;
+                Client.Grid.RegionHandleReply -= HandleMapRegionReply;
+
+                string regionName = "Unknown";
+                if (Client.Grid.RegionsByHandleReadOnly.TryGetValue(e.RegionHandle, out var region))
+                    regionName = region.Name;
+
+                var pos = decoded.Position;
+                var slurl = $"secondlife://{Uri.EscapeDataString(regionName)}/{(int)pos.X}/{(int)pos.Y}/{(int)pos.Z}";
+
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(slurl) { UseShellExecute = true }); }
+                    catch { _instance.ShowNotificationInChat($"Could not open map: {slurl}"); }
+                });
+            }
+        });
+    }
+
     // ── Gestures ─────────────────────────────────────────────────────────────
 
     [RelayCommand]
@@ -777,6 +986,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     private void CreateFolder()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryFolder>(SelectedNode.ItemId, out var folder)
+            || !CanCreateInFolder(folder.PreferredType))
+        {
+            _instance.ShowNotificationInChat("Cannot create items in this folder.");
+            return;
+        }
         Client.Inventory.CreateFolder(SelectedNode.ItemId, "New Folder");
     }
 
@@ -784,6 +999,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     private void CreateNotecard()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryFolder>(SelectedNode.ItemId, out var folder)
+            || !CanCreateInFolder(folder.PreferredType))
+        {
+            _instance.ShowNotificationInChat("Cannot create items in this folder.");
+            return;
+        }
         Client.Inventory.RequestCreateItem(
             SelectedNode.ItemId, "New Notecard", string.Empty,
             AssetType.Notecard, UUID.Random(), InventoryType.Notecard,
@@ -794,6 +1015,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     private void CreateScript()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryFolder>(SelectedNode.ItemId, out var folder)
+            || !CanCreateInFolder(folder.PreferredType))
+        {
+            _instance.ShowNotificationInChat("Cannot create items in this folder.");
+            return;
+        }
         Client.Inventory.RequestCreateItem(
             SelectedNode.ItemId, "New Script", string.Empty,
             AssetType.LSLText, UUID.Random(), InventoryType.LSL,
@@ -803,16 +1030,27 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     // ── Trash ────────────────────────────────────────────────────────────────
 
     [RelayCommand]
-    private void EmptyTrash()
+    private async Task EmptyTrash()
     {
-        _ = Client.Inventory.EmptyTrashAsync();
-        _instance.ShowNotificationInChat("Emptying trash...");
+        var trashId = Client.Inventory.FindFolderForType(FolderType.Trash);
+        await Client.Inventory.EmptyTrashAsync();
+        if (_nodeCache.TryGetValue(trashId, out var trashNode))
+        {
+            RemoveChildrenFromCache(trashNode);
+            trashNode.Children.Clear();
+        }
+        _instance.ShowNotificationInChat("Trash emptied.");
     }
 
     [RelayCommand]
     private async Task EmptyFolder()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (IsProtectedFolder(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"Cannot empty the '{SelectedNode.Name}' system folder.");
+            return;
+        }
         var children = SelectedNode.Children.ToList();
         var trashId = Client.Inventory.FindFolderForType(FolderType.Trash);
         foreach (var child in children)
@@ -869,16 +1107,26 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     private void CutItem()
     {
         if (SelectedNode == null) return;
+        if (SelectedNode.IsFolder && (IsProtectedFolder(SelectedNode) || IsRootSystemFolder(SelectedNode)))
+        {
+            _instance.ShowNotificationInChat($"Cannot cut the '{SelectedNode.Name}' system folder.");
+            return;
+        }
         InvClipboard.Cut(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
-        _instance.ShowNotificationInChat($"Cut: {SelectedNode.Name}");
+        VelesNotificationService.Show("Inventory", $"Cut: {SelectedNode.Name}");
     }
 
     [RelayCommand]
     private void CopyItem()
     {
         if (SelectedNode == null) return;
+        if (!SelectedNode.IsFolder && !CanCopyItem(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"'{SelectedNode.Name}' cannot be copied (no-copy permissions).");
+            return;
+        }
         InvClipboard.Copy(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
-        _instance.ShowNotificationInChat($"Copied: {SelectedNode.Name}");
+        VelesNotificationService.Show("Inventory", $"Copied: {SelectedNode.Name}");
     }
 
     [RelayCommand]
@@ -914,6 +1162,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (!destNode.IsFolder) destNode = destNode.Parent;
         if (destNode == null) return;
 
+        if (!CanAcceptInFolder(destNode, InvClipboard.ItemId, InvClipboard.IsFolder))
+        {
+            _instance.ShowNotificationInChat($"Cannot paste '{InvClipboard.ItemName}' into '{destNode.Name}'.");
+            return;
+        }
+
         if (!Inventory.TryGetValue<InventoryFolder>(destNode.ItemId, out var destFolder)) return;
 
         if (InvClipboard.Mode == InvClipboardMode.Cut)
@@ -930,17 +1184,20 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                 else
                     await Client.Inventory.MoveItemAsync(movedId, destFolder.UUID, movedName);
 
-                // Update visual tree after success
+                // Update visual tree after success; defer Remove and Add into one dispatch
+                // so Avalonia doesn't clamp the scroll offset between the two collection changes.
                 var srcNode = FindNodeById(RootNodes, movedId);
                 if (srcNode != null)
                 {
-                    srcNode.Parent?.Children.Remove(srcNode);
+                    var oldParent = srcNode.Parent;
                     var destNode2 = FindNodeById(RootNodes, destFolder.UUID);
-                    if (destNode2 != null)
+                    srcNode.Parent = destNode2;
+                    Dispatcher.UIThread.Post(() =>
                     {
-                        srcNode.Parent = destNode2;
-                        destNode2.Children.Add(srcNode);
-                    }
+                        oldParent?.Children.Remove(srcNode);
+                        if (destNode2 != null)
+                            destNode2.Children.Add(srcNode);
+                    });
                 }
                 else
                 {
@@ -975,6 +1232,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (!destNode.IsFolder) destNode = destNode.Parent;
         if (destNode == null) return;
 
+        if (!CanAcceptInFolder(destNode, InvClipboard.ItemId, false, asLink: true))
+        {
+            _instance.ShowNotificationInChat($"Cannot create a link in '{destNode.Name}'.");
+            return;
+        }
+
         if (!Inventory.TryGetValue<InventoryFolder>(destNode.ItemId, out var destFolder)) return;
         if (!Inventory.TryGetValue<InventoryItem>(InvClipboard.ItemId, out var srcItem)) return;
 
@@ -994,12 +1257,29 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (SelectedNode == null || SelectedNode.IsFolder) return;
         var clipboard = TopLevel;
         if (clipboard == null) return;
-        await clipboard.SetTextAsync(SelectedNode.ItemId.ToString());
-        _instance.ShowNotificationInChat($"UUID copied: {SelectedNode.ItemId}");
+
+        var assetId = UUID.Zero;
+        if (TryGetInventoryBase(SelectedNode.ItemId) is InventoryItem item)
+        {
+            if (item.IsLink())
+            {
+                // For a link, AssetUUID holds the target inventory item UUID — resolve it.
+                if (TryGetInventoryBase(item.ResolvedItemID) is InventoryItem target)
+                    assetId = target.AssetUUID;
+            }
+            else
+            {
+                assetId = item.AssetUUID;
+            }
+        }
+
+        if (assetId == UUID.Zero) return;
+        await clipboard.SetTextAsync(assetId.ToString());
+        _instance.ShowNotificationInChat($"Asset UUID copied: {assetId}");
     }
 
     // TopLevel reference set by the code-behind so we can access the system clipboard
-    public Avalonia.Input.Platform.IClipboard? TopLevel { get; set; }
+    public IClipboard? TopLevel { get; set; }
 
     // ── Rez Object ───────────────────────────────────────────────────────────
 
@@ -1013,8 +1293,27 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
         var pos = Client.Self.SimPosition + Client.Self.Movement.Camera.AtAxis * 2.0f;
-        Client.Inventory.RequestRezFromInventory(sim, OpenMetaverse.Quaternion.Identity, pos, invItem);
+        Client.Inventory.RequestRezFromInventory(sim, Quaternion.Identity, pos, invItem);
         _instance.ShowNotificationInChat($"Rezzing {invItem.Name}...");
+    }
+
+    // ── Restore to World ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Rez a trashed object back to the world at its last known position.
+    /// Sends the <c>RezRestoreToWorld</c> packet — mirrors SL viewer <c>LLItemBridge::restoreToWorld()</c>.
+    /// </summary>
+    [RelayCommand]
+    private void RestoreToWorld()
+    {
+        if (SelectedNode == null || SelectedNode.IsFolder) return;
+        if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
+        if (invItem.AssetType != AssetType.Object) return;
+
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+        Client.Inventory.RequestRestoreRezFromInventory(sim, invItem, UUID.Random());
+        _instance.ShowNotificationInChat($"Restoring {invItem.Name} to world...");
     }
 
     // ── Create Link ───────────────────────────────────────────────────────────
@@ -1040,6 +1339,22 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     public async Task MoveNodeToFolder(InvTreeNode node, InvTreeNode targetFolderNode)
     {
         if (!targetFolderNode.IsFolder) return;
+        // Prevent moving a folder into itself or one of its own subfolders
+        if (node.IsFolder && IsAncestorOrSelf(node, targetFolderNode))
+        {
+            _instance.ShowNotificationInChat($"Cannot move '{node.Name}' into its own subfolder.");
+            return;
+        }
+        if (node.IsFolder && (IsProtectedFolder(node) || IsRootSystemFolder(node)))
+        {
+            _instance.ShowNotificationInChat($"Cannot move the '{node.Name}' system folder.");
+            return;
+        }
+        if (!CanAcceptInFolder(targetFolderNode, node.ItemId, node.IsFolder))
+        {
+            _instance.ShowNotificationInChat($"Cannot move '{node.Name}' to '{targetFolderNode.Name}'.");
+            return;
+        }
         if (!Inventory.TryGetValue<InventoryFolder>(targetFolderNode.ItemId, out var destFolder)) return;
 
         try
@@ -1090,9 +1405,43 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
         if (_instance.COF != null)
         {
-            _ = _instance.COF.RemoveFromOutfit(invItem, System.Threading.CancellationToken.None);
-            _instance.ShowNotificationInChat($"Removing {invItem.Name}...");
+            _ = _instance.COF.RemoveFromOutfit(invItem, CancellationToken.None);
+            VelesNotificationService.Show("Outfit", $"Removing {invItem.Name}...");
         }
+    }
+
+    /// <summary>
+    /// Sends a touch/click event to a currently worn attachment, matching SL's
+    /// "touch" action on LLObjectBridge. Only works when the attachment is worn
+    /// and its prim is tracked in _attachmentObjects.
+    /// </summary>
+    [RelayCommand]
+    private async Task TouchAttachment()
+    {
+        if (SelectedNode == null || SelectedNode.IsFolder || !SelectedNode.IsWorn) return;
+        if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
+
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        // Reverse-lookup: find the local prim ID for this inventory item.
+        uint localId = 0;
+        foreach (var kv in _attachmentObjects)
+        {
+            if (kv.Value == invItem.ResolvedItemID || kv.Value == invItem.UUID)
+            {
+                localId = kv.Key;
+                break;
+            }
+        }
+
+        if (localId == 0)
+        {
+            _instance.ShowNotificationInChat($"Cannot touch {invItem.Name}: attachment prim not found.");
+            return;
+        }
+
+        await Client.Objects.ClickObjectAsync(sim, localId);
     }
 
     [RelayCommand]
@@ -1103,27 +1452,47 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (_instance.COF == null) return;
 
         await _instance.COF.Attach(invItem, point, true, CancellationToken.None).ConfigureAwait(false);
-        _instance.ShowNotificationInChat($"Wearing {invItem.Name} at {point}...");
+        VelesNotificationService.Show("Outfit", $"Wearing {invItem.Name} at {point}...");
     }
 
     [RelayCommand]
     private void WearFolder()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (IsProtectedFolder(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"Cannot wear the '{SelectedNode.Name}' folder.");
+            return;
+        }
         if (_instance.COF == null) return;
-        var items = GetFolderItems(SelectedNode.ItemId);
+        if (!FolderCanBeWorn(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"'{SelectedNode.Name}' contains no wearable items.");
+            return;
+        }
+        var items = GetFolderWearableItems(SelectedNode.ItemId);
         if (items.Count == 0) return;
-        _ = _instance.COF.AddToOutfit(items, false, System.Threading.CancellationToken.None);
-        _instance.ShowNotificationInChat($"Adding {SelectedNode.Name} to outfit...");
+        _ = _instance.COF.AddToOutfit(items, false, CancellationToken.None);
+        VelesNotificationService.Show("Outfit", $"Adding {SelectedNode.Name} to outfit...");
     }
 
     [RelayCommand]
     private void ReplaceOutfit()
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
+        if (IsProtectedFolder(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"Cannot wear the '{SelectedNode.Name}' folder.");
+            return;
+        }
         if (_instance.COF == null) return;
-        _ = _instance.COF.ReplaceOutfit(SelectedNode.ItemId, System.Threading.CancellationToken.None);
-        _instance.ShowNotificationInChat($"Replacing outfit with {SelectedNode.Name}...");
+        if (!FolderCanBeWorn(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"'{SelectedNode.Name}' contains no wearable items.");
+            return;
+        }
+        _ = _instance.COF.ReplaceOutfit(SelectedNode.ItemId, CancellationToken.None);
+        VelesNotificationService.Show("Outfit", $"Replacing outfit with {SelectedNode.Name}...");
     }
 
     [RelayCommand]
@@ -1131,28 +1500,90 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     {
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
         if (_instance.COF == null) return;
-        var items = GetFolderItems(SelectedNode.ItemId);
+        if (!FolderCanBeTakenOff(SelectedNode))
+        {
+            _instance.ShowNotificationInChat($"Nothing from '{SelectedNode.Name}' is currently worn.");
+            return;
+        }
+        var items = GetFolderWearableItems(SelectedNode.ItemId);
         if (items.Count == 0) return;
-        _ = _instance.COF.RemoveFromOutfit(items, System.Threading.CancellationToken.None);
-        _instance.ShowNotificationInChat($"Removing {SelectedNode.Name} from outfit...");
+        _ = _instance.COF.RemoveFromOutfit(items, CancellationToken.None);
+        VelesNotificationService.Show("Outfit", $"Removing {SelectedNode.Name} from outfit...");
     }
 
-    private List<InventoryItem> GetFolderItems(UUID folderId)
+    /// <summary>Recursively collects all wearable and attachable items from a folder and its subfolders.</summary>
+    private List<InventoryItem> GetFolderWearableItems(UUID folderId)
     {
         var result = new List<InventoryItem>();
-        var storeNode = Inventory.GetNodeOrDefault(folderId);
-        if (storeNode?.Nodes == null) return result;
+        CollectWearableItems(folderId, result);
+        return result;
+    }
 
-        List<OpenMetaverse.InventoryNode> children;
-        try { children = storeNode.Nodes.Values.ToList(); }
-        catch (System.InvalidOperationException) { return result; }
-
-        foreach (var child in children)
+    private void CollectWearableItems(UUID folderId, List<InventoryItem> result)
+    {
+        var contents = Inventory.GetContents(folderId);
+        foreach (var c in contents)
         {
-            if (child.Data is InventoryItem item)
+            if (c is InventoryFolder sub)
+                CollectWearableItems(sub.UUID, result);
+            else if (c is InventoryItem item && IsWearableOrAttachableItem(item))
                 result.Add(item);
         }
-        return result;
+    }
+
+    private static bool IsWearableOrAttachableItem(InventoryItem item) =>
+        item is InventoryWearable or InventoryObject or InventoryAttachment;
+
+    // ── Save outfit ───────────────────────────────────────────────────────────
+
+    /// <summary>Raised when the user invokes "Save Current Outfit..." from a context menu.</summary>
+    public event EventHandler? SaveCurrentOutfitRequested;
+
+    [RelayCommand]
+    private void RequestSaveCurrentOutfit()
+    {
+        SaveCurrentOutfitRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Saves the current outfit as a new named folder under My Outfits,
+    /// populating it with links to each currently worn item.
+    /// </summary>
+    public async Task SaveCurrentOutfitAsync(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var cof = _instance.COF;
+        if (cof == null)
+        {
+            VelesNotificationService.Show("Outfit", "Outfit manager not available.");
+            return;
+        }
+        var myOutfitsId = Client.Inventory.FindFolderForType(FolderType.MyOutfits);
+        if (myOutfitsId == UUID.Zero)
+        {
+            VelesNotificationService.Show("Outfit", "My Outfits folder not found.");
+            return;
+        }
+        var newFolderId = Client.Inventory.CreateFolder(myOutfitsId, name, FolderType.Outfit);
+        if (newFolderId == UUID.Zero)
+        {
+            VelesNotificationService.Show("Outfit", "Failed to create outfit folder.");
+            return;
+        }
+        await Task.Delay(500).ConfigureAwait(false);
+        var links = await cof.GetCurrentOutfitLinks().ConfigureAwait(false);
+        foreach (var link in links)
+        {
+            var actual = cof.ResolveInventoryLink(link);
+            if (actual == null) continue;
+            await Client.Inventory.CreateLinkAsync(
+                newFolderId, actual.UUID, actual.Name,
+                string.Empty, actual.InventoryType, UUID.Random(),
+                (_, _) => { },
+                CancellationToken.None
+            ).ConfigureAwait(false);
+        }
+        VelesNotificationService.Show("Outfit", $"Saved '{name}' to My Outfits.");
     }
 
     // ── Special folder helpers ────────────────────────────────────────────────
@@ -1164,9 +1595,23 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         return folder.PreferredType == FolderType.Trash;
     }
 
+    /// <summary>
+    /// Returns true when the item's direct parent is the Current Outfit Folder.
+    /// Mirrors SL viewer's <c>isCOFFolder()</c> / <c>getIsInCOF()</c> check.
+    /// </summary>
+    public bool IsCofItem(InvTreeNode node)
+    {
+        if (node.IsFolder) return false;
+        if (!Inventory.TryGetValue<InventoryItem>(node.ItemId, out var item)) return false;
+        var cofId = Client.Inventory.FindFolderForType(FolderType.CurrentOutfit);
+        return cofId != UUID.Zero && item.ParentUUID == cofId;
+    }
+
     public bool IsInsideTrash(InvTreeNode node)
     {
         var trashId = Client.Inventory.FindFolderForType(FolderType.Trash);
+        if (trashId == UUID.Zero) return false;
+        if (node.ItemId == trashId) return false; // The Trash folder itself is not "inside" trash
         var current = node.Parent;
         while (current != null)
         {
@@ -1182,6 +1627,144 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         if (!Inventory.TryGetValue<InventoryFolder>(node.ItemId, out var folder)) return false;
         return folder.PreferredType != FolderType.None;
     }
+
+    /// <summary>
+    /// Returns true for system-typed folders that are direct children of the root inventory
+    /// (e.g. Calling Cards, Clothing, Body Parts, Landmarks).
+    /// These folders cannot be cut, moved, or deleted — mirroring the SL viewer's
+    /// <c>isMovable()</c> check that blocks root-level system folders from being relocated.
+    /// </summary>
+    public bool IsRootSystemFolder(InvTreeNode node)
+    {
+        if (!node.IsFolder) return false;
+        if (!Inventory.TryGetValue<InventoryFolder>(node.ItemId, out var folder)) return false;
+        if (folder.PreferredType == FolderType.None) return false;
+        var rootId = Client.Inventory.FindFolderForType(FolderType.Root);
+        return rootId != UUID.Zero && folder.ParentUUID == rootId;
+    }
+
+    /// <summary>
+    /// Returns true if the folder is not protected and contains at least one wearable or attachable item.
+    /// Used to decide whether to show "Add to Outfit" / "Replace Outfit" in the context menu.
+    /// </summary>
+    public bool FolderCanBeWorn(InvTreeNode node)
+    {
+        if (!node.IsFolder || IsProtectedFolder(node)) return false;
+        return NodeHasWearableDescendant(node);
+    }
+
+    /// <summary>Returns true if the folder contains at least one currently worn or attached item.</summary>
+    public bool FolderCanBeTakenOff(InvTreeNode node)
+    {
+        if (!node.IsFolder) return false;
+        return NodeHasWornDescendant(node);
+    }
+
+    private static bool NodeHasWearableDescendant(InvTreeNode node)
+    {
+        foreach (var child in node.Children)
+        {
+            if (!child.IsFolder && IsWearableOrAttachableTypeName(child.TypeName)) return true;
+            if (child.IsFolder && NodeHasWearableDescendant(child)) return true;
+        }
+        return false;
+    }
+
+    private static bool NodeHasWornDescendant(InvTreeNode node)
+    {
+        foreach (var child in node.Children)
+        {
+            if (!child.IsFolder && child.IsWorn) return true;
+            if (child.IsFolder && NodeHasWornDescendant(child)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsWearableOrAttachableTypeName(string typeName) => typeName is
+        "Shape" or "Skin" or "Hair" or "Eyes" or "Shirt" or "Pants" or
+        "Shoes" or "Socks" or "Jacket" or "Gloves" or "Undershirt" or
+        "Underpants" or "Skirt" or "Alpha" or "Tattoo" or "Physics" or
+        "Universal" or "Object";
+
+    /// <summary>
+    /// Returns true if <paramref name="potentialAncestor"/> is an ancestor of (or the same node as)
+    /// <paramref name="node"/> by walking up the parent chain.
+    /// Used to block moving a folder into its own subtree.
+    /// </summary>
+    public static bool IsAncestorOrSelf(InvTreeNode potentialAncestor, InvTreeNode node)
+    {
+        var current = node;
+        while (current != null)
+        {
+            if (current.ItemId == potentialAncestor.ItemId) return true;
+            current = current.Parent;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true for the canonical system folders that cannot be deleted, cut, or moved.
+    /// Matches the SL viewer's <c>LLFolderType::lookupIsProtectedType</c> set.
+    /// </summary>
+    public bool IsProtectedFolder(InvTreeNode node)
+    {
+        if (!node.IsFolder) return false;
+        if (!Inventory.TryGetValue<InventoryFolder>(node.ItemId, out var folder)) return false;
+        return folder.PreferredType is
+            FolderType.Root or FolderType.Trash or FolderType.LostAndFound or
+            FolderType.Favorites or FolderType.CurrentOutfit or FolderType.MyOutfits or
+            FolderType.Inbox or FolderType.Outbox or FolderType.BasicRoot or
+            FolderType.MarketplaceListings;
+    }
+
+    /// <summary>Returns true if the owner has Copy permission on this item.</summary>
+    public bool CanCopyItem(InvTreeNode node)
+    {
+        if (node.IsFolder || node.IsLibrary) return false;
+        if (!Inventory.TryGetValue<InventoryItem>(node.ItemId, out var item)) return true;
+        return (item.Permissions.OwnerMask & PermissionMask.Copy) != 0;
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="targetFolderNode"/> can accept a paste or drag-drop
+    /// of the given source. Mirrors the SL viewer's per-folder-type restrictions.
+    /// </summary>
+    /// <param name="asLink">True when the operation creates a new link rather than moving the source item (i.e. Paste as Link).</param>
+    public bool CanAcceptInFolder(InvTreeNode targetFolderNode, UUID sourceId, bool sourceIsFolder, bool asLink = false)
+    {
+        if (!targetFolderNode.IsFolder) return false;
+        if (!Inventory.TryGetValue<InventoryFolder>(targetFolderNode.ItemId, out var folder)) return false;
+
+        switch (folder.PreferredType)
+        {
+            case FolderType.Favorites:
+                // Favorites accepts landmark items and sub-folders (for organisation).
+                if (sourceIsFolder) return true;
+                if (!Inventory.TryGetValue(sourceId, out InventoryBase? src)) return false;
+                if (src is InventoryLandmark) return true;
+                if (src is InventoryItem li && li.IsLink())
+                    return Inventory.TryGetValue<InventoryLandmark>(li.AssetUUID, out _);
+                return false;
+
+            case FolderType.CurrentOutfit:
+                // COF is managed by the outfit system; only links may be placed here.
+                if (asLink) return true;
+                if (sourceIsFolder) return false;
+                if (!Inventory.TryGetValue(sourceId, out InventoryBase? cofSrc)) return false;
+                return cofSrc is InventoryItem cofItem && cofItem.IsLink();
+
+            case FolderType.Inbox:
+                // Read-only; managed entirely by the server.
+                return false;
+
+            default:
+                return true;
+        }
+    }
+
+    /// <summary>Returns false for folders that do not accept new user-created content.</summary>
+    private static bool CanCreateInFolder(FolderType type) =>
+        type is not (FolderType.Trash or FolderType.CurrentOutfit or FolderType.Inbox);
 
     #endregion
 
@@ -1207,6 +1790,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         }
 
         Dispatcher.UIThread.Post(() => RefreshFolderNode(RootNodes, e.FolderID));
+
+        // When the COF folder changes (e.g. after an attachment is removed), the
+        // worn-state cache must be rebuilt so context menus show "Wear" not "Take Off".
+        var cofId = _instance.COF?.COF?.UUID ?? UUID.Zero;
+        if (cofId != UUID.Zero && e.FolderID == cofId)
+            RefreshAllWornState();
 
         // Defer CountItems (full tree traversal) via the same batch timer used by
         // ItemReceived so that a burst of folder updates only causes one recount.
@@ -1373,10 +1962,10 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         });
     }
 
-    private static void CollectLibraryFolders(OpenMetaverse.InventoryNode? node, List<InventoryFolder> result)
+    private static void CollectLibraryFolders(InventoryNode? node, List<InventoryFolder> result)
     {
         if (node?.Nodes == null) return;
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try { children = node.Nodes.Values.ToList(); }
         catch (InvalidOperationException) { return; }
         foreach (var child in children)
@@ -1386,7 +1975,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void TraverseAndQueueFolders(OpenMetaverse.InventoryNode node)
+    private void TraverseAndQueueFolders(InventoryNode node)
     {
         if (node.NeedsUpdate && node.Data is InventoryFolder)
         {
@@ -1395,7 +1984,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
         if (node.Nodes == null) return;
 
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try
         {
             children = node.Nodes.Values.ToList();
@@ -1411,13 +2000,13 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static void MarkAllNeedsUpdate(OpenMetaverse.InventoryNode node)
+    private static void MarkAllNeedsUpdate(InventoryNode node)
     {
         node.NeedsUpdate = true;
 
         if (node.Nodes == null) return;
 
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try
         {
             children = node.Nodes.Values.ToList();
@@ -1453,21 +2042,64 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
         {
             if (node.ItemId == folderId && node.IsFolder)
             {
-                RemoveChildrenFromCache(node);
-                node.Children.Clear();
-                var contents = Inventory.GetContents(folderId);
-                foreach (var child in SortContents(contents))
-                {
-                    var childNode = CreateNode(child, node.IsLibrary);
-                    childNode.Parent = node;
-                    node.Children.Add(childNode);
-                }
+                MergeFolderChildren(node);
                 return;
             }
 
             if (node.Children.Count > 0)
             {
                 RefreshFolderNode(node.Children, folderId);
+            }
+        }
+    }
+
+    private void MergeFolderChildren(InvTreeNode folder)
+    {
+        var newContents = SortContents(Inventory.GetContents(folder.ItemId)).ToList();
+        var newIds = new HashSet<UUID>(newContents.Select(c => c.UUID));
+
+        // Remove stale children; walk backwards to avoid index shifting.
+        for (int i = folder.Children.Count - 1; i >= 0; i--)
+        {
+            var child = folder.Children[i];
+            if (!newIds.Contains(child.ItemId))
+            {
+                _nodeCache.Remove(child.ItemId);
+                RemoveChildrenFromCache(child);
+                folder.Children.RemoveAt(i);
+            }
+        }
+
+        // Build lookup of surviving children so we can reuse their node instances,
+        // preserving IsExpanded state and TreeView visual selection.
+        var existingById = folder.Children.ToDictionary(c => c.ItemId);
+
+        for (int targetIdx = 0; targetIdx < newContents.Count; targetIdx++)
+        {
+            var item = newContents[targetIdx];
+            if (existingById.TryGetValue(item.UUID, out var existing))
+            {
+                // Update name in-place if the server sent a new one.
+                var newName = item.Name ?? "(unnamed)";
+                if (existing.Name != newName)
+                {
+                    existing.Name = newName;
+                    existing.NotifyNameChanged();
+                }
+                // Move to the correct sorted position if necessary.
+                int curIdx = folder.Children.IndexOf(existing);
+                if (curIdx != targetIdx && curIdx >= 0)
+                    folder.Children.Move(curIdx, targetIdx);
+            }
+            else
+            {
+                var newNode = CreateNode(item, folder.IsLibrary);
+                newNode.Parent = folder;
+                if (targetIdx < folder.Children.Count)
+                    folder.Children.Insert(targetIdx, newNode);
+                else
+                    folder.Children.Add(newNode);
+                existingById[item.UUID] = newNode;
             }
         }
     }
@@ -1508,20 +2140,57 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
             && folder.PreferredType == FolderType.CurrentOutfit;
     }
 
+    /// <summary>
+    /// Returns true if <paramref name="itemId"/> is the asset target of any link currently
+    /// in the Current Outfit Folder. Used to suppress "Item Received" toasts for real items
+    /// that are re-fetched as a side-effect of COF operations (e.g. ResolveInventoryLink
+    /// calling RequestFetchInventoryAsync on the underlying worn item).
+    /// </summary>
+    private bool IsLinkedFromCof(UUID itemId)
+    {
+        var cofId = _instance.COF?.COF?.UUID ?? UUID.Zero;
+        if (cofId == UUID.Zero)
+        {
+            if (!Inventory.TryGetValue<InventoryFolder>(
+                    Client.Inventory.FindFolderForType(FolderType.CurrentOutfit),
+                    out var cofFolder))
+                return false;
+            cofId = cofFolder.UUID;
+        }
+
+        // Walk COF contents and check if any link resolves to this item.
+        foreach (var child in Inventory.GetContents(cofId))
+        {
+            if (child is InventoryItem link && link.IsLink() && link.AssetUUID == itemId)
+                return true;
+        }
+        return false;
+    }
+
     private void Inventory_ItemReceived(object? sender, ItemReceivedEventArgs e)
     {
         var parentId = e.Item.ParentUUID;
+        var itemId   = e.Item.UUID;
         var itemName = e.Item.Name;
         bool isLink = e.Item is InventoryItem li && li.IsLink();
 
-        // Capture before the Dispatcher.Post so it's evaluated on the event thread.
+        // Evaluate all suppression conditions on the event thread before dispatching.
         bool inSuppressWindow = (Environment.TickCount - _teleportSuppressUntilTicks) < 0;
+        // Also suppress during appearance operations (outfit wear/detach causes item re-fetches).
+        bool appearanceBusy = inSuppressWindow || Client.Appearance.ManagerBusy;
+        // Evaluate IsInCofFolder here on the event thread — the COF UUID and folder type
+        // are stable data that don't require the UI thread.
+        bool inCof = IsInCofFolder(parentId);
+        // Suppress if this item is the *target* of an existing COF link.
+        // ResolveInventoryLink fetches the real item (not a link) during outfit operations,
+        // which would otherwise show spurious "Item Received" toasts for items being worn.
+        bool isWornTarget = !inCof && IsLinkedFromCof(itemId);
 
         // Show notification on UI thread; tree refresh is debounced below.
         Dispatcher.UIThread.Post(() =>
         {
-            if (!isLink && !inSuppressWindow && !IsInCofFolder(parentId) && _inventoryLoaded)
-                _instance.ShowNotificationInChat($"Received: {itemName}");
+            if (!isLink && !appearanceBusy && !inCof && !isWornTarget && _inventoryLoaded)
+                VelesNotificationService.Show("Item Received", itemName);
         });
 
         // Collect the dirty folder and (re)start the batch timer.
@@ -1557,6 +2226,41 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
             StatusText = $"Inventory ({CountItems(Inventory.RootNode)} items)";
         });
+    }
+
+    private void Inventory_ObjectRemoved(object? sender, InventoryObjectRemovedEventArgs e)
+    {
+        var id = e.Obj.UUID;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_nodeCache.TryGetValue(id, out var node)) return;
+            _nodeCache.Remove(id);
+            RemoveChildrenFromCache(node);
+            node.Parent?.Children.Remove(node);
+        });
+    }
+
+    private void Inventory_ObjectAdded(object? sender, InventoryObjectAddedEventArgs e)
+    {
+        // Suppress during initial load — FolderUpdated handles that phase.
+        if (!_inventoryLoaded) return;
+        // Folders are handled by Inventory_FolderUpdated; skip links to avoid COF noise.
+        if (e.Obj is InventoryFolder) return;
+        if (e.Obj is InventoryItem li && li.IsLink()) return;
+
+        var parentId = e.Obj.ParentUUID;
+        if (parentId == UUID.Zero) return;
+
+        _pendingItemFolders.TryAdd(parentId, 0);
+        lock (_itemBatchLock)
+        {
+            if (_itemReceivedBatchTimer == null)
+                _itemReceivedBatchTimer = new Timer(OnItemBatchTimerFired, null,
+                    TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
+            else
+                _itemReceivedBatchTimer.Change(
+                    TimeSpan.FromMilliseconds(300), Timeout.InfiniteTimeSpan);
+        }
     }
 
 
@@ -1682,19 +2386,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                     var originalId = item.AssetUUID;
                     if (slots.ContainsKey(originalId)) continue;
 
+                    // Only use the COF scan as a fallback for wearables (clothing/bodypart).
+                    // For objects/attachments, rely solely on GetAttachmentsByItemId() above —
+                    // the COF link may linger briefly after detach and would cause stale "Attached" labels.
                     if (Inventory.TryGetValue<InventoryWearable>(originalId, out var wearable))
                         slots[originalId] = wearable.WearableType.ToString();
-                    else if (Inventory.TryGetValue<InventoryItem>(originalId, out var resolved)
-                             && (resolved is InventoryAttachment || resolved is InventoryObject))
-                    {
-                        // Look up the real attachment point if available
-                        var attachPoints = Client.Appearance.GetAttachmentsByItemId();
-                        slots[originalId] = attachPoints.TryGetValue(originalId, out var pt)
-                            ? pt.ToString()
-                            : "Attached";
-                    }
-                    else
-                        slots[originalId] = "Worn";
+                    // (Intentionally no fallback for InventoryObject/InventoryAttachment here)
                 }
             }
         }
@@ -1734,11 +2431,15 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
     private void Appearance_AppearanceSet(object? sender, AppearanceSetEventArgs e)
     {
+        // Suppress ItemReceived notifications briefly — the server re-sends item data
+        // as part of finalizing an outfit change, which would otherwise show spurious toasts.
+        _teleportSuppressUntilTicks = Environment.TickCount + 3000;
         RefreshAllWornState();
     }
 
     private void Appearance_AgentWearablesReply(object? sender, AgentWearablesReplyEventArgs e)
     {
+        _teleportSuppressUntilTicks = Environment.TickCount + 3000;
         RefreshAllWornState();
     }
 
@@ -1772,12 +2473,12 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                         ? prim.PrimData.AttachmentPoint.ToString()
                         : "Attached";
 
-                _wornSlots.TryAdd(inventoryId, pointStr);
+                // Use assignment (not TryAdd) so stale slot labels are always overwritten.
+                _wornSlots[inventoryId] = pointStr;
                 if (_nodeCache.TryGetValue(inventoryId, out var node))
                 {
                     node.IsWorn   = true;
-                    if (string.IsNullOrEmpty(node.WornSlot))
-                        node.WornSlot = pointStr;
+                    node.WornSlot = pointStr;
                 }
 
                 // AttachItemID from the server may be a COF link UUID rather than the
@@ -1787,12 +2488,11 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                 if (Inventory.TryGetValue<InventoryItem>(inventoryId, out var linkItem) && linkItem.IsLink())
                 {
                     effectiveId = linkItem.AssetUUID;
-                    _wornSlots.TryAdd(effectiveId, pointStr);
+                    _wornSlots[effectiveId] = pointStr;
                     if (_nodeCache.TryGetValue(effectiveId, out var originalNode))
                     {
-                        originalNode.IsWorn = true;
-                        if (string.IsNullOrEmpty(originalNode.WornSlot))
-                            originalNode.WornSlot = pointStr;
+                        originalNode.IsWorn   = true;
+                        originalNode.WornSlot = pointStr;
                     }
                 }
 
@@ -1804,15 +2504,67 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
                     if (Inventory.TryGetValue<InventoryItem>(kv.Key, out var possibleLink)
                         && possibleLink.AssetUUID == effectiveId)
                     {
-                        _wornSlots.TryAdd(kv.Key, pointStr);
-                        kv.Value.IsWorn = true;
-                        if (string.IsNullOrEmpty(kv.Value.WornSlot))
-                            kv.Value.WornSlot = pointStr;
+                        _wornSlots[kv.Key] = pointStr;
+                        kv.Value.IsWorn   = true;
+                        kv.Value.WornSlot = pointStr;
                     }
                 }
             });
             break;
         }
+    }
+
+    private void Objects_KillObjects(object? sender, KillObjectsEventArgs e)
+    {
+        // Find which of the killed local IDs were tracked attachments and clear their worn state.
+        var killedInventoryIds = new List<UUID>();
+        foreach (var localId in e.ObjectLocalIDs)
+        {
+            if (_attachmentObjects.TryRemove(localId, out var invId))
+                killedInventoryIds.Add(invId);
+        }
+
+        if (killedInventoryIds.Count == 0) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            foreach (var inventoryId in killedInventoryIds)
+            {
+                _wornSlots.Remove(inventoryId);
+
+                if (_nodeCache.TryGetValue(inventoryId, out var node))
+                {
+                    node.IsWorn   = false;
+                    node.WornSlot = string.Empty;
+                }
+
+                // Resolve link to original item and clear that too.
+                var effectiveId = inventoryId;
+                if (Inventory.TryGetValue<InventoryItem>(inventoryId, out var linkItem) && linkItem.IsLink())
+                {
+                    effectiveId = linkItem.AssetUUID;
+                    _wornSlots.Remove(effectiveId);
+                    if (_nodeCache.TryGetValue(effectiveId, out var originalNode))
+                    {
+                        originalNode.IsWorn   = false;
+                        originalNode.WornSlot = string.Empty;
+                    }
+                }
+
+                // Clear any other cached links resolving to the same underlying item.
+                foreach (var kv in _nodeCache)
+                {
+                    if (!kv.Value.IsLink) continue;
+                    if (Inventory.TryGetValue<InventoryItem>(kv.Key, out var possibleLink)
+                        && possibleLink.AssetUUID == effectiveId)
+                    {
+                        _wornSlots.Remove(kv.Key);
+                        kv.Value.IsWorn   = false;
+                        kv.Value.WornSlot = string.Empty;
+                    }
+                }
+            }
+        });
     }
 
     #endregion
@@ -1862,7 +2614,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
     }
 
     private void FilterNode(
-        OpenMetaverse.InventoryNode? node,
+        InventoryNode? node,
         InventoryFilterViewModel filter,
         Func<UUID, string> nameResolver,
         List<InventorySearchResult> results,
@@ -1881,7 +2633,7 @@ public partial class InventoryViewModel : ObservableObject, IDisposable
 
         if (node.Nodes == null) return;
 
-        List<OpenMetaverse.InventoryNode> children;
+        List<InventoryNode> children;
         try { children = node.Nodes.Values.ToList(); }
         catch (InvalidOperationException) { return; }
 
@@ -1904,10 +2656,21 @@ public class InvTreeNode : ObservableObject
     public bool IsFolder { get; set; }
     public string TypeName { get; set; } = string.Empty;
     public FolderType FolderKind { get; set; } = FolderType.None;
+    public MarketplaceFolderRole MarketplaceRole { get; set; } = MarketplaceFolderRole.None;
     public bool IsLibrary { get; set; }
     public InvTreeNode? Parent { get; set; }
 
     public ObservableCollection<InvTreeNode> Children { get; } = [];
+
+    /// <summary>
+    /// Fires change notifications for display properties that depend on <see cref="Name"/>.
+    /// Call this after setting <see cref="Name"/> directly (it has no SetProperty backing).
+    /// </summary>
+    public void NotifyNameChanged()
+    {
+        OnPropertyChanged(nameof(DisplayText));
+        OnPropertyChanged(nameof(DisplayName));
+    }
 
     private bool _isExpanded;
     public bool IsExpanded
@@ -1970,12 +2733,17 @@ public class InvTreeNode : ObservableObject
         get
         {
             if (IsLibrary) return "\U0001F4DA";  // 📚 library (always)
+            // Marketplace-specific icons take precedence over generic FolderKind
+            if (MarketplaceRole == MarketplaceFolderRole.ListingsRoot) return "\U0001F6D2";  // 🛒 listings root
+            if (MarketplaceRole == MarketplaceFolderRole.Listing)      return "\U0001F3F7";  // 🏷 listing folder
             return FolderKind switch
             {
-                FolderType.Trash         => "\U0001F5D1",  // 🗑 wastebasket
-                FolderType.LostAndFound  => "\U0001F4EE",  // 📮 lost+found
-                FolderType.CurrentOutfit => "\U0001F455",  // 👕 t-shirt
-                _                        => "\U0001F4C1",  // 📁 generic folder
+                FolderType.Trash              => "\U0001F5D1",  // 🗑 wastebasket
+                FolderType.LostAndFound       => "\U0001F4EE",  // 📮 lost+found
+                FolderType.CurrentOutfit      => "\U0001F455",  // 👕 t-shirt
+                FolderType.MarketplaceVersion => "\U0001F4CB",  // 📋 version folder
+                FolderType.MarketplaceStock   => "\U0001F4E6",  // 📦 stock folder
+                _                             => "\U0001F4C1",  // 📁 generic folder
             };
         }
     }
@@ -1985,7 +2753,7 @@ public class InvTreeNode : ObservableObject
         get
         {
             if (!IsWorn || string.IsNullOrEmpty(WornSlot)) return string.Empty;
-            if (Enum.TryParse<OpenMetaverse.WearableType>(WornSlot, true, out _))
+            if (Enum.TryParse<WearableType>(WornSlot, true, out _))
                 return $"\u00b7 Worn on: {WornSlot}";
             return string.Equals(WornSlot, "Attached", StringComparison.OrdinalIgnoreCase)
                 ? "\u00b7 Attached"
@@ -2053,10 +2821,10 @@ public record InventorySearchResult(
 public class InventoryEditorRequestedEventArgs : EventArgs
 {
     public InventoryBase? Item { get; }
-    public CommunityToolkit.Mvvm.ComponentModel.ObservableObject EditorViewModel { get; }
+    public ObservableObject EditorViewModel { get; }
 
     public InventoryEditorRequestedEventArgs(InventoryBase? item,
-        CommunityToolkit.Mvvm.ComponentModel.ObservableObject editorViewModel)
+        ObservableObject editorViewModel)
     {
         Item = item;
         EditorViewModel = editorViewModel;

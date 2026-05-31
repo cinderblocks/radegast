@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -96,7 +96,7 @@ namespace Radegast
 		
 		public void ImportFromFile(string filename)
 		{
-			ImportDirectory = Path.GetDirectoryName(filename);
+			ImportDirectory = Path.GetDirectoryName(filename)!;
             var xml = File.ReadAllText(filename);
 			var prims = Helpers.OSDToPrimList(OSDParser.DeserializeLLSDXml(xml));
 			
@@ -203,7 +203,7 @@ namespace Radegast
 			}
 		}
 
-        private void Objects_OnNewPrim(object sender, PrimEventArgs e)
+        private void Objects_OnNewPrim(object? sender, PrimEventArgs e)
 		{
 			Primitive prim = e.Prim;
 			

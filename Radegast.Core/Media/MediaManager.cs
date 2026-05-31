@@ -248,9 +248,6 @@ namespace Radegast.Media
             allSounds = new Dictionary<IntPtr, MediaObject>();
             allChannels = new Dictionary<IntPtr, MediaObject>();
 
-            // Initialize the command queue.
-            queue = new Queue<SoundDelegate>();
-
             // Initialize sound cache
             Cache = new SoundCache(Instance, 50 * 1024 * 1024); // 50MB default
 
@@ -289,7 +286,7 @@ namespace Radegast.Media
             }
         }
 
-        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             UnregisterClientEvents(e.OldClient);
             if (ObjectEnable)
@@ -633,7 +630,7 @@ namespace Radegast.Media
             var possiblePaths = new List<string>();
 
             // Get the application base directory
-            string appDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            string appDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
             
             // Primary installation paths - dll subdirectory (matches LibreMetaverse convention)
             possiblePaths.Add(Path.Combine(appDirectory, "dll", architecture, dllName));
@@ -838,7 +835,7 @@ namespace Radegast.Media
         {
             // Notice changes in position or direction.
             Vector3 lastpos = new Vector3(0.0f, 0.0f, 0.0f);
-            float lastface = 0.0f;
+            double lastAngle = 0.0;
 
             while (!token.IsCancellationRequested)
             {
@@ -849,17 +846,26 @@ namespace Radegast.Media
 
                 var my = Instance.Client.Self;
                 Vector3 newPosition = new Vector3(my.SimPosition);
-                float newFace = my.SimRotation.W;
+
+                // Derive the full signed yaw angle from the facing quaternion using atan2
+                // so that all four compass quadrants are correctly represented.
+                // SimRotation is a unit quaternion; for a pure yaw rotation about the world
+                // Z axis:  q = (0, 0, sin(θ/2), cos(θ/2))  ⟹  θ = 2·atan2(qZ, qW).
+                // Using only Acos(W) loses the sign and mirrors any southward-facing direction.
+                double newAngle = 2.0 * Math.Atan2(
+                    (double)my.SimRotation.Z,
+                    (double)my.SimRotation.W);
 
                 // If we are standing still, nothing to update now, but
                 // FMOD needs a 'tick' anyway for callbacks, etc.  In looping
-                // 'game' programs, the loop is the 'tick'.   Since Radegast
-                // uses events and has no loop, we use this position update
-                // thread to drive the FMOD tick.  Have to move more than
-                // 500mm or turn more than 10 desgrees to bother with.
-                //
-                if (newPosition.ApproxEquals(lastpos, 0.5f) &&
-                    Math.Abs(newFace - lastface) < 0.2)
+                // 'game' programs, the loop is the 'tick'.  Since Radegast
+                // uses events and has no loop, we use this position-update
+                // thread to drive the FMOD tick.  Update only when the avatar
+                // has moved more than 500 mm or turned more than ~6 degrees.
+                double angleDelta = newAngle - lastAngle;
+                // Normalise delta to [-π, π] to handle wrap-around at ±π.
+                angleDelta -= Math.Round(angleDelta / (2.0 * Math.PI)) * (2.0 * Math.PI);
+                if (newPosition.ApproxEquals(lastpos, 0.5f) && Math.Abs(angleDelta) < 0.1)
                 {
                     invoke(delegate
                     {
@@ -868,40 +874,34 @@ namespace Radegast.Media
                     continue;
                 }
 
-                // We have moved or turned.  Remember new position.
+                // We have moved or turned.  Remember new position and yaw.
                 lastpos = newPosition;
-                lastface = newFace;
+                lastAngle = newAngle;
 
                 // Convert coordinate spaces.
                 VECTOR listenerpos = FromOMVSpace(newPosition);
 
-                // Get azimuth from the facing Quaternion.  Note we assume the
-                // avatar is standing upright.  Avatars in unusual positions
-                // hear things from unpredictable directions.
-                // By definition, facing.W = Cos( angle/2 )
-                // With angle=0 meaning East.
-                double angle = 2.0 * Math.Acos(newFace);
-
-                // Construct facing unit vector in FMOD coordinates.
-                // Z is East, X is South, Y is up.
+                // Build the facing unit vector in FMOD coordinate space.
+                // FMOD convention: Z = East, X = South, Y = Up.
+                // SL/OMV forward direction for yaw θ: (cos θ, sin θ, 0).
+                // OMV → FMOD mapping (see FromOMVSpace): x_fmod = −y_omv, z_fmod = x_omv.
+                // Therefore: x_fmod = −sin θ, z_fmod = cos θ.
                 VECTOR forward = new VECTOR
                 {
-                    x = (float) Math.Sin(angle),
+                    x = -(float)Math.Sin(newAngle),  // South component (−OMV Y)
                     y = 0.0f,
-                    z = (float) Math.Cos(angle)
+                    z =  (float)Math.Cos(newAngle)   // East  component ( OMV X)
                 };
-                // South
-                // East
 
                 // Tell FMOD the new orientation.
                 invoke(delegate
                 {
                     FMODExec(system.set3DListenerAttributes(
                         0,
-                        ref listenerpos,    // Position
-                        ref ZeroVector,        // Velocity
-                        ref forward,        // Facing direction
-                        ref UpVector));    // Top of head
+                        ref listenerpos,  // Position
+                        ref ZeroVector,   // Velocity
+                        ref forward,      // Facing direction
+                        ref UpVector));   // Top of head
 
                     FMODExec(system.update());
                 });
@@ -956,7 +956,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Sound_SoundTrigger(object sender, SoundTriggerEventArgs e)
+        private void Sound_SoundTrigger(object? sender, SoundTriggerEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             if (e.SoundID == UUID.Zero) return;
@@ -977,7 +977,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Sound_AttachedSound(object sender, AttachedSoundEventArgs e)
+        private void Sound_AttachedSound(object? sender, AttachedSoundEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             
@@ -1036,7 +1036,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Sound_PreloadSound(object sender, PreloadSoundEventArgs e)
+        private void Sound_PreloadSound(object? sender, PreloadSoundEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             if (e.SoundID == UUID.Zero) return;
@@ -1050,7 +1050,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Objects_ObjectUpdate(object sender, PrimEventArgs e)
+        private void Objects_ObjectUpdate(object? sender, PrimEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             HandleObjectSound(e.Prim, e.Simulator);
@@ -1061,7 +1061,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Objects_KillObject(object sender, KillObjectEventArgs e)
+        private void Objects_KillObject(object? sender, KillObjectEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             
@@ -1096,7 +1096,7 @@ namespace Radegast.Media
             Vector3 fullPosition = p.Position;
             if (p.ParentID != 0)
             {
-                Primitive parentP;
+                Primitive? parentP;
                 if (!s.ObjectsPrimitives.TryGetValue(p.ParentID, out parentP)) return;
                 fullPosition += parentP.Position;
             }
@@ -1168,7 +1168,7 @@ namespace Radegast.Media
             get => m_objectEnabled;
         }
 
-        private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
+        private void Self_ChatFromSimulator(object? sender, ChatEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             
@@ -1189,7 +1189,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Network_SimChanged(object sender, SimChangedEventArgs e)
+        private void Network_SimChanged(object? sender, SimChangedEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             BufferSound.KillAll();
@@ -1200,7 +1200,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Network_Disconnected(object sender, DisconnectedEventArgs e)
+        private void Network_Disconnected(object? sender, DisconnectedEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             BufferSound.KillAll();
@@ -1212,7 +1212,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender"></param>
         /// <param name="e"></param>
-        private void Network_LoggedOut(object sender, LoggedOutEventArgs e)
+        private void Network_LoggedOut(object? sender, LoggedOutEventArgs e)
         {
             if (!SoundSystemAvailable) return;
             BufferSound.KillAll();
@@ -1803,7 +1803,7 @@ namespace Radegast.Media
             if (lruList.Count == 0)
                 return;
 
-            var lruId = lruList.Last.Value;
+            var lruId = lruList.Last!.Value;
             lruList.RemoveLast();
 
             if (cache.TryGetValue(lruId, out var cached))

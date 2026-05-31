@@ -37,7 +37,7 @@ public partial class UploadAnimationWindow : Window
 
     private async void OnBrowseClick(object? sender, RoutedEventArgs e)
     {
-        var files = await TopLevel.GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
+        var files = await GetTopLevel(this)!.StorageProvider.OpenFilePickerAsync(
             new FilePickerOpenOptions
             {
                 Title = "Select animation file to upload",

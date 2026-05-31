@@ -172,7 +172,7 @@ namespace Radegast.Rendering
 
         private readonly ConcurrentDictionary<UUID, TextureInfo> TexturesPtrMap = new ConcurrentDictionary<UUID, TextureInfo>();
         private readonly RadegastInstance instance;
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
         private readonly ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
         private readonly float[] lightPos = new float[] { 0f, 0f, 1f, 0f };
@@ -225,7 +225,7 @@ namespace Radegast.Rendering
 
             this.instance = instance;
 
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
             textRendering = new TextRendering(instance);
 
             Client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;

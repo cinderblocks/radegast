@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2021-2025, Sjofn, LLC
  * All rights reserved.
@@ -146,8 +146,7 @@ namespace Radegast.Core
             if (string.IsNullOrEmpty(processorArchitecture))
                 return null;
 
-            string platformName;
-            if (this._ProcessorArchitecturePlatforms.TryGetValue(processorArchitecture, out platformName))
+            if (this._ProcessorArchitecturePlatforms.TryGetValue(processorArchitecture, out string? platformName))
             {
                 return platformName;
             }
@@ -181,7 +180,7 @@ namespace Radegast.Core
 
                     // Try loading from executing assembly domain
                     var executingAssembly = GetType().GetTypeInfo().Assembly;
-                    var baseDirectory = Path.GetDirectoryName(executingAssembly.Location);
+                    var baseDirectory = Path.GetDirectoryName(executingAssembly.Location)!;
                     dllHandle = LoadLibraryInternal(dllName, baseDirectory, processArch);
                     if (dllHandle != IntPtr.Zero) return;
 

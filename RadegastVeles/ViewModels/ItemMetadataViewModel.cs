@@ -141,7 +141,7 @@ public partial class ItemMetadataViewModel : ObservableObject, IDisposable
         if ((mask & PermissionMask.Modify) != 0)   parts.Add("M");
         if ((mask & PermissionMask.Copy) != 0)     parts.Add("C");
         if ((mask & PermissionMask.Transfer) != 0) parts.Add("T");
-        return parts.Count > 0 ? string.Join("", parts) : "\u2014";
+        return parts.Count > 0 ? string.Join("", parts) : "-";
     }
 
     public void Dispose()

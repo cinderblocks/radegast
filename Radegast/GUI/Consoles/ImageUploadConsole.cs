@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -155,7 +155,7 @@ namespace Radegast
                     case ".j2c":
                         // Upload JPEG2000 images untouched
                         UploadData = File.ReadAllBytes(FileName);
-                        bitmap = J2kImage.FromBytes(UploadData).As<SKBitmap>().ToBitmap();
+                        bitmap = J2kImage.DecodeToImage<SKBitmap>(UploadData).ToBitmap();
 
                         txtStatus.AppendText("Loaded raw JPEG2000 data " + FileName + Environment.NewLine);
                         break;

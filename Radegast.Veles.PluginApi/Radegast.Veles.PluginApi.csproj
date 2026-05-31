@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyTitle>Radegast Veles Plugin API</AssemblyTitle>
+    <RootNamespace>Radegast.Veles.PluginApi</RootNamespace>
+    <AssemblyName>Radegast.Veles.PluginApi</AssemblyName>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
+    <OutputPath>..\bin\Veles\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="12.0.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
+  </ItemGroup>
+</Project>

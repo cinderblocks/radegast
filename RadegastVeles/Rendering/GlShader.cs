@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 
@@ -31,6 +32,10 @@ public sealed class GlShader : IDisposable
 {
     private int  _programId;
     private bool _disposed;
+
+    // Cached uniform locations: populated on first Loc(name) call, reused on all subsequent.
+    // Eliminates GL.GetUniformLocation driver round-trips on every Set(...) call.
+    private readonly Dictionary<string, int> _uniformLocations = new(StringComparer.Ordinal);
 
     private GlShader(int programId) => _programId = programId;
 
@@ -65,12 +70,31 @@ public sealed class GlShader : IDisposable
     public void Use()   => GL.UseProgram(_programId);
     public void Unuse() => GL.UseProgram(0);
 
-    private int Loc(string name) => GL.GetUniformLocation(_programId, name);
+    private int Loc(string name)
+    {
+        if (!_uniformLocations.TryGetValue(name, out var loc))
+        {
+            loc = GL.GetUniformLocation(_programId, name);
+            _uniformLocations[name] = loc;
+        }
+        return loc;
+    }
 
     public void Set(string name, int    v) => GL.Uniform1(Loc(name), v);
     public void Set(string name, float  v) => GL.Uniform1(Loc(name), v);
     public void Set(string name, bool   v) => GL.Uniform1(Loc(name), v ? 1 : 0);
+    public void Set(string name, Vector2 v) => GL.Uniform2(Loc(name), v);
+    public void Set(string name, Vector3 v) => GL.Uniform3(Loc(name), v);
     public void Set(string name, Vector4 v) => GL.Uniform4(Loc(name), v);
+
+    /// <summary>Upload a uniform vec3 array (e.g. SSAO sample kernel).</summary>
+    public void SetVec3Array(string name, Vector3[] values)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        for (int i = 0; i < values.Length; i++)
+            GL.Uniform3(loc + i, values[i]);
+    }
 
     public void Set(string name, ref Matrix4 m, bool transpose = false) =>
         GL.UniformMatrix4(Loc(name), transpose, ref m);

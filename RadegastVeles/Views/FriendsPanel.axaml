@@ -46,6 +46,9 @@
                     <Button Content="Profile" Command="{Binding ShowProfileCommand}" Margin="0,0,4,4" AutomationProperties.Name="Show friend profile" />
                     <Button Content="IM" Command="{Binding IMCommand}" Margin="0,0,4,4" AutomationProperties.Name="Send IM to friend" />
                     <Button Content="Pay" Command="{Binding PayCommand}" Margin="0,0,4,4" AutomationProperties.Name="Pay friend" />
+                    <Button Content="Offer Teleport" Command="{Binding OfferTeleportCommand}" Margin="0,0,4,4" AutomationProperties.Name="Offer teleport to friend" />
+                    <Button Content="Teleport To" Command="{Binding TeleportToCommand}" Margin="0,0,4,4" AutomationProperties.Name="Teleport to friend" />
+                    <Button Content="Invite to Group…" Command="{Binding InviteToGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Invite friend to group" />
                     <Button Content="Remove" Command="{Binding RemoveFriendCommand}" Margin="0,0,4,4" AutomationProperties.Name="Remove friend" />
                 </WrapPanel>
             </StackPanel>

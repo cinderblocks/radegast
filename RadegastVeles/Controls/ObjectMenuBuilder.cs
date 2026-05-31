@@ -20,6 +20,7 @@
 using System;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
 using OpenMetaverse;
 using Radegast.Veles.Core;

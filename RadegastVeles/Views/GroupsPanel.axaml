@@ -36,6 +36,7 @@
                     <Button Content="Activate" Command="{Binding ActivateGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Activate group" />
                     <Button Content="Info" Command="{Binding GroupInfoCommand}" Margin="0,0,4,4" AutomationProperties.Name="Group info" />
                     <Button Content="IM" Command="{Binding GroupIMCommand}" Margin="0,0,4,4" AutomationProperties.Name="Group IM" />
+                    <Button Content="Invite…" Command="{Binding InviteMemberCommand}" Margin="0,0,4,4" AutomationProperties.Name="Invite member to group" />
                     <Button Content="Leave" Command="{Binding LeaveGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Leave group" />
                 </WrapPanel>
             </StackPanel>

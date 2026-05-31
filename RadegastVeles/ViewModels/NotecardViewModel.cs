@@ -19,6 +19,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -44,12 +48,16 @@ public partial class NotecardViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _isSaving;
     [ObservableProperty] private bool _isModified;
 
+    public ObservableCollection<EmbeddedNotecardItem> EmbeddedItems { get; } = [];
+    public bool HasEmbeddedItems => EmbeddedItems.Count > 0;
+
     public NotecardViewModel(RadegastInstanceAvalonia instance, InventoryNotecard item)
     {
         _instance = instance;
         _item = item;
         NotecardName = item.Name;
         Metadata = new ItemMetadataViewModel(instance, item);
+        EmbeddedItems.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasEmbeddedItems));
         LoadNotecard();
     }
 
@@ -80,6 +88,12 @@ public partial class NotecardViewModel : ObservableObject, IDisposable
             _isSettingText = true;
             Content = notecard.BodyText ?? string.Empty;
             _isSettingText = false;
+            EmbeddedItems.Clear();
+            if (notecard.EmbeddedItems != null)
+            {
+                foreach (var embItem in notecard.EmbeddedItems)
+                    EmbeddedItems.Add(new EmbeddedNotecardItem(embItem));
+            }
             IsModified = false;
             StatusText = "Ready";
             SaveCommand.NotifyCanExecuteChanged();
@@ -104,7 +118,7 @@ public partial class NotecardViewModel : ObservableObject, IDisposable
         var notecard = new AssetNotecard
         {
             BodyText = Content,
-            EmbeddedItems = new List<InventoryItem>()
+            EmbeddedItems = EmbeddedItems.Select(e => e.Item).ToList()
         };
         notecard.Encode();
 
@@ -129,6 +143,40 @@ public partial class NotecardViewModel : ObservableObject, IDisposable
         Client.Inventory.RequestUploadNotecardAsset(notecard.AssetData, _item.UUID, handler);
     }
 
+    public void HandleDroppedNode(InvTreeNode node)
+    {
+        if (Client.Inventory.Store == null ||
+            !Client.Inventory.Store.TryGetValue(node.ItemId, out InventoryBase? invBase) ||
+            invBase is not InventoryItem item)
+            return;
+
+        if ((item.Permissions.OwnerMask & PermissionMask.Transfer) == 0) return;
+        if (EmbeddedItems.Any(e => e.ItemId == item.UUID)) return;
+        EmbeddedItems.Add(new EmbeddedNotecardItem(item));
+        IsModified = true;
+    }
+
+    [RelayCommand]
+    private async Task CopyEmbeddedItemToInventory(EmbeddedNotecardItem entry, CancellationToken ct)
+    {
+        var folderId = Client.Inventory.FindFolderForType(entry.Item.AssetType);
+        StatusText = $"Saving '{entry.Name}' to inventory\u2026";
+        await Client.Inventory.RequestCopyItemFromNotecardAsync(
+            UUID.Zero, _item.UUID, folderId, entry.Item.UUID,
+            copied => Dispatcher.UIThread.Post(() =>
+                StatusText = copied != null
+                    ? $"'{entry.Name}' saved to inventory."
+                    : "Failed to save item to inventory."),
+            ct);
+    }
+
+    [RelayCommand]
+    private void RemoveEmbeddedItem(EmbeddedNotecardItem entry)
+    {
+        EmbeddedItems.Remove(entry);
+        IsModified = true;
+    }
+
     [RelayCommand]
     private void Refresh()
     {
@@ -139,4 +187,11 @@ public partial class NotecardViewModel : ObservableObject, IDisposable
     private bool CanSave() => !IsLoading && !IsSaving;
 
     public void Dispose() => Metadata.Dispose();
+}
+
+public record EmbeddedNotecardItem(InventoryItem Item)
+{
+    public UUID ItemId => Item.UUID;
+    public string Name => Item.Name ?? "(unnamed)";
+    public string TypeLabel => Item.AssetType.ToString();
 }

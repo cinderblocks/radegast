@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -46,13 +46,13 @@ namespace Radegast.Rendering
         private bool terrainInProgress = false;
         private bool terrainTextureNeedsUpdate = false;
         private float terrainTimeSinceUpdate = RenderSettings.MinimumTimeBetweenTerrainUpdated + 1f; // Update terrain om first run
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
         private Simulator sim => Instance.Client.Network.CurrentSim;
 
         public RenderTerrain(RadegastInstanceForms instance)
         {
             Instance = instance;
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
         }
 
         public void ResetTerrain()

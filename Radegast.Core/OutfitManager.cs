@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -48,7 +48,7 @@ namespace Radegast
             base.Dispose(disposing);
         }
 
-        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             // Atomically update the underlying GridClient in the base class
             UpdateClient(e.Client);

@@ -95,6 +95,13 @@ public partial class MuteListViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void MuteResident()
+    {
+        _instance.ShowAvatarPicker("Mute Resident", entry =>
+            Client.Self.UpdateMuteListEntry(MuteType.Resident, entry.Id, entry.Name));
+    }
+
+    [RelayCommand]
     private void Refresh()
     {
         Client.Self.RequestMuteList();

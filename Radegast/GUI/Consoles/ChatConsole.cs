@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -721,6 +721,16 @@ namespace Radegast
 
         private void rtbChat_LinkClicked(object sender, LinkClickedEventArgs e)
         {
+            var link = e.LinkText;
+            var sepPos = link.IndexOf(RRichTextBox.LinkSeparator);
+            if (sepPos > 0) link = link.Substring(sepPos + 1);
+
+            if (link == ChatTextManager.LoadMoreChatUri)
+            {
+                ChatManager.LoadMoreHistory();
+                return;
+            }
+
             instance.MainForm.ProcessLink(e.LinkText);
         }
 

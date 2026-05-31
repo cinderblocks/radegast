@@ -20,6 +20,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -35,14 +36,8 @@ public enum IMSessionType
     Conference
 }
 
-public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
+public partial class IMViewModel : TabViewModelBase, IChatContext
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private INetCom NetCom => _instance.NetCom;
-    private GridClient Client => _instance.Client;
-
-    public RadegastInstanceAvalonia Instance => _instance;
-
     public ObservableCollection<IMSession> Sessions { get; } = [];
 
     [ObservableProperty]
@@ -54,15 +49,8 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
     [ObservableProperty]
     private string _statusText = "No conversations";
 
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(UnreadTabLabel))]
-    private bool _hasUnreadAny;
-
-    /// <summary>True when the IMs tab is the currently selected tab.</summary>
-    public bool IsActive { get; set; }
-
-    /// <summary>Screenreader-friendly tab label that announces unread state.</summary>
-    public string UnreadTabLabel => HasUnreadAny ? "IMs, new messages" : "IMs";
+    /// <inheritdoc/>
+    public override string UnreadTabLabel => HasUnread ? "IMs, new messages" : "IMs";
 
     /// <summary>
     /// Number of IM/Group/Conference sessions that have at least one unread message.
@@ -70,53 +58,78 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
     /// </summary>
     public int UnreadConversationCount => Sessions.Count(s => s.HasUnread);
 
-    public void ClearUnread()
+    public override void ClearUnread()
     {
         foreach (var s in Sessions)
             s.HasUnread = false;
-        HasUnreadAny = false;
+        HasUnread = false;
     }
 
-    private void UpdateHasUnreadAny()
+    private void UpdateHasUnread()
     {
-        HasUnreadAny = Sessions.Any(s => s.HasUnread);
+        HasUnread = Sessions.Any(s => s.HasUnread);
         OnPropertyChanged(nameof(UnreadConversationCount));
     }
 
-    public IMViewModel(RadegastInstanceAvalonia instance)
+    public IMViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
-
         NetCom.InstantMessageReceived += NetCom_InstantMessageReceived;
         NetCom.InstantMessageSent += NetCom_InstantMessageSent;
-        _instance.ClientChanged += Instance_ClientChanged;
         RegisterClientEvents(Client);
+
+        if (instance.Voice != null)
+        {
+            instance.Voice.GroupVoiceJoined += OnVoiceSessionJoined;
+            instance.Voice.GroupVoiceLeft += OnVoiceSessionLeft;
+        }
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         NetCom.InstantMessageReceived -= NetCom_InstantMessageReceived;
         NetCom.InstantMessageSent -= NetCom_InstantMessageSent;
-        _instance.ClientChanged -= Instance_ClientChanged;
-        UnregisterClientEvents(Client);
+        if (_instance.Voice != null)
+        {
+            _instance.Voice.GroupVoiceJoined -= OnVoiceSessionJoined;
+            _instance.Voice.GroupVoiceLeft -= OnVoiceSessionLeft;
+        }
+        base.Dispose();
     }
 
-    private void RegisterClientEvents(GridClient client)
+    private void OnVoiceSessionJoined(UUID sessionId)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var session = Sessions.FirstOrDefault(s => s.SessionId == sessionId);
+            if (session != null)
+                session.IsVoiceConnected = true;
+        });
+    }
+
+    private void OnVoiceSessionLeft(UUID sessionId)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var session = Sessions.FirstOrDefault(s => s.SessionId == sessionId);
+            if (session != null)
+                session.IsVoiceConnected = false;
+        });
+    }
+
+    protected override void RegisterClientEvents(GridClient client)
     {
         client.Self.ChatSessionMemberAdded += Self_ChatSessionMemberAdded;
         client.Self.ChatSessionMemberLeft += Self_ChatSessionMemberLeft;
     }
 
-    private void UnregisterClientEvents(GridClient client)
+    protected override void UnregisterClientEvents(GridClient client)
     {
         client.Self.ChatSessionMemberAdded -= Self_ChatSessionMemberAdded;
         client.Self.ChatSessionMemberLeft -= Self_ChatSessionMemberLeft;
     }
 
-    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
+    protected override void OnClientChanged(GridClient oldClient, GridClient newClient)
     {
-        UnregisterClientEvents(e.OldClient);
-        RegisterClientEvents(e.Client);
         Dispatcher.UIThread.Post(() =>
         {
             Sessions.Clear();
@@ -133,9 +146,14 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
     /// </summary>
     public void OpenIMSession(UUID agentId, string agentName)
     {
+        if (_instance.RLV?.Enabled == true && !_instance.RLV.Permissions.CanStartIM(agentId.Guid))
+        {
+            _instance.ShowNotificationInChat($"[RLV] Cannot start IM with {agentName}: restricted.");
+            return;
+        }
         Dispatcher.UIThread.Post(() =>
         {
-            var session = GetOrCreatePersonalSession(agentId, agentName);
+            var session = GetOrCreateSession(Client.Self.AgentID ^ agentId, agentName, IMSessionType.Personal, agentId);
             SelectedSession = session;
         });
     }
@@ -148,46 +166,19 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
     {
         Dispatcher.UIThread.Post(() =>
         {
-            var session = GetOrCreateGroupSession(groupId, groupName);
+            var session = GetOrCreateSession(groupId, groupName, IMSessionType.Group, groupId);
             SelectedSession = session;
             // Ask the server to join/start the group session if not already joined
             Client.Self.RequestJoinGroupChat(groupId);
         });
     }
 
-    private IMSession GetOrCreatePersonalSession(UUID agentId, string agentName)
-    {
-        var sessionId = Client.Self.AgentID ^ agentId;
-        var existing = Sessions.FirstOrDefault(s => s.SessionId == sessionId);
-        if (existing != null) return existing;
-
-        var session = new IMSession(sessionId, agentName, IMSessionType.Personal, agentId);
-        Sessions.Add(session);
-        UpdateStatus();
-        LoadSessionHistory(session);
-        PlayUISound(UISounds.IM);
-        return session;
-    }
-
-    private IMSession GetOrCreateGroupSession(UUID sessionId, string groupName)
+    private IMSession GetOrCreateSession(UUID sessionId, string label, IMSessionType type, UUID targetId)
     {
         var existing = Sessions.FirstOrDefault(s => s.SessionId == sessionId);
         if (existing != null) return existing;
 
-        var session = new IMSession(sessionId, groupName, IMSessionType.Group, sessionId);
-        Sessions.Add(session);
-        UpdateStatus();
-        LoadSessionHistory(session);
-        PlayUISound(UISounds.IM);
-        return session;
-    }
-
-    private IMSession GetOrCreateConferenceSession(UUID sessionId, string label)
-    {
-        var existing = Sessions.FirstOrDefault(s => s.SessionId == sessionId);
-        if (existing != null) return existing;
-
-        var session = new IMSession(sessionId, label, IMSessionType.Conference, sessionId);
+        var session = new IMSession(sessionId, label, type, targetId);
         Sessions.Add(session);
         UpdateStatus();
         LoadSessionHistory(session);
@@ -245,6 +236,34 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
 
     #endregion
 
+    #region Typing Notifications
+
+    /// <summary>
+    /// Called by the view when the user starts typing in the input box.
+    /// Sends a StartTyping IM for P2P sessions only.
+    /// </summary>
+    public void NotifyTypingStarted()
+    {
+        if (SelectedSession?.SessionType != IMSessionType.Personal) return;
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+            && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
+        NetCom.SendIMStartTyping(SelectedSession.TargetId, SelectedSession.SessionId);
+    }
+
+    /// <summary>
+    /// Called by the view when the user stops typing (idle timeout or message sent).
+    /// Sends a StopTyping IM for P2P sessions only.
+    /// </summary>
+    public void NotifyTypingStopped()
+    {
+        if (SelectedSession?.SessionType != IMSessionType.Personal) return;
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+            && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
+        NetCom.SendIMStopTyping(SelectedSession.TargetId, SelectedSession.SessionId);
+    }
+
+    #endregion
+
     #region Commands
 
     [RelayCommand]
@@ -255,12 +274,24 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         var text = MessageInput.Length >= 1000 ? MessageInput[..1000] : MessageInput;
         MessageInput = string.Empty;
 
+        // Sending a message implicitly stops typing
+        NotifyTypingStopped();
+
+        if (_instance.GlobalSettings["mu_emotes"].AsBoolean() && text.StartsWith(':'))
+            text = "/me " + text[1..];
+
         var session = SelectedSession;
 
         switch (session.SessionType)
         {
             case IMSessionType.Personal:
+                if (_instance.RLV?.Enabled == true &&
+                    !_instance.RLV.Permissions.CanSendIM(text, session.TargetId.Guid))
+                {
+                    return;
+                }
                 NetCom.SendInstantMessage(text, session.TargetId, session.SessionId);
+                _instance.Voice?.VoiceSynth.SpeakOutbound(text);
                 break;
 
             case IMSessionType.Group:
@@ -271,7 +302,35 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
             case IMSessionType.Conference:
                 Client.Self.InstantMessageGroup(session.SessionId, text);
                 AddOutgoingMessage(session, text);
+                _instance.Voice?.VoiceSynth.SpeakOutbound(text);
                 break;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleSessionVoice()
+    {
+        if (SelectedSession == null || !SelectedSession.SupportsVoice) return;
+        if (_instance.Voice == null) return;
+
+        var session = SelectedSession;
+
+        if (session.IsVoiceConnected)
+        {
+            session.IsVoiceConnected = false;
+            if (session.SessionType == IMSessionType.Group)
+                await _instance.Voice.LeaveGroupVoiceAsync(session.SessionId);
+            else
+                await _instance.Voice.LeaveConferenceVoiceAsync(session.SessionId);
+        }
+        else
+        {
+            if (session.SessionType == IMSessionType.Group)
+                await _instance.Voice.JoinGroupVoiceAsync(session.SessionId);
+            else
+                await _instance.Voice.JoinConferenceVoiceAsync(session.SessionId);
+
+            // IsVoiceConnected is updated via the GroupVoiceJoined/Left events
         }
     }
 
@@ -281,6 +340,16 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         if (SelectedSession == null) return;
 
         var session = SelectedSession;
+
+        // Leave voice if active
+        if (session.IsVoiceConnected)
+        {
+            session.IsVoiceConnected = false;
+            if (session.SessionType == IMSessionType.Group)
+                _ = _instance.Voice?.LeaveGroupVoiceAsync(session.SessionId);
+            else
+                _ = _instance.Voice?.LeaveConferenceVoiceAsync(session.SessionId);
+        }
 
         // Leave group/conference chat sessions on the server side
         if (session.SessionType is IMSessionType.Group or IMSessionType.Conference)
@@ -365,9 +434,15 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
 
     private void HandlePersonalIM(InstantMessageEventArgs e)
     {
+        if (_instance.RLV?.Enabled == true &&
+            !_instance.RLV.Permissions.CanReceiveIM(e.IM.Message, e.IM.FromAgentID.Guid))
+        {
+            return;
+        }
         var fromName = _instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
-        var session = GetOrCreatePersonalSession(e.IM.FromAgentID, fromName);
-        AddMessage(session, new ChatLine(DateTime.Now, fromName, $": {e.IM.Message}", ChatLineType.Normal, e.IM.FromAgentID));
+        var session = GetOrCreateSession(Client.Self.AgentID ^ e.IM.FromAgentID, fromName, IMSessionType.Personal, e.IM.FromAgentID);
+        var (imText, imType) = ParseMessagePose(e.IM.Message);
+        AddMessage(session, new ChatLine(DateTime.Now, fromName, imText, imType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
         if (!IsActive)
             VelesNotificationService.Show(fromName, e.IM.Message);
@@ -382,9 +457,10 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         }
         groupName = string.IsNullOrEmpty(groupName) ? "Group Chat" : groupName;
 
-        var session = GetOrCreateGroupSession(e.IM.IMSessionID, groupName);
+        var session = GetOrCreateSession(e.IM.IMSessionID, groupName, IMSessionType.Group, e.IM.IMSessionID);
         var fromName = _instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
-        AddMessage(session, new ChatLine(DateTime.Now, fromName, $": {e.IM.Message}", ChatLineType.Normal, e.IM.FromAgentID));
+        var (grpText, grpType) = ParseMessagePose(e.IM.Message);
+        AddMessage(session, new ChatLine(DateTime.Now, fromName, grpText, grpType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
         if (!IsActive)
             VelesNotificationService.Show(groupName, $"{fromName}: {e.IM.Message}");
@@ -395,9 +471,10 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         var label = Utils.BytesToString(e.IM.BinaryBucket);
         if (string.IsNullOrEmpty(label)) label = "Conference";
 
-        var session = GetOrCreateConferenceSession(e.IM.IMSessionID, label);
+        var session = GetOrCreateSession(e.IM.IMSessionID, label, IMSessionType.Conference, e.IM.IMSessionID);
         var fromName = _instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
-        AddMessage(session, new ChatLine(DateTime.Now, fromName, $": {e.IM.Message}", ChatLineType.Normal, e.IM.FromAgentID));
+        var (confText, confType) = ParseMessagePose(e.IM.Message);
+        AddMessage(session, new ChatLine(DateTime.Now, fromName, confText, confType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
     }
 
@@ -425,7 +502,7 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         if (SelectedSession != session)
         {
             session.HasUnread = true;
-            UpdateHasUnreadAny();
+            UpdateHasUnread();
         }
     }
 
@@ -440,13 +517,22 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         var session = Sessions.FirstOrDefault(s => s.SessionId == e.SessionID);
         if (session != null)
         {
-            AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, $": {e.Message}", ChatLineType.Self, Client.Self.AgentID));
+            var (sentText, sentType) = ParseMessagePose(e.Message, selfEmote: true);
+            AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, sentText, sentType, Client.Self.AgentID));
         }
     }
 
     private void AddOutgoingMessage(IMSession session, string text)
     {
-        AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, $": {text}", ChatLineType.Self, Client.Self.AgentID));
+        var (outText, outType) = ParseMessagePose(text, selfEmote: true);
+        AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, outText, outType, Client.Self.AgentID));
+    }
+
+    private static (string text, ChatLineType type) ParseMessagePose(string message, bool selfEmote = false)
+    {
+        if (message.StartsWith("/me ", StringComparison.OrdinalIgnoreCase))
+            return (message[4..], ChatLineType.Emote);
+        return ($": {message}", selfEmote ? ChatLineType.Self : ChatLineType.Normal);
     }
 
     private void AddMessage(IMSession session, ChatLine line)
@@ -472,7 +558,7 @@ public partial class IMViewModel : ObservableObject, IDisposable, IChatContext
         if (value != null)
         {
             value.HasUnread = false;
-            UpdateHasUnreadAny();
+            UpdateHasUnread();
             if (value.ShowParticipants)
                 RefreshParticipants(value);
         }
@@ -546,9 +632,17 @@ public partial class IMSession : ObservableObject
     public ObservableCollection<IMParticipant> Participants { get; } = [];
 
     public bool ShowParticipants => SessionType is IMSessionType.Group or IMSessionType.Conference;
+    public bool SupportsVoice => SessionType is IMSessionType.Group or IMSessionType.Conference;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(VoiceButtonLabel))]
+    private bool _isVoiceConnected;
+
+    public string VoiceButtonLabel => IsVoiceConnected ? "🔇 Leave Voice" : "🎙 Join Voice";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(DisplayText))]
+    [NotifyPropertyChangedFor(nameof(AccessibleLabel))]
     private bool _hasUnread;
 
     [ObservableProperty]
@@ -590,6 +684,9 @@ public partial class IMSession : ObservableObject
 
     /// <summary>Non-empty when a partner is typing; used for the typing indicator label.</summary>
     public string TypingText => IsPartnerTyping ? $"{Label} is typing..." : string.Empty;
+
+    /// <summary>Accessibility label for the session list button, including unread state.</summary>
+    public string AccessibleLabel => HasUnread ? $"{Label} — unread messages" : Label;
 }
 
 public record IMParticipant(UUID Id, string Name, bool IsModerator)

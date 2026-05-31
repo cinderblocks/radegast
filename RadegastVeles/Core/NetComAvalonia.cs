@@ -84,6 +84,7 @@ public sealed class NetComAvalonia : INetCom
         client.Network.Disconnected += Network_Disconnected;
         client.Network.LoginProgress += Network_LoginProgress;
         client.Network.LoggedOut += Network_LoggedOut;
+        client.Network.RegisterLoginResponseCallback(Network_LoginResponseCallback);
     }
 
     private void UnregisterClientEvents(GridClient client)
@@ -96,9 +97,10 @@ public sealed class NetComAvalonia : INetCom
         client.Network.Disconnected -= Network_Disconnected;
         client.Network.LoginProgress -= Network_LoginProgress;
         client.Network.LoggedOut -= Network_LoggedOut;
+        client.Network.UnregisterLoginResponseCallback(Network_LoginResponseCallback);
     }
 
-    public void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+    public void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
     {
         UnregisterClientEvents(e.OldClient);
         Client = e.Client;
@@ -107,6 +109,11 @@ public sealed class NetComAvalonia : INetCom
 
     public void Login()
     {
+        if (IsLoggingIn)
+        {
+            Client.Network.AbortLogin();
+        }
+
         IsLoggingIn = true;
 
         var ea = new OverrideEventArgs();
@@ -144,7 +151,7 @@ public sealed class NetComAvalonia : INetCom
                 break;
         }
 
-        string password = Radegast.LoginOptions.IsPasswordMD5(LoginOptions.Password!)
+        string password = LoginOptions.IsPasswordMD5(LoginOptions.Password!)
             ? LoginOptions.Password!
             : Utils.MD5(LoginOptions.Password!.Length > 16
                 ? LoginOptions.Password[..16]
@@ -165,6 +172,13 @@ public sealed class NetComAvalonia : INetCom
         loginParams.Token = LoginOptions.MfaToken!;
 
         Client.Network.BeginLogin(loginParams);
+    }
+
+    public void CancelLogin()
+    {
+        if (!IsLoggingIn) { return; }
+        Client.Network.AbortLogin();
+        IsLoggingIn = false;
     }
 
     public void Logout()
@@ -317,6 +331,16 @@ public sealed class NetComAvalonia : INetCom
     private void Self_AlertMessage(object? sender, AlertMessageEventArgs e)
     {
         PostToUI(() => AlertMessageReceived?.Invoke(this, e));
+    }
+
+    private void Network_LoginResponseCallback(bool loginSuccess, bool redirect, string message, string reason, LoginResponseData? replyData)
+    {
+        // Capture the server-returned MFA hash on both challenge and success so
+        // the correct hash is available for the next login attempt.
+        if ((loginSuccess || reason == "mfa_challenge") && replyData != null)
+        {
+            LoginOptions.MfaHash = replyData.MfaHash;
+        }
     }
 
     private void Network_LoginProgress(object? sender, LoginProgressEventArgs e)

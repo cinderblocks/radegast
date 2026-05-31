@@ -21,19 +21,19 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using OpenMetaverse;
+using OpenMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class MapViewModel : ObservableObject, IDisposable
+public partial class MapViewModel : ClientAwareViewModelBase
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
     private bool Active => Client.Network.Connected;
 
     private readonly Dictionary<string, ulong> _regionHandles = new();
@@ -43,6 +43,20 @@ public partial class MapViewModel : ObservableObject, IDisposable
     private bool _inTeleport;
 #pragma warning restore CS0414
     private string? _pendingGoToRegion;
+
+    // Favorites resolution state (for saving to credentials)
+    private readonly Dictionary<UUID, List<(string Name, UUID AssetUUID, Vector3 Position)>> _pendingFavByRegionId = new();
+    private readonly Dictionary<ulong, List<(string Name, UUID AssetUUID, Vector3 Position)>> _pendingFavByHandle = new();
+    private readonly List<(string Name, string Location)> _resolvedFavorites = new();
+    private int _pendingFavoriteCount;
+    private volatile bool _loadingFavorites;
+    private volatile bool _favoritesPopulated;
+    private Timer? _favoritesTimeoutTimer;
+    // Resolved positions cached for instant map navigation (UUID = landmark asset UUID)
+    private readonly Dictionary<UUID, (string RegionName, int X, int Y, int Z)> _resolvedFavoritePositions = new();
+    // Navigation-only pipeline (from OnSelectedFavoriteChanged when not yet resolved)
+    private readonly Dictionary<UUID, (int X, int Y, int Z)> _navPendingByRegionId = new();
+    private readonly Dictionary<ulong, (int X, int Y, int Z)> _navPendingByHandle = new();
 
     [ObservableProperty]
     private string _regionSearch = string.Empty;
@@ -76,6 +90,13 @@ public partial class MapViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> RegionResults { get; } = [];
     public ObservableCollection<string> OnlineFriends { get; } = [];
+    public ObservableCollection<FavoriteLandmarkEntry> FavoriteLandmarks { get; } = [];
+
+    [ObservableProperty]
+    private FavoriteLandmarkEntry? _selectedFavorite;
+
+    [ObservableProperty]
+    private MapSelfEntry? _selfEntry;
 
     // Map data exposed for the grid map control
     public ObservableCollection<MapRegionEntry> MapRegions { get; } = [];
@@ -86,27 +107,24 @@ public partial class MapViewModel : ObservableObject, IDisposable
     /// </summary>
     public event EventHandler<MapCenterChangedEventArgs>? MapCenterChanged;
 
-    public MapViewModel(RadegastInstanceAvalonia instance)
+    public MapViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
-
         RegisterClientEvents(Client);
-        _instance.ClientChanged += Instance_ClientChanged;
 
-        // Initial location
+        // Initial location and favorites
         if (Client.Network.CurrentSim != null)
         {
             GotoMyPosition();
+            LoadFavorites();
         }
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
-        UnregisterClientEvents(Client);
-        _instance.ClientChanged -= Instance_ClientChanged;
+        base.Dispose();
     }
 
-    private void RegisterClientEvents(GridClient client)
+    protected override void RegisterClientEvents(GridClient client)
     {
         client.Grid.GridRegion += Grid_GridRegion;
         client.Grid.GridItems += Grid_GridItems;
@@ -115,9 +133,11 @@ public partial class MapViewModel : ObservableObject, IDisposable
         client.Friends.FriendFoundReply += Friends_FriendFoundReply;
         client.Friends.FriendOnline += Friends_FriendStatusChanged;
         client.Friends.FriendOffline += Friends_FriendStatusChanged;
+        client.Grid.RegionHandleReply += Grid_RegionHandleReply;
+        client.Inventory.FolderUpdated += Inventory_FolderUpdated;
     }
 
-    private void UnregisterClientEvents(GridClient client)
+    protected override void UnregisterClientEvents(GridClient client)
     {
         client.Grid.GridRegion -= Grid_GridRegion;
         client.Grid.GridItems -= Grid_GridItems;
@@ -126,12 +146,8 @@ public partial class MapViewModel : ObservableObject, IDisposable
         client.Friends.FriendFoundReply -= Friends_FriendFoundReply;
         client.Friends.FriendOnline -= Friends_FriendStatusChanged;
         client.Friends.FriendOffline -= Friends_FriendStatusChanged;
-    }
-
-    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
-    {
-        UnregisterClientEvents(e.OldClient);
-        RegisterClientEvents(e.Client);
+        client.Grid.RegionHandleReply -= Grid_RegionHandleReply;
+        client.Inventory.FolderUpdated -= Inventory_FolderUpdated;
     }
 
     #region Search & Navigation
@@ -170,6 +186,8 @@ public partial class MapViewModel : ObservableObject, IDisposable
         CoordX = (int)pos.X;
         CoordY = (int)pos.Y;
         CoordZ = (int)pos.Z;
+        Utils.LongToUInts(Client.Network.CurrentSim.Handle, out var rx, out var ry);
+        SelfEntry = new MapSelfEntry(rx / 256, ry / 256, pos.X, pos.Y);
         GotoRegion(simName, CoordX, CoordY);
     }
 
@@ -288,7 +306,7 @@ public partial class MapViewModel : ObservableObject, IDisposable
         OnlineFriends.Clear();
 
         var friends = Client.Friends.FriendList
-            .Where(f => f.Value.IsOnline)
+            .Where(f => f.Value.IsOnline && f.Value.CanSeeThemOnMap)
             .Select(f => f.Value.Name)
             .OrderBy(n => n)
             .ToList();
@@ -327,6 +345,18 @@ public partial class MapViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Locate a friend on the map. Call after switching to the map tab so the result is visible.
+    /// </summary>
+    public void ShowFriendOnMap(UUID agentId)
+    {
+        if (!Client.Friends.FriendList.TryGetValue(agentId, out var info)) return;
+        if (!info.CanSeeThemOnMap) return;
+        _targetRegionHandle = 0;
+        Client.Friends.MapFriend(agentId);
+        StatusText = $"Locating {info.Name}\u2026";
+    }
+
+    /// <summary>
     /// Teleport to a position identified by region grid coords + local offset.
     /// Called from the map control's double-click event.
     /// </summary>
@@ -361,6 +391,256 @@ public partial class MapViewModel : ObservableObject, IDisposable
         CoordY = (int)localY;
         CanTeleport = true;
         DoTeleport();
+    }
+
+    #endregion
+
+    #region Favorites
+
+    partial void OnSelectedFavoriteChanged(FavoriteLandmarkEntry? value)
+    {
+        if (value == null || !Active) return;
+
+        // If already resolved, navigate immediately
+        lock (_resolvedFavoritePositions)
+        {
+            if (_resolvedFavoritePositions.TryGetValue(value.AssetUUID, out var pos))
+            {
+                RegionSearch = pos.RegionName;
+                CoordX = pos.X;
+                CoordY = pos.Y;
+                CoordZ = pos.Z;
+                CanTeleport = true;
+                StatusText = $"Ready for {value.Name}";
+                GotoRegion(pos.RegionName, pos.X, pos.Y);
+                return;
+            }
+        }
+
+        // Decode the landmark asset to find the region
+        StatusText = $"Locating {value.Name}...";
+        var capturedEntry = value;
+        Client.Assets.RequestAsset(value.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        {
+            if (!transfer.Success || asset is not AssetLandmark la || !la.Decode()) return;
+            var localPos = la.Position;
+            lock (_navPendingByRegionId)
+                _navPendingByRegionId[la.RegionID] = ((int)localPos.X, (int)localPos.Y, (int)localPos.Z);
+            Client.Grid.RequestRegionHandle(la.RegionID);
+        });
+    }
+
+    private async void LoadFavorites()
+    {
+        if (!Active) return;
+        if (_loadingFavorites) return;
+        _loadingFavorites = true;
+        try
+        {
+            var favFolderId = Client.Inventory.FindFolderForType(FolderType.Favorites);
+            if (favFolderId == UUID.Zero) return;
+
+            List<InventoryBase> contents;
+            try
+            {
+                contents = await Client.Inventory.RequestFolderContents(
+                    favFolderId, Client.Self.AgentID, false, true, InventorySortOrder.ByName);
+            }
+            catch { return; }
+
+            // CAPS returned nothing: fall back to the local inventory store.
+            // This handles two cases: (a) CAPS not yet available at startup,
+            // (b) inventory restored from cache with NeedsUpdate=false so FetchAllFolders
+            //     never re-fetches the favorites folder and FolderUpdated never fires for it.
+            if (contents.Count == 0)
+            {
+                try { contents = Client.Inventory.Store?.GetContents(favFolderId) ?? []; }
+                catch { }
+            }
+
+            var landmarks = contents.OfType<InventoryLandmark>().ToList();
+            if (landmarks.Count > 0)
+                _favoritesPopulated = true;
+
+            Dispatcher.UIThread.Post(() =>
+            {
+                FavoriteLandmarks.Clear();
+                foreach (var lm in landmarks)
+                    FavoriteLandmarks.Add(new FavoriteLandmarkEntry(lm.Name, lm.AssetUUID));
+            });
+
+            // Resolve region names so we can persist login-time start locations
+            lock (_resolvedFavorites) { _resolvedFavorites.Clear(); }
+            lock (_pendingFavByRegionId) { _pendingFavByRegionId.Clear(); }
+            lock (_pendingFavByHandle) { _pendingFavByHandle.Clear(); }
+
+            _pendingFavoriteCount = landmarks.Count;
+            if (landmarks.Count == 0) { SaveFavoritesToCredentials(); return; }
+
+            foreach (var lm in landmarks)
+            {
+                var capturedName = lm.Name;
+                var capturedUUID = lm.AssetUUID;
+                Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+                {
+                    if (transfer.Success && asset is AssetLandmark la && la.Decode())
+                    {
+                        lock (_pendingFavByRegionId)
+                        {
+                            if (!_pendingFavByRegionId.TryGetValue(la.RegionID, out var list))
+                                _pendingFavByRegionId[la.RegionID] = list = [];
+                            list.Add((capturedName, capturedUUID, la.Position));
+                        }
+                        Client.Grid.RequestRegionHandle(la.RegionID);
+                    }
+                    else if (Interlocked.Decrement(ref _pendingFavoriteCount) == 0)
+                    {
+                        SaveFavoritesToCredentials();
+                    }
+                });
+            }
+
+            // Safety-net: if any landmark regions never respond after 15 s, save whatever resolved
+            _favoritesTimeoutTimer?.Dispose();
+            _favoritesTimeoutTimer = new Timer(_ =>
+            {
+                if (_pendingFavoriteCount > 0)
+                {
+                    Interlocked.Exchange(ref _pendingFavoriteCount, 0);
+                    Dispatcher.UIThread.Post(SaveFavoritesToCredentials);
+                }
+            }, null, TimeSpan.FromSeconds(15), Timeout.InfiniteTimeSpan);
+        }
+        finally { _loadingFavorites = false; }
+    }
+
+    private void Grid_RegionHandleReply(object? sender, RegionHandleReplyEventArgs e)
+    {
+        // Resolution pipeline (save favorites to credentials)
+        List<(string Name, UUID AssetUUID, Vector3 Position)>? resPendingList;
+        bool resFound;
+        lock (_pendingFavByRegionId)
+        {
+            resFound = _pendingFavByRegionId.TryGetValue(e.RegionID, out resPendingList);
+            if (resFound) _pendingFavByRegionId.Remove(e.RegionID);
+        }
+        if (resFound && resPendingList != null)
+        {
+            lock (_pendingFavByHandle)
+            {
+                if (!_pendingFavByHandle.TryGetValue(e.RegionHandle, out var existing))
+                    _pendingFavByHandle[e.RegionHandle] = existing = [];
+                existing.AddRange(resPendingList);
+            }
+        }
+
+        // Navigation pipeline (from OnSelectedFavoriteChanged)
+        (int X, int Y, int Z) navPos;
+        bool navFound;
+        lock (_navPendingByRegionId)
+        {
+            navFound = _navPendingByRegionId.TryGetValue(e.RegionID, out navPos);
+            if (navFound) _navPendingByRegionId.Remove(e.RegionID);
+        }
+        if (navFound)
+        {
+            lock (_navPendingByHandle)
+                _navPendingByHandle[e.RegionHandle] = navPos;
+        }
+
+        if (resFound || navFound)
+        {
+            // Shortcut: if region name is already known, resolve immediately without another round-trip
+            string? knownName = null;
+            lock (_regionHandles)
+            {
+                foreach (var kvp in _regionHandles)
+                {
+                    if (kvp.Value == e.RegionHandle) { knownName = kvp.Key; break; }
+                }
+            }
+
+            if (knownName != null)
+            {
+                // Remove from by-handle dicts now so Grid_GridRegion won't double-process
+                lock (_pendingFavByHandle) _pendingFavByHandle.Remove(e.RegionHandle);
+                lock (_navPendingByHandle) _navPendingByHandle.Remove(e.RegionHandle);
+
+                var capturedName = knownName;
+                var capturedResPendingList = resPendingList;
+                var capturedResFound = resFound;
+                var capturedNavPos = navPos;
+                var capturedNavFound = navFound;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    if (capturedResFound && capturedResPendingList != null)
+                    {
+                        foreach (var fav in capturedResPendingList)
+                        {
+                            var location = $"uri:{capturedName}&{(int)fav.Position.X}&{(int)fav.Position.Y}&{(int)fav.Position.Z}";
+                            lock (_resolvedFavorites)
+                                _resolvedFavorites.Add((fav.Name, location));
+                            lock (_resolvedFavoritePositions)
+                                _resolvedFavoritePositions[fav.AssetUUID] = (capturedName, (int)fav.Position.X, (int)fav.Position.Y, (int)fav.Position.Z);
+                            if (Interlocked.Decrement(ref _pendingFavoriteCount) == 0)
+                                SaveFavoritesToCredentials();
+                        }
+                    }
+                    if (capturedNavFound)
+                    {
+                        RegionSearch = capturedName;
+                        CoordX = capturedNavPos.X;
+                        CoordY = capturedNavPos.Y;
+                        CoordZ = capturedNavPos.Z;
+                        CanTeleport = true;
+                        StatusText = $"Ready for {capturedName}";
+                        GotoRegion(capturedName, capturedNavPos.X, capturedNavPos.Y);
+                    }
+                });
+            }
+            else
+            {
+                // Region not yet known — request map block; returnNonExistent=true so deleted
+                // regions still fire Grid_GridRegion and decrement _pendingFavoriteCount
+                Utils.LongToUInts(e.RegionHandle, out uint gx, out uint gy);
+                Client.Grid.RequestMapBlocks(GridLayerType.Objects,
+                    (ushort)(gx / 256), (ushort)(gy / 256),
+                    (ushort)(gx / 256), (ushort)(gy / 256), true);
+            }
+        }
+    }
+
+    private void Inventory_FolderUpdated(object? sender, FolderUpdatedEventArgs e)
+    {
+        if (!e.Success || _loadingFavorites) return;
+
+        var favFolderId = Client.Inventory.FindFolderForType(FolderType.Favorites);
+        if (e.FolderID == favFolderId)
+        {
+            // The favorites folder itself was updated — always reload
+            // (handles the case where the user adds/removes favorites).
+            _favoritesPopulated = false;
+            Dispatcher.UIThread.Post(LoadFavorites);
+        }
+        else if (!_favoritesPopulated)
+        {
+            // Any other folder update during initial inventory loading is used as a
+            // signal to retry, because the favorites folder may now be in the store
+            // even if its FolderUpdated event never fires (NeedsUpdate=false from cache).
+            Dispatcher.UIThread.Post(LoadFavorites);
+        }
+    }
+
+    private void SaveFavoritesToCredentials()
+    {
+        _favoritesTimeoutTimer?.Dispose();
+        var key = Instance.AccountKey;
+        var cm = Instance.CredentialManager;
+        if (string.IsNullOrEmpty(key) || cm == null) return;
+        List<(string Name, string Location)> snapshot;
+        lock (_resolvedFavorites)
+            snapshot = [.. _resolvedFavorites];
+        cm.SaveFavoriteLocations(key, snapshot);
     }
 
     #endregion
@@ -416,6 +696,50 @@ public partial class MapViewModel : ObservableObject, IDisposable
                 _pendingGoToRegion = null;
                 MapCenterChanged?.Invoke(this, new MapCenterChangedEventArgs(rx, ry, (uint)CoordX, (uint)CoordY));
             }
+
+            // Resolve pending favorite if this region was requested for location persistence
+            List<(string Name, UUID AssetUUID, Vector3 Position)>? favPendingList;
+            bool hasFav;
+            lock (_pendingFavByHandle)
+            {
+                hasFav = _pendingFavByHandle.TryGetValue(e.Region.RegionHandle, out favPendingList);
+                if (hasFav) _pendingFavByHandle.Remove(e.Region.RegionHandle);
+            }
+            if (hasFav && favPendingList != null)
+            {
+                foreach (var favPending in favPendingList)
+                {
+                    if (e.Region.Access != SimAccess.NonExistent)
+                    {
+                        var location = $"uri:{e.Region.Name}&{(int)favPending.Position.X}&{(int)favPending.Position.Y}&{(int)favPending.Position.Z}";
+                        lock (_resolvedFavorites)
+                            _resolvedFavorites.Add((favPending.Name, location));
+                        lock (_resolvedFavoritePositions)
+                            _resolvedFavoritePositions[favPending.AssetUUID] = (e.Region.Name, (int)favPending.Position.X, (int)favPending.Position.Y, (int)favPending.Position.Z);
+                    }
+                    if (Interlocked.Decrement(ref _pendingFavoriteCount) == 0)
+                        SaveFavoritesToCredentials();
+                }
+            }
+
+            // Navigation pipeline: center map on a selected favorite
+            (int X, int Y, int Z) navPos;
+            bool hasNav;
+            lock (_navPendingByHandle)
+            {
+                hasNav = _navPendingByHandle.TryGetValue(e.Region.RegionHandle, out navPos);
+                if (hasNav) _navPendingByHandle.Remove(e.Region.RegionHandle);
+            }
+            if (hasNav)
+            {
+                RegionSearch = e.Region.Name;
+                CoordX = navPos.X;
+                CoordY = navPos.Y;
+                CoordZ = navPos.Z;
+                CanTeleport = true;
+                StatusText = $"Ready for {e.Region.Name}";
+                GotoRegion(e.Region.Name, navPos.X, navPos.Y);
+            }
         });
     }
 
@@ -449,6 +773,8 @@ public partial class MapViewModel : ObservableObject, IDisposable
             var simName = Client.Network.CurrentSim.Name;
             var pos = Client.Self.SimPosition;
             StatusText = $"Now in {simName}";
+            Utils.LongToUInts(Client.Network.CurrentSim.Handle, out var rx, out var ry);
+            SelfEntry = new MapSelfEntry(rx / 256, ry / 256, pos.X, pos.Y);
             GotoRegion(simName, (int)pos.X, (int)pos.Y);
         });
     }
@@ -515,6 +841,7 @@ public partial class MapViewModel : ObservableObject, IDisposable
             ry /= 256;
 
             // Try to find region name from known handles
+            bool nameResolved = false;
             lock (_regionHandles)
             {
                 foreach (var kvp in _regionHandles)
@@ -523,9 +850,17 @@ public partial class MapViewModel : ObservableObject, IDisposable
                     {
                         RegionSearch = kvp.Key;
                         CanTeleport = true;
+                        nameResolved = true;
                         break;
                     }
                 }
+            }
+            if (!nameResolved)
+            {
+                // Region name not yet known; request map block so Grid_GridRegion fires
+                // and sets RegionSearch + CanTeleport via _targetRegionHandle
+                Client.Grid.RequestMapBlocks(GridLayerType.Objects,
+                    (ushort)rx, (ushort)ry, (ushort)rx, (ushort)ry, false);
             }
 
             MapCenterChanged?.Invoke(this, new MapCenterChangedEventArgs(rx, ry, (uint)CoordX, (uint)CoordY));
@@ -567,5 +902,13 @@ public class MapCenterChangedEventArgs : EventArgs
         LocalY = localY;
     }
 }
+
+public record FavoriteLandmarkEntry(string Name, UUID AssetUUID)
+{
+    public override string ToString() => Name;
+}
+
+/// <summary>Current agent position on the world map.</summary>
+public record MapSelfEntry(uint GridX, uint GridY, float LocalX, float LocalY);
 
 #endregion

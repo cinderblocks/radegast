@@ -18,3 +18,5 @@ RadegastVeles/Generated/
 RadegastVeles/Generated.cs
 ProductInstallFiles.wxs
 .DS_Store
+Install/VelesBundle/windowsdesktop-runtime-8.0-win-x64.exe
+Install/VelesBundle/windowsdesktop-runtime-10.0-win-x64.exe

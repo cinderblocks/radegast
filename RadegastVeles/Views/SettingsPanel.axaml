@@ -29,14 +29,14 @@
                     <StackPanel VerticalAlignment="Center" Spacing="4">
                         <TextBlock Text="{Binding SettingsName}" FontSize="14" FontWeight="SemiBold"
                                    TextWrapping="Wrap" AutomationProperties.Name="Settings name" />
-                        <Border Background="#0288D1" CornerRadius="3" Padding="5,2" HorizontalAlignment="Left">
+                        <Border Background="{DynamicResource VelesBadgeInfo}" CornerRadius="3" Padding="5,2" HorizontalAlignment="Left">
                             <TextBlock Text="Environment Settings" FontSize="11" Foreground="White" />
                         </Border>
                     </StackPanel>
                 </StackPanel>
 
                 <TextBlock Text="Extended Environment (EEP) settings asset. Controls sky, water, and day cycle appearance."
-                           TextWrapping="Wrap" Opacity="0.7" FontSize="11" Margin="0,4,0,0" />
+                           TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11" Margin="0,4,0,0" />
 
             </StackPanel>
         </ScrollViewer>
