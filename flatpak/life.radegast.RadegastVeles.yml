@@ -1,0 +1,42 @@
+app-id: life.radegast.RadegastVeles
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: RadegastVeles
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=home
+
+modules:
+  - name: radegast-veles
+    buildsystem: simple
+    no-separate-locales: true
+    build-commands:
+      - install -d /app/lib/radegast-veles /app/bin
+      - install -d /app/share/applications /app/share/metainfo
+      - install -d /app/share/icons/hicolor/256x256/apps
+      - cp -r publish-source/. /app/lib/radegast-veles/
+      - chmod +x /app/lib/radegast-veles/RadegastVeles
+      - ln -s /app/lib/radegast-veles/RadegastVeles /app/bin/RadegastVeles
+      - install -Dm644 veles.png /app/share/icons/hicolor/256x256/apps/life.radegast.RadegastVeles.png
+      - install -Dm644 life.radegast.RadegastVeles.desktop /app/share/applications/life.radegast.RadegastVeles.desktop
+      - install -Dm644 life.radegast.RadegastVeles.metainfo.xml /app/share/metainfo/life.radegast.RadegastVeles.metainfo.xml
+    sources:
+      # Pre-built self-contained binary produced by `dotnet publish -r linux-x64`
+      # CI populates publish/flatpak-source/ before running flatpak-builder.
+      # For a Flathub submission, replace this with a type:archive pointing at the release tarball.
+      - type: dir
+        path: ../publish/flatpak-source
+        dest: publish-source
+      - type: file
+        path: ../RadegastVeles/Assets/veles.png
+      - type: file
+        path: life.radegast.RadegastVeles.desktop
+      - type: file
+        path: life.radegast.RadegastVeles.metainfo.xml

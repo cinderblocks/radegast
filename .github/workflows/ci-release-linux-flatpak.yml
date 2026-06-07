@@ -1,0 +1,109 @@
+name: CI Release Linux Flatpak
+
+on:
+  release:
+    types: [published]
+
+env:
+  APP_ID: life.radegast.RadegastVeles
+  TAG_NAME: ${{ github.event.release.tag_name }}
+  REPO_NAME: ${{ github.event.repository.name }}
+  VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+  build-flatpak:
+    name: Build Linux Flatpak (x86_64)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ env.DOTNET_VERSION }}-${{ hashFiles('**/*.csproj', '**/*.sln') }}
+          restore-keys: nuget-${{ env.DOTNET_VERSION }}-
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Publish (self-contained, linux-x64)
+        run: |
+          set -e
+          dotnet publish "$VELES_PROJECT" \
+            -c Release \
+            -r linux-x64 \
+            --self-contained true \
+            -p:PublishSingleFile=false \
+            -p:PublishTrimmed=false \
+            -o publish/flatpak-source
+
+      - name: Install Flatpak tools
+        run: |
+          set -e
+          sudo apt-get update -qq
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Cache Flatpak runtime
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/share/flatpak
+            .flatpak-builder/cache
+          key: flatpak-runtime-24.08-${{ hashFiles('flatpak/*.yml') }}
+          restore-keys: flatpak-runtime-24.08-
+
+      - name: Install Flatpak runtime and SDK
+        run: |
+          flatpak install --user -y \
+            org.freedesktop.Platform//24.08 \
+            org.freedesktop.Sdk//24.08
+
+      - name: Build Flatpak
+        run: |
+          set -e
+          flatpak-builder \
+            --user \
+            --repo=flatpak-repo \
+            --force-clean \
+            --state-dir=.flatpak-builder \
+            flatpak-build \
+            flatpak/${{ env.APP_ID }}.yml
+
+      - name: Create Flatpak bundle
+        run: |
+          set -e
+          mkdir -p dist
+          flatpak build-bundle \
+            flatpak-repo \
+            "dist/${REPO_NAME}-${TAG_NAME}-x86_64.flatpak" \
+            "$APP_ID"
+
+      - name: Upload Flatpak to GitHub Release
+        run: gh release upload "$TAG_NAME" dist/*.flatpak --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload debug artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-x86_64-${{ env.TAG_NAME }}
+          path: dist/*.flatpak

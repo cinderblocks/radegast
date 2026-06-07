@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>life.radegast.RadegastVeles</id>
+
+  <name>Radegast Veles</name>
+  <summary>Second Life viewer</summary>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>LGPL-3.0-or-later</project_license>
+  <developer id="life.radegast">
+    <name>Sjofn, LLC</name>
+  </developer>
+
+  <description>
+    <p>
+      Radegast Veles is a Second Life viewer with an Avalonia-based desktop UI,
+      3D rendering via OpenGL, and built-in voice support.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">life.radegast.RadegastVeles.desktop</launchable>
+
+  <url type="homepage">https://github.com/cinderblocks/Radegast</url>
+  <url type="bugtracker">https://github.com/cinderblocks/Radegast/issues</url>
+
+  <!-- Add at least one screenshot before submitting to Flathub -->
+  <screenshots/>
+
+  <!-- Releases are added here; flatpak-external-data-checker can maintain this for Flathub -->
+  <releases/>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">moderate</content_attribute>
+    <content_attribute id="social-audio">moderate</content_attribute>
+    <content_attribute id="social-info">mild</content_attribute>
+  </content_rating>
+
+  <update_contact>admin@radegast.life</update_contact>
+</component>
