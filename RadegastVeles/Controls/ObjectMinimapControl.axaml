@@ -9,12 +9,13 @@
              x:Class="Radegast.Veles.Controls.ObjectMinimapControl"
              x:DataType="controls:ObjectMinimapControl"
              MinWidth="180" MinHeight="120"
+             IsTabStop="False" Focusable="False"
              AutomationProperties.Name="Objects minimap showing nearby object positions">
     <Border BorderBrush="{DynamicResource SystemControlForegroundBaseMediumBrush}"
             BorderThickness="1" CornerRadius="4" ClipToBounds="True"
             Background="#1A1A2E">
         <Grid>
-            <Canvas x:Name="ObjectMapCanvas" />
+            <Canvas x:Name="ObjectMapCanvas" IsTabStop="False" />
             <!-- Hover tooltip overlay - rendered on top, does not intercept mouse -->
             <Border x:Name="HoverTooltip"
                     Background="#DD1A1A2E"

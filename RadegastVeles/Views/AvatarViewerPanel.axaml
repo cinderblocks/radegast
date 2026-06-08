@@ -36,19 +36,23 @@
                         <Button Grid.Row="0" Grid.Column="2" Content="&#x2191;" Command="{Binding OrbitUpCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit up (10&#xB0;)" />
+                                ToolTip.Tip="Orbit up (10&#xB0;)"
+                                AutomationProperties.Name="Orbit camera up" />
                         <Button Grid.Row="2" Grid.Column="0" Content="&#x2190;" Command="{Binding OrbitLeftCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit left (15&#xB0;)" />
+                                ToolTip.Tip="Orbit left (15&#xB0;)"
+                                AutomationProperties.Name="Orbit camera left" />
                         <Button Grid.Row="2" Grid.Column="2" Content="&#x2193;" Command="{Binding OrbitDownCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit down (10&#xB0;)" />
+                                ToolTip.Tip="Orbit down (10&#xB0;)"
+                                AutomationProperties.Name="Orbit camera down" />
                         <Button Grid.Row="2" Grid.Column="4" Content="&#x2192;" Command="{Binding OrbitRightCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit right (15&#xB0;)" />
+                                ToolTip.Tip="Orbit right (15&#xB0;)"
+                                AutomationProperties.Name="Orbit camera right" />
                     </Grid>
                 </Border>
 
@@ -59,11 +63,13 @@
                         <Button Content="+" Command="{Binding ZoomInCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Zoom in" />
+                                ToolTip.Tip="Zoom in"
+                                AutomationProperties.Name="Zoom in" />
                         <Button Content="&#x2212;" Command="{Binding ZoomOutCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Zoom out" />
+                                ToolTip.Tip="Zoom out"
+                                AutomationProperties.Name="Zoom out" />
                     </StackPanel>
                 </Border>
 

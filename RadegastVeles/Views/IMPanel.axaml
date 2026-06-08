@@ -102,7 +102,8 @@
                              Text="{Binding MessageInput, Mode=TwoWay}"
                              PlaceholderText="Type a message..."
                              IsEnabled="{Binding SelectedSession, Converter={x:Static ObjectConverters.IsNotNull}}"
-                             AutomationProperties.Name="IM message input" />
+                             AutomationProperties.Name="IM message input"
+                             AutomationProperties.HelpText="Type a message and press Enter to send" />
                     <Button Grid.Column="1" Content="Send" Command="{Binding SendMessageCommand}"
                             Margin="4,0,0,0" MinWidth="60"
                             AutomationProperties.Name="Send IM" />
@@ -114,7 +115,8 @@
                            FontStyle="Italic" FontSize="11" Opacity="0.65"
                            Margin="8,0,4,2"
                            IsVisible="{Binding SelectedSession.IsPartnerTyping, FallbackValue=False}"
-                           AutomationProperties.Name="Partner typing indicator" />
+                           AutomationProperties.Name="Partner typing indicator"
+                           AutomationProperties.LiveSetting="Polite" />
 
                 <!-- Message log with clickable sender names -->
                 <ListBox x:Name="IMLog"
@@ -142,7 +144,7 @@
                     </ListBox.Styles>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="vm:ChatLine">
-                            <Grid>
+                            <Grid AutomationProperties.Name="{Binding AutomationText}">
                                 <!-- Date-change separator -->
                                 <Grid IsVisible="{Binding IsDateSeparator}"
                                       ColumnDefinitions="*,Auto,*"

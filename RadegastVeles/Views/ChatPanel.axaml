@@ -17,7 +17,7 @@
             <!-- Chat input -->
             <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="4" AutomationProperties.Name="Chat input area">
 
-                <ComboBox Grid.Column="0" ItemsSource="{Binding ChatTypes}" SelectedIndex="{Binding SelectedChatTypeIndex}" MinWidth="90" VerticalAlignment="Stretch" AutomationProperties.Name="Chat type selector" />
+                <ComboBox Grid.Column="0" ItemsSource="{Binding ChatTypes}" SelectedIndex="{Binding SelectedChatTypeIndex}" MinWidth="90" VerticalAlignment="Stretch" AutomationProperties.Name="Chat type selector" AutomationProperties.HelpText="Select Whisper, Normal, or Shout. Shift+Enter whispers, Ctrl+Enter shouts." />
                 <TextBox Grid.Column="1" x:Name="ChatInputBox" Text="{Binding ChatInput, Mode=TwoWay}" PlaceholderText="Type a message..." Margin="4,0" VerticalAlignment="Center" AutomationProperties.Name="Chat message input" AutomationProperties.HelpText="Type your message and press Enter to send" />
                 <Button Grid.Column="2" Content="Send" Command="{Binding SendChatCommand}" MinWidth="60" VerticalAlignment="Stretch" AutomationProperties.Name="Send chat message" />
             </Grid>
@@ -59,7 +59,7 @@
                 </ListBox.Styles>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:ChatLine">
-                        <Grid>
+                        <Grid AutomationProperties.Name="{Binding AutomationText}">
                             <!-- Date-change separator -->
                             <Grid IsVisible="{Binding IsDateSeparator}"
                                   ColumnDefinitions="*,Auto,*"
@@ -187,67 +187,80 @@
                     <TextBlock DockPanel.Dock="Top" Text="Nearby" FontWeight="SemiBold" Margin="0,0,0,2" />
 
                     <!-- Sim permission / health status bar -->
-                    <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+                    <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4"
+                               AutomationProperties.Name="Sim status"
+                               AutomationProperties.LiveSetting="Polite">
                         <!-- Health: ♥ + percentage, shown only when damage is enabled -->
                         <StackPanel Orientation="Horizontal" Spacing="2"
                                     IsVisible="{Binding IsDamageEnabled}"
                                     ToolTip.Tip="Avatar health"
+                                    AutomationProperties.Name="{Binding HealthAccessibleText}"
                                     Margin="0,0,6,0">
-                            <TextBlock Text="♥" Foreground="#CC2222" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="♥" Foreground="#CC2222" FontSize="12" VerticalAlignment="Center" AutomationProperties.Name="" />
                             <TextBlock Text="{Binding Health, StringFormat='{}{0:0}%'}" FontSize="11"
-                                       Foreground="#CC2222" VerticalAlignment="Center" />
+                                       Foreground="#CC2222" VerticalAlignment="Center" AutomationProperties.Name="" />
                         </StackPanel>
 
                         <!-- Fly -->
                         <TextBlock Text="✈" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding CanFly}"
                                    ToolTip.Tip="Flying allowed"
+                                   AutomationProperties.Name="Flying allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="✈" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !CanFly}"
                                    ToolTip.Tip="Flying not allowed"
+                                   AutomationProperties.Name="Flying not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Build -->
                         <TextBlock Text="⚒" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding CanBuild}"
                                    ToolTip.Tip="Building allowed"
+                                   AutomationProperties.Name="Building allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="⚒" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !CanBuild}"
                                    ToolTip.Tip="Building not allowed"
+                                   AutomationProperties.Name="Building not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Scripts -->
                         <TextBlock Text="⚙" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding ScriptsAllowed}"
                                    ToolTip.Tip="Scripts allowed"
+                                   AutomationProperties.Name="Scripts allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="⚙" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !ScriptsAllowed}"
                                    ToolTip.Tip="Scripts not allowed"
+                                   AutomationProperties.Name="Scripts not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Push -->
                         <TextBlock Text="↑" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding PushAllowed}"
                                    ToolTip.Tip="Avatar push allowed"
+                                   AutomationProperties.Name="Avatar push allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="↑" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !PushAllowed}"
                                    ToolTip.Tip="Avatar push restricted"
+                                   AutomationProperties.Name="Avatar push restricted"
                                    Margin="0,0,6,0" />
 
                         <!-- Voice -->
                         <TextBlock Text="♪" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding VoiceAllowed}"
-                                   ToolTip.Tip="Voice chat allowed" />
+                                   ToolTip.Tip="Voice chat allowed"
+                                   AutomationProperties.Name="Voice chat allowed" />
                         <TextBlock Text="♪" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !VoiceAllowed}"
-                                   ToolTip.Tip="Voice chat not allowed" />
+                                   ToolTip.Tip="Voice chat not allowed"
+                                   AutomationProperties.Name="Voice chat not allowed" />
                     </WrapPanel>
 
-                    <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" AutomationProperties.LiveSetting="Polite" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.Styles>
                             <Style Selector="Button.nearbyName">
                                 <Setter Property="Background" Value="Transparent" />
@@ -268,37 +281,44 @@
                         </ListBox.Styles>
                         <ListBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:NearbyAvatar">
-                                <WrapPanel VerticalAlignment="Center">
+                                <WrapPanel VerticalAlignment="Center"
+                                           AutomationProperties.Name="{Binding AccessibleText}">
                                     <Button Classes="nearbyName" Click="OnNearbyAvatarClick" ContextRequested="OnNearbyContextRequested" Tag="{Binding}"
                                             IsEnabled="{Binding !IsSelf}"
                                             AutomationProperties.Name="{Binding DisplayText, StringFormat=Open profile for {0}}">
-                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding DisplayText}" />
+                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="" />
                                     </Button>
-                                    <!-- Status icons after the name -->
+                                    <!-- Status icons: visible for sighted users, silenced for screen readers (AccessibleText has the combined description) -->
                                     <TextBlock Text="{Binding VoiceIcon}"
                                                IsVisible="{Binding ShowVoiceIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="In voice channel" />
+                                               Margin="3,0,0,0" ToolTip.Tip="In voice channel"
+                                               AutomationProperties.Name="" />
                                     <TextBlock Text="{Binding TypingIcon}"
                                                IsVisible="{Binding ShowTypingIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Typing" />
+                                               Margin="3,0,0,0" ToolTip.Tip="Typing"
+                                               AutomationProperties.Name="" />
                                     <TextBlock Text="{Binding AwayIcon}"
                                                IsVisible="{Binding ShowAwayIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Away" />
+                                               Margin="3,0,0,0" ToolTip.Tip="Away"
+                                               AutomationProperties.Name="" />
                                     <TextBlock Text="{Binding BusyIcon}"
                                                IsVisible="{Binding ShowBusyIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Busy / Do Not Disturb" />
+                                               Margin="3,0,0,0" ToolTip.Tip="Busy / Do Not Disturb"
+                                               AutomationProperties.Name="" />
                                     <TextBlock Text="{Binding FlyingIcon}"
                                                IsVisible="{Binding ShowFlyingIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Flying" />
+                                               Margin="3,0,0,0" ToolTip.Tip="Flying"
+                                               AutomationProperties.Name="" />
                                     <TextBlock Text="{Binding SittingIcon}"
                                                IsVisible="{Binding ShowSittingIcon}"
                                                FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Sitting" />
+                                               Margin="3,0,0,0" ToolTip.Tip="Sitting"
+                                               AutomationProperties.Name="" />
                                 </WrapPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

@@ -86,6 +86,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HealthText))]
+    [NotifyPropertyChangedFor(nameof(HealthAccessibleText))]
     private float _health = 100f;
 
     [ObservableProperty] private bool _isDamageEnabled;
@@ -96,6 +97,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     [ObservableProperty] private bool _voiceAllowed    = true;
 
     public string HealthText => $"♥ {Health:0}%";
+    public string HealthAccessibleText => $"Avatar health {Health:0} percent";
 
     public bool HasRegionName => !string.IsNullOrEmpty(RegionName);
     public bool HasParcelName => !string.IsNullOrEmpty(ParcelName);
@@ -1272,7 +1274,11 @@ public record ChatLine(DateTime Timestamp, string From, string Text, ChatLineTyp
         ? $"{From} {Text}"
         : $"{From}{Text}";
 
-    public string AutomationText => $"{FormattedTime} {DisplayText}";
+    public string AutomationText => IsDateSeparator
+        ? DateLabel
+        : Timestamp == DateTime.MinValue
+            ? Text
+            : $"{FormattedTime} {DisplayText}";
 
     /// <summary>Full date + time timestamp for copy operations.</summary>
     public string CopyText => IsDateSeparator || Timestamp == DateTime.MinValue
@@ -1368,6 +1374,23 @@ public enum ChatLineType
 public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, string DistanceText = "", bool IsInVoice = false, bool IsSpeaking = false, bool IsTyping = false, bool IsAway = false, bool IsBusy = false, bool IsFlying = false, bool IsSitting = false)
 {
     public string DisplayText => IsSelf ? Name : $"{Name} ({DistanceText}m)";
+
+    public string AccessibleText
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder(DisplayText);
+            if (IsSpeaking)       sb.Append(", speaking");
+            else if (IsInVoice)   sb.Append(", in voice channel");
+            if (IsTyping)         sb.Append(", typing");
+            if (IsAway)           sb.Append(", away");
+            if (IsBusy)           sb.Append(", busy");
+            if (IsFlying)         sb.Append(", flying");
+            if (IsSitting)        sb.Append(", sitting");
+            return sb.ToString();
+        }
+    }
+
     /// <summary>Mic icon shown when the avatar is in the same voice channel.</summary>
     public string VoiceIcon => IsSpeaking ? "🔊" : IsInVoice ? "🎙" : string.Empty;
     public bool ShowVoiceIcon => IsInVoice || IsSpeaking;

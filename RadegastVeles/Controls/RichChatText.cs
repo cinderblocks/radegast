@@ -17,7 +17,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Layout;
@@ -132,6 +134,13 @@ public class RichChatText : UserControl
 
         // Tooltip showing the raw URL on hover
         ToolTip.SetTip(btn, url);
+
+        // Accessible name: concise label; raw URL as help text for more detail
+        string accessibleLabel = url.StartsWith("secondlife://", StringComparison.OrdinalIgnoreCase)
+            ? $"Second Life link: {seg.DisplayText}"
+            : $"Link: {seg.DisplayText}";
+        AutomationProperties.SetName(btn, accessibleLabel);
+        AutomationProperties.SetHelpText(btn, url);
 
         return btn;
     }

@@ -170,7 +170,7 @@
             </Grid.Styles>
 
             <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Status message" />
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" AutomationProperties.Name="Status message" AutomationProperties.LiveSetting="Polite" />
                 <Border Background="Goldenrod" CornerRadius="3" Padding="4,1"
                         IsVisible="{Binding IsAway}" VerticalAlignment="Center"
                         AutomationProperties.Name="Away status indicator">
@@ -238,7 +238,8 @@
                         AutomationProperties.Name="Current location">
                 <TextBlock Text="{Binding BalanceText}" VerticalAlignment="Center" FontWeight="SemiBold"
                            IsVisible="{Binding BalanceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                           AutomationProperties.Name="L$ balance" />
+                           AutomationProperties.Name="L$ balance"
+                           AutomationProperties.LiveSetting="Polite" />
                 <TextBlock Text="·" VerticalAlignment="Center" Opacity="0.4"
                            IsVisible="{Binding BalanceText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <Button Classes="locationLink"
