@@ -156,10 +156,10 @@ public partial class ChatPanel : UserControl
         copyItem.Click += async (_, _) =>
         {
             var chatLog = this.FindControl<ListBox>("ChatLog");
-            var lines = chatLog?.SelectedItems?.OfType<ChatLine>().ToList();
+            var lines = chatLog?.SelectedItems?.OfType<ChatLine>().Where(l => !l.IsDateSeparator).ToList();
             // If nothing is selected (or only this row) fall back to the right-clicked line
             if (lines == null || lines.Count == 0) lines = [line];
-            var text = string.Join(Environment.NewLine, lines.Select(l => l.AutomationText));
+            var text = string.Join(Environment.NewLine, lines.Select(l => l.CopyText));
             IClipboard? clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard != null) await clipboard.SetTextAsync(text);
         };

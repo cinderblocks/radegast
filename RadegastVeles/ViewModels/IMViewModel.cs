@@ -208,9 +208,19 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         session.HistoryExhausted = !hasMore;
 
         // Must be on UI thread (called from GetOrCreate which is always on UI thread)
-        for (int i = chunk.Count - 1; i >= 0; i--)
-            session.Messages.Insert(0, chunk[i]);
-        session.Messages.Insert(chunk.Count, new ChatLine(DateTime.MinValue, string.Empty,
+        DateTime? firstLiveDate = null;
+        foreach (var l in session.Messages)
+        {
+            if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+            firstLiveDate = l.Timestamp.Date;
+            break;
+        }
+
+        var processed = ChatLine.WithDateSeparators(chunk, firstLiveDate);
+
+        for (int i = processed.Count - 1; i >= 0; i--)
+            session.Messages.Insert(0, processed[i]);
+        session.Messages.Insert(processed.Count, new ChatLine(DateTime.MinValue, string.Empty,
             "─── Previous messages ───", ChatLineType.System));
     }
 
@@ -225,8 +235,18 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         var chunk = _instance.ChatLog.ReadHistoryChunk(avatarName, session.Label, session.HistoryOffset, 50, out var hasMore);
         session.HistoryExhausted = !hasMore || chunk.Count == 0;
 
-        for (int i = chunk.Count - 1; i >= 0; i--)
-            session.Messages.Insert(0, chunk[i]);
+        DateTime? oldestCurrentDate = null;
+        foreach (var l in session.Messages)
+        {
+            if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+            oldestCurrentDate = l.Timestamp.Date;
+            break;
+        }
+
+        var processed = ChatLine.WithDateSeparators(chunk, oldestCurrentDate);
+
+        for (int i = processed.Count - 1; i >= 0; i--)
+            session.Messages.Insert(0, processed[i]);
         session.HistoryOffset += chunk.Count;
         if (chunk.Count == 0) session.HistoryExhausted = true;
         session.IsLoadingHistory = false;
@@ -537,6 +557,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
 
     private void AddMessage(IMSession session, ChatLine line)
     {
+        MaybeInsertDateSeparator(session.Messages, line);
         session.Messages.Add(line);
         if (_instance.ChatLog.IsEnabled)
         {
@@ -544,6 +565,21 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
             if (!string.IsNullOrWhiteSpace(avatarName))
                 _instance.ChatLog.Log(avatarName, session.Label, line.Timestamp, line.DisplayText);
         }
+    }
+
+    private static void MaybeInsertDateSeparator(ObservableCollection<ChatLine> lines, ChatLine incoming)
+    {
+        if (incoming.Type is ChatLineType.System or ChatLineType.DateSeparator) return;
+        DateTime? lastDate = null;
+        for (int i = lines.Count - 1; i >= 0; i--)
+        {
+            var l = lines[i];
+            if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+            lastDate = l.Timestamp.Date;
+            break;
+        }
+        if (lastDate.HasValue && incoming.Timestamp.Date != lastDate.Value)
+            lines.Add(ChatLine.CreateDateSeparator(incoming.Timestamp.Date));
     }
 
     private void PlayUISound(UUID sound)

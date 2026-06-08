@@ -227,9 +227,9 @@ public partial class IMPanel : UserControl
         copyItem.Click += async (_, _) =>
         {
             var imLog = this.FindControl<ListBox>("IMLog");
-            var lines = imLog?.SelectedItems?.OfType<ChatLine>().ToList();
+            var lines = imLog?.SelectedItems?.OfType<ChatLine>().Where(l => !l.IsDateSeparator).ToList();
             if (lines == null || lines.Count == 0) lines = [line];
-            var text = string.Join(Environment.NewLine, lines.Select(l => l.AutomationText));
+            var text = string.Join(Environment.NewLine, lines.Select(l => l.CopyText));
             IClipboard? clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
             if (clipboard != null) await clipboard.SetTextAsync(text);
         };

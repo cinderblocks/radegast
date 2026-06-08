@@ -623,11 +623,27 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     {
         Dispatcher.UIThread.Post(() =>
         {
+            MaybeInsertDateSeparator(ChatLines, line);
             ChatLines.Add(line);
             LogChatLine(line);
             if (!IsActive && line.Type is ChatLineType.Normal or ChatLineType.Object or ChatLineType.Emote)
                 HasUnread = true;
         });
+    }
+
+    private static void MaybeInsertDateSeparator(ObservableCollection<ChatLine> lines, ChatLine incoming)
+    {
+        if (incoming.Type is ChatLineType.System or ChatLineType.DateSeparator) return;
+        DateTime? lastDate = null;
+        for (int i = lines.Count - 1; i >= 0; i--)
+        {
+            var l = lines[i];
+            if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+            lastDate = l.Timestamp.Date;
+            break;
+        }
+        if (lastDate.HasValue && incoming.Timestamp.Date != lastDate.Value)
+            lines.Add(ChatLine.CreateDateSeparator(incoming.Timestamp.Date));
     }
 
     private void LogChatLine(ChatLine line)
@@ -648,6 +664,9 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
     public bool HistoryExhausted => _historyExhausted;
 
+    /// <summary>True when at least one history chunk has been loaded and more chunks remain above.</summary>
+    public bool HasPrecedingHistory => _historyOffset > 0 && !_historyExhausted;
+
     public void LoadInitialHistory()
     {
         var avatarName = Client.Self.Name;
@@ -663,12 +682,24 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         Dispatcher.UIThread.Post(() =>
         {
             IsLoadingHistory = true;
-            for (int i = chunk.Count - 1; i >= 0; i--)
-                ChatLines.Insert(0, chunk[i]);
+
+            DateTime? firstLiveDate = null;
+            foreach (var l in ChatLines)
+            {
+                if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+                firstLiveDate = l.Timestamp.Date;
+                break;
+            }
+
+            var processed = ChatLine.WithDateSeparators(chunk, firstLiveDate);
+
+            for (int i = processed.Count - 1; i >= 0; i--)
+                ChatLines.Insert(0, processed[i]);
             if (_historyOffset > 0)
-                ChatLines.Insert(chunk.Count, new ChatLine(DateTime.MinValue, string.Empty,
+                ChatLines.Insert(processed.Count, new ChatLine(DateTime.MinValue, string.Empty,
                     "─── Previous messages ───", ChatLineType.System));
             IsLoadingHistory = false;
+            OnPropertyChanged(nameof(HasPrecedingHistory));
         });
     }
 
@@ -684,11 +715,22 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
         Dispatcher.UIThread.Post(() =>
         {
-            for (int i = chunk.Count - 1; i >= 0; i--)
-                ChatLines.Insert(0, chunk[i]);
+            DateTime? oldestCurrentDate = null;
+            foreach (var l in ChatLines)
+            {
+                if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+                oldestCurrentDate = l.Timestamp.Date;
+                break;
+            }
+
+            var processed = ChatLine.WithDateSeparators(chunk, oldestCurrentDate);
+
+            for (int i = processed.Count - 1; i >= 0; i--)
+                ChatLines.Insert(0, processed[i]);
             _historyOffset += chunk.Count;
             if (chunk.Count == 0) _historyExhausted = true;
             IsLoadingHistory = false;
+            OnPropertyChanged(nameof(HasPrecedingHistory));
         });
     }
 
@@ -1213,6 +1255,11 @@ public record ChatLine(DateTime Timestamp, string From, string Text, ChatLineTyp
 
     public string AutomationText => $"{FormattedTime} {DisplayText}";
 
+    /// <summary>Full date + time timestamp for copy operations.</summary>
+    public string CopyText => IsDateSeparator || Timestamp == DateTime.MinValue
+        ? string.Empty
+        : $"[{Timestamp:yyyy-MM-dd HH:mm}] {DisplayText}";
+
     public bool HasAgentLink => Type is ChatLineType.Normal or ChatLineType.Emote or ChatLineType.Self
                                 && AgentID != UUID.Zero;
 
@@ -1237,6 +1284,54 @@ public record ChatLine(DateTime Timestamp, string From, string Text, ChatLineTyp
 
     /// <summary>Emote text wrapped in asterisks for display: *Name does something*</summary>
     public string EmoteDisplayText => $"* {From} {Text} *";
+
+    public bool IsDateSeparator => Type == ChatLineType.DateSeparator;
+
+    /// <summary>Human-readable date label shown in the day-change separator.</summary>
+    public string DateLabel
+    {
+        get
+        {
+            var today = DateTime.Today;
+            if (Timestamp.Date == today) return "Today";
+            if (Timestamp.Date == today.AddDays(-1)) return "Yesterday";
+            return Timestamp.ToString("dddd, MMMM d, yyyy");
+        }
+    }
+
+    public static ChatLine CreateDateSeparator(DateTime date) =>
+        new(date, string.Empty, string.Empty, ChatLineType.DateSeparator);
+
+    /// <summary>
+    /// Returns a new list that is <paramref name="chunk"/> with date-change separator items
+    /// injected between messages on different calendar days.
+    /// <paramref name="dateAfterChunk"/> is the date of the first item that will follow this
+    /// chunk in the display list; pass it so a boundary separator is added when needed.
+    /// </summary>
+    public static List<ChatLine> WithDateSeparators(IReadOnlyList<ChatLine> chunk, DateTime? dateAfterChunk = null)
+    {
+        var result = new List<ChatLine>(chunk.Count + 4);
+        DateTime? prevDate = null;
+
+        foreach (var line in chunk)
+        {
+            if (line.Type is ChatLineType.System or ChatLineType.DateSeparator)
+            {
+                result.Add(line);
+                continue;
+            }
+            var date = line.Timestamp.Date;
+            if (prevDate.HasValue && date != prevDate.Value)
+                result.Add(CreateDateSeparator(date));
+            prevDate = date;
+            result.Add(line);
+        }
+
+        if (prevDate.HasValue && dateAfterChunk.HasValue && prevDate.Value != dateAfterChunk.Value)
+            result.Add(CreateDateSeparator(dateAfterChunk.Value));
+
+        return result;
+    }
 }
 
 public enum ChatLineType
@@ -1247,7 +1342,8 @@ public enum ChatLineType
     Emote,
     System,
     Alert,
-    History   // Lines loaded from the log file (shown with dimmed style)
+    History,      // Lines loaded from the log file (shown with dimmed style)
+    DateSeparator // Visual day-change divider — not a real chat message
 }
 
 public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, string DistanceText = "", bool IsInVoice = false, bool IsSpeaking = false, bool IsTyping = false, bool IsAway = false, bool IsBusy = false, bool IsFlying = false, bool IsSitting = false)
