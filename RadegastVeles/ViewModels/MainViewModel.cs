@@ -78,28 +78,39 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _selectedTabIndex;
 
-    public MainViewModel(RadegastInstanceAvalonia instance)
+    public MainViewModel(
+        RadegastInstanceAvalonia instance,
+        NearbyViewModel chat,
+        IMViewModel im,
+        MapViewModel map,
+        ObjectsViewModel objects,
+        InventoryViewModel inventory,
+        FriendsViewModel friends,
+        GroupsViewModel groups,
+        MediaViewModel media,
+        NotificationQueueViewModel notifications,
+        VoiceViewModel voice,
+        MarketplaceViewModel marketplace)
     {
         _instance = instance;
 
-        Chat = new NearbyViewModel(instance);
-        IM = new IMViewModel(instance);
-        Map = new MapViewModel(instance);
-        Objects = new ObjectsViewModel(instance);
-        Inventory = new InventoryViewModel(instance);
-        Friends = new FriendsViewModel(instance);
-        Groups = new GroupsViewModel(instance);
-        Media = new MediaViewModel(instance);
-        Notifications = new NotificationQueueViewModel(instance);
-        Voice = new VoiceViewModel(instance);
-        Marketplace = new MarketplaceViewModel(instance);
-        // Expose voice
-        _instance.Voice = Voice;
-        // Expose media through instance so sub-ViewModels can access it.
-        _instance.Media = Media;
-        // Expose voice and media through NearbyViewModel so ChatPanel can bind to them.
-        Chat.Voice = Voice;
-        Chat.Media = Media;
+        Chat = chat;
+        IM = im;
+        Map = map;
+        Objects = objects;
+        Inventory = inventory;
+        Friends = friends;
+        Groups = groups;
+        Media = media;
+        Notifications = notifications;
+        Voice = voice;
+        Marketplace = marketplace;
+
+        // Back-references used by other parts of the session.
+        _instance.Voice = voice;
+        _instance.Media = media;
+        Chat.Voice = voice;
+        Chat.Media = media;
 
         // Forward status from Chat VM
         Chat.PropertyChanged += (_, e) =>

@@ -47,7 +47,7 @@
                      AutomationProperties.Name="Nearby objects list" Margin="4,0"
                      PointerPressed="ObjectsList_PointerPressed">
                 <ListBox.ContextMenu>
-                    <ContextMenu x:CompileBindings="False">
+                    <ContextMenu x:DataType="vm:ObjectsViewModel">
                         <MenuItem Header="Touch"    Command="{Binding TouchObjectCommand}" />
                         <MenuItem Header="{Binding SitButtonText}" Command="{Binding SitOnCommand}" />
                         <Separator />

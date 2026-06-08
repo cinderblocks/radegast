@@ -44,6 +44,7 @@
     <PackageReference Include="OpenTK.Graphics" Version="4.9.4" />
     <PackageReference Include="OpenTK.Mathematics" Version="4.9.4" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.8" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.8" />
     <!-- sherpa-onnx: managed API + platform-specific native runtimes -->
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.2" />
