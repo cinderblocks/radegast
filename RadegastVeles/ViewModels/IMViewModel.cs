@@ -53,6 +53,16 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
     public override string UnreadTabLabel => HasUnread ? "IMs, new messages" : "IMs";
 
     /// <summary>
+    /// Fired when a toast notification is clicked and the user should be taken
+    /// directly to that conversation. Subscribers should select the session and
+    /// switch to the IM tab.
+    /// </summary>
+    public event Action<IMSession>? NavigateToSessionRequested;
+
+    /// <summary>Selects <paramref name="session"/> as the active conversation.</summary>
+    public void FocusSession(IMSession session) => SelectedSession = session;
+
+    /// <summary>
     /// Number of IM/Group/Conference sessions that have at least one unread message.
     /// Drives the app-icon badge; hidden when zero.
     /// </summary>
@@ -465,7 +475,8 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         AddMessage(session, new ChatLine(DateTime.Now, fromName, imText, imType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
         if (!IsActive)
-            VelesNotificationService.Show(fromName, e.IM.Message);
+            VelesNotificationService.Show(fromName, e.IM.Message,
+                onClick: () => NavigateToSessionRequested?.Invoke(session));
     }
 
     private void HandleGroupIM(InstantMessageEventArgs e)
@@ -483,7 +494,8 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         AddMessage(session, new ChatLine(DateTime.Now, fromName, grpText, grpType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
         if (!IsActive)
-            VelesNotificationService.Show(groupName, $"{fromName}: {e.IM.Message}");
+            VelesNotificationService.Show(groupName, $"{fromName}: {e.IM.Message}",
+                onClick: () => NavigateToSessionRequested?.Invoke(session));
     }
 
     private void HandleConferenceIM(InstantMessageEventArgs e)

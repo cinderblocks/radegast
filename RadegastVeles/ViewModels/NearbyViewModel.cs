@@ -981,14 +981,33 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     private void RebuildMinimap()
     {
         MinimapEntries.Clear();
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        var rotationById = new Dictionary<UUID, Quaternion>(sim.ObjectsAvatars.Count);
+        foreach (var kv in sim.ObjectsAvatars)
+        {
+            if (kv.Value?.ID != UUID.Zero)
+                rotationById[kv.Value!.ID] = kv.Value.Rotation;
+        }
+
         foreach (var av in NearbyAvatars)
         {
-            if (Client.Network.CurrentSim == null ||
-                !Client.Network.CurrentSim.AvatarPositions.TryGetValue(av.Id, out var pos))
-                continue;
-            MinimapEntries.Add(new MinimapEntry(av.Id, av.Name, pos.X, pos.Y, pos.Z, av.IsSelf));
+            if (!sim.AvatarPositions.TryGetValue(av.Id, out var pos)) continue;
+
+            float? heading = null;
+            if (av.IsSelf)
+                heading = ExtractHeadingYaw(Client.Self.SimRotation);
+            else if (rotationById.TryGetValue(av.Id, out var rot))
+                heading = ExtractHeadingYaw(rot);
+
+            MinimapEntries.Add(new MinimapEntry(av.Id, av.Name, pos.X, pos.Y, pos.Z, av.IsSelf, heading));
         }
     }
+
+    // Avatar faces +X at rest; this extracts the yaw (CCW from east, in radians).
+    private static float ExtractHeadingYaw(Quaternion q) =>
+        MathF.Atan2(2f * (q.W * q.Z + q.X * q.Y), 1f - 2f * (q.Y * q.Y + q.Z * q.Z));
 
     public void WalkToPoint(float x, float y)
     {
@@ -1369,6 +1388,6 @@ public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, stri
     public bool ShowSittingIcon => IsSitting;
 }
 
-public record MinimapEntry(UUID Id, string Name, float X, float Y, float Z, bool IsSelf);
+public record MinimapEntry(UUID Id, string Name, float X, float Y, float Z, bool IsSelf, float? Heading = null);
 
 #endregion

@@ -52,15 +52,17 @@ public static class VelesNotificationService
     /// Displays a toast notification. Safe to call from any thread —
     /// the call is marshalled to the UI thread automatically.
     /// </summary>
+    /// <param name="onClick">Optional callback invoked (on the UI thread) when the user clicks the toast.</param>
     public static void Show(
         string title,
         string message,
         NotificationType type = NotificationType.Information,
-        TimeSpan? expiration = null)
+        TimeSpan? expiration = null,
+        Action? onClick = null)
     {
         var manager = _manager;
         if (manager == null) return;
-        var notification = new Notification(title, message, type, expiration ?? TimeSpan.FromSeconds(5));
+        var notification = new Notification(title, message, type, expiration ?? TimeSpan.FromSeconds(5), onClick);
         if (Dispatcher.UIThread.CheckAccess())
             manager.Show(notification);
         else

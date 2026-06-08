@@ -134,6 +134,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.GroupIMRequested += Instance_GroupIMRequested;
         _instance.ShowOnMapRequested += Instance_ShowOnMapRequested;
         _instance.NotificationReceived += Instance_NotificationReceived;
+        IM.NavigateToSessionRequested += OnIMNavigateRequested;
 
         // Auto-connect voice if the setting is enabled
         _ = Voice.TryAutoConnectAsync();
@@ -146,6 +147,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.GroupIMRequested -= Instance_GroupIMRequested;
         _instance.ShowOnMapRequested -= Instance_ShowOnMapRequested;
         _instance.NotificationReceived -= Instance_NotificationReceived;
+        IM.NavigateToSessionRequested -= OnIMNavigateRequested;
 
         Chat.Dispose();
         IM.Dispose();
@@ -172,6 +174,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             BalanceText = $"L${e.Balance:N0}");
+    }
+
+    private void OnIMNavigateRequested(IMSession session)
+    {
+        IM.FocusSession(session);
+        ShowTab(1);
     }
 
     private void Instance_IMRequested(object? sender, IMRequestedEventArgs e)
