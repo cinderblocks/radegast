@@ -42,6 +42,8 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     private readonly List<string> _chatHistory = [];
     private int _chatPointer;
     private DispatcherTimer? _healthTimer;
+    private DispatcherTimer? _typingStopTimer;
+    private bool _isSendingTyping;
 
     [ObservableProperty]
     private string _chatInput = string.Empty;
@@ -264,7 +266,45 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         _healthTimer?.Stop();
         _healthTimer = null;
 
+        _typingStopTimer?.Stop();
+        _typingStopTimer = null;
+
         base.Dispose();
+    }
+
+    // Typing-indicator debounce: send StartTyping on first keystroke,
+    // StopTyping after 5 s of inactivity (or immediately on send/clear).
+    partial void OnChatInputChanged(string value)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            if (!_isSendingTyping)
+            {
+                _isSendingTyping = true;
+                NotifyTypingStarted();
+            }
+            if (_typingStopTimer == null)
+            {
+                _typingStopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _typingStopTimer.Tick += (_, _) => StopTypingIndicator();
+            }
+            _typingStopTimer.Stop();
+            _typingStopTimer.Start();
+        }
+        else
+        {
+            StopTypingIndicator();
+        }
+    }
+
+    internal void StopTypingIndicator()
+    {
+        _typingStopTimer?.Stop();
+        if (_isSendingTyping)
+        {
+            _isSendingTyping = false;
+            NotifyTypingStopped();
+        }
     }
 
     protected override void RegisterClientEvents(GridClient client)

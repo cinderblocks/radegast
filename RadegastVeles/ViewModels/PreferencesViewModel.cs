@@ -55,10 +55,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private int _imageDecodeConcurrency = 2;
 
     [ObservableProperty]
-    private int _decodeReservedRamMb = 512;
+    private int _decodeReservedRamMb = (int)GridTextureHelper.DefaultDecodeReservedMb;
 
     [ObservableProperty]
-    private double _decodePerDecodeMb = 21.5;
+    private double _decodePerDecodeMb = GridTextureHelper.DefaultDecodePerDecodeMb;
 
     [ObservableProperty]
     private int _skBitmapCacheCap = 512;
@@ -80,10 +80,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private void ResetDecodeGateToAuto()
     {
         GridTextureHelper.TuneDecodeGateForAvailableRam();
-        // Back-calculate what the method used so the sliders show the auto-detected values.
-        // TuneDecodeGateForAvailableRam defaults: reservedMb=512, perDecodeMb=21.5
-        DecodeReservedRamMb = 512;
-        DecodePerDecodeMb   = 21.5;
+        DecodeReservedRamMb = (int)GridTextureHelper.DefaultDecodeReservedMb;
+        DecodePerDecodeMb   = GridTextureHelper.DefaultDecodePerDecodeMb;
         SkBitmapCacheCap    = 512;
         GridTextureHelper.SkBitmapCacheCap = 512;
         OnPropertyChanged(nameof(MaxConcurrentDecodes));
@@ -549,9 +547,9 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["image_decode_concurrency"].AsInteger()
             : Math.Max(1, Environment.ProcessorCount / 2);
         DecodeReservedRamMb = s["decode_reserved_ram_mb"].Type != OSDType.Unknown
-            ? s["decode_reserved_ram_mb"].AsInteger() : 512;
+            ? s["decode_reserved_ram_mb"].AsInteger() : (int)GridTextureHelper.DefaultDecodeReservedMb;
         DecodePerDecodeMb = s["decode_per_decode_mb"].Type != OSDType.Unknown
-            ? s["decode_per_decode_mb"].AsReal() : 21.5;
+            ? s["decode_per_decode_mb"].AsReal() : GridTextureHelper.DefaultDecodePerDecodeMb;
         SkBitmapCacheCap = s["sk_bitmap_cache_cap"].Type != OSDType.Unknown
             ? s["sk_bitmap_cache_cap"].AsInteger() : 512;
         GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;

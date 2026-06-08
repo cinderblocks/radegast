@@ -18,6 +18,8 @@
  */
 
 using Avalonia.Controls;
+using Radegast.Veles.Core;
+using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Views;
 
@@ -27,4 +29,10 @@ public partial class FriendsPanel : UserControl
     {
         InitializeComponent();
     }
+
+    // Exposed for AvatarNameButton bindings inside DataTemplates. Direct DataContext
+    // navigation in a DataTemplate requires an explicit type cast in Avalonia compiled
+    // bindings; a typed code-behind property avoids that and is refactor-safe.
+    public RadegastInstanceAvalonia? VelesInstance =>
+        (DataContext as FriendsViewModel)?.Instance;
 }

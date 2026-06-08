@@ -60,8 +60,8 @@ internal static class Program
         // Read user overrides from the persisted settings file if it already exists;
         // this mirrors the path RadegastInstance.InitializeAppData() uses at runtime.
         var settingsFile = Path.Combine(logDir, "settings.xml");
-        double reservedMb  = 512.0;
-        double perDecodeMb = 21.5;
+        double reservedMb  = GridTextureHelper.DefaultDecodeReservedMb;
+        double perDecodeMb = GridTextureHelper.DefaultDecodePerDecodeMb;
         try
         {
             if (File.Exists(settingsFile))

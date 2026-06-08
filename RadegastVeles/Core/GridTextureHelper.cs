@@ -221,6 +221,12 @@ public static class GridTextureHelper
         }
     }
 
+    /// <summary>Megabytes reserved for the application when auto-tuning the decode gate. Default 512.</summary>
+    public const double DefaultDecodeReservedMb = 512.0;
+
+    /// <summary>Expected peak managed-heap cost per concurrent J2K decode in megabytes. Default 21.5.</summary>
+    public const double DefaultDecodePerDecodeMb = 21.5;
+
     /// <summary>
     /// Sets <see cref="MaxConcurrentDecodes"/> based on the amount of available managed
     /// memory reported by the GC.  Each cold J2K decode requires ≈21.5 MB of working
@@ -230,15 +236,15 @@ public static class GridTextureHelper
     /// [1, <c>ProcessorCount</c>] so the CPU is never the bottleneck.
     /// </summary>
     /// <param name="reservedMb">
-    /// Megabytes to reserve for the rest of the application.  Default is 512 MB.
+    /// Megabytes to reserve for the rest of the application.  Default is <see cref="DefaultDecodeReservedMb"/>.
     /// </param>
     /// <param name="perDecodeMb">
     /// Expected peak managed-heap cost per concurrent decode in megabytes.
-    /// Default is 21.5 MB, measured by memory profiling CoreJ2K.
+    /// Default is <see cref="DefaultDecodePerDecodeMb"/>, measured by memory profiling CoreJ2K.
     /// </param>
     public static void TuneDecodeGateForAvailableRam(
-        double reservedMb = 512.0,
-        double perDecodeMb = 21.5)
+        double reservedMb = DefaultDecodeReservedMb,
+        double perDecodeMb = DefaultDecodePerDecodeMb)
     {
         var info = GC.GetGCMemoryInfo();
         // TotalAvailableMemoryBytes is the GC-visible memory limit (respects container
