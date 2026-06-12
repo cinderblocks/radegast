@@ -3,6 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <ProductVersion Condition=" '$(ProductVersion)' == '' ">1.0.0</ProductVersion>
+    <IsRestoreEnabled>false</IsRestoreEnabled>
     <OutputName>RadegastVelesSetup_$(Platform)</OutputName>
     <OutputPath>..\..\bin\Packages\</OutputPath>
     <Name>VelesSetup</Name>

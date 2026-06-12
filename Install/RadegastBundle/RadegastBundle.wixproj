@@ -3,6 +3,7 @@
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <ProductVersion Condition=" '$(ProductVersion)' == '' ">3.1.0</ProductVersion>
+    <IsRestoreEnabled>false</IsRestoreEnabled>
     <OutputName>RadegastBundle_$(Platform)</OutputName>
     <OutputPath>..\..\bin\Packages\</OutputPath>
     <OutputType>Bundle</OutputType>

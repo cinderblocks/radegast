@@ -54,7 +54,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
     // The attached Sdl3Audio device. When set, synthesized PCM is fed via
     // FeedPcmSamples which handles Opus encoding and fires OnAudioSourceEncodedSample
     // that VoiceSession wires to pc.SendAudio — transmitting TTS over WebRTC.
-    private Sdl3Audio? _attachedAudio;
+    private AudioDevice? _attachedAudio;
 
     /// <inheritdoc/>
     public string ModelDirectory { get; private set; } = string.Empty;
@@ -89,7 +89,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
     /// handles Opus encoding and fires <c>OnAudioSourceEncodedSample</c> that
     /// VoiceSession wires to <c>pc.SendAudio</c> — transmitting TTS over WebRTC.
     /// </summary>
-    public void AttachVoiceSession(Sdl3Audio audioDevice)
+    public void AttachVoiceSession(AudioDevice audioDevice)
     {
         _attachedAudio = audioDevice;
     }
