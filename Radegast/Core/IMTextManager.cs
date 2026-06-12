@@ -451,12 +451,12 @@ namespace Radegast
             _historyDisplayStart = startIndex;
             TextPrinter.ClearText();
 
+            PrintLastLog();
+
             if (_historyDisplayStart > 0)
             {
                 PrintLoadMoreLink();
             }
-
-            PrintLastLog();
 
             for (int i = _historyDisplayStart; i < textBuffer.Count; i++)
             {
