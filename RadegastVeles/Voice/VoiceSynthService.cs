@@ -51,7 +51,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
 
     // ── Audio routing ────────────────────────────────────────────────────
 
-    // The attached Sdl3Audio device. When set, synthesized PCM is fed via
+    // The attached AudioDevice. When set, synthesized PCM is fed via
     // FeedPcmSamples which handles Opus encoding and fires OnAudioSourceEncodedSample
     // that VoiceSession wires to pc.SendAudio — transmitting TTS over WebRTC.
     private AudioDevice? _attachedAudio;

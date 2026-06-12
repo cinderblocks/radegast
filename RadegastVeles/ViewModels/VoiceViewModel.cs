@@ -42,7 +42,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     // Internal so VoiceSynthViewModel can access the audio device for injection.
     internal VoiceManager? _voice;
 
-    /// <summary>True when the SDL3 audio backend initialised successfully.</summary>
+    /// <summary>True when the audio backend initialised successfully.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ConnectLabel))]
     [NotifyPropertyChangedFor(nameof(IsVisibleInUI))]
@@ -121,6 +121,24 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     private string _selectedInputDevice = string.Empty;
 
+    // ── Audio Processing (WebRTC APM) ─────────────────────────────────────
+
+    /// <summary>Suppress background noise on the capture stream.</summary>
+    [ObservableProperty]
+    private bool _noiseSuppressionEnabled = true;
+
+    /// <summary>Remove DC offset and sub-80 Hz rumble from the capture stream.</summary>
+    [ObservableProperty]
+    private bool _highPassFilterEnabled = true;
+
+    /// <summary>Automatically normalise capture level (Automatic Gain Control).</summary>
+    [ObservableProperty]
+    private bool _agcEnabled;
+
+    /// <summary>Cancel echo from the local speaker before it reaches the mic.</summary>
+    [ObservableProperty]
+    private bool _echoCancellationEnabled;
+
     /// <summary>Available microphone input devices on this machine.</summary>
     public ObservableCollection<string> InputDevices { get; } = [];
 
@@ -196,11 +214,17 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             Enum.TryParse<Key>(s["voice_ptt_key"].AsString(), out var savedKey))
             PttKey = savedKey;
 
+        NoiseSuppressionEnabled  = s["voice_apm_noise_suppression"].Type != OSDType.Unknown ? s["voice_apm_noise_suppression"].AsBoolean() : true;
+        HighPassFilterEnabled    = s["voice_apm_high_pass_filter"].Type  != OSDType.Unknown ? s["voice_apm_high_pass_filter"].AsBoolean()  : true;
+        AgcEnabled               = s["voice_apm_agc"].Type               != OSDType.Unknown && s["voice_apm_agc"].AsBoolean();
+        EchoCancellationEnabled  = s["voice_apm_echo_cancellation"].Type != OSDType.Unknown && s["voice_apm_echo_cancellation"].AsBoolean();
+
         if (_voice != null)
         {
             _voice.AudioDevice.SpeakerLevel = OutputVolume / 100.0f;
             if (SelectedInputDevice != "(Default)")
                 _voice.AudioDevice.SetRecordingDevice(SelectedInputDevice);
+            ApplyAudioProcessing();
         }
     }
 
@@ -214,13 +238,27 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         s["voice_ptt_key"]       = OSD.FromString(PttKey.ToString());
         var deviceToSave = SelectedInputDevice == "(Default)" ? string.Empty : SelectedInputDevice;
         s["voice_input_device"]  = OSD.FromString(deviceToSave);
+        s["voice_apm_noise_suppression"]  = OSD.FromBoolean(NoiseSuppressionEnabled);
+        s["voice_apm_high_pass_filter"]   = OSD.FromBoolean(HighPassFilterEnabled);
+        s["voice_apm_agc"]                = OSD.FromBoolean(AgcEnabled);
+        s["voice_apm_echo_cancellation"]  = OSD.FromBoolean(EchoCancellationEnabled);
 
         if (_voice != null)
         {
             _voice.AudioDevice.SpeakerLevel = OutputVolume / 100.0f;
             var device = SelectedInputDevice == "(Default)" ? null : SelectedInputDevice;
             _voice.AudioDevice.SetRecordingDevice(device);
+            ApplyAudioProcessing();
         }
+    }
+
+    private void ApplyAudioProcessing()
+    {
+        if (_voice == null || !IsAvailable) return;
+        if (NoiseSuppressionEnabled || HighPassFilterEnabled || AgcEnabled || EchoCancellationEnabled)
+            _voice.AudioDevice.EnableAudioProcessing(NoiseSuppressionEnabled, HighPassFilterEnabled, AgcEnabled, EchoCancellationEnabled);
+        else
+            _voice.AudioDevice.DisableAudioProcessing();
     }
 
     internal void RefreshInputDevices()

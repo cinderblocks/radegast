@@ -223,7 +223,7 @@
                                   IsChecked="{Binding VoiceEnabled}"
                                   FontWeight="SemiBold"
                                   AutomationProperties.Name="Enable voice chat" />
-                        <TextBlock Text="Voice chat requires the WebRTC/SDL3 audio backend which was not detected."
+                        <TextBlock Text="Voice chat requires the WebRTC audio backend which was not detected."
                                    FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
                                    IsVisible="{Binding !VoiceSystemAvailable}" />
 
@@ -284,6 +284,26 @@
                             </StackPanel>
                             <TextBlock Text="Click 'Test Microphone' to verify your mic is working. The level bar will animate when sound is detected."
                                        FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+
+                            <!-- ── Audio Processing ───────────────────────────────────── -->
+                            <Separator />
+                            <TextBlock Text="Audio Processing" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="WebRTC APM processes the captured microphone signal before transmission."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+                            <CheckBox Content="Noise Suppression"
+                                      IsChecked="{Binding VoiceNoiseSuppression}"
+                                      AutomationProperties.Name="Enable noise suppression" />
+                            <CheckBox Content="High-Pass Filter (remove low-frequency rumble)"
+                                      IsChecked="{Binding VoiceHighPassFilter}"
+                                      AutomationProperties.Name="Enable high-pass filter" />
+                            <CheckBox Content="Automatic Gain Control (AGC)"
+                                      IsChecked="{Binding VoiceAgc}"
+                                      AutomationProperties.Name="Enable automatic gain control" />
+                            <CheckBox Content="Echo Cancellation"
+                                      IsChecked="{Binding VoiceEchoCancellation}"
+                                      AutomationProperties.Name="Enable echo cancellation" />
+                            <TextBlock Text="Changes take effect when you click Apply."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" />
 
                             <!-- ── Text to Speech ─────────────────────────────────────── -->
                             <Separator />

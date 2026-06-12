@@ -253,6 +253,18 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private int _voiceOutputVolume = 80;
 
+    [ObservableProperty]
+    private bool _voiceNoiseSuppression = true;
+
+    [ObservableProperty]
+    private bool _voiceHighPassFilter = true;
+
+    [ObservableProperty]
+    private bool _voiceAgc;
+
+    [ObservableProperty]
+    private bool _voiceEchoCancellation;
+
     /// <summary>Available microphone input device names. Passes through from VoiceViewModel.</summary>
     public ObservableCollection<string> VoiceInputDevices => _voice?.InputDevices ?? _emptyDevices;
     private static readonly ObservableCollection<string> _emptyDevices = [];
@@ -617,6 +629,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             VoicePushToTalkEnabled = _voice.PushToTalkEnabled;
             VoiceAutoConnect      = _voice.AutoConnect;
             VoiceOutputVolume     = _voice.OutputVolume;
+            VoiceNoiseSuppression = _voice.NoiseSuppressionEnabled;
+            VoiceHighPassFilter   = _voice.HighPassFilterEnabled;
+            VoiceAgc              = _voice.AgcEnabled;
+            VoiceEchoCancellation = _voice.EchoCancellationEnabled;
         }
 
         // Graphics
@@ -748,10 +764,14 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Voice settings — push to VoiceViewModel and save
         if (_voice != null)
         {
-            _voice.VoiceEnabled      = VoiceEnabled;
-            _voice.PushToTalkEnabled  = VoicePushToTalkEnabled;
-            _voice.AutoConnect        = VoiceAutoConnect;
-            _voice.OutputVolume       = VoiceOutputVolume;
+            _voice.VoiceEnabled             = VoiceEnabled;
+            _voice.PushToTalkEnabled        = VoicePushToTalkEnabled;
+            _voice.AutoConnect              = VoiceAutoConnect;
+            _voice.OutputVolume             = VoiceOutputVolume;
+            _voice.NoiseSuppressionEnabled  = VoiceNoiseSuppression;
+            _voice.HighPassFilterEnabled    = VoiceHighPassFilter;
+            _voice.AgcEnabled               = VoiceAgc;
+            _voice.EchoCancellationEnabled  = VoiceEchoCancellation;
             _voice.SaveSettings();
             _voice.VoiceSynth.SaveSettings();
         }
