@@ -431,7 +431,7 @@ namespace Radegast.Rendering
                 if (RHelp.LoadCachedImage(textureID, out var textureBytes,
                         out var hasAlpha, out var fullAlpha, out var isMask))
                 {
-                    img = J2kImage.FromBytes(textureBytes).As<SKBitmap>();
+                    img = J2kImage.DecodeToImage<SKBitmap>(textureBytes);
                 }
                 else
                 {

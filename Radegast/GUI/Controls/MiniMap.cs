@@ -208,7 +208,7 @@ namespace Radegast.WinForms
                     {
                         if (state == TextureRequestState.Finished)
                         {
-                            _MapLayer = J2kImage.FromBytes(asset.AssetData).As<SKBitmap>().ToBitmap();
+                            _MapLayer = J2kImage.DecodeToImage<SKBitmap>(asset.AssetData).ToBitmap();
                         }
                     });
             }

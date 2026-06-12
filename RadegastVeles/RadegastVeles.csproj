@@ -53,6 +53,7 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.2" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.2" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.2" />
+    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.0.81" />
     <PackageReference Include="SharpCompress" Version="0.49.1" />
   </ItemGroup>
   <ItemGroup>

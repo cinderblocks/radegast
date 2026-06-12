@@ -292,8 +292,8 @@ namespace Radegast
             {
                 if (Client.Assets.Cache.HasAsset(imageID))
                 {
-                    regionTiles[handle] = J2kImage.FromBytes(
-                            Client.Assets.Cache.GetCachedAssetBytes(imageID)).As<SKBitmap>().ToBitmap();
+                    regionTiles[handle] = J2kImage.DecodeToImage<SKBitmap>(
+                            Client.Assets.Cache.GetCachedAssetBytes(imageID)).ToBitmap();
                     needRepaint = true;
 
                     lock (tileRequests)
@@ -319,7 +319,7 @@ namespace Radegast
                             var responseData = result.data;
                             if (response != null && responseData != null && response.IsSuccessStatusCode)
                             {
-                                regionTiles[handle] = J2kImage.FromBytes(responseData).As<SKBitmap>().ToBitmap();
+                                regionTiles[handle] = J2kImage.DecodeToImage<SKBitmap>(responseData).ToBitmap();
                                 needRepaint = true;
                                 await Client.Assets.Cache.SaveAssetToCacheAsync(imageID, responseData);
                             }
@@ -353,7 +353,7 @@ namespace Radegast
                             if (assetTexture?.AssetData != null)
                             {
                                 regionTiles[handle] =
-                                    J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>().ToBitmap();
+                                    J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData).ToBitmap();
                                 needRepaint = true;
                             }
                             lock (tileRequests)

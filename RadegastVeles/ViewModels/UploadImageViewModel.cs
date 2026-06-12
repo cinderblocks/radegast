@@ -159,8 +159,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         if (ext is ".jp2" or ".j2c")
         {
             var raw = File.ReadAllBytes(filePath);
-            skBitmap = J2kImage.FromBytes(raw).As<SKBitmap>();
-            if (skBitmap == null) throw new InvalidOperationException("Failed to decode JPEG2000 image.");
+            skBitmap = J2kImage.DecodeToImage<SKBitmap>(raw);
 
             skBitmap = ResizeToNearestPow2(skBitmap, out _);
             var encBuilder = new CompleteEncoderConfigurationBuilder();

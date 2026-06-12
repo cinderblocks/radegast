@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -28,7 +27,6 @@ using CoreJ2K;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
 using Radegast.Veles.Core;
-using SkiaSharp;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -113,13 +111,7 @@ public partial class TextureViewerViewModel : ObservableObject, IDisposable
         Bitmap? bitmap = null;
         try
         {
-            bitmap = await Task.Run(() =>
-            {
-                using var skBitmap = J2kImage.FromBytes(data).As<SKBitmap>();
-                using var encoded = skBitmap.Encode(SKEncodedImageFormat.Png, 100);
-                using var ms = new MemoryStream(encoded.ToArray());
-                return new Bitmap(ms);
-            });
+            bitmap = await Task.Run(() => J2kImage.DecodeToImage<WriteableBitmap>(data));
         }
         catch
         {

@@ -309,7 +309,7 @@ namespace Radegast.Rendering
             {
                 if (state == TextureRequestState.Finished && assetTexture?.AssetData != null)
                 {
-                    detailTexture[i] = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>();
+                    detailTexture[i] = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData);
                 }
                 textureDone.Set();
             };

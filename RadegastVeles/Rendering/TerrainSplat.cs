@@ -248,7 +248,7 @@ internal static class TerrainSplat
                 {
                     try
                     {
-                        var bmp = J2kImage.FromBytes(asset.AssetData).As<SKBitmap>();
+                        var bmp = J2kImage.DecodeToImage<SKBitmap>(asset.AssetData);
                         tcs.TrySetResult(bmp);
                     }
                     catch { tcs.TrySetResult(null); }

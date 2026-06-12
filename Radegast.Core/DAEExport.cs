@@ -266,7 +266,7 @@ namespace Radegast
                             {
                                 var data = asset.AssetData;
                                 SKBitmap? bmp = null;
-                                try { bmp = J2kImage.FromBytes(data).As<SKBitmap>(); } catch { bmp = null; }
+                                try { bmp = J2kImage.DecodeToImage<SKBitmap>(data); } catch { bmp = null; }
                                 tcs.TrySetResult((data, bmp));
                                 return;
                             }

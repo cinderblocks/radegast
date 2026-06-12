@@ -1219,7 +1219,7 @@ namespace Radegast.Rendering
                         {
                             if (state == TextureRequestState.Finished)
                             {
-                                img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>();
+                                img = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData);
                             }
                         }
                         finally
