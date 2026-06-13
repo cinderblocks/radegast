@@ -2567,7 +2567,9 @@ namespace Radegast.Rendering
                 {
                     mesh.Faces = mesh.Faces.FindAll(f => f.Vertices != null && f.Vertices.Count > 0 && f.Indices != null && f.Indices.Count > 0);
                 }
-                rprim.Faces = mesh.Faces;
+                // MeshFoundry returns null on failure; MeshmerizerR returned an empty mesh.
+                // Fall back to an empty face list so downstream null-checks hold.
+                rprim.Faces = mesh?.Faces ?? new System.Collections.Generic.List<Face>();
                 CalculateBoundingBox(rprim);
                 rprim.Meshing = false;
                 rprim.Meshed = true;

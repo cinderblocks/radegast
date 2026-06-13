@@ -980,13 +980,21 @@ namespace Radegast.Rendering
 
                     foreach (byte vpvalue in av.VisualParameters)
                     {
-                        if (x >= VisualParamEx.TweakableParams.Count)
+                        if (x >= VisualParamEx.TransmittedParams.Count)
                         {
                             //Logger.Log("Too many visual parameters in Avatar appearance", Helpers.LogLevel.Warning);
                             break;
                         }
 
-                        VisualParamEx vpe = (VisualParamEx)VisualParamEx.TweakableParams.GetByIndex(x);
+                        VisualParamEx vpe = (VisualParamEx)VisualParamEx.TransmittedParams.GetByIndex(x);
+
+                        // Skip group-3 (TRANSMIT_NOT_TWEAKABLE) params — they occupy bytes in
+                        // the packet but have no tweakable morphs or bone deforms to apply.
+                        if (vpe.Group != 0)
+                        {
+                            x++;
+                            continue;
+                        }
 
                         if (vpe.sex != VisualParamEx.EparamSex.SEX_BOTH && vpe.sex != msex)
                         {
@@ -2043,9 +2051,14 @@ namespace Radegast.Rendering
         //All visual params indexed by ID
         public static Dictionary<int, VisualParamEx> AllParams = new Dictionary<int, VisualParamEx>();
 
-        // The sorted list of tweakable params, this matches the AvatarAppearance packet visual
-        // parameters ordering
+        // Group-0 only — kept for VisualAppearanceParameters indexing. NOT suitable for
+        // byte-to-param mapping: the AvatarAppearance packet interleaves group-3 params.
         public static SortedList TweakableParams = new SortedList();
+
+        // All params transmitted in AvatarAppearance (group-0 tweakable + group-3
+        // transmit_not_tweakable), sorted by ParamID. This list matches the byte ordering
+        // of av.VisualParameters exactly.
+        public static SortedList TransmittedParams = new SortedList();
 
         public Dictionary<string, BoneDeform> BoneDeforms = null;
 
@@ -2237,6 +2250,17 @@ namespace Radegast.Rendering
                     Logger.Warn($"Warning duplicate tweakable parameter ID {count} {Name}");
                 }
                 count++;
+            }
+
+            // TransmittedParams tracks both group-0 and group-3 params in sorted ParamID
+            // order, matching the byte ordering the server uses in AvatarAppearance packets.
+            if (Group == (int)GroupType.VISUAL_PARAM_GROUP_TWEAKABLE ||
+                Group == (int)GroupType.VISUAL_PARAM_GROUP_TRANSMIT_NOT_TWEAKABLE)
+            {
+                if (!TransmittedParams.ContainsKey(ParamID))
+                {
+                    TransmittedParams.Add(ParamID, this);
+                }
             }
 
             if (AllParams.ContainsKey(ParamID))
