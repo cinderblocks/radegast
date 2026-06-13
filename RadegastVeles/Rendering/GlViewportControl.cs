@@ -175,6 +175,29 @@ public class GlViewportControl : Panel
     /// </summary>
     public int SsaoMaxOpaqueFaces { get; set; } = 1500;
 
+    // ── Water resources (GL thread only) ─────────────────────────────────────────
+    private GlShader? _waterShader;
+    private int _waterReflFbo, _waterReflColorTex, _waterReflDepthRb;
+    private int _waterNormalmapTex, _waterDudvmapTex;
+    private int _waterVao, _waterVbo, _waterEbo;
+    private bool _waterReady;
+    private float _waterTime;
+    private long  _waterLastTick;
+    private const int WaterReflSize = 512;
+
+    /// <summary>
+    /// World-space Z height of the water surface.
+    /// <see cref="float.NaN"/> disables water rendering (default).
+    /// Set this from the simulator's <c>WaterHeight</c> field.
+    /// </summary>
+    public float WaterHeight { get; set; } = float.NaN;
+
+    /// <summary>
+    /// Windlight water fog colour used as the deep-water tint.
+    /// Defaults to SL's default water colour; update from EEP water track.
+    /// </summary>
+    public Vector4 WaterFogColor { get; set; } = new Vector4(0.09f, 0.28f, 0.63f, 0.84f);
+
     // ── Particle state ────────────────────────────────────────────────────────────
     // Pending submissions from any thread: key → submission (null = remove).
     private readonly ConcurrentDictionary<ulong, ParticleRenderSubmission?> _pendingParticleMap = new();
@@ -645,6 +668,10 @@ public class GlViewportControl : Panel
                 _ssaoReady = false;
             }
 
+            // Water rendering (best-effort; viewer works fine without it)
+            try { InitWater(); }
+            catch { _waterReady = false; }
+
             // Notify listeners (on the UI thread) that a fresh GL context is ready.
             // On a first open this fires immediately; on tab-switch re-attaches it
             // triggers streamers to re-dirty and re-upload their scene data.
@@ -863,6 +890,16 @@ public class GlViewportControl : Panel
             }
         }
 
+        // ── Water reflection pre-pass ─────────────────────────────────────
+        // Render the opaque scene from a camera mirrored over the water plane
+        // into a fixed-resolution FBO. Must happen before the main scene pass
+        // so the reflection texture is ready when DrawWater samples it.
+        float waterH = WaterHeight;
+        bool  doWater = _waterReady && !float.IsNaN(waterH)
+                        && _camera.EyePosition.Z >= waterH - 0.05f;
+        if (doWater)
+            DrawWaterReflection(ref view, ref proj, waterH, w, h);
+
         // ── Main scene pass ───────────────────────────────────────────────
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
         GL.Viewport(0, 0, w, h);
@@ -879,6 +916,12 @@ public class GlViewportControl : Panel
 
         DrawFaces(_opaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats);
         DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats);
+
+        // ── Water surface ─────────────────────────────────────────────────
+        // Drawn after opaque geometry (correct depth test) but before alpha
+        // geometry (transparent objects above water render in front of it).
+        if (doWater)
+            DrawWater(ref view, ref proj, waterH);
 
         // Alpha pass — depth-sorted back-to-front, two-sided.
         var allAlpha = _alpha.Count > 0 || _sceneAlpha.Count > 0;
@@ -1115,6 +1158,7 @@ public class GlViewportControl : Panel
         if (_gbufFbo != 0)       { GL.DeleteFramebuffer(_gbufFbo); _gbufFbo = 0; }
         if (_ssaoNoiseTex != 0)  { GL.DeleteTexture(_ssaoNoiseTex); _ssaoNoiseTex = 0; }
         if (_quadVao != 0)       { GL.DeleteVertexArray(_quadVao); _quadVao = 0; }
+        DeleteWaterResources();
         _primShader?.Dispose();     _primShader     = null;
         _wireShader?.Dispose();     _wireShader     = null;
         _pickShader?.Dispose();     _pickShader     = null;
@@ -1589,6 +1633,227 @@ public class GlViewportControl : Panel
         if (_ssaoColorTex != 0){ GL.DeleteTexture(_ssaoColorTex);   _ssaoColorTex = 0; }
         if (_ssaoBlurTex != 0) { GL.DeleteTexture(_ssaoBlurTex);    _ssaoBlurTex = 0; }
         _ssaoFboW = _ssaoFboH = 0;
+    }
+
+    // ── Water rendering ───────────────────────────────────────────────────────────
+
+    private void InitWater()
+    {
+        _waterShader = GlShader.Compile(
+            ShaderLoader.Load("water.vert"),
+            ShaderLoader.Load("water.frag"));
+
+        // Load normalmap and dudvmap from embedded resources
+        _waterNormalmapTex = LoadEmbeddedTexture("normalmap.png", repeat: true);
+        _waterDudvmapTex   = LoadEmbeddedTexture("dudvmap.png",   repeat: true);
+
+        // Water plane VAO: unit square (XY only), expanded to world scale in vertex shader
+        float[]  verts = { -1f,-1f, 1f,-1f, 1f,1f, -1f,1f };
+        ushort[] idx   = { 0,1,2, 0,2,3 };
+
+        _waterVao = GL.GenVertexArray();
+        _waterVbo = GL.GenBuffer();
+        _waterEbo = GL.GenBuffer();
+
+        GL.BindVertexArray(_waterVao);
+        GL.BindBuffer(BufferTarget.ArrayBuffer, _waterVbo);
+        GL.BufferData(BufferTarget.ArrayBuffer, verts.Length * sizeof(float), verts, BufferUsageHint.StaticDraw);
+        GL.EnableVertexAttribArray(0);
+        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
+        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _waterEbo);
+        GL.BufferData(BufferTarget.ElementArrayBuffer, idx.Length * sizeof(ushort), idx, BufferUsageHint.StaticDraw);
+        GL.BindVertexArray(0);
+
+        // Reflection FBO — fixed WaterReflSize × WaterReflSize
+        _waterReflColorTex = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
+        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
+            WaterReflSize, WaterReflSize, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+
+        _waterReflDepthRb = GL.GenRenderbuffer();
+        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _waterReflDepthRb);
+        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, WaterReflSize, WaterReflSize);
+        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+
+        _waterReflFbo = GL.GenFramebuffer();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
+        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
+            TextureTarget.Texture2D, _waterReflColorTex, 0);
+        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            RenderbufferTarget.Renderbuffer, _waterReflDepthRb);
+        var fbStatus = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+        if (fbStatus != FramebufferErrorCode.FramebufferComplete)
+        {
+            // Reflection FBO unsupported — water still renders with water colour fallback
+            GL.DeleteFramebuffer(_waterReflFbo);
+            GL.DeleteTexture(_waterReflColorTex);
+            GL.DeleteRenderbuffer(_waterReflDepthRb);
+            _waterReflFbo = _waterReflColorTex = _waterReflDepthRb = 0;
+        }
+
+        _waterLastTick = Environment.TickCount64;
+        _waterReady    = true;
+    }
+
+    /// <summary>
+    /// Loads an embedded shader-data PNG as a GL texture with mipmaps.
+    /// <paramref name="repeat"/> controls wrap mode (Repeat for tiling, ClampToEdge for one-shot).
+    /// </summary>
+    private static int LoadEmbeddedTexture(string filename, bool repeat = false)
+    {
+        var uri = new Uri("avares://RadegastVeles/Rendering/shader_data/" + filename);
+        using var stream = Avalonia.Platform.AssetLoader.Open(uri);
+        using var bitmap = SkiaSharp.SKBitmap.Decode(stream);
+        if (bitmap == null) return 0;
+
+        using var processed = GlTexture.Preprocess(bitmap);
+
+        int tex = GL.GenTexture();
+        GL.BindTexture(TextureTarget.Texture2D, tex);
+
+        var span = processed.GetPixelSpan();
+        unsafe
+        {
+            fixed (byte* ptr = span)
+            {
+                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
+                    processed.Width, processed.Height, 0,
+                    PixelFormat.Rgba, PixelType.UnsignedByte, (IntPtr)ptr);
+            }
+        }
+
+        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        int wrap = repeat ? (int)TextureWrapMode.Repeat : (int)TextureWrapMode.ClampToEdge;
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, wrap);
+        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, wrap);
+        GL.BindTexture(TextureTarget.Texture2D, 0);
+        return tex;
+    }
+
+    /// <summary>
+    /// Renders the opaque scene into the reflection FBO using a camera mirrored about
+    /// the water plane (Z = <paramref name="waterHeight"/>).
+    /// Flips front-face winding to correct back-face culling after the Z mirror.
+    /// Leaves FBO state unbound; the caller must rebind the scene FBO before continuing.
+    /// </summary>
+    private void DrawWaterReflection(ref Matrix4 view, ref Matrix4 proj, float waterHeight, int w, int h)
+    {
+        if (_waterReflFbo == 0 || _primShader == null) return;
+
+        // Build reflected view: Z mirror about z = waterHeight in world space.
+        // Row-vector convention: reflMat transforms v_world -> v_reflected_world.
+        //   (x, y, z, 1) * reflMat = (x, y, 2*wh - z, 1)
+        var reflMat = new Matrix4(
+            new Vector4(1f, 0f, 0f,              0f),
+            new Vector4(0f, 1f, 0f,              0f),
+            new Vector4(0f, 0f, -1f,             0f),
+            new Vector4(0f, 0f, 2f * waterHeight, 1f));
+        var reflView = reflMat * view;
+
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
+        GL.Viewport(0, 0, WaterReflSize, WaterReflSize);
+        GL.ClearColor(0.39f, 0.58f, 0.93f, 1f);
+        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        GL.Enable(EnableCap.DepthTest);
+        GL.DepthMask(true);
+        GL.DepthFunc(DepthFunction.Less);
+        GL.Enable(EnableCap.CullFace);
+        GL.Disable(EnableCap.Blend);
+        // Z mirror flips winding: what was CCW becomes CW from the reflected camera
+        GL.FrontFace(FrontFaceDirection.Cw);
+
+        // No frustum culling — the reflected camera has a different frustum
+        DrawFaces(_opaque,      _primShader, ref reflView, ref proj);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj);
+
+        GL.FrontFace(FrontFaceDirection.Ccw);
+        // Unbind reflection FBO; main scene pass will rebind _sceneFbo
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GL.Viewport(0, 0, w, h);
+    }
+
+    /// <summary>
+    /// Draws the infinite water surface at <paramref name="waterHeight"/>.
+    /// Called after the opaque pass so depth is written for underwater geometry.
+    /// </summary>
+    private void DrawWater(ref Matrix4 view, ref Matrix4 proj, float waterHeight)
+    {
+        if (_waterShader == null || _waterVao == 0) return;
+
+        // Advance animation clock
+        long  now  = Environment.TickCount64;
+        float dt   = MathF.Min((now - _waterLastTick) / 1000f, 0.1f);
+        _waterLastTick = now;
+        _waterTime    += dt;
+
+        var  eye      = _camera.EyePosition;
+        var  viewProj = view * proj;
+        var  center   = new Vector2(eye.X, eye.Y);
+        // Sun direction: slightly off-zenith (Windlight integration TBD)
+        var  lightDir = Vector3.Normalize(new Vector3(0.5f, 0.5f, 2.0f));
+
+        _waterShader.Use();
+        _waterShader.Set("uViewProj",      ref viewProj);
+        _waterShader.Set("uHalfSize",      600f);
+        _waterShader.Set("uCenterXY",      center);
+        _waterShader.Set("uWaterHeight",   waterHeight);
+        _waterShader.Set("uTime",          _waterTime);
+        _waterShader.Set("uCameraPos",     eye);
+        _waterShader.Set("uWaterColor",    WaterFogColor);
+        _waterShader.Set("uLightDir",      lightDir);
+        _waterShader.Set("uHasReflection", _waterReflFbo != 0 ? 1 : 0);
+
+        GL.ActiveTexture(TextureUnit.Texture0);
+        GL.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
+        _waterShader.Set("uReflectionTex", 0);
+
+        GL.ActiveTexture(TextureUnit.Texture1);
+        GL.BindTexture(TextureTarget.Texture2D, _waterNormalmapTex);
+        _waterShader.Set("uNormalMap", 1);
+
+        GL.ActiveTexture(TextureUnit.Texture2);
+        GL.BindTexture(TextureTarget.Texture2D, _waterDudvmapTex);
+        _waterShader.Set("uDudvMap", 2);
+
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        GL.Disable(EnableCap.CullFace);
+
+        GL.BindVertexArray(_waterVao);
+        GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedShort, 0);
+        GL.BindVertexArray(0);
+
+        GL.Enable(EnableCap.CullFace);
+        GL.Disable(EnableCap.Blend);
+        _waterShader.Unuse();
+
+        // Clean up texture units so subsequent passes start from a known state
+        GL.ActiveTexture(TextureUnit.Texture2); GL.BindTexture(TextureTarget.Texture2D, 0);
+        GL.ActiveTexture(TextureUnit.Texture1); GL.BindTexture(TextureTarget.Texture2D, 0);
+        GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, 0);
+    }
+
+    private void DeleteWaterResources()
+    {
+        _waterShader?.Dispose();     _waterShader = null;
+        if (_waterVao != 0)          { GL.DeleteVertexArray(_waterVao); _waterVao = 0; }
+        if (_waterVbo != 0)          { GL.DeleteBuffer(_waterVbo);      _waterVbo = 0; }
+        if (_waterEbo != 0)          { GL.DeleteBuffer(_waterEbo);      _waterEbo = 0; }
+        if (_waterReflFbo != 0)      { GL.DeleteFramebuffer(_waterReflFbo);      _waterReflFbo = 0; }
+        if (_waterReflColorTex != 0) { GL.DeleteTexture(_waterReflColorTex);     _waterReflColorTex = 0; }
+        if (_waterReflDepthRb != 0)  { GL.DeleteRenderbuffer(_waterReflDepthRb); _waterReflDepthRb = 0; }
+        if (_waterNormalmapTex != 0) { GL.DeleteTexture(_waterNormalmapTex);     _waterNormalmapTex = 0; }
+        if (_waterDudvmapTex != 0)   { GL.DeleteTexture(_waterDudvmapTex);       _waterDudvmapTex = 0; }
+        _waterReady = false;
     }
 
     // ── SSAO kernel and noise ─────────────────────────────────────────────────────

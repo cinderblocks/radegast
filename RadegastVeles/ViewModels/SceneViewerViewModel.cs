@@ -168,6 +168,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.Wireframe              = Wireframe;
         _viewport.SsaoEnabled            = SsaoEnabled;
         _viewport.FrustumCullingEnabled  = FrustumCullingEnabled;
+        _viewport.WaterHeight            = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
         _viewport.Stats.FrameCompleted  += OnFrameCompleted;
         _viewport.InitFailed += msg =>
         {
@@ -412,6 +413,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             SelectedLocalId = 0;
             SelectedInfo    = string.Empty;
             UpdateStatusBar();
+            if (_viewport != null)
+                _viewport.WaterHeight = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
             _ = RefreshTerrainAsync(centerCamera: true);
 
             // Re-seed from whatever is already present in the new sim's object cache.
@@ -427,6 +430,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (e.Simulator != _instance.Client.Network.CurrentSim) return;
         SyncMovementState();
         UpdateStatusBar();
+        if (_viewport != null)
+            _viewport.WaterHeight = e.Simulator.WaterHeight;
         _ = RefreshTerrainAsync(centerCamera: true);
         // Seed any objects/avatars already cached in the newly connected sim.
         SeedStreamersFromCurrentSim();
