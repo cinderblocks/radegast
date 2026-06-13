@@ -2342,6 +2342,14 @@ public class GlViewportControl : Panel
             patch.Bitmap?.Dispose();
             throw;
         }
+        catch (ObjectDisposedException)
+        {
+            // Viewport is tearing down (GlDeinit already disposed the semaphore).
+            // Treat as cancellation: dispose the bitmap and silently exit — throwing
+            // here would propagate through Progress<T> onto the thread pool and crash.
+            patch.Bitmap?.Dispose();
+            return;
+        }
 
         // Preprocess the bitmap on this (background) thread so the GL thread only
         // performs the actual OpenGL upload — no Skia conversion/flip on the render loop.
