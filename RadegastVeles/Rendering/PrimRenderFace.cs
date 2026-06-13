@@ -112,7 +112,64 @@ public sealed class PrimRenderFace
     /// </summary>
     public          SKBitmap? Texture   { get; init; }
 
-    public          Matrix4   Transform  { get; set; } = Matrix4.Identity;
+    private         Matrix4   _transform = Matrix4.Identity;
+    private         Matrix3   _modelInv3;
+    private         bool      _modelInv3Ready;
+
+    public          Matrix4   Transform
+    {
+        get => _transform;
+        set { _transform = value; _modelInv3Ready = false; }
+    }
+
+    /// <summary>
+    /// Upper-left 3×3 of <c>Transform⁻¹</c>, lazily computed and cached until
+    /// <see cref="Transform"/> next changes. The full normal matrix <c>(MV⁻¹)ᵀ</c> factors
+    /// as <c>(V⁻¹)₃ × (M⁻¹)₃</c>; the view part is constant per frame, so caching the model
+    /// part here lets the draw loop skip the per-face 4×4 invert for static geometry —
+    /// only a single 3×3 multiply remains per face. Accessed on the GL thread only.
+    /// </summary>
+    internal Matrix3 ModelInverse3
+    {
+        get
+        {
+            if (!_modelInv3Ready)
+            {
+                _modelInv3 = InvertUpper3x3(in _transform);
+                _modelInv3Ready = true;
+            }
+            return _modelInv3;
+        }
+    }
+
+    /// <summary>
+    /// Inverse of the upper-left 3×3 of an affine transform. For an affine matrix this
+    /// equals <c>upper3x3(Matrix4.Invert(t))</c>, but is computed directly so that a
+    /// degenerate prim (a flattened face with a zero-scale axis) falls back to identity
+    /// instead of throwing. <see cref="Matrix4.Invert"/> raises on a singular matrix, and
+    /// catching that per face every frame (degenerate faces are re-inverted whenever a
+    /// terse update changes their Transform) caused load-time hitching. Computing only the
+    /// 3×3 we actually need is also cheaper than a full 4×4 inverse.
+    /// </summary>
+    private static Matrix3 InvertUpper3x3(in Matrix4 t)
+    {
+        float a = t.M11, b = t.M12, c = t.M13;
+        float d = t.M21, e = t.M22, f = t.M23;
+        float g = t.M31, h = t.M32, i = t.M33;
+
+        float A = e * i - f * h;
+        float B = f * g - d * i;
+        float C = d * h - e * g;
+        float det = a * A + b * B + c * C;
+        if (System.Math.Abs(det) < 1e-12f)
+            return Matrix3.Identity;
+
+        float id = 1f / det;
+        return new Matrix3(
+            A * id,                 (c * h - b * i) * id,   (b * f - c * e) * id,
+            B * id,                 (a * i - c * g) * id,   (c * d - a * f) * id,
+            C * id,                 (b * g - a * h) * id,   (a * e - b * d) * id);
+    }
 
     /// <summary>
     /// True for faces belonging to a flexi prim.  The vertex buffer for such a face is

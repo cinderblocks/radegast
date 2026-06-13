@@ -37,6 +37,17 @@ public sealed class GlShader : IDisposable
     // Eliminates GL.GetUniformLocation driver round-trips on every Set(...) call.
     private readonly Dictionary<string, int> _uniformLocations = new(StringComparer.Ordinal);
 
+    // Cached uniform *values*, keyed by location. Uniform state is per-program and persists
+    // until changed, so as long as every write goes through Set(...) we can skip the
+    // glUniform* driver round-trip when the value is unchanged. The hot DrawFaces loop sets
+    // ~23 uniforms per face every frame, most identical between adjacent faces (fullbright,
+    // glow, PBR flags, UV transforms…), so this eliminates the large majority of those calls.
+    // Matrices are intentionally not cached — they change essentially every face, and a
+    // 16-float compare costs about as much as the upload.
+    private readonly Dictionary<int, int>     _cachedInt   = new();
+    private readonly Dictionary<int, float>   _cachedFloat = new();
+    private readonly Dictionary<int, Vector4> _cachedVec   = new();
+
     private GlShader(int programId) => _programId = programId;
 
     /// <summary>Compile vertex and fragment stages and link into a program.</summary>
@@ -80,12 +91,54 @@ public sealed class GlShader : IDisposable
         return loc;
     }
 
-    public void Set(string name, int    v) => GL.Uniform1(Loc(name), v);
-    public void Set(string name, float  v) => GL.Uniform1(Loc(name), v);
-    public void Set(string name, bool   v) => GL.Uniform1(Loc(name), v ? 1 : 0);
-    public void Set(string name, Vector2 v) => GL.Uniform2(Loc(name), v);
-    public void Set(string name, Vector3 v) => GL.Uniform3(Loc(name), v);
-    public void Set(string name, Vector4 v) => GL.Uniform4(Loc(name), v);
+    public void Set(string name, int v)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        if (_cachedInt.TryGetValue(loc, out var prev) && prev == v) return;
+        _cachedInt[loc] = v;
+        GL.Uniform1(loc, v);
+    }
+
+    public void Set(string name, float v)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        if (_cachedFloat.TryGetValue(loc, out var prev) && prev == v) return;
+        _cachedFloat[loc] = v;
+        GL.Uniform1(loc, v);
+    }
+
+    public void Set(string name, bool v) => Set(name, v ? 1 : 0);
+
+    public void Set(string name, Vector2 v)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        var key = new Vector4(v.X, v.Y, 0f, 0f);
+        if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
+        _cachedVec[loc] = key;
+        GL.Uniform2(loc, v);
+    }
+
+    public void Set(string name, Vector3 v)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        var key = new Vector4(v.X, v.Y, v.Z, 0f);
+        if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
+        _cachedVec[loc] = key;
+        GL.Uniform3(loc, v);
+    }
+
+    public void Set(string name, Vector4 v)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        if (_cachedVec.TryGetValue(loc, out var prev) && prev == v) return;
+        _cachedVec[loc] = v;
+        GL.Uniform4(loc, v);
+    }
 
     /// <summary>Upload a uniform vec3 array (e.g. SSAO sample kernel).</summary>
     public void SetVec3Array(string name, Vector3[] values)

@@ -165,6 +165,16 @@ public class GlViewportControl : Panel
     /// <summary>Enable or disable SSAO. Change takes effect on the next frame.</summary>
     public bool SsaoEnabled { get; set; } = true;
 
+    /// <summary>
+    /// Above this opaque face count SSAO is skipped for the frame even when
+    /// <see cref="SsaoEnabled"/> is true. The G-buffer pre-pass re-renders every opaque
+    /// face a second time, so in dense scenes (the SceneViewer) the cost outweighs the
+    /// subtle ambient-occlusion benefit — which is also least noticeable when the screen
+    /// is busy. Light scenes (avatar / prim viewers, sparse regions) stay under the cap
+    /// and keep SSAO. Set to <see cref="int.MaxValue"/> to never auto-skip.
+    /// </summary>
+    public int SsaoMaxOpaqueFaces { get; set; } = 1500;
+
     // ── Particle state ────────────────────────────────────────────────────────────
     // Pending submissions from any thread: key → submission (null = remove).
     private readonly ConcurrentDictionary<ulong, ParticleRenderSubmission?> _pendingParticleMap = new();
@@ -781,7 +791,10 @@ public class GlViewportControl : Panel
         //    and scene depth as samplable textures.
         // 2. SSAO: full-screen hemisphere sampling pass → raw occlusion texture.
         // 3. Blur: 4×4 box blur to remove noise.
-        bool doSsao = SsaoEnabled && _ssaoReady && (_opaque.Count > 0 || _sceneOpaque.Count > 0);
+        int opaqueFaceCount = _opaque.Count + _sceneOpaque.Count;
+        bool doSsao = SsaoEnabled && _ssaoReady
+                      && opaqueFaceCount > 0
+                      && opaqueFaceCount <= SsaoMaxOpaqueFaces;
         int  ssaoTex = 0; // 0 = no SSAO this frame
 
         if (doSsao)
@@ -2437,6 +2450,13 @@ public class GlViewportControl : Panel
             shader.Set("uHasSsao", 0);
         }
 
+        // View inverse (upper-3×3) is constant for every face this frame. The per-face
+        // normal matrix (MV⁻¹)ᵀ = (V⁻¹)₃ × (M⁻¹)₃, so combining this with the face's cached
+        // model inverse avoids a full 4×4 Matrix4.Invert per face per frame (see
+        // PrimRenderFace.ModelInverse3).
+        var viewInvFull = Matrix4.Invert(view);
+        var viewInv3 = new Matrix3(viewInvFull.Row0.Xyz, viewInvFull.Row1.Xyz, viewInvFull.Row2.Xyz);
+
         bool cullActive = true;
         for (int _i = 0; _i < list.Count; _i++)
         {
@@ -2483,11 +2503,10 @@ public class GlViewportControl : Panel
             // rows and columns before loading, giving GLSL the correct (MV^-1)^T
             // transform. Without the transpose, normals end up in world space rather
             // than view space, breaking lighting as the camera orbits.
-            var mvInv     = Matrix4.Invert(mv);
-            var normalMat = new Matrix3(
-                mvInv.Row0.Xyz,
-                mvInv.Row1.Xyz,
-                mvInv.Row2.Xyz);
+            //
+            // upper3x3((MV)^-1) = (V^-1)₃ × (M^-1)₃, so reuse the per-frame view inverse and
+            // the face's cached model inverse instead of inverting the full MV every face.
+            var normalMat = viewInv3 * face.ModelInverse3;
 
             shader.Set("uMvp",       ref mvp);
             shader.Set("uModelView", ref mv);
@@ -2611,12 +2630,15 @@ public class GlViewportControl : Panel
         ref Matrix4 proj)
     {
         shader.Use();
+        // Per-frame view inverse (upper-3×3); combined with each face's cached model
+        // inverse to form the normal matrix without a per-face 4×4 invert.
+        var viewInvFull = Matrix4.Invert(view);
+        var viewInv3 = new Matrix3(viewInvFull.Row0.Xyz, viewInvFull.Row1.Xyz, viewInvFull.Row2.Xyz);
         foreach (var (mesh, _, _, _, _, _, face) in list)
         {
             var mv  = face.Transform * view;
             var mvp = mv * proj;
-            var mvInv = Matrix4.Invert(mv);
-            var normalMat = new Matrix3(mvInv.Row0.Xyz, mvInv.Row1.Xyz, mvInv.Row2.Xyz);
+            var normalMat = viewInv3 * face.ModelInverse3;
             shader.Set("uMvp",       ref mvp);
             shader.Set("uModelView", ref mv);
             shader.Set("uNormalMat", ref normalMat, transpose: true);
