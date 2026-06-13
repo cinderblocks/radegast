@@ -98,11 +98,7 @@ void main()
     float alpha = mix(uWaterColor.a * 0.75, 0.95, fresnel);
 
     fragColor = vec4(col, alpha);
-
-    // ── Write the water surface's actual clip-space depth ─────────────────────
-    // Ensures correct depth ordering with terrain and transparent objects.
-    // Clamp to [0, 0.99999] so far-horizon water (depth ≥ 1) still passes
-    // the LessOrEqual depth test against the cleared depth buffer.
-    float ndcDepth = clipPos.z / clipPos.w;
-    gl_FragDepth   = clamp(ndcDepth * 0.5 + 0.5, 0.0, 0.99999);
+    // No gl_FragDepth: rasterised depth stays at 1.0 (from water.vert gl_Position.z=w=1).
+    // This preserves GPU early-z culling — the driver discards terrain pixels (depth<1)
+    // before the fragment shader runs, so water only executes on unfilled (sky/sea) pixels.
 }

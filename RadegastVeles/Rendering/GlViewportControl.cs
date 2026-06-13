@@ -182,7 +182,11 @@ public class GlViewportControl : Panel
     private bool _waterReady;
     private float _waterTime;
     private long  _waterLastTick;
-    private const int WaterReflSize = 512;
+    // Timestamp of the last reflection FBO render. 0 = never. Used to throttle the
+    // reflection pre-pass so it fires at most once every kReflIntervalMs milliseconds.
+    private long  _reflLastTick;
+    private const int WaterReflSize     = 512;
+    private const int kReflIntervalMs   = 150; // ~7 fps for reflection updates
 
     /// <summary>
     /// World-space Z height of the water surface.
@@ -668,6 +672,11 @@ public class GlViewportControl : Panel
                 _quadVao        = GL.GenVertexArray();
                 _ssaoKernel     = BuildSsaoKernel(32);
                 _ssaoNoiseTex   = BuildSsaoNoiseTex();
+                // Upload the kernel once at init — it never changes at runtime.
+                _ssaoShader.Use();
+                _ssaoShader.SetVec3Array("uKernel", _ssaoKernel);
+                _ssaoShader.Set("uKernelSize", _ssaoKernel.Length);
+                _ssaoShader.Unuse();
                 _ssaoReady      = true;
             }
             catch
@@ -879,8 +888,6 @@ public class GlViewportControl : Panel
                 GL.ActiveTexture(TextureUnit.Texture2);
                 GL.BindTexture(TextureTarget.Texture2D, _ssaoNoiseTex);
                 _ssaoShader.Set("uNoiseTex", 2);
-                _ssaoShader.SetVec3Array("uKernel", _ssaoKernel!);
-                _ssaoShader.Set("uKernelSize",   _ssaoKernel!.Length);
                 _ssaoShader.Set("uNoiseScale",   new Vector2(w / 4.0f, h / 4.0f));
                 _ssaoShader.Set("uProj",         ref proj);
                 _ssaoShader.Set("uScreenSize",   new Vector2(w, h));
@@ -1755,6 +1762,10 @@ public class GlViewportControl : Panel
     {
         if (_waterReflFbo == 0 || _primShader == null) return;
 
+        long nowTick = Environment.TickCount64;
+        if (nowTick - _reflLastTick < kReflIntervalMs)
+            return; // reuse the cached reflection texture
+
         // Build reflected view: Z mirror about z = waterHeight in world space.
         // Row-vector convention: reflMat transforms v_world -> v_reflected_world.
         //   (x, y, z, 1) * reflMat = (x, y, 2*wh - z, 1)
@@ -1763,7 +1774,9 @@ public class GlViewportControl : Panel
             new Vector4(0f, 1f, 0f,              0f),
             new Vector4(0f, 0f, -1f,             0f),
             new Vector4(0f, 0f, 2f * waterHeight, 1f));
-        var reflView = reflMat * view;
+        var reflView    = reflMat * view;
+        var reflViewProj = reflView * proj;
+        var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
 
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
         GL.Viewport(0, 0, WaterReflSize, WaterReflSize);
@@ -1777,14 +1790,14 @@ public class GlViewportControl : Panel
         // Z mirror flips winding: what was CCW becomes CW from the reflected camera
         GL.FrontFace(FrontFaceDirection.Cw);
 
-        // No frustum culling — the reflected camera has a different frustum
-        DrawFaces(_opaque,      _primShader, ref reflView, ref proj);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj);
+        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum);
 
         GL.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, w, h);
+        _reflLastTick = nowTick;
     }
 
     /// <summary>
@@ -1858,6 +1871,7 @@ public class GlViewportControl : Panel
         if (_waterReflDepthRb != 0)  { GL.DeleteRenderbuffer(_waterReflDepthRb); _waterReflDepthRb = 0; }
         if (_waterNormalmapTex != 0) { GL.DeleteTexture(_waterNormalmapTex);     _waterNormalmapTex = 0; }
         if (_waterDudvmapTex != 0)   { GL.DeleteTexture(_waterDudvmapTex);       _waterDudvmapTex = 0; }
+        _reflLastTick = 0;
         _waterReady = false;
     }
 
