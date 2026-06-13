@@ -179,7 +179,6 @@ public class GlViewportControl : Panel
     private GlShader? _waterShader;
     private int _waterReflFbo, _waterReflColorTex, _waterReflDepthRb;
     private int _waterNormalmapTex, _waterDudvmapTex;
-    private int _waterVao, _waterVbo, _waterEbo;
     private bool _waterReady;
     private float _waterTime;
     private long  _waterLastTick;
@@ -197,6 +196,16 @@ public class GlViewportControl : Panel
     /// Defaults to SL's default water colour; update from EEP water track.
     /// </summary>
     public Vector4 WaterFogColor { get; set; } = new Vector4(0.09f, 0.28f, 0.63f, 0.84f);
+
+    // ── Sky resources (GL thread only) ───────────────────────────────────────────
+    private GlShader? _skyShader;
+    private bool _skyReady;
+
+    /// <summary>
+    /// Windlight / EEP sky and atmosphere parameters.
+    /// Update from <see cref="SceneViewerViewModel"/> when EEP environment data arrives.
+    /// </summary>
+    public SkySettings Sky { get; set; } = new SkySettings();
 
     // ── Particle state ────────────────────────────────────────────────────────────
     // Pending submissions from any thread: key → submission (null = remove).
@@ -672,6 +681,10 @@ public class GlViewportControl : Panel
             try { InitWater(); }
             catch { _waterReady = false; }
 
+            // Sky rendering (best-effort; falls back to solid clear colour)
+            try { InitSky(); }
+            catch { _skyReady = false; }
+
             // Notify listeners (on the UI thread) that a fresh GL context is ready.
             // On a first open this fires immediately; on tab-switch re-attaches it
             // triggers streamers to re-dirty and re-upload their scene data.
@@ -789,10 +802,12 @@ public class GlViewportControl : Panel
         GL.CullFace(TriangleFace.Back);
         GL.FrontFace(FrontFaceDirection.Ccw);
 
-        // Use a visible error colour if init failed so the failure is obvious.
-        GL.ClearColor(_initError != null ? 0.55f : 0.39f,
-                      _initError != null ? 0.10f : 0.58f,
-                      _initError != null ? 0.10f : 0.93f, 1f);
+        // Error: vivid red-tint.  Sky ready: clear to black (sky shader fills it).
+        // Fallback: solid SL sky-blue so the viewer looks reasonable without the sky shader.
+        float clearR = _initError != null ? 0.55f : (_skyReady ? 0f : 0.39f);
+        float clearG = _initError != null ? 0.10f : (_skyReady ? 0f : 0.58f);
+        float clearB = _initError != null ? 0.10f : (_skyReady ? 0f : 0.93f);
+        GL.ClearColor(clearR, clearG, clearB, 1f);
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         if (_primShader == null)
@@ -812,6 +827,11 @@ public class GlViewportControl : Panel
         Frustum? frustum = FrustumCullingEnabled
             ? FrustumCuller.ExtractPlanes(viewProj)
             : (Frustum?)null;
+
+        // ── Sky background ────────────────────────────────────────────────
+        // Drawn before everything else so it fills pixels not covered by geometry.
+        if (_skyReady)
+            DrawSky(ref view, ref proj, w, h);
 
         // ── SSAO pre-pass ─────────────────────────────────────────────────
         // 1. G-buffer: render opaque geometry to extract view-space normals
@@ -1159,6 +1179,7 @@ public class GlViewportControl : Panel
         if (_ssaoNoiseTex != 0)  { GL.DeleteTexture(_ssaoNoiseTex); _ssaoNoiseTex = 0; }
         if (_quadVao != 0)       { GL.DeleteVertexArray(_quadVao); _quadVao = 0; }
         DeleteWaterResources();
+        DeleteSkyResources();
         _primShader?.Dispose();     _primShader     = null;
         _wireShader?.Dispose();     _wireShader     = null;
         _pickShader?.Dispose();     _pickShader     = null;
@@ -1647,22 +1668,7 @@ public class GlViewportControl : Panel
         _waterNormalmapTex = LoadEmbeddedTexture("normalmap.png", repeat: true);
         _waterDudvmapTex   = LoadEmbeddedTexture("dudvmap.png",   repeat: true);
 
-        // Water plane VAO: unit square (XY only), expanded to world scale in vertex shader
-        float[]  verts = { -1f,-1f, 1f,-1f, 1f,1f, -1f,1f };
-        ushort[] idx   = { 0,1,2, 0,2,3 };
-
-        _waterVao = GL.GenVertexArray();
-        _waterVbo = GL.GenBuffer();
-        _waterEbo = GL.GenBuffer();
-
-        GL.BindVertexArray(_waterVao);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _waterVbo);
-        GL.BufferData(BufferTarget.ArrayBuffer, verts.Length * sizeof(float), verts, BufferUsageHint.StaticDraw);
-        GL.EnableVertexAttribArray(0);
-        GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, 2 * sizeof(float), 0);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _waterEbo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer, idx.Length * sizeof(ushort), idx, BufferUsageHint.StaticDraw);
-        GL.BindVertexArray(0);
+        // No per-water VAO needed — the fullscreen triangle uses _quadVao.
 
         // Reflection FBO — fixed WaterReflSize × WaterReflSize
         _waterReflColorTex = GL.GenTexture();
@@ -1787,7 +1793,7 @@ public class GlViewportControl : Panel
     /// </summary>
     private void DrawWater(ref Matrix4 view, ref Matrix4 proj, float waterHeight)
     {
-        if (_waterShader == null || _waterVao == 0) return;
+        if (_waterShader == null) return;
 
         // Advance animation clock
         long  now  = Environment.TickCount64;
@@ -1795,19 +1801,17 @@ public class GlViewportControl : Panel
         _waterLastTick = now;
         _waterTime    += dt;
 
-        var  eye      = _camera.EyePosition;
-        var  viewProj = view * proj;
-        var  center   = new Vector2(eye.X, eye.Y);
-        // Sun direction: slightly off-zenith (Windlight integration TBD)
-        var  lightDir = Vector3.Normalize(new Vector3(0.5f, 0.5f, 2.0f));
+        var eye       = _camera.EyePosition;
+        var viewProj  = view * proj;
+        var invVP     = Matrix4.Invert(viewProj);
+        var lightDir  = Vector3.Normalize(Sky.SunDirection);
 
         _waterShader.Use();
         _waterShader.Set("uViewProj",      ref viewProj);
-        _waterShader.Set("uHalfSize",      600f);
-        _waterShader.Set("uCenterXY",      center);
+        _waterShader.Set("uInvViewProj",   ref invVP);
+        _waterShader.Set("uEyePos",        eye);
         _waterShader.Set("uWaterHeight",   waterHeight);
         _waterShader.Set("uTime",          _waterTime);
-        _waterShader.Set("uCameraPos",     eye);
         _waterShader.Set("uWaterColor",    WaterFogColor);
         _waterShader.Set("uLightDir",      lightDir);
         _waterShader.Set("uHasReflection", _waterReflFbo != 0 ? 1 : 0);
@@ -1827,11 +1831,15 @@ public class GlViewportControl : Panel
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         GL.Disable(EnableCap.CullFace);
+        // LessOrEqual so far-horizon water (depth clamped to 0.99999) is visible
+        // against the cleared depth buffer (depth = 1.0).
+        GL.DepthFunc(DepthFunction.Lequal);
 
-        GL.BindVertexArray(_waterVao);
-        GL.DrawElements(PrimitiveType.Triangles, 6, DrawElementsType.UnsignedShort, 0);
+        GL.BindVertexArray(_quadVao);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
         GL.BindVertexArray(0);
 
+        GL.DepthFunc(DepthFunction.Less);
         GL.Enable(EnableCap.CullFace);
         GL.Disable(EnableCap.Blend);
         _waterShader.Unuse();
@@ -1845,15 +1853,67 @@ public class GlViewportControl : Panel
     private void DeleteWaterResources()
     {
         _waterShader?.Dispose();     _waterShader = null;
-        if (_waterVao != 0)          { GL.DeleteVertexArray(_waterVao); _waterVao = 0; }
-        if (_waterVbo != 0)          { GL.DeleteBuffer(_waterVbo);      _waterVbo = 0; }
-        if (_waterEbo != 0)          { GL.DeleteBuffer(_waterEbo);      _waterEbo = 0; }
         if (_waterReflFbo != 0)      { GL.DeleteFramebuffer(_waterReflFbo);      _waterReflFbo = 0; }
         if (_waterReflColorTex != 0) { GL.DeleteTexture(_waterReflColorTex);     _waterReflColorTex = 0; }
         if (_waterReflDepthRb != 0)  { GL.DeleteRenderbuffer(_waterReflDepthRb); _waterReflDepthRb = 0; }
         if (_waterNormalmapTex != 0) { GL.DeleteTexture(_waterNormalmapTex);     _waterNormalmapTex = 0; }
         if (_waterDudvmapTex != 0)   { GL.DeleteTexture(_waterDudvmapTex);       _waterDudvmapTex = 0; }
         _waterReady = false;
+    }
+
+    // ── Sky rendering ─────────────────────────────────────────────────────────────
+
+    private void InitSky()
+    {
+        var vert = ShaderLoader.Load("sky.vert");
+        var frag = ShaderLoader.Load("sky.frag");
+        _skyShader = GlShader.Compile(vert, frag);
+        _skyReady  = true;
+    }
+
+    /// <summary>
+    /// Draws the sky background as a full-screen triangle into the currently-bound FBO.
+    /// Must be called before any opaque geometry so it fills pixels not covered by terrain.
+    /// </summary>
+    private void DrawSky(ref Matrix4 view, ref Matrix4 proj, int w, int h)
+    {
+        if (_skyShader == null) return;
+
+        var vp    = view * proj;
+        var invVP = Matrix4.Invert(vp);
+
+        GL.DepthMask(false);
+        GL.Disable(EnableCap.DepthTest);
+        GL.Disable(EnableCap.CullFace);
+
+        _skyShader.Use();
+        _skyShader.Set("uInvViewProj",   ref invVP);
+        _skyShader.Set("uBlueHorizon",   Sky.BlueHorizon);
+        _skyShader.Set("uBlueDensity",   Sky.BlueDensity);
+        _skyShader.Set("uHazeHorizon",   Sky.HazeHorizon);
+        _skyShader.Set("uHazeDensity",   Sky.HazeDensity);
+        _skyShader.Set("uSunlightColor", Sky.SunlightColor);
+        _skyShader.Set("uAmbient",       Sky.Ambient);
+        _skyShader.Set("uSunDirection",  Vector3.Normalize(Sky.SunDirection));
+        _skyShader.Set("uSunGlowFocus",  Sky.SunGlowFocus);
+        _skyShader.Set("uSunGlowSize",   Sky.SunGlowSize);
+
+        GL.BindVertexArray(_quadVao);
+        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        GL.BindVertexArray(0);
+
+        _skyShader.Unuse();
+
+        // Restore depth state for subsequent geometry passes
+        GL.Enable(EnableCap.DepthTest);
+        GL.DepthMask(true);
+        GL.Enable(EnableCap.CullFace);
+    }
+
+    private void DeleteSkyResources()
+    {
+        _skyShader?.Dispose(); _skyShader = null;
+        _skyReady = false;
     }
 
     // ── SSAO kernel and noise ─────────────────────────────────────────────────────
