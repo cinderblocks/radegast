@@ -311,6 +311,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         Fullbright               = origFace.Fullbright,
                         Glow                     = origFace.Glow,
                         HasAlpha                 = origFace.HasAlpha,
+                        AlphaAuto                = origFace.AlphaAuto,
                         PrimLocalId              = origFace.PrimLocalId,
                         FaceIndex                = origFace.FaceIndex,
                         Texture                  = origFace.Texture,

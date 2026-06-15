@@ -391,6 +391,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 // Legacy path — alpha mode without knowledge of texture alpha yet.
                 FaceAlphaMode legacyAlphaMode;
                 bool legacyHasAlpha;
+                // True only when the alpha mode came from the face colour alone (no explicit
+                // material/force-opaque override). Such faces are eligible to be upgraded to
+                // the alpha pass once their albedo texture is decoded and found to be transparent.
+                bool legacyAlphaAuto = false;
                 if (rf.ForceOpaque)
                 {
                     legacyHasAlpha  = false;
@@ -405,6 +409,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 {
                     legacyAlphaMode = rf.AlphaMode;
                     legacyHasAlpha  = legacyAlphaMode == FaceAlphaMode.Blend;
+                    legacyAlphaAuto = true;
                 }
 
                 float legacyAlphaCutoff = rf.AlphaCutoff;
@@ -443,6 +448,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     Glow                 = rf.Glow,
                     HasAlpha             = legacyHasAlpha,
                     AlphaMode            = legacyAlphaMode,
+                    AlphaAuto            = legacyAlphaAuto,
                     Shiny                = rf.Shiny,
                     HasBump              = rf.HasBump,
                     Transform            = rf.Transform,
@@ -576,6 +582,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
                 if (bmp == null) return;
 
+                // Decide once, here on the background thread, whether this texture is actually
+                // transparent — but only if some face uses it as its albedo. The viewport uses
+                // this to move opaque-tinted legacy faces with a transparent texture into the
+                // alpha pass (without it they render fully opaque). Scanning here keeps the
+                // per-pixel work off the GL render thread.
+                bool texHasAlpha = false;
+                for (int si = 0; si < slots.Count; si++)
+                    if (slots[si].Slot == TextureSlot.Albedo) { texHasAlpha = BitmapHasTransparency(bmp); break; }
+
                 // Final (full-quality) bitmap: report one patch per face/slot that uses it.
                 // Ownership of `bmp` transfers to the last Report call.  If Report throws
                 // (e.g. OCE from PatchSceneObjectTexture) before we reach the last slot,
@@ -593,7 +608,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
                             if (delivery != null)
                             {
                                 if (si == slots.Count - 1) bmpOwned = false; // transfer ownership
-                                texturePatch.Report(new SceneTexturePatch(primLocalId, faceIndex, slot, delivery));
+                                texturePatch.Report(new SceneTexturePatch(primLocalId, faceIndex, slot, delivery)
+                                {
+                                    TextureHasAlpha = texHasAlpha,
+                                });
                             }
                         }
                     }
@@ -615,6 +633,25 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
         try { await Task.WhenAll(tasks).ConfigureAwait(false); }
         catch (OperationCanceledException) { }
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="bmp"/> has a meaningfully non-opaque alpha channel.
+    /// Alpha occupies byte 3 of every pixel in both RGBA8888 and BGRA8888 — the only 32-bit
+    /// layouts CoreJ2K emits — so a single strided scan works for either. A threshold below
+    /// 255 ignores the stray near-opaque pixels that JPEG2000 ringing can leave on otherwise
+    /// solid textures, which would otherwise push opaque faces into the alpha pass needlessly.
+    /// </summary>
+    private static bool BitmapHasTransparency(SKBitmap bmp)
+    {
+        // An opaque alpha type cannot carry transparency — cheap early-out, no scan.
+        if (bmp.AlphaType == SKAlphaType.Opaque) return false;
+        if (bmp.BytesPerPixel != 4) return false; // unexpected layout: be conservative (treat as opaque)
+
+        var px = bmp.GetPixelSpan();
+        for (int i = 3; i < px.Length; i += 4)
+            if (px[i] < 250) return true;
+        return false;
     }
 
     // ── Material fetching ────────────────────────────────────────────────────────

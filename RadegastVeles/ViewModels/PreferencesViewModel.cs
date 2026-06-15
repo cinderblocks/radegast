@@ -61,7 +61,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private double _decodePerDecodeMb = GridTextureHelper.DefaultDecodePerDecodeMb;
 
     [ObservableProperty]
-    private int _skBitmapCacheCap = 512;
+    private int _skBitmapCacheCap = GridTextureHelper.RecommendSkBitmapCacheCap();
 
     /// <summary>
     /// Live value of <see cref="GridTextureHelper.MaxConcurrentDecodes"/> after the last tuning call.
@@ -82,8 +82,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         GridTextureHelper.TuneDecodeGateForAvailableRam();
         DecodeReservedRamMb = (int)GridTextureHelper.DefaultDecodeReservedMb;
         DecodePerDecodeMb   = GridTextureHelper.DefaultDecodePerDecodeMb;
-        SkBitmapCacheCap    = 512;
-        GridTextureHelper.SkBitmapCacheCap = 512;
+        SkBitmapCacheCap    = GridTextureHelper.RecommendSkBitmapCacheCap();
+        GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
         OnPropertyChanged(nameof(MaxConcurrentDecodes));
         Apply();
     }
@@ -567,7 +567,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         DecodePerDecodeMb = s["decode_per_decode_mb"].Type != OSDType.Unknown
             ? s["decode_per_decode_mb"].AsReal() : GridTextureHelper.DefaultDecodePerDecodeMb;
         SkBitmapCacheCap = s["sk_bitmap_cache_cap"].Type != OSDType.Unknown
-            ? s["sk_bitmap_cache_cap"].AsInteger() : 512;
+            ? s["sk_bitmap_cache_cap"].AsInteger() : GridTextureHelper.RecommendSkBitmapCacheCap();
         GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
 
         // Apply immediately

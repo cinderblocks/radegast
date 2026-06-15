@@ -532,7 +532,13 @@ internal sealed class SceneObjectStreamer : IDisposable
                     if (token.IsCancellationRequested)
                         patch.Bitmap?.Dispose();
                     else
-                        _viewport.PatchSceneObjectTexture(patch, token);
+                        // Stamp the full scene key so the viewport resolves the owning
+                        // linkset by direct dictionary lookup. _sceneObjects is keyed by
+                        // sceneKey (sim index << 32 | rootLocalId); without this the lookup
+                        // falls back to (ulong)RootLocalId — the *child* prim's localId for
+                        // linkset faces — which never matches a root sceneKey, so the texture
+                        // patch is deferred and ultimately dropped (faces stay untextured).
+                        _viewport.PatchSceneObjectTexture(patch with { SceneKey = sceneKey }, token);
                 }))
                 .ConfigureAwait(false);
 

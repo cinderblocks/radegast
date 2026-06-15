@@ -257,6 +257,40 @@ public static class GridTextureHelper
         MaxConcurrentDecodes = tuned;
     }
 
+    /// <summary>Megabytes reserved for the app, GPU driver, and OS when sizing the texture cache. Default 1536.</summary>
+    public const double DefaultCacheReservedMb = 1536.0;
+
+    /// <summary>Approximate managed cost of one cached decoded texture in megabytes (a 1024² RGBA bitmap). Default 4.</summary>
+    public const double DefaultBytesPerCachedTextureMb = 4.0;
+
+    /// <summary>Lower bound for the auto-sized decoded-texture cache cap.</summary>
+    public const int MinRecommendedCacheCap = 256;
+
+    /// <summary>Upper bound for the auto-sized decoded-texture cache cap.</summary>
+    public const int MaxRecommendedCacheCap = 1024;
+
+    /// <summary>
+    /// Recommends a value for <see cref="SkBitmapCacheCap"/> scaled to the memory available
+    /// to the process, instead of a flat default.  A small cap on a busy region thrashes —
+    /// evicted textures must be re-decoded (~43 ms each through the gated decoder) — while a
+    /// large flat cap (512 × 4 MB ≈ 2 GB) is unsafe on low-memory machines.  This reserves
+    /// <paramref name="reservedMb"/> MB for the rest of the process, divides the remainder by
+    /// the per-texture budget, and clamps to
+    /// [<see cref="MinRecommendedCacheCap"/>, <see cref="MaxRecommendedCacheCap"/>].
+    /// </summary>
+    /// <param name="reservedMb">Megabytes to reserve for the rest of the process. Default <see cref="DefaultCacheReservedMb"/>.</param>
+    /// <param name="perTextureMb">Managed cost per cached texture in megabytes. Default <see cref="DefaultBytesPerCachedTextureMb"/>.</param>
+    public static int RecommendSkBitmapCacheCap(
+        double reservedMb   = DefaultCacheReservedMb,
+        double perTextureMb = DefaultBytesPerCachedTextureMb)
+    {
+        var info        = GC.GetGCMemoryInfo();
+        var availableMb = info.TotalAvailableMemoryBytes / (1024.0 * 1024.0);
+        var budget      = Math.Max(0.0, availableMb - reservedMb);
+        var fromRam     = (int)Math.Floor(budget / Math.Max(0.1, perTextureMb));
+        return Math.Clamp(fromRam, MinRecommendedCacheCap, MaxRecommendedCacheCap);
+    }
+
     // Low-resolution decode config for progressive previews.
     // ResolutionLevel = 0 drops all DWT levels → smallest/fastest decode (~1/64 size for a 6-level wavelet).
     // The low-frequency subbands arrive first in the SL packet ordering so this is robust on
@@ -503,50 +537,74 @@ public static class GridTextureHelper
         }
 
         // Winner: run the actual decode.
+        //
+        // Scheduled with CancellationToken.None — NOT `ct` — so the lambda body always runs.
+        // If we passed a `ct` that was already cancelled, Task.Run would hand back a cancelled
+        // task and never execute the body: winnerTcs would stay uncompleted and the
+        // _inflightDecodes entry would be orphaned forever. Every later request for this UUID
+        // joins that dead task (see TryGetValue above) and hangs permanently — the whole
+        // texture pipeline appears to deadlock on one stuck texture. Cancellation is instead
+        // observed cooperatively via DecodeGate.WaitAsync(ct) inside the body, where the
+        // catch/finally guarantee winnerTcs completes and the inflight entry is removed.
         return Task.Run(async () =>
         {
-            await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                if (progress != null)
+                await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
-                    using var previewRaw = J2kImage.FromBytes(j2kBytes, PreviewDecoderCfg).As<SKBitmap>();
-                    if (previewRaw != null)
+                    if (progress != null)
                     {
-                        var previewBmp = previewRaw.Copy(previewRaw.ColorType);
-                        if (previewBmp != null) progress.Report(previewBmp);
+                        using var previewRaw = J2kImage.FromBytes(j2kBytes, PreviewDecoderCfg).As<SKBitmap>();
+                        if (previewRaw != null)
+                        {
+                            var previewBmp = previewRaw.Copy(previewRaw.ColorType);
+                            if (previewBmp != null) progress.Report(previewBmp);
+                        }
                     }
-                }
 
-                // Store the decoded bitmap directly in the cache (no second copy).
-                // raw is NOT wrapped in using — ownership transfers to SkBitmapCache.
-                var raw = J2kImage.FromBytes(j2kBytes, FullDecoderCfg).As<SKBitmap>();
-                if (raw != null)
-                {
-                    SkBitmapCache.AddOrUpdate(textureId, raw);
+                    // Store the decoded bitmap directly in the cache (no second copy).
+                    // raw is NOT wrapped in using — ownership transfers to SkBitmapCache.
+                    var raw = J2kImage.FromBytes(j2kBytes, FullDecoderCfg).As<SKBitmap>();
+                    if (raw != null)
+                    {
+                        SkBitmapCache.AddOrUpdate(textureId, raw);
+                    }
+                    // Signal late-joiners with the cached bitmap directly — no extra Copy.
+                    // This eliminates one full-resolution SKBitmap allocation per cold
+                    // decode (~4 MB for a 1024² texture), which on a teleport burst of
+                    // ~100 unique textures saves ~400 MB of transient managed memory.
+                    winnerTcs.TrySetResult(raw);
+                    // Return a separate copy to the winner's own caller (which owns / disposes it).
+                    return raw != null && raw.Handle != IntPtr.Zero ? raw.Copy(raw.ColorType) : null;
                 }
-                // Signal late-joiners with the cached bitmap directly — no extra Copy.
-                // The cache's eviction policy does NOT dispose entries, so the handle
-                // remains valid for the lifetime of any continuation that observes it.
-                // This eliminates one full-resolution SKBitmap allocation per cold
-                // decode (~4 MB for a 1024² texture), which on a teleport burst of
-                // ~100 unique textures saves ~400 MB of transient managed memory.
-                winnerTcs.TrySetResult(raw);
-                // Return a separate copy to the winner's own caller (which owns / disposes it).
-                return raw != null && raw.Handle != IntPtr.Zero ? raw.Copy(raw.ColorType) : null;
+                finally
+                {
+                    // Released only when WaitAsync above succeeded (we hold a permit here).
+                    DecodeGate.Release();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Build cancelled (object moved, LOD change, 30 s timeout) before/while waiting
+                // on the decode gate. The J2K bytes are still valid, so do NOT evict the disk
+                // cache — just unblock any late-joiners with null rather than leaving them hung.
+                winnerTcs.TrySetResult(null);
+                return null;
             }
             catch
             {
+                // Genuine decode failure (corrupt/truncated codestream): drop the bad bytes.
                 TextureDiskCache.Evict(textureId);
                 winnerTcs.TrySetResult(null);
                 return null;
             }
             finally
             {
+                // Always runs — guarantees the UUID is never left poisoned in _inflightDecodes.
                 _inflightDecodes.TryRemove(textureId, out _);
-                DecodeGate.Release();
             }
-        }, ct);
+        }, CancellationToken.None);
     }
 
     /// <summary>

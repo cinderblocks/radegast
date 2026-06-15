@@ -97,8 +97,12 @@ public sealed class PrimRenderFace
     public          bool     Fullbright { get; init; }
     public          float    Glow       { get; init; }
 
-    /// <summary>If true this face is rendered in the alpha pass.</summary>
-    public          bool     HasAlpha   { get; init; }
+    /// <summary>
+    /// If true this face is rendered in the alpha pass. Settable because a legacy face's
+    /// transparency may only become known once its albedo texture is decoded (see
+    /// <see cref="AlphaAuto"/>), at which point the viewport re-buckets it into the alpha pass.
+    /// </summary>
+    public          bool     HasAlpha   { get; set; }
 
     /// <summary>LocalID of the prim this face belongs to (for picking / touch).</summary>
     public          uint     PrimLocalId { get; init; }
@@ -189,6 +193,15 @@ public sealed class PrimRenderFace
     public          Vector3   Centroid   { get; init; }
 
     /// <summary>
+    /// Scratch field: squared distance from the camera eye to <see cref="Centroid"/>,
+    /// recomputed once per frame by the alpha pass before sorting. Kept on the face so the
+    /// back-to-front sort comparator reads a precomputed float instead of doing a vector
+    /// subtraction + length on every comparison (O(N) precompute vs O(N log N) vector math).
+    /// Not persisted by <see cref="WithWorldTransform"/>; it is transient per-frame state.
+    /// </summary>
+    public          float     AlphaSortKey;
+
+    /// <summary>
     /// When true, the face is rendered without back-face culling.
     /// Set for avatar body mesh faces whose winding is not guaranteed consistent
     /// (mirrors SL viewer behaviour: glDisable(GL_CULL_FACE) for the avatar body).
@@ -217,7 +230,18 @@ public sealed class PrimRenderFace
     public          bool      HasBump     { get; init; }
 
     /// <summary>How the diffuse alpha channel is interpreted for this face.</summary>
-    public          FaceAlphaMode AlphaMode { get; init; } = FaceAlphaMode.Blend;
+    public          FaceAlphaMode AlphaMode { get; set; } = FaceAlphaMode.Blend;
+
+    /// <summary>
+    /// True when this face's alpha classification was derived from the face colour alone
+    /// (a plain legacy texture with no explicit PBR/material alpha mode and not force-opaque).
+    /// For these faces the real transparency is unknown until the albedo texture is decoded,
+    /// so the viewport upgrades <see cref="AlphaMode"/> to <see cref="FaceAlphaMode.Blend"/>
+    /// and moves the face to the alpha pass if the decoded texture carries an alpha channel.
+    /// PBR faces, explicit-material faces, and force-opaque faces leave this false so their
+    /// authored alpha mode is never overridden.
+    /// </summary>
+    public          bool        AlphaAuto  { get; init; }
 
     /// <summary>True when this face has an LLMaterial applied.</summary>
     public          bool        HasMaterial          { get; init; }
@@ -393,6 +417,7 @@ public sealed class PrimRenderFace
             Fullbright                 = Fullbright,
             Glow                       = Glow,
             HasAlpha                   = HasAlpha,
+            AlphaAuto                  = AlphaAuto,
             PrimLocalId                = PrimLocalId,
             FaceIndex                  = FaceIndex,
             Texture                    = Texture,
@@ -624,4 +649,13 @@ public sealed record SceneTexturePatch(
     /// Zero means "use (ulong)RootLocalId" (avatar patches, legacy paths).
     /// </summary>
     public ulong SceneKey { get; init; }
+
+    /// <summary>
+    /// For an <see cref="TextureSlot.Albedo"/> patch: true when the decoded texture carries a
+    /// non-opaque alpha channel. Computed once off the render thread by the builder. The
+    /// viewport uses this to upgrade an eligible legacy face (see <see cref="PrimRenderFace.AlphaAuto"/>)
+    /// to the alpha pass, since a transparent texture on an opaque-tinted face would otherwise
+    /// render fully opaque. Ignored for non-albedo slots.
+    /// </summary>
+    public bool TextureHasAlpha { get; init; }
 }

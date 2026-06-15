@@ -287,6 +287,9 @@ public class GlViewportControl : Panel
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingSubmissionPatches = new();
     // Patches that arrived before their scene object was uploaded; retried each frame for up to ~5 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredPatches = new();
+    // Set when a texture patch upgraded a legacy face to the alpha pass; triggers a single
+    // RebuildSceneFlatLists() at the end of ApplyTexturePatches so the face moves draw lists.
+    private bool _alphaReclassNeeded;
     // Submission patches that arrived before UploadSubmission ran; retried for up to ~5 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredSubmissionPatches = new();
 
@@ -988,12 +991,12 @@ public class GlViewportControl : Panel
             if (mergedAlpha.Count > 1)
             {
                 var eye = _camera.EyePosition;
-                mergedAlpha.Sort((a, b) =>
-                {
-                    float da = (a.face.Centroid - eye).LengthSquared;
-                    float db = (b.face.Centroid - eye).LengthSquared;
-                    return db.CompareTo(da);
-                });
+                // Precompute each face's squared eye-distance once (O(N)). The comparator
+                // then reads the cached float, avoiding a vector subtraction + LengthSquared
+                // on every one of the O(N log N) comparisons performed by Sort.
+                for (int i = 0; i < mergedAlpha.Count; i++)
+                    mergedAlpha[i].face.AlphaSortKey = (mergedAlpha[i].face.Centroid - eye).LengthSquared;
+                mergedAlpha.Sort(static (a, b) => b.face.AlphaSortKey.CompareTo(a.face.AlphaSortKey));
             }
 
             GL.Enable(EnableCap.Blend);
@@ -2597,6 +2600,14 @@ public class GlViewportControl : Panel
         if (!_pendingTexturePatches.IsEmpty || _deferredPatches.Count > 0)
             Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
 
+        // One or more faces were upgraded to the alpha pass after their texture decoded.
+        // Rebuild the flat draw lists once so they move from _sceneOpaque to _sceneAlpha.
+        if (_alphaReclassNeeded)
+        {
+            _alphaReclassNeeded = false;
+            RebuildSceneFlatLists();
+        }
+
         // Drain patches for the single-submission viewer path (_opaque / _alpha).
         while (_pendingSubmissionPatches.TryDequeue(out var subPatch))
             ApplySubmissionPatch(subPatch);
@@ -2748,6 +2759,18 @@ public class GlViewportControl : Panel
             var (updTex, updNorm, updSpec, updMr, updEm) =
                 ReplacedSlot(patch.Slot, newTex, tex, normalTex, specTex, mrTex, emTex);
             faceTuples[fi] = (mesh, updTex, updNorm, updSpec, updMr, updEm, face);
+
+            // A legacy face whose alpha was inferred from face colour alone (AlphaAuto) renders
+            // opaque until we learn its albedo texture is transparent. Upgrade it to the alpha
+            // pass now. The flat draw lists bucket by HasAlpha, so flag a rebuild (batched once
+            // per frame in ApplyTexturePatches) to move the face from the opaque to the alpha list.
+            if (patch.Slot == TextureSlot.Albedo && patch.TextureHasAlpha
+                && face.AlphaAuto && face.AlphaMode == FaceAlphaMode.None)
+            {
+                face.AlphaMode = FaceAlphaMode.Blend;
+                face.HasAlpha  = true;
+                _alphaReclassNeeded = true;
+            }
             break;
         }
 
