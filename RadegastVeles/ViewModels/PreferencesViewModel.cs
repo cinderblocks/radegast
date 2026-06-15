@@ -286,6 +286,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _frustumCullingEnabled = true;
 
+    /// <summary>Enable planar water reflections in scene viewers. Default false (costs a full scene pre-pass).</summary>
+    [ObservableProperty]
+    private bool _waterReflectionsEnabled = false;
+
     /// <summary>Scene viewer draw distance in metres (16–512). Default 96.</summary>
     [ObservableProperty]
     private float _sceneViewerDrawDistance = 96f;
@@ -640,6 +644,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["ssao_enabled"].AsBoolean() : true;
         FrustumCullingEnabled = s["frustum_culling_enabled"].Type != OSDType.Unknown
             ? s["frustum_culling_enabled"].AsBoolean() : true;
+        WaterReflectionsEnabled = s["water_reflections_enabled"].Type != OSDType.Unknown
+            ? s["water_reflections_enabled"].AsBoolean() : false;
         SceneViewerDrawDistance = s["scene_draw_distance"].Type != OSDType.Unknown
             ? (float)s["scene_draw_distance"].AsReal() : 96f;
 
@@ -801,6 +807,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Graphics
         s["ssao_enabled"] = OSD.FromBoolean(SsaoEnabled);
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
+        s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
 
         // RLV

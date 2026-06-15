@@ -3,7 +3,8 @@ precision highp float;
 
 in vec2 vNdc;
 
-uniform mat4      uViewProj;       // view * proj — for clip-space depth and reflUV
+uniform mat4      uViewProj;       // view * proj — unused after refactor (kept for compat)
+uniform mat4      uReflViewProj;   // reflected-camera view * proj — for reflection UV lookup
 uniform mat4      uInvViewProj;    // inverse(view * proj) — ray reconstruction
 uniform vec3      uEyePos;         // camera world position (Z-up)
 uniform float     uWaterHeight;    // world Z of the water plane
@@ -18,8 +19,9 @@ uniform int       uHasReflection;  // 1 = reflection FBO available
 
 out vec4 fragColor;
 
-const float kDistortion = 0.012;
-const float kShininess  = 96.0;
+const float kDistortion   = 0.012;
+const float kShininess    = 96.0;
+const float kMaxReflDist  = 400.0; // world-units beyond which reflection FBO is not sampled
 
 // UV constants identical to the old water.vert
 const float kWaterUV  = 35.0 / 256.0;
@@ -72,19 +74,20 @@ void main()
     float cosV    = max(dot(mapNorm, viewDir), 0.0);
     float fresnel = 0.04 + 0.96 * pow(1.0 - cosV, 5.0);
 
-    // ── Clip-space position of the water hit (for reflection UV + depth) ─────
-    vec4 clipPos = uViewProj * vec4(hitPos, 1.0);
-
     // ── Reflection ────────────────────────────────────────────────────────────
+    // Project the water surface hit point through the reflected camera's VP to get
+    // the correct texture coordinates into the reflection FBO.
+    // Beyond kMaxReflDist the hit is so far from the camera that the 512×512 FBO
+    // cannot resolve it correctly (the reflected VP maps the point outside the FBO,
+    // and the clamp produces arbitrary "terrain" samples).  Use water color instead.
     vec4 reflColor = uWaterColor;
-    if (uHasReflection != 0)
+    if (uHasReflection != 0 && t < kMaxReflDist)
     {
-        vec2 ndcR   = clipPos.xy / clipPos.w;
-        vec2 reflUV = ndcR * 0.5 + 0.5;
-        reflUV.y    = 1.0 - reflUV.y;  // Y-flip: reflection camera is Z-mirrored
-        reflUV     += distOff * 0.4;
-        reflUV      = clamp(reflUV, 0.001, 0.999);
-        reflColor   = texture(uReflectionTex, reflUV);
+        vec4 reflClip = uReflViewProj * vec4(hitPos, 1.0);
+        vec2 reflUV   = reflClip.xy / reflClip.w * 0.5 + 0.5;
+        reflUV       += distOff * 0.4;
+        reflUV        = clamp(reflUV, 0.001, 0.999);
+        reflColor     = texture(uReflectionTex, reflUV);
     }
 
     // ── Blinn-Phong specular (sun glint) ─────────────────────────────────────
@@ -98,7 +101,12 @@ void main()
     float alpha = mix(uWaterColor.a * 0.75, 0.95, fresnel);
 
     fragColor = vec4(col, alpha);
-    // No gl_FragDepth: rasterised depth stays at 1.0 (from water.vert gl_Position.z=w=1).
-    // This preserves GPU early-z culling — the driver discards terrain pixels (depth<1)
-    // before the fragment shader runs, so water only executes on unfilled (sky/sea) pixels.
+
+    // Write the depth of the actual water surface so the water:
+    //   • renders over underwater terrain (terrain depth > water depth → Less passes)
+    //   • is culled by above-water terrain (terrain depth < water depth → Less fails)
+    //   • appears at the horizon where no geometry fills the pixel (depth buffer = 1.0)
+    // Disabling early-z is acceptable for a single full-screen pass per frame.
+    vec4 clipHit  = uViewProj * vec4(hitPos, 1.0);
+    gl_FragDepth  = clamp(clipHit.z / clipHit.w * 0.5 + 0.5, 0.0, 1.0);
 }

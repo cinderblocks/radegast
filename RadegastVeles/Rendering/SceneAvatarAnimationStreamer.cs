@@ -125,20 +125,17 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
 
     // ── Internals ─────────────────────────────────────────────────────────────────
 
-    private void OnAvatarBuilt(uint sceneKey, uint localId, AvatarBuildResult result)
+    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
     {
         if (_disposed) return;
 
-        // Pull the pending flexi handoff BEFORE RemoveAnimator runs — RemoveAnimator
-        // also clears _pendingFlexi[localId] (so kills/teardowns don't leak state),
-        // which would otherwise discard the very entry SceneFlexiStreamer just stashed
-        // when its AvatarBuilt subscription fired ahead of ours.
         bool hadPending = _pendingFlexi.TryRemove(localId, out var pendingFlexi);
 
-        // Replace any existing animator for this avatar.
         RemoveAnimator(localId);
 
-        var animator = new SceneAvatarAnimator(_client, localId, sceneKey, _viewport, result);
+        // SceneAvatarAnimator uses uint for ScheduleSceneVertexUpdate; avatar keys always
+        // fit in uint (AvatarKeyOffset = 0x8000_0000, localId < 0x8000_0000).
+        var animator = new SceneAvatarAnimator(_client, localId, (uint)sceneKey, _viewport, result);
         _animators[localId] = animator;
 
         // If a flexi animator arrived ahead of us, hook it up before Start()

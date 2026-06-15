@@ -18,7 +18,9 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -27,6 +29,7 @@ using CommunityToolkit.Mvvm.Input;
 using OpenMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
+using TkVector3 = OpenTK.Mathematics.Vector3;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -51,6 +54,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private SceneTerrainBuilder? _terrainBuilder;
     private CancellationTokenSource? _terrainCts;
     private readonly object _terrainCtsLock = new();
+
+    // Terrain builders and cancellation tokens for each neighbor simulator.
+    // Keyed by sim.Handle so each region gets at most one in-flight build.
+    private readonly Dictionary<ulong, SceneTerrainBuilder>      _neighborTerrainBuilders = new();
+    private readonly Dictionary<ulong, CancellationTokenSource>  _neighborTerrainCts      = new();
+    private readonly object                                       _neighborTerrainLock     = new();
     private SceneObjectStreamer?             _objectStreamer;
     private SceneAvatarStreamer?             _avatarStreamer;
     private SceneParticleStreamer?           _particleStreamer;
@@ -58,6 +67,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private SceneAvatarAnimationStreamer?    _avatarAnimStreamer;
     private SceneNameTagService?             _nameTagService;
     private SceneBuildScheduler?             _buildScheduler;
+    private SceneEnvironmentService?         _envService;
 
     // Periodically pushes the GL camera position/orientation into
     // Self.Movement.Camera so the server receives the correct view frustum in
@@ -76,6 +86,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _showPerfOverlay;
     [ObservableProperty] private bool   _showChatOverlay;
     [ObservableProperty] private bool   _frustumCullingEnabled = true;
+    [ObservableProperty] private bool   _waterReflectionsEnabled = false;
     [ObservableProperty] private string _perfOverlayText = string.Empty;
 
     private const int ChatOverlayMaxLines = 10;
@@ -122,6 +133,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
         _frustumCullingEnabled = instance.GlobalSettings["frustum_culling_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["frustum_culling_enabled"].AsBoolean() : true;
+        _waterReflectionsEnabled = instance.GlobalSettings["water_reflections_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["water_reflections_enabled"].AsBoolean() : false;
         _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
             ? (float)instance.GlobalSettings["scene_draw_distance"].AsReal() : 96f;
     }
@@ -139,6 +152,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     partial void OnFrustumCullingEnabledChanged(bool value)
     {
         if (_viewport != null) _viewport.FrustumCullingEnabled = value;
+    }
+
+    partial void OnWaterReflectionsEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.WaterReflectionsEnabled = value;
     }
 
     partial void OnShowPerfOverlayChanged(bool value)
@@ -164,10 +182,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     /// </summary>
     public void SetViewport(GlViewportControl viewport)
     {
-        _viewport                       = viewport;
-        _viewport.Wireframe              = Wireframe;
-        _viewport.SsaoEnabled            = SsaoEnabled;
-        _viewport.FrustumCullingEnabled  = FrustumCullingEnabled;
+        _viewport                           = viewport;
+        _viewport.Wireframe                  = Wireframe;
+        _viewport.SsaoEnabled                = SsaoEnabled;
+        _viewport.FrustumCullingEnabled      = FrustumCullingEnabled;
+        _viewport.WaterReflectionsEnabled    = WaterReflectionsEnabled;
         _viewport.WaterHeight            = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
         _viewport.Stats.FrameCompleted  += OnFrameCompleted;
         _viewport.InitFailed += msg =>
@@ -213,6 +232,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _nameTagService.TagsUpdated      += OnNameTagsUpdated;
         _nameTagService.HoverTagsUpdated += OnHoverTagsUpdated;
         _nameTagService.Start();
+
+        // EEP day-cycle service — feeds interpolated sky/water into the GL viewport once per frame.
+        _envService = new SceneEnvironmentService(_instance);
+        _viewport.EnvironmentService = _envService;
 
         // Sync the GL camera into Self.Movement.Camera at ~10 Hz so the server's
         // interest list receives the correct view frustum via AgentUpdate.
@@ -264,6 +287,35 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         // Seed particle streamer with all root prims that have emitters.
         _particleStreamer?.SeedFromCurrentSim();
+    }
+
+    /// <summary>
+    /// Seeds all NEIGHBOR simulators that are already connected when the viewer opens or resets.
+    /// Objects cached in neighbor sims before the viewer subscribed to ObjectUpdate never fire
+    /// new events, so we feed them through the streamer manually here.
+    /// Also kicks off terrain builds for each reachable neighbor.
+    /// </summary>
+    private void SeedNeighborSims()
+    {
+        if (_objectStreamer == null || _disposed) return;
+        var currentSim = _instance.Client.Network.CurrentSim;
+        if (currentSim == null) return;
+
+        Simulator[] neighborSims;
+        lock (_instance.Client.Network.Simulators)
+            neighborSims = _instance.Client.Network.Simulators
+                .Where(s => s != currentSim)
+                .ToArray();
+
+        foreach (var sim in neighborSims)
+        {
+            foreach (var prim in sim.ObjectsPrimitives.Values)
+            {
+                if (prim.ParentID != 0) continue;
+                _objectStreamer.OnObjectUpdate(sim, prim, isAttachment: false);
+            }
+            _ = RefreshNeighborTerrainAsync(sim);
+        }
     }
 
     /// <summary>Sync fly/run toggle state from the current AgentMovement flags.</summary>
@@ -390,8 +442,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private void OnLandPatchReceived(object? sender, LandPatchReceivedEventArgs e)
     {
         if (_disposed) return;
-        if (e.Simulator != _instance.Client.Network.CurrentSim) return;
-        _ = RefreshTerrainAsync(centerCamera: false);
+        if (e.Simulator == _instance.Client.Network.CurrentSim)
+            _ = RefreshTerrainAsync(centerCamera: false);
+        else
+            _ = RefreshNeighborTerrainAsync(e.Simulator);
     }
 
     private void OnSimChanged(object? sender, SimChangedEventArgs e)
@@ -401,6 +455,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // Also flush the decoded-bitmap cache: textures from the old sim are unlikely to be reused
         // and releasing them now reclaims the RAM before the new sim loads its own textures.
         GridTextureHelper.ClearSkBitmapCache();
+        CancelAllNeighborTerrainBuilds();
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -417,24 +472,31 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                 _viewport.WaterHeight = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
             _ = RefreshTerrainAsync(centerCamera: true);
 
-            // Re-seed from whatever is already present in the new sim's object cache.
-            // Without this, avatars and objects that arrived before SimChanged fired
-            // (or before network events resume) would never appear.
+            // Re-seed from whatever is already present in the new sim's object cache,
+            // then seed any already-connected neighbor sims.
             SeedStreamersFromCurrentSim();
+            SeedNeighborSims();
         });
     }
 
     private void OnSimConnected(object? sender, SimConnectedEventArgs e)
     {
         if (_disposed) return;
-        if (e.Simulator != _instance.Client.Network.CurrentSim) return;
-        SyncMovementState();
-        UpdateStatusBar();
-        if (_viewport != null)
-            _viewport.WaterHeight = e.Simulator.WaterHeight;
-        _ = RefreshTerrainAsync(centerCamera: true);
-        // Seed any objects/avatars already cached in the newly connected sim.
-        SeedStreamersFromCurrentSim();
+        if (e.Simulator == _instance.Client.Network.CurrentSim)
+        {
+            SyncMovementState();
+            UpdateStatusBar();
+            if (_viewport != null)
+                _viewport.WaterHeight = e.Simulator.WaterHeight;
+            _envService?.OnRegionChanged();
+            _ = RefreshTerrainAsync(centerCamera: true);
+            SeedStreamersFromCurrentSim();
+        }
+        else
+        {
+            // Neighbor simulator connected — build its terrain if we have patch data.
+            _ = RefreshNeighborTerrainAsync(e.Simulator);
+        }
     }
 
     private async Task RefreshTerrainAsync(bool centerCamera = false)
@@ -457,7 +519,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         StatusText = "Building terrain…";
         try
         {
-            var submission = await _terrainBuilder.RebuildAsync(ct).ConfigureAwait(false);
+            var submission = await _terrainBuilder.RebuildAsync(ct: ct).ConfigureAwait(false);
             if (ct.IsCancellationRequested || submission == null) return;
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
@@ -471,6 +533,94 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             StatusText = $"Terrain error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Builds or rebuilds terrain for a neighbor simulator within draw distance of the
+    /// agent.  Only triggers a build when the simulator is within one region length of
+    /// the agent's position, so distant sims do not waste CPU on geometry we can't see.
+    /// </summary>
+    private async Task RefreshNeighborTerrainAsync(Simulator sim)
+    {
+        if (_viewport == null || _disposed) return;
+        if (sim.Terrain == null) return;
+
+        var currentSim = _instance.Client.Network.CurrentSim;
+        if (currentSim == null) return;
+
+        // Compute the region offset and skip if the entire neighbor region is beyond draw distance.
+        Utils.LongToUInts(currentSim.Handle, out uint cx, out uint cy);
+        Utils.LongToUInts(sim.Handle,        out uint sx, out uint sy);
+        var regionOffset = new TkVector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
+
+        // Nearest point on the neighbor region's world-space footprint to the agent.
+        // Clamp the agent's position to [regionOffset, regionOffset+255] on each axis.
+        var agentPos = _instance.Client.Self.SimPosition;
+        float nearestX = Math.Clamp(agentPos.X, regionOffset.X, regionOffset.X + 255f);
+        float nearestY = Math.Clamp(agentPos.Y, regionOffset.Y, regionOffset.Y + 255f);
+        float edgeDx = nearestX - agentPos.X;
+        float edgeDy = nearestY - agentPos.Y;
+        if (edgeDx * edgeDx + edgeDy * edgeDy > DrawDistance * DrawDistance)
+            return; // entire neighbor region is beyond draw distance
+
+        // Cancel any in-flight build for this sim and start a new one.
+        CancellationToken ct;
+        lock (_neighborTerrainLock)
+        {
+            if (_disposed) return;
+            if (_neighborTerrainCts.TryGetValue(sim.Handle, out var old))
+            {
+                old.Cancel();
+                old.Dispose();
+            }
+            var cts = new CancellationTokenSource();
+            _neighborTerrainCts[sim.Handle] = cts;
+            ct = cts.Token;
+
+            if (!_neighborTerrainBuilders.TryGetValue(sim.Handle, out _))
+                _neighborTerrainBuilders[sim.Handle] = new SceneTerrainBuilder(_instance.Client);
+        }
+
+        // Stable scene key for this neighbor's terrain.
+        // Upper 32 bits = a 1-15 simIndex derived from the neighbor's grid position,
+        // lower 32 bits = uint.MaxValue (reserved; real prims never use this LocalID).
+        uint simIndex = (uint)((sx / 256 + sy / 256) & 0xFu) + 1u;
+        ulong terrainKey = ((ulong)simIndex << 32) | uint.MaxValue;
+
+        try
+        {
+            SceneTerrainBuilder builder;
+            lock (_neighborTerrainLock)
+                builder = _neighborTerrainBuilders[sim.Handle];
+
+            var submission = await builder.RebuildAsync(sim, regionOffset, ct).ConfigureAwait(false);
+            if (ct.IsCancellationRequested || submission == null) return;
+
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                _viewport?.SubmitSceneObject(terrainKey, submission);
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            // Non-fatal: neighbor terrain is a best-effort addition.
+            System.Diagnostics.Debug.WriteLine($"Neighbor terrain error: {ex.Message}");
+        }
+    }
+
+    private void CancelAllNeighborTerrainBuilds()
+    {
+        lock (_neighborTerrainLock)
+        {
+            foreach (var cts in _neighborTerrainCts.Values)
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            _neighborTerrainCts.Clear();
+            _neighborTerrainBuilders.Clear();
         }
     }
 
@@ -1031,6 +1181,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _terrainCts?.Dispose();
             _terrainCts = null;
         }
+        CancelAllNeighborTerrainBuilds();
 
         _objectStreamer?.Dispose();
         _objectStreamer = null;
@@ -1052,6 +1203,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         _nameTagService?.Dispose();
         _nameTagService = null;
+
+        _envService?.Dispose();
+        _envService = null;
 
         // Release all decoded SKBitmaps from the GL texture cache — the scene is going
         // away so the RAM is no longer needed.
@@ -1082,6 +1236,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // rootId in _dirty (a ConcurrentDictionary), so duplicates are simply
         // overwritten — the scheduler never sees duplicate entries.
         SeedStreamersFromCurrentSim();
+        SeedNeighborSims();
 
         // Terrain geometry was disposed with the old GL context.  Rebuild it now.
         _ = RefreshTerrainAsync();

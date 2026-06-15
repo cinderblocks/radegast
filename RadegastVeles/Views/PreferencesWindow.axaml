@@ -459,6 +459,11 @@
                                   AutomationProperties.Name="Enable frustum culling" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Skip CPU draw calls for faces outside the camera frustum. Disable temporarily to rule out culling artefacts." />
+                        <CheckBox Content="Enable water reflections"
+                                  IsChecked="{Binding WaterReflectionsEnabled}"
+                                  AutomationProperties.Name="Enable water reflections" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Renders the scene a second time into a reflection texture sampled by the water surface. Disabled by default due to GPU cost. Takes effect the next time a viewer window is opened." />
                         <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0"
                                        Text="Draw Distance"

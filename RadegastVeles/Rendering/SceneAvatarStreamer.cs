@@ -89,7 +89,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     };
 
     // Key offset so avatar scene-layer IDs never collide with prim IDs.
-    // We reserve the top half of uint space for avatars.
+    // Avatars use the range [0x8000_0000, 0xFFFF_FFFF] (top uint half, cast to ulong).
     private const uint  AvatarKeyOffset   = 0x8000_0000u;
 
     private readonly Timer _debounceTimer;
@@ -98,9 +98,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// <summary>
     /// Raised after a successful avatar build.
     /// Arguments: (sceneKey, localId, buildResult).
-    /// The sceneKey is the uint used in <see cref="GlViewportControl.SubmitSceneObject"/>.
+    /// The sceneKey is the ulong used in <see cref="GlViewportControl.SubmitSceneObject"/>.
     /// </summary>
-    public event Action<uint, uint, AvatarBuildResult>? AvatarBuilt;
+    public event Action<ulong, uint, AvatarBuildResult>? AvatarBuilt;
 
     private SceneAvatarAnimationStreamer? _animationStreamer;
 
@@ -282,7 +282,10 @@ internal sealed class SceneAvatarStreamer : IDisposable
     public void OnKillAvatar(Simulator sim, uint localId)
     {
         if (_disposed) return;
-        if (sim != _client.Network.CurrentSim) return;
+        // Accept kills from any sim: after a region crossing CurrentSim is already
+        // the new sim, so the old-sim guard would wrongly ignore kill packets from
+        // the previous region and leave the avatar visible.  RemoveAvatar is a
+        // no-op when the localId isn't tracked.
         RemoveAvatar(localId);
     }
 
@@ -416,7 +419,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
     // ── Internals ─────────────────────────────────────────────────────────────────
 
-    private static uint SceneKey(uint localId) => AvatarKeyOffset + localId;
+    private static ulong SceneKey(uint localId) => (ulong)AvatarKeyOffset + localId;
 
     private void EnqueueDirty(uint localId)
     {

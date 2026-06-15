@@ -615,4 +615,13 @@ public sealed record SceneTexturePatch(
     uint        RootLocalId,
     int         FaceIndex,
     TextureSlot Slot,
-    SKBitmap?   Bitmap);
+    SKBitmap?   Bitmap)
+{
+    /// <summary>
+    /// Full ulong scene key (simIndex in upper 32 bits, localId in lower 32 bits).
+    /// Set by <see cref="Rendering.SceneObjectStreamer"/> so the viewport can do a
+    /// direct dictionary lookup without scanning for neighbor-sim objects.
+    /// Zero means "use (ulong)RootLocalId" (avatar patches, legacy paths).
+    /// </summary>
+    public ulong SceneKey { get; init; }
+}

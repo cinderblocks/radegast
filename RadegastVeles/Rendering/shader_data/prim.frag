@@ -65,9 +65,10 @@ uniform sampler2D uSsaoMap;
 uniform int       uHasSsao;
 uniform vec2      uScreenSize;
 
-// Key light - warm, upper-right of camera (view space, pre-normalised)
-const vec3  kKeyDir    = vec3(0.4472, 0.7155, 0.5366);  // normalize(0.5, 0.8, 0.6)
-const vec3  kKeyColor  = vec3(1.00, 0.96, 0.90);
+// Sun light (view-space direction and colour driven by EEP/Windlight environment)
+uniform vec3 uSunDir;       // view-space unit vector toward sun
+uniform vec3 uSunColor;     // sun/moon colour (EEP sun_moon_color)
+uniform vec3 uAmbientColor; // sky ambient colour (EEP sky_ambient)
 const float kKey       = 0.70;
 
 // Fill light - cool, lower-left of camera (view space, pre-normalised)
@@ -81,8 +82,6 @@ const float kFill      = 0.28;
 const vec3  kRimDir    = vec3(0.0, 0.0995, -0.9950);    // normalize(0, 0.1, -1)
 const vec3  kRimColor  = vec3(0.82, 0.88, 1.00);
 const float kRim       = 0.18;
-
-const float kAmbient   = 0.25;
 const float PI         = 3.14159265359;
 
 // ACES filmic tone-mapping approximation (Narkowicz 2015).
@@ -150,9 +149,9 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
 
     vec3 Lo = vec3(0.0);
 
-    // Key light
+    // Key light (sun)
     {
-        vec3  L     = kKeyDir;
+        vec3  L     = uSunDir;
         vec3  H     = normalize(L + v);
         float NdotL = max(dot(n, L), 0.0);
         float NdotH = max(dot(n, H), 0.0);
@@ -165,7 +164,7 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
         vec3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.001);
         vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
-        Lo += (kD * albedo / PI + specular) * kKeyColor * kKey * NdotL;
+        Lo += (kD * albedo / PI + specular) * uSunColor * kKey * NdotL;
     }
 
     // Fill light
@@ -205,7 +204,7 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     vec3  kD_amb     = (vec3(1.0) - F_amb) * (1.0 - metallic);
     // Specular ambient response: smooth surfaces reflect more of the environment.
     float specScale  = mix(0.04, 0.50, 1.0 - roughness * roughness);
-    vec3 ambient     = kAmbient * (kD_amb * albedo + F_amb * specScale) * occlusion * ssao;
+    vec3 ambient     = uAmbientColor * (kD_amb * albedo + F_amb * specScale) * occlusion * ssao;
 
     vec3 col = ambient + Lo + emissive;
 
@@ -392,12 +391,12 @@ void main()
         specTint     = vec3(specStrength);
     }
 
-    // Key light: standard Lambert diffuse + Blinn-Phong specular.
+    // Key light (sun): standard Lambert diffuse + Blinn-Phong specular.
     // SL C++ viewer uses max(dot(N,L),0) — standard Lambert — not half-Lambert.
     // Half-Lambert (range [0.5,1.0]) washes out all shadow definition; standard
     // Lambert (range [0,1]) gives proper light/shadow contrast matching SL.
-    float keyDiff = max(dot(n, kKeyDir), 0.0);
-    vec3  keyH    = normalize(kKeyDir + v);
+    float keyDiff = max(dot(n, uSunDir), 0.0);
+    vec3  keyH    = normalize(uSunDir + v);
     float keySpec = pow(max(dot(n, keyH), 0.0), shininess);
 
     // Fill light: clamped lambert, no specular
@@ -409,11 +408,11 @@ void main()
     float ssao = (uHasSsao != 0)
         ? texture(uSsaoMap, gl_FragCoord.xy / uScreenSize).r
         : 1.0;
-    vec3 col = albedo * (kAmbient * ssao
-             + kKeyColor  * kKey  * keyDiff
-             + kFillColor * kFill * fillDiff
-             + kRimColor  * kRim  * rimDiff);
-    col     += kKeyColor * specTint * keySpec;
+    vec3 col = albedo * (uAmbientColor * ssao
+             + uSunColor   * kKey  * keyDiff
+             + kFillColor  * kFill * fillDiff
+             + kRimColor   * kRim  * rimDiff);
+    col     += uSunColor * specTint * keySpec;
 
     // Fresnel environment reflection (material path).
     if (uHasMaterial != 0 && uEnvIntensity > 0.0)

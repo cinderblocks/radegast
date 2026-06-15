@@ -181,10 +181,13 @@ public class GlViewportControl : Panel
     private int _waterNormalmapTex, _waterDudvmapTex;
     private bool _waterReady;
     private float _waterTime;
-    private long  _waterLastTick;
+    private long    _waterLastTick;
     // Timestamp of the last reflection FBO render. 0 = never. Used to throttle the
     // reflection pre-pass so it fires at most once every kReflIntervalMs milliseconds.
-    private long  _reflLastTick;
+    private long    _reflLastTick;
+    // Last reflected-camera view-projection matrix (saved in DrawWaterReflection,
+    // consumed in DrawWater for correct planar-reflection UV lookup).
+    private Matrix4 _lastReflViewProj;
     private const int WaterReflSize     = 512;
     private const int kReflIntervalMs   = 150; // ~7 fps for reflection updates
 
@@ -210,6 +213,12 @@ public class GlViewportControl : Panel
     /// Update from <see cref="SceneViewerViewModel"/> when EEP environment data arrives.
     /// </summary>
     public SkySettings Sky { get; set; } = new SkySettings();
+
+    /// <summary>
+    /// When set, <see cref="GlRender"/> queries this service once per frame to
+    /// obtain the interpolated sky and water parameters for the current day-cycle time.
+    /// </summary>
+    public SceneEnvironmentService? EnvironmentService { get; set; }
 
     // ── Particle state ────────────────────────────────────────────────────────────
     // Pending submissions from any thread: key → submission (null = remove).
@@ -240,16 +249,16 @@ public class GlViewportControl : Panel
     private readonly List<(float[] PickerVerts, float[] NormalUvVerts, ushort[] Indices, Matrix4 Model)> _cpuFaceData = new();
 
     // ── Scene-object layer (additive over the base terrain submission) ────────────
-    // keyed by root prim LocalID → uploaded GPU faces
-    private readonly Dictionary<uint, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
-    // Pending scene-object updates: (rootId, submission).  null submission means "remove".
-    private readonly ConcurrentQueue<(uint RootId, PrimRenderSubmission? Sub)> _pendingSceneObjects = new();
+    // keyed by scene key (ulong: upper 32 bits = sim index, lower 32 bits = localId)
+    private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
+    // Pending scene-object updates: (sceneKey, submission).  null submission means "remove".
+    private readonly ConcurrentQueue<(ulong RootId, PrimRenderSubmission? Sub)> _pendingSceneObjects = new();
     // Flat draw lists rebuilt from _sceneObjects each time objects are added/removed.
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneOpaque = new();
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneAlpha  = new();
     // Parallel root-ID lists so the draw loop can apply per-root transform overrides.
-    private readonly List<uint> _sceneOpaqueRootIds = new();
-    private readonly List<uint> _sceneAlphaRootIds  = new();
+    private readonly List<ulong> _sceneOpaqueRootIds = new();
+    private readonly List<ulong> _sceneAlphaRootIds  = new();
 
     // Ordered list of every GlMesh uploaded in the current submission, indexed by face order.
     // Used to apply per-face vertex updates submitted from the animation thread.
@@ -263,10 +272,10 @@ public class GlViewportControl : Panel
     private readonly ConcurrentQueue<(uint RootId, int FaceOffset, float[] Verts, int VertsLength, bool IsPoolRented)> _pendingSceneVertexUpdates = new();
 
     // Per-root model-matrix overrides (e.g. avatar position updates without a full re-upload).
-    // When a rootId is present here its matrix replaces face.Transform for every face in that object.
-    private readonly ConcurrentDictionary<uint, Matrix4> _sceneObjectTransformOverrides = new();
+    // When a sceneKey is present here its matrix replaces face.Transform for every face in that object.
+    private readonly ConcurrentDictionary<ulong, Matrix4> _sceneObjectTransformOverrides = new();
     // Pending transform override updates enqueued from non-GL threads.
-    private readonly ConcurrentQueue<(uint RootId, Matrix4 Transform)> _pendingTransformOverrides = new();
+    private readonly ConcurrentQueue<(ulong RootId, Matrix4 Transform)> _pendingTransformOverrides = new();
 
     // Pending single-texture patches for already-live scene objects (progressive texture streaming).
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingTexturePatches = new();
@@ -329,6 +338,13 @@ public class GlViewportControl : Panel
     /// Set to <c>false</c> to verify that culling is not removing visible geometry.
     /// </summary>
     public bool FrustumCullingEnabled { get; set; } = true;
+
+    /// <summary>
+    /// When <c>true</c> the reflection pre-pass runs and the water shader samples the
+    /// reflection FBO. When <c>false</c> the pre-pass is skipped and the water shader
+    /// uses the deep-water colour instead. Defaults to <c>false</c>.
+    /// </summary>
+    public bool WaterReflectionsEnabled { get; set; } = false;
 
     /// <summary>Number of scene object submissions waiting to be uploaded to the GPU this frame. Zero-cost snapshot.</summary>
     public int PendingUploadCount => _pendingSceneObjects.Count;
@@ -577,23 +593,23 @@ public class GlViewportControl : Panel
     public void RequestRender() => _core.RequestNextFrameRendering();
 
     /// <summary>
-    /// Queue an additive scene-object submission for the given root prim LocalID.
-    /// Replaces any previously queued submission for the same root.
+    /// Queue an additive scene-object submission for the given scene key.
+    /// Replaces any previously queued submission for the same key.
     /// Safe to call from any thread.
     /// </summary>
-    public void SubmitSceneObject(uint rootLocalId, PrimRenderSubmission submission)
+    public void SubmitSceneObject(ulong sceneKey, PrimRenderSubmission submission)
     {
-        _pendingSceneObjects.Enqueue((rootLocalId, submission));
+        _pendingSceneObjects.Enqueue((sceneKey, submission));
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
     /// <summary>
-    /// Queue removal of the scene object with the given root LocalID.
+    /// Queue removal of the scene object with the given scene key.
     /// Safe to call from any thread.
     /// </summary>
-    public void RemoveSceneObject(uint rootLocalId)
+    public void RemoveSceneObject(ulong sceneKey)
     {
-        _pendingSceneObjects.Enqueue((rootLocalId, null));
+        _pendingSceneObjects.Enqueue((sceneKey, null));
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -770,7 +786,7 @@ public class GlViewportControl : Panel
         // FlexiPrimAnimator allocates exact-size buffers with new[] (IsPoolRented=false).
         while (_pendingSceneVertexUpdates.TryDequeue(out var su))
         {
-            if (_sceneObjects.TryGetValue(su.RootId, out var scFaces))
+            if (_sceneObjects.TryGetValue((ulong)su.RootId, out var scFaces))
             {
                 int idx = su.FaceOffset;
                 if ((uint)idx < (uint)scFaces.Count)
@@ -836,6 +852,16 @@ public class GlViewportControl : Panel
         Frustum? frustum = FrustumCullingEnabled
             ? FrustumCuller.ExtractPlanes(viewProj)
             : (Frustum?)null;
+
+        // ── EEP day-cycle update ──────────────────────────────────────────
+        // Sample the environment service once per frame so sky and water colour
+        // track the in-world day/night cycle.  Done before DrawSky so the sky
+        // shader already receives the updated parameters on the same frame.
+        if (EnvironmentService != null)
+        {
+            Sky          = EnvironmentService.GetCurrentSky();
+            WaterFogColor = EnvironmentService.GetCurrentWaterFogColor();
+        }
 
         // ── Sky background ────────────────────────────────────────────────
         // Drawn before everything else so it fills pixels not covered by geometry.
@@ -924,7 +950,7 @@ public class GlViewportControl : Panel
         float waterH = WaterHeight;
         bool  doWater = _waterReady && !float.IsNaN(waterH)
                         && _camera.EyePosition.Z >= waterH - 0.05f;
-        if (doWater)
+        if (doWater && WaterReflectionsEnabled)
             DrawWaterReflection(ref view, ref proj, waterH, w, h);
 
         // ── Main scene pass ───────────────────────────────────────────────
@@ -941,8 +967,8 @@ public class GlViewportControl : Panel
         // the geometry was already submitted).
         ApplyTexturePatches();
 
-        DrawFaces(_opaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats);
-        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats);
+        DrawFaces(_opaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky);
+        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky);
 
         // ── Water surface ─────────────────────────────────────────────────
         // Drawn after opaque geometry (correct depth test) but before alpha
@@ -975,7 +1001,7 @@ public class GlViewportControl : Panel
             GL.DepthMask(false);
             GL.Disable(EnableCap.CullFace);
             // Alpha surfaces don't receive SSAO — matches SL viewer behaviour.
-            DrawFaces(mergedAlpha, _primShader, ref view, ref proj, manageCulling: false, frustum: frustum, stats: _stats);
+            DrawFaces(mergedAlpha, _primShader, ref view, ref proj, manageCulling: false, frustum: frustum, stats: _stats, sky: Sky);
             GL.Enable(EnableCap.CullFace);
             GL.DepthMask(true);
             GL.Disable(EnableCap.Blend);
@@ -1774,9 +1800,10 @@ public class GlViewportControl : Panel
             new Vector4(0f, 1f, 0f,              0f),
             new Vector4(0f, 0f, -1f,             0f),
             new Vector4(0f, 0f, 2f * waterHeight, 1f));
-        var reflView    = reflMat * view;
+        var reflView     = reflMat * view;
         var reflViewProj = reflView * proj;
         var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
+        _lastReflViewProj = reflViewProj;
 
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
         GL.Viewport(0, 0, WaterReflSize, WaterReflSize);
@@ -1790,8 +1817,8 @@ public class GlViewportControl : Panel
         // Z mirror flips winding: what was CCW becomes CW from the reflected camera
         GL.FrontFace(FrontFaceDirection.Cw);
 
-        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum);
+        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
 
         GL.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
@@ -1822,12 +1849,13 @@ public class GlViewportControl : Panel
         _waterShader.Use();
         _waterShader.Set("uViewProj",      ref viewProj);
         _waterShader.Set("uInvViewProj",   ref invVP);
+        _waterShader.Set("uReflViewProj",  ref _lastReflViewProj);
         _waterShader.Set("uEyePos",        eye);
         _waterShader.Set("uWaterHeight",   waterHeight);
         _waterShader.Set("uTime",          _waterTime);
         _waterShader.Set("uWaterColor",    WaterFogColor);
         _waterShader.Set("uLightDir",      lightDir);
-        _waterShader.Set("uHasReflection", _waterReflFbo != 0 ? 1 : 0);
+        _waterShader.Set("uHasReflection", (_waterReflFbo != 0 && WaterReflectionsEnabled) ? 1 : 0);
 
         GL.ActiveTexture(TextureUnit.Texture0);
         GL.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
@@ -1844,8 +1872,10 @@ public class GlViewportControl : Panel
         GL.Enable(EnableCap.Blend);
         GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         GL.Disable(EnableCap.CullFace);
-        // LessOrEqual so far-horizon water (depth clamped to 0.99999) is visible
-        // against the cleared depth buffer (depth = 1.0).
+        // LessOrEqual: water surface (gl_FragDepth = actual surface hit depth) passes when
+        // the surface is closer to the camera than existing geometry, covering underwater
+        // terrain.  Also passes at the horizon where the hit is beyond the far plane and
+        // gl_FragDepth clamps to 1.0 (== cleared buffer value), keeping horizon water visible.
         GL.DepthFunc(DepthFunction.Lequal);
 
         GL.BindVertexArray(_quadVao);
@@ -2191,11 +2221,14 @@ public class GlViewportControl : Panel
         // and must not be applied to new objects that may share the same local IDs.
         foreach (var (patch, _) in _deferredPatches) patch.Bitmap?.Dispose();
         _deferredPatches.Clear();
-        while (_pendingTexturePatches.TryDequeue(out var p)) p.Bitmap?.Dispose();
+        int purged = 0;
+        while (_pendingTexturePatches.TryDequeue(out var p)) { p.Bitmap?.Dispose(); purged++; }
+        // Release all consumed gate permits so future PatchSceneObjectTexture calls are not starved.
+        if (purged > 0) _texturePatchGate.Release(purged);
         RebuildSceneFlatLists();
     }
 
-    private void RemoveSceneObjectGpu(uint rootId)
+    private void RemoveSceneObjectGpu(ulong rootId)
     {
         if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
 
@@ -2230,7 +2263,7 @@ public class GlViewportControl : Panel
     }
 
     // No-rebuild variant used by the batched drain loop in GlRender.
-    private void RemoveSceneObjectGpuNoRebuild(uint rootId)
+    private void RemoveSceneObjectGpuNoRebuild(ulong rootId)
     {
         if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
 
@@ -2261,14 +2294,14 @@ public class GlViewportControl : Panel
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
     }
 
-    private void UploadSceneObject(uint rootId, PrimRenderSubmission sub)
+    private void UploadSceneObject(ulong rootId, PrimRenderSubmission sub)
     {
         UploadSceneObjectNoRebuild(rootId, sub);
         RebuildSceneFlatLists();
     }
 
     // No-rebuild variant: caller is responsible for calling RebuildSceneFlatLists once.
-    private void UploadSceneObjectNoRebuild(uint rootId, PrimRenderSubmission sub)
+    private void UploadSceneObjectNoRebuild(ulong rootId, PrimRenderSubmission sub)
     {
         // Free existing GPU resources for this root before uploading the new ones.
         RemoveSceneObjectGpuNoRebuild(rootId);
@@ -2382,9 +2415,9 @@ public class GlViewportControl : Panel
     /// updates (e.g. walking avatars) without a full mesh re-upload.
     /// Safe to call from any thread.
     /// </summary>
-    public void SetSceneObjectTransform(uint rootId, Matrix4 transform)
+    public void SetSceneObjectTransform(ulong sceneKey, Matrix4 transform)
     {
-        _pendingTransformOverrides.Enqueue((rootId, transform));
+        _pendingTransformOverrides.Enqueue((sceneKey, transform));
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -2662,7 +2695,8 @@ public class GlViewportControl : Panel
         // but emit patches with the raw avatar localId (body) or an attachment prim
         // localId (attachments), so fall back to scanning all faces in every entry.
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>? faceTuples = null;
-        if (!_sceneObjects.TryGetValue(patch.RootLocalId, out faceTuples))
+        ulong lookupKey = patch.SceneKey != 0 ? patch.SceneKey : (ulong)patch.RootLocalId;
+        if (!_sceneObjects.TryGetValue(lookupKey, out faceTuples))
         {
             foreach (var kv in _sceneObjects)
             {
@@ -2778,7 +2812,8 @@ public class GlViewportControl : Panel
         int ssaoTex = 0,
         Vector2 screenSize = default,
         Frustum? frustum = null,
-        FrameStatsTracker? stats = null)
+        FrameStatsTracker? stats = null,
+        SkySettings? sky = null)
     {
         shader.Use();
 
@@ -2795,6 +2830,21 @@ public class GlViewportControl : Panel
         else
         {
             shader.Set("uHasSsao", 0);
+        }
+
+        // Set EEP sun/ambient uniforms — constant for all faces in this draw call.
+        // uSunDir is transformed from world space into view space so the lighting
+        // computation in prim.frag uses the correct coordinate frame.
+        {
+            SkySettings s  = sky ?? SkySettings.Default;
+            var worldSun   = s.SunDirection;
+            var sunViewDir = new Vector3(
+                Vector3.Dot(view.Row0.Xyz, worldSun),
+                Vector3.Dot(view.Row1.Xyz, worldSun),
+                Vector3.Dot(view.Row2.Xyz, worldSun));
+            shader.Set("uSunDir",       sunViewDir);
+            shader.Set("uSunColor",     s.SunlightColor);
+            shader.Set("uAmbientColor", s.Ambient);
         }
 
         // View inverse (upper-3×3) is constant for every face this frame. The per-face

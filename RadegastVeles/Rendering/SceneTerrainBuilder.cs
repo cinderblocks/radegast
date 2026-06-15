@@ -32,11 +32,11 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Builds a <see cref="PrimRenderSubmission"/> that combines the terrain mesh
-/// and an alpha-blended water plane for the currently-connected simulator region.
+/// and an alpha-blended water plane for a given simulator region.
 /// </summary>
 internal sealed class SceneTerrainBuilder
 {
-    private readonly GridClient _client;
+    private readonly GridClient  _client;
     private readonly MeshFoundry _mesher = new();
 
     public SceneTerrainBuilder(GridClient client)
@@ -45,17 +45,24 @@ internal sealed class SceneTerrainBuilder
     }
 
     /// <summary>
-    /// Samples the current simulator heightmap, composites the terrain splat
+    /// Samples the heightmap for <paramref name="sim"/>, composites the terrain splat
     /// texture, adds a water plane, and packs everything into a single
     /// <see cref="PrimRenderSubmission"/> whose AABB covers terrain + water.
-    /// Returns <c>null</c> when no simulator is connected or patch data is absent.
+    /// <para>
+    /// Pass <paramref name="regionOffset"/> to shift all face positions into world-space
+    /// when building terrain for a neighboring region.  The offset is baked into each
+    /// face's <see cref="PrimRenderFace.Transform"/> translation so the renderer does
+    /// not need to know about region boundaries.
+    /// </para>
+    /// Returns <c>null</c> when patch data is absent.
     /// </summary>
-    public async Task<PrimRenderSubmission?> RebuildAsync(CancellationToken ct = default)
+    public async Task<PrimRenderSubmission?> RebuildAsync(
+        Simulator? sim = null,
+        TkVector3  regionOffset = default,
+        CancellationToken ct = default)
     {
-        var sim = _client.Network.CurrentSim;
+        sim ??= _client.Network.CurrentSim;
         if (sim?.Terrain == null) return null;
-
-        float waterZ = sim.WaterHeight;
 
         // ── Sample heightmap on a background thread ───────────────────────────
         var heightmap = await Task.Run(() => SampleHeightmap(sim), ct).ConfigureAwait(false);
@@ -85,17 +92,20 @@ internal sealed class SceneTerrainBuilder
         var (terrainFace, bMin, bMax) = await Task.Run(() => BuildTerrainMesh(heightmap), ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
 
-        // ── Assemble faces list ───────────────────────────────────────────────
-        var faces = new List<PrimRenderFace>(2);
+        // ── Assemble terrain face ─────────────────────────────────────────────
+        // Water is rendered analytically by the full-screen water shader; no water
+        // mesh is needed here.
+        var offsetMat = regionOffset == TkVector3.Zero
+            ? TkMatrix4.Identity
+            : TkMatrix4.CreateTranslation(regionOffset);
 
-        // Terrain face — opaque, textured
-        var terrainCentroid = (bMin + bMax) * 0.5f;
-        faces.Add(new PrimRenderFace
+        var terrainCentroid = (bMin + bMax) * 0.5f + regionOffset;
+        var terrainFaceOut  = new PrimRenderFace
         {
             Vertices    = PackVertices(terrainFace),
             Indices     = terrainFace.Indices.ToArray(),
             Color       = TkVector4.One,
-            Transform   = TkMatrix4.Identity,
+            Transform   = offsetMat,
             Texture     = splatBmp,
             Fullbright  = false,
             Glow        = 0f,
@@ -104,38 +114,15 @@ internal sealed class SceneTerrainBuilder
             PrimLocalId = 0,
             FaceIndex   = 0,
             Centroid    = terrainCentroid,
-        });
+        };
 
-        // Water plane face — alpha-blended, no texture
-        var (waterVerts, waterIdx) = BuildWaterPlane(waterZ);
-        var waterCentroid = new TkVector3(127.5f, 127.5f, waterZ);
-        faces.Add(new PrimRenderFace
-        {
-            Vertices    = waterVerts,
-            Indices     = waterIdx,
-            Color       = new TkVector4(0.15f, 0.45f, 0.65f, 0.62f),
-            Transform   = TkMatrix4.Identity,
-            Texture     = null,
-            Fullbright  = false,
-            Glow        = 0f,
-            HasAlpha    = true,
-            AlphaMode   = FaceAlphaMode.Blend,
-            IsTwoSided  = true,
-            PrimLocalId = 0,
-            FaceIndex   = 1,
-            Centroid    = waterCentroid,
-        });
-
-        // Expand AABB to include the water surface
-        var waterMin = new TkVector3(0f,   0f,   waterZ);
-        var waterMax = new TkVector3(255f, 255f, waterZ);
-        bMin = TkVector3.ComponentMin(bMin, waterMin);
-        bMax = TkVector3.ComponentMax(bMax, waterMax);
+        bMin += regionOffset;
+        bMax += regionOffset;
 
         return new PrimRenderSubmission
         {
             Label     = "terrain",
-            Faces     = [.. faces],
+            Faces     = [terrainFaceOut],
             BoundsMin = bMin,
             BoundsMax = bMax,
         };
@@ -195,25 +182,4 @@ internal sealed class SceneTerrainBuilder
         return verts;
     }
 
-    /// <summary>
-    /// Builds a flat 256×256 m quad centred at Z=<paramref name="z"/>.
-    /// Returns interleaved vertex data (Position+Normal+UV, 8 floats each)
-    /// and a triangle index array.
-    /// </summary>
-    private static (float[] verts, ushort[] indices) BuildWaterPlane(float z)
-    {
-        // Four corners: (0,0), (255,0), (255,255), (0,255) — normal points up (+Z)
-        var verts = new float[]
-        {
-            //  X      Y      Z     nX   nY   nZ    U     V
-              0f,    0f,    z,    0f,  0f,  1f,  0f,  0f,
-            255f,    0f,    z,    0f,  0f,  1f,  1f,  0f,
-            255f,  255f,    z,    0f,  0f,  1f,  1f,  1f,
-              0f,  255f,    z,    0f,  0f,  1f,  0f,  1f,
-        };
-
-        var indices = new ushort[] { 0, 1, 2,  0, 2, 3 };
-
-        return (verts, indices);
-    }
 }

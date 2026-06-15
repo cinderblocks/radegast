@@ -42,8 +42,8 @@ internal sealed class SceneFlexiStreamer : IDisposable
 
     // sceneKey → active animator (prim root localId for objects, AvatarKeyOffset+localId for avatars)
     // avatarLocalId → sceneKey (reverse map so SetAnimationStreamer can look up the right flexi animator)
-    private readonly ConcurrentDictionary<uint, FlexiPrimAnimator> _animators  = new();
-    private readonly ConcurrentDictionary<uint, uint>              _localToKey = new();
+    private readonly ConcurrentDictionary<ulong, FlexiPrimAnimator> _animators  = new();
+    private readonly ConcurrentDictionary<uint, ulong>              _localToKey = new();
 
     private bool _disposed;
 
@@ -83,7 +83,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
     {
         if (_disposed) return;
         if (sim != _client.Network.CurrentSim) return;
-        RemoveAnimator(localId);
+        RemoveAnimator((ulong)localId);
     }
 
     /// <summary>Stop all animators and clear state (sim change / viewer close).</summary>
@@ -110,10 +110,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private void OnObjectBuilt(uint rootId, PrimRenderSubmission submission)
     {
         if (_disposed) return;
-        StartAnimator(rootId, submission, sceneKey: rootId);
+        StartAnimator((ulong)rootId, submission, sceneKey: (ulong)rootId);
     }
 
-    private void OnAvatarBuilt(uint sceneKey, uint localId, AvatarBuildResult result)
+    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
     {
         if (_disposed) return;
         StartAnimator(sceneKey, result.Submission, sceneKey: sceneKey, avatarLocalId: localId);
@@ -128,7 +128,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         }
     }
 
-    private void StartAnimator(uint key, PrimRenderSubmission submission, uint sceneKey,
+    private void StartAnimator(ulong key, PrimRenderSubmission submission, ulong sceneKey,
         uint avatarLocalId = 0)
     {
         if (submission.FlexiPrims.Length == 0)
@@ -141,10 +141,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
 
         // Capture viewport reference once; the lambda keeps it alive for the animator's lifetime.
         var vp = _viewport;
-        // FlexiPrimAnimator allocates exact-size buffers with new[] (not pool-rented) because
-        // glBufferSubData requires the byte count to match exactly; isPoolRented is false.
+        // ScheduleSceneVertexUpdate takes uint; safe cast because object keys are current-sim localIds
+        // (uint range) and avatar keys (AvatarKeyOffset + localId) also fit in uint.
         Action<int, float[]> schedule = sceneKey != 0
-            ? (faceIndex, verts) => vp.ScheduleSceneVertexUpdate(sceneKey, faceIndex, verts, verts.Length, isPoolRented: false)
+            ? (faceIndex, verts) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, verts.Length, isPoolRented: false)
             : vp.ScheduleVertexUpdate;
 
         var animator = new FlexiPrimAnimator(submission, schedule);
@@ -161,7 +161,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         }
     }
 
-    private void RemoveAnimator(uint rootId)
+    private void RemoveAnimator(ulong rootId)
     {
         if (_animators.TryRemove(rootId, out var anim))
             anim.Dispose();

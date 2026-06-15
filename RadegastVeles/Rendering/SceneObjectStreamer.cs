@@ -31,12 +31,13 @@ using TkVector3 = OpenTK.Mathematics.Vector3;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Streams in-world prim objects from the current simulator into the
+/// Streams in-world prim objects from all connected simulators into the
 /// scene-object layer of a <see cref="GlViewportControl"/>.
 /// <para>
-/// When an <see cref="ObjectManager.ObjectUpdate"/> event arrives the object is
-/// added to a dirty set.  A lightweight debounce timer coalesces rapid bursts of
-/// updates into a single tessellation run per root linkset.
+/// Objects from neighboring regions within <see cref="DrawDistance"/> metres of
+/// the agent are automatically included and offset to world-space coordinates.
+/// Scene keys encode the simulator index in the upper 32 bits and the prim
+/// LocalID in the lower 32 bits, preventing collisions across region boundaries.
 /// </para>
 /// </summary>
 internal sealed class SceneObjectStreamer : IDisposable
@@ -46,33 +47,33 @@ internal sealed class SceneObjectStreamer : IDisposable
     private readonly PrimMeshBuilder     _builder;
     private readonly SceneBuildScheduler _scheduler;
 
-    // rootLocalId → CancellationTokenSource for the in-flight build task.
-    private readonly ConcurrentDictionary<uint, CancellationTokenSource> _inflight = new();
+    // sceneKey → CancellationTokenSource for the in-flight build task.
+    private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _inflight = new();
 
-    // Dirty roots queued for tessellation (rootLocalId → timestamp of first enqueue).
-    private readonly ConcurrentDictionary<uint, long> _dirty = new();
+    // Dirty roots queued for tessellation (sceneKey → timestamp of first enqueue).
+    private readonly ConcurrentDictionary<ulong, long> _dirty = new();
 
-    // Root local IDs that currently have a live scene-object submission.
-    private readonly ConcurrentDictionary<uint, byte> _rendered = new();
+    // Scene keys that currently have a live scene-object submission.
+    private readonly ConcurrentDictionary<ulong, byte> _rendered = new();
 
-    // Reverse parent index: rootLocalId → set of child LocalIDs.
-    // Maintained incrementally so CollectLinkset and IsSinglePrim checks are O(1)
-    // instead of O(n) full-dict scans.
-    private readonly ConcurrentDictionary<uint, ConcurrentDictionary<uint, byte>> _childrenByParent = new();
+    // Reverse parent index: rootSceneKey → set of child scene keys.
+    private readonly ConcurrentDictionary<ulong, ConcurrentDictionary<ulong, byte>> _childrenByParent = new();
+
+    // ── Sim index registry ────────────────────────────────────────────────────────
+    // Upper 32 bits of a scene key encode a sim index (0 = current sim, 1-N for neighbors).
+    // This lets us distinguish objects with the same LocalID in different regions.
+    private int _nextNeighborIndex = 0;
+    private readonly ConcurrentDictionary<ulong, uint> _neighborSimIndex = new(); // handle → index
+    private readonly ConcurrentDictionary<uint, Simulator> _simByIndex    = new(); // index → sim
 
     /// <summary>Number of object build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
 
-    // How long to wait after the last update for a root before tessellating.
-    // 50 ms is enough to coalesce rapid property updates within the same sim
-    // tick without delaying first-appearance by a full 400 ms.
     private const int DebounceMs = 50;
 
     private readonly Timer  _debounceTimer;
     private bool            _disposed;
 
-    // Maximum radius from the avatar (in metres) at which objects are streamed.
-    // Prims outside this radius are ignored/culled.
     private float _maxStreamRadius = 96f;
 
     /// <summary>Gets or sets the streaming radius in metres (default 96).</summary>
@@ -107,8 +108,8 @@ internal sealed class SceneObjectStreamer : IDisposable
     public event Action<uint, PrimRenderSubmission>? ObjectBuilt;
 
     /// <summary>
-    /// Call when a prim update is received from the simulator.
-    /// Skips attachments, avatars, and objects outside the stream radius.
+    /// Call when a prim update is received from any connected simulator.
+    /// Skips attachments and avatars.  Objects outside the stream radius are culled.
     /// </summary>
     public void OnObjectUpdate(Simulator sim, Primitive prim, bool isAttachment)
     {
@@ -116,114 +117,101 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (isAttachment) return;
 
         var currentSim = _client.Network.CurrentSim;
-        if (sim != currentSim) return;
-
-        var rootId    = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
-        var avatarPos = _client.Self.SimPosition;
+        var rootLocalId = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
+        var sceneKey    = MakeSceneKey(sim, rootLocalId, currentSim);
 
         // Maintain the reverse parent index for child prims.
         if (prim.ParentID != 0)
         {
-            _childrenByParent.GetOrAdd(rootId, _ => new ConcurrentDictionary<uint, byte>())
-                             .TryAdd(prim.LocalID, 0);
+            var childKey = MakeSceneKey(sim, prim.LocalID, currentSim);
+            _childrenByParent.GetOrAdd(sceneKey, _ => new ConcurrentDictionary<ulong, byte>())
+                             .TryAdd(childKey, 0);
         }
 
-        // Child prims have parent-relative positions, not world positions.
-        // Always use the root prim's world position for the radius check so that
-        // property updates on child prims don't cause the linkset to be culled.
-        var rootPos = GetRootWorldPosition(sim, rootId, prim);
+        // World-space position includes region offset for neighbor sims.
+        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim);
+        var worldPos = ApplyRegionOffset(rootPos, sim, currentSim);
+        var avatarPos = _client.Self.SimPosition;
 
-        if (!IsWithinRadius(rootPos, avatarPos, _maxStreamRadius))
+        if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
         {
-            // If we previously had this object loaded, remove it.
-            _viewport.RemoveSceneObject(rootId);
+            _viewport.RemoveSceneObject(sceneKey);
             return;
         }
 
-        EnqueueDirty(rootId);
+        EnqueueDirty(sceneKey);
     }
 
     /// <summary>
     /// Call when a terse (position/rotation) update arrives for a prim.
-    /// If the root linkset is already rendered, fast-paths the translation
-    /// without a full mesh rebuild. Otherwise triggers a normal dirty enqueue.
+    /// Fast-paths the translation for already-rendered objects in the current sim.
+    /// Objects from neighbor sims always use the slow path (rebuild on transform change).
     /// </summary>
     public void OnTerseObjectUpdate(Simulator sim, Primitive prim)
     {
         if (_disposed) return;
-        if (sim != _client.Network.CurrentSim) return;
         if (prim.PrimData.PCode == PCode.Avatar) return;
 
-        var rootId    = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
+        var currentSim  = _client.Network.CurrentSim;
+        var rootLocalId = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
+        var sceneKey    = MakeSceneKey(sim, rootLocalId, currentSim);
+
+        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim);
+        var worldPos = ApplyRegionOffset(rootPos, sim, currentSim);
         var avatarPos = _client.Self.SimPosition;
 
-        // Child prims have parent-relative positions; use the root prim's world
-        // position for the radius check to avoid wrongly culling the linkset.
-        var rootPos = GetRootWorldPosition(sim, rootId, prim);
-
-        if (!IsWithinRadius(rootPos, avatarPos, _maxStreamRadius))
+        if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
         {
-            CancelAndRemove(rootId);
+            CancelAndRemove(sceneKey);
             return;
         }
 
-        if (_rendered.ContainsKey(rootId))
+        if (_rendered.ContainsKey(sceneKey))
         {
             if (prim.ParentID == 0)
             {
-                // Root prim terse update: apply the new transform immediately so
-                // the object moves visually on every packet (including keyframe
-                // motion) without waiting for the debounced rebuild to finish.
-                var s = prim.Scale;
-                var r = prim.Rotation;
-                var p = prim.Position;
-                var scale = OpenTK.Mathematics.Matrix4.CreateScale(s.X, s.Y, s.Z);
-                var rot   = OpenTK.Mathematics.Matrix4.CreateFromQuaternion(
+                var s   = prim.Scale;
+                var r   = prim.Rotation;
+                var p   = prim.Position;
+                var off = RegionOffset(sim, currentSim);
+                var scale = TkMatrix4.CreateScale(s.X, s.Y, s.Z);
+                var rot   = TkMatrix4.CreateFromQuaternion(
                                 new OpenTK.Mathematics.Quaternion(r.X, r.Y, r.Z, r.W));
-                var trans = OpenTK.Mathematics.Matrix4.CreateTranslation(p.X, p.Y, p.Z);
-                _viewport.SetSceneObjectTransform(rootId, scale * rot * trans);
+                var trans = TkMatrix4.CreateTranslation(p.X + off.X, p.Y + off.Y, p.Z);
+                _viewport.SetSceneObjectTransform(sceneKey, scale * rot * trans);
 
-                // Also queue a debounced rebuild for linksets so child-face world
-                // positions are recalculated at the new root location.
-                // Use the reverse-parent index for O(1) single-prim detection.
-                bool isSinglePrim = !_childrenByParent.TryGetValue(rootId, out var ch) || ch.IsEmpty;
+                bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
                 if (!isSinglePrim)
-                    EnqueueDirty(rootId);
+                    EnqueueDirty(sceneKey);
             }
-            // Child-prim terse updates do not carry a new world position for the
-            // linkset root; the root's own terse update handles the transform.
         }
         else
         {
-            EnqueueDirty(rootId);
+            EnqueueDirty(sceneKey);
         }
     }
 
     /// <summary>
-    /// Call when a kill-object notification is received from the simulator.
+    /// Call when a kill-object notification is received from any connected simulator.
     /// </summary>
     public void OnKillObject(Simulator sim, uint localId)
     {
         if (_disposed) return;
-        if (sim != _client.Network.CurrentSim) return;
 
-        // The killed object could be a root or a child.  Cancel any in-flight
-        // build for it (in case it was a root) and remove from the viewport.
-        CancelAndRemove(localId);
+        var currentSim = _client.Network.CurrentSim;
+        var sceneKey   = MakeSceneKey(sim, localId, currentSim);
+        CancelAndRemove(sceneKey);
 
-        // If the killed object was a child, prune the reverse index and
-        // dirty-rebuild the parent root.
-        if (_client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(localId, out var prim)
-            && prim.ParentID != 0)
+        if (sim.ObjectsPrimitives.TryGetValue(localId, out var prim) && prim.ParentID != 0)
         {
-            if (_childrenByParent.TryGetValue(prim.ParentID, out var siblings))
-                siblings.TryRemove(localId, out _);
-            EnqueueDirty(prim.ParentID);
+            var parentKey = MakeSceneKey(sim, prim.ParentID, currentSim);
+            if (_childrenByParent.TryGetValue(parentKey, out var siblings))
+                siblings.TryRemove(sceneKey, out _);
+            EnqueueDirty(parentKey);
         }
         else
         {
-            // Root was killed — also remove its children entry from the index.
-            _childrenByParent.TryRemove(localId, out _);
+            _childrenByParent.TryRemove(sceneKey, out _);
         }
     }
 
@@ -235,48 +223,45 @@ internal sealed class SceneObjectStreamer : IDisposable
     {
         if (_disposed) return;
         var now = Environment.TickCount64;
-        foreach (var rootId in _rendered.Keys)
-            _dirty.AddOrUpdate(rootId, now, (_, _) => now);
+        foreach (var key in _rendered.Keys)
+            _dirty.AddOrUpdate(key, now, (_, _) => now);
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
 
     /// <summary>
-    /// Re-enqueues all currently rendered root IDs for a rebuild after a GL
-    /// context reset (tab switch). Routes through <see cref="EnqueueDirty"/> with
-    /// a near-zero debounce so the back-pressure guard in <see cref="ProcessDirty"/>
-    /// throttles the burst rather than flooding the scheduler with hundreds of
-    /// simultaneous <see cref="EnqueueBuild"/> calls, which can overflow the queue
-    /// and drop objects.
+    /// Re-enqueues all currently rendered root IDs for a rebuild after a GL context reset.
     /// </summary>
     public void RebuildAllRendered()
     {
         if (_disposed) return;
-        var now = Environment.TickCount64 - DebounceMs; // mark as immediately due
-        foreach (var rootId in _rendered.Keys)
-            _dirty.AddOrUpdate(rootId, now, (_, _) => now);
+        var now = Environment.TickCount64 - DebounceMs;
+        foreach (var key in _rendered.Keys)
+            _dirty.AddOrUpdate(key, now, (_, _) => now);
         if (!_dirty.IsEmpty)
-            _debounceTimer.Change(0, Timeout.Infinite); // fire ProcessDirty immediately
+            _debounceTimer.Change(0, Timeout.Infinite);
     }
 
     /// <summary>
     /// Immediately removes any rendered objects that now lie outside the current
-    /// <see cref="DrawDistance"/>. Called automatically when the draw distance is
-    /// reduced so far objects disappear without waiting for the next network event.
+    /// <see cref="DrawDistance"/>.
     /// </summary>
     public void CullBeyondDrawDistance()
     {
         if (_disposed) return;
-        var avatarPos = _client.Self.SimPosition;
-        var sim       = _client.Network.CurrentSim;
-        if (sim == null) return;
+        var avatarPos  = _client.Self.SimPosition;
+        var currentSim = _client.Network.CurrentSim;
+        if (currentSim == null) return;
 
-        foreach (var rootId in _rendered.Keys)
+        foreach (var sceneKey in _rendered.Keys)
         {
-            var objs = sim.ObjectsPrimitives;
-            if (objs == null || !objs.TryGetValue(rootId, out var root)) continue;
-            if (!IsWithinRadius(root.Position, avatarPos, _maxStreamRadius))
-                CancelAndRemove(rootId);
+            var sim         = SimForSceneKey(sceneKey) ?? currentSim;
+            var rootLocalId = LocalIdForSceneKey(sceneKey);
+            var objs        = sim.ObjectsPrimitives;
+            if (objs == null || !objs.TryGetValue(rootLocalId, out var root)) continue;
+            var worldPos = ApplyRegionOffset(root.Position, sim, currentSim);
+            if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
+                CancelAndRemove(sceneKey);
         }
     }
 
@@ -290,9 +275,12 @@ internal sealed class SceneObjectStreamer : IDisposable
         _dirty.Clear();
         _rendered.Clear();
         _childrenByParent.Clear();
+        _neighborSimIndex.Clear();
+        _simByIndex.Clear();
+        Interlocked.Exchange(ref _nextNeighborIndex, 0);
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
 
-        foreach (var (rootId, cts) in _inflight)
+        foreach (var (_, cts) in _inflight)
         {
             cts.Cancel();
             cts.Dispose();
@@ -311,49 +299,92 @@ internal sealed class SceneObjectStreamer : IDisposable
         _inflight.Clear();
     }
 
+    // ── Sim index helpers ─────────────────────────────────────────────────────────
+
+    // Returns 0 for the current sim, 1-N for neighbor sims (stable per handle).
+    private uint GetSimIndex(Simulator sim, Simulator? currentSim)
+    {
+        if (currentSim == null || sim == currentSim) return 0u;
+        var handle = sim.Handle;
+        if (_neighborSimIndex.TryGetValue(handle, out uint existing))
+        {
+            _simByIndex[existing] = sim;
+            return existing;
+        }
+        uint newIdx = (uint)Interlocked.Increment(ref _nextNeighborIndex);
+        uint idx    = _neighborSimIndex.GetOrAdd(handle, newIdx);
+        _simByIndex[idx] = sim;
+        return idx;
+    }
+
+    private ulong MakeSceneKey(Simulator sim, uint localId, Simulator? currentSim)
+        => ((ulong)GetSimIndex(sim, currentSim) << 32) | localId;
+
+    private Simulator? SimForSceneKey(ulong key)
+    {
+        uint simIndex = (uint)(key >> 32);
+        if (simIndex == 0) return _client.Network.CurrentSim;
+        return _simByIndex.TryGetValue(simIndex, out var s) ? s : null;
+    }
+
+    private static uint LocalIdForSceneKey(ulong key) => (uint)(key & 0xFFFF_FFFF);
+
+    // ── Region offset helpers ─────────────────────────────────────────────────────
+
+    // Returns the world-space offset of `sim` relative to `currentSim` in metres.
+    private static TkVector3 RegionOffset(Simulator sim, Simulator? currentSim)
+    {
+        if (currentSim == null || sim == currentSim) return TkVector3.Zero;
+        Utils.LongToUInts(currentSim.Handle, out uint cx, out uint cy);
+        Utils.LongToUInts(sim.Handle,        out uint sx, out uint sy);
+        return new TkVector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
+    }
+
+    private static Vector3 ApplyRegionOffset(Vector3 localPos, Simulator sim, Simulator? currentSim)
+    {
+        if (currentSim == null || sim == currentSim) return localPos;
+        Utils.LongToUInts(currentSim.Handle, out uint cx, out uint cy);
+        Utils.LongToUInts(sim.Handle,        out uint sx, out uint sy);
+        return new Vector3(localPos.X + (sx - cx), localPos.Y + (sy - cy), localPos.Z);
+    }
+
     // ── Internals ─────────────────────────────────────────────────────────────────
 
-    private void EnqueueDirty(uint rootId)
+    private void EnqueueDirty(ulong sceneKey)
     {
         var now = Environment.TickCount64;
-        _dirty.AddOrUpdate(rootId, now, (_, _) => now);
-        // Restart debounce window.
+        _dirty.AddOrUpdate(sceneKey, now, (_, _) => now);
         _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
 
-    private void CancelAndRemove(uint rootId)
+    private void CancelAndRemove(ulong sceneKey)
     {
-        if (_inflight.TryRemove(rootId, out var cts))
+        if (_inflight.TryRemove(sceneKey, out var cts))
         {
             cts.Cancel();
             cts.Dispose();
         }
-        _dirty.TryRemove(rootId, out _);
-        _rendered.TryRemove(rootId, out _);
-        _viewport.RemoveSceneObject(rootId);
+        _dirty.TryRemove(sceneKey, out _);
+        _rendered.TryRemove(sceneKey, out _);
+        _viewport.RemoveSceneObject(sceneKey);
     }
 
-    // Maximum number of build tasks dispatched to the scheduler in one ProcessDirty
-    // tick.  Priority sorting above ensures we always dispatch the nearest/in-frustum
-    // objects first, so 20 well-chosen slots per tick gives good throughput without
-    // flooding the GL command queue with placeholder submissions or saturating the
-    // thread pool during the initial scene-load burst.
     private const int MaxBuildsPerTick = 20;
 
-    // Quick priority score used only for sorting the ProcessDirty dispatch list.
-    // Does not need to be identical to SceneBuildScheduler.ScoreWithFrustum; it just
-    // needs to rank nearest/in-frustum objects higher than far/behind-camera ones.
     private float ScoreDue(
-        uint rootId,
-        OpenMetaverse.Vector3 avatarPos,
+        ulong sceneKey,
+        Vector3 avatarPos,
         TkVector3 eyePos,
-        TkVector3 camFwd,
-        ConcurrentDictionary<uint, Primitive>? ovPrims)
+        TkVector3 camFwd)
     {
-        float distSq = DistanceSq(rootId, avatarPos);
-        if (ovPrims != null && ovPrims.TryGetValue(rootId, out var rp))
+        float distSq    = DistanceSq(sceneKey, avatarPos);
+        var sim         = SimForSceneKey(sceneKey);
+        var rootLocalId = LocalIdForSceneKey(sceneKey);
+        var ovPrims     = sim?.ObjectsPrimitives;
+        if (ovPrims != null && ovPrims.TryGetValue(rootLocalId, out var rp))
         {
-            var objPos = new TkVector3(rp.Position.X, rp.Position.Y, rp.Position.Z);
+            var off    = RegionOffset(sim!, _client.Network.CurrentSim);
+            var objPos = new TkVector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
             return SceneBuildScheduler.ScoreWithFrustum(
                 distSq, SceneBuildScheduler.PrimMultiplier, eyePos, camFwd, objPos);
         }
@@ -364,99 +395,85 @@ internal sealed class SceneObjectStreamer : IDisposable
     {
         if (_disposed) return;
 
-        // Note: we no longer bail early when the scheduler queue is deep.
-        // The scheduler's own MaxQueueDepth (500) + priority-drop policy provides
-        // sufficient throttling; bailing here caused ProcessDirty to stall
-        // indefinitely after a tab-switch GL reset when leftover pending items
-        // from the previous session kept QueueCount elevated.
+        var now = Environment.TickCount64;
+        var due = new List<ulong>();
 
-        var now  = Environment.TickCount64;
-        var due  = new List<uint>();
-
-        foreach (var (rootId, enqueued) in _dirty)
+        foreach (var (key, enqueued) in _dirty)
         {
             if (now - enqueued >= DebounceMs)
-                due.Add(rootId);
+                due.Add(key);
         }
 
-        // Sort nearest/in-frustum objects first so that when MaxBuildsPerTick
-        // caps the dispatch count we always build the most important objects.
-        // Pre-score into a (score, id) list so each item pays exactly one dict
-        // lookup instead of O(log n) lookups inside the Sort comparator.
         if (due.Count > 1)
         {
             var avatarPos = _client.Self.SimPosition;
             var cam       = _viewport.Camera;
             var eyePos    = cam.EyePosition;
             var camFwd    = cam.ForwardDirection;
-            var ovPrims   = _client.Network.CurrentSim?.ObjectsPrimitives;
 
-            var scored = new List<(float score, uint id)>(due.Count);
-            foreach (var rootId in due)
-                scored.Add((ScoreDue(rootId, avatarPos, eyePos, camFwd, ovPrims), rootId));
+            var scored = new List<(float score, ulong key)>(due.Count);
+            foreach (var key in due)
+                scored.Add((ScoreDue(key, avatarPos, eyePos, camFwd), key));
 
-            // Insertion sort is fastest for the small N (≤ MaxBuildsPerTick) typical here.
             for (int i = 1; i < scored.Count; i++)
             {
-                var key = scored[i];
+                var k = scored[i];
                 int j = i - 1;
-                while (j >= 0 && scored[j].score < key.score)
+                while (j >= 0 && scored[j].score < k.score)
                 {
                     scored[j + 1] = scored[j];
                     j--;
                 }
-                scored[j + 1] = key;
+                scored[j + 1] = k;
             }
 
             due.Clear();
-            foreach (var (_, rootId) in scored)
-                due.Add(rootId);
+            foreach (var (_, key) in scored)
+                due.Add(key);
         }
 
         int dispatched = 0;
-        foreach (var rootId in due)
+        foreach (var key in due)
         {
             if (dispatched >= MaxBuildsPerTick) break;
-            _dirty.TryRemove(rootId, out _);
-            EnqueueBuild(rootId);
+            _dirty.TryRemove(key, out _);
+            EnqueueBuild(key);
             dispatched++;
         }
 
-        // If there are still pending dirty entries reschedule.
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
 
-    private void EnqueueBuild(uint rootId)
+    private void EnqueueBuild(ulong sceneKey)
     {
         if (_disposed) return;
 
-        // Cancel any previous in-flight or pending build for this root.
-        if (_inflight.TryRemove(rootId, out var oldCts))
+        if (_inflight.TryRemove(sceneKey, out var oldCts))
         {
             oldCts.Cancel();
             oldCts.Dispose();
         }
 
-        var cts = new CancellationTokenSource();
-        var token = cts.Token;          // capture before exposing cts to other threads
-        _inflight[rootId] = cts;
+        var cts   = new CancellationTokenSource();
+        var token = cts.Token;
+        _inflight[sceneKey] = cts;
 
-        // Compute priority: closer prims that are in front of the camera score highest.
-        var avatarPos  = _client.Self.SimPosition;
-        float distSq   = DistanceSq(rootId, avatarPos);
+        var avatarPos   = _client.Self.SimPosition;
+        float distSq    = DistanceSq(sceneKey, avatarPos);
+        var cam         = _viewport.Camera;
+        var eyePos      = cam.EyePosition;
+        var camFwd      = cam.ForwardDirection;
 
-        var cam     = _viewport.Camera;
-        var eyePos  = cam.EyePosition;
-        var camFwd  = cam.ForwardDirection;
-
-        // Best-effort object centre from the root prim; fall back to plain Score.
-        TkVector3 objPos = default;
+        TkVector3 objPos      = default;
         bool hasPosForFrustum = false;
-        var ovPrims = _client.Network.CurrentSim?.ObjectsPrimitives;
-        if (ovPrims != null && ovPrims.TryGetValue(rootId, out var rp))
+        var sim         = SimForSceneKey(sceneKey);
+        var rootLocalId = LocalIdForSceneKey(sceneKey);
+        var ovPrims     = sim?.ObjectsPrimitives;
+        if (ovPrims != null && ovPrims.TryGetValue(rootLocalId, out var rp))
         {
-            objPos = new TkVector3(rp.Position.X, rp.Position.Y, rp.Position.Z);
+            var off = RegionOffset(sim!, _client.Network.CurrentSim);
+            objPos           = new TkVector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
             hasPosForFrustum = true;
         }
 
@@ -464,48 +481,49 @@ internal sealed class SceneObjectStreamer : IDisposable
             ? SceneBuildScheduler.ScoreWithFrustum(distSq, SceneBuildScheduler.PrimMultiplier, eyePos, camFwd, objPos)
             : SceneBuildScheduler.Score(distSq, SceneBuildScheduler.PrimMultiplier);
 
-        // Progressive geometry: submit a placeholder box immediately so the object
-        // appears at the correct position while tessellation runs in the background.
-        // Only do this for the first appearance — updates to already-visible objects
-        // keep the existing (real) geometry until the new build finishes.
-        if (!_rendered.ContainsKey(rootId))
+        // Progressive placeholder for first appearance.
+        if (!_rendered.ContainsKey(sceneKey) && sim != null)
         {
-            var rootPrimOv = _client.Network.CurrentSim?.ObjectsPrimitives;
-            if (rootPrimOv != null &&
-                rootPrimOv.TryGetValue(rootId, out var rootPrim) &&
+            if (ovPrims != null &&
+                ovPrims.TryGetValue(rootLocalId, out var rootPrim) &&
                 rootPrim.Scale.LengthSquared() > 0f)
             {
-                var scale    = new TkVector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
-                var worldPos = new TkVector3(rootPrim.Position.X, rootPrim.Position.Y, rootPrim.Position.Z);
+                var off     = RegionOffset(sim, _client.Network.CurrentSim);
+                var scale   = new TkVector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
+                var wPos    = new TkVector3(rootPrim.Position.X + off.X, rootPrim.Position.Y + off.Y, rootPrim.Position.Z);
                 var placeholder = PlaceholderMeshFactory.Build(
-                    $"ph:{rootId}", scale, worldPos, rootPrimLocalId: rootId);
-                _viewport.SubmitSceneObject(rootId, placeholder);
+                    $"ph:{rootLocalId}", scale, wPos, rootPrimLocalId: rootLocalId);
+                _viewport.SubmitSceneObject(sceneKey, placeholder);
             }
         }
 
-        _scheduler.Enqueue(priority, _ => BuildObjectAsync(rootId, token));
+        _scheduler.Enqueue(priority, _ => BuildObjectAsync(sceneKey, token));
     }
 
-    private async Task BuildObjectAsync(uint rootId, CancellationToken token)
+    private async Task BuildObjectAsync(ulong sceneKey, CancellationToken token)
     {
         if (_disposed) return;
 
         try
         {
-            var prims = CollectLinkset(rootId);
+            var sim         = SimForSceneKey(sceneKey);
+            var rootLocalId = LocalIdForSceneKey(sceneKey);
+            if (sim == null) return;
+
+            var prims = CollectLinkset(sim, rootLocalId);
             if (prims == null || prims.Count == 0)
             {
-                _viewport.RemoveSceneObject(rootId);
+                _viewport.RemoveSceneObject(sceneKey);
                 return;
             }
 
-            var rootPrimForLod = prims.Find(p => p.LocalID == rootId) ?? prims[0];
-            float dist       = Vector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
-            var   lod        = LodForDistance(dist);
+            var rootPrimForLod = prims.Find(p => p.LocalID == rootLocalId) ?? prims[0];
+            float dist = Vector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
+            var   lod  = LodForDistance(dist);
 
             var submission = await _builder.BuildAsync(
-                prims, rootId,
-                label:        $"prim:{rootId}",
+                prims, rootLocalId,
+                label:        $"prim:{rootLocalId}",
                 progress:     null,
                 ct:           token,
                 detailLevel:  lod,
@@ -520,18 +538,16 @@ internal sealed class SceneObjectStreamer : IDisposable
 
             if (token.IsCancellationRequested) return;
 
-            // PrimMeshBuilder produces geometry relative to the root prim's local
-            // origin (scale × rotation, no world translation). Apply the root's
-            // sim-local position so objects appear at the correct world-space
-            // location in the scene viewer.
-            var rootPrim = rootPrimForLod;
-            var worldPos = new TkVector3(
-                rootPrim.Position.X, rootPrim.Position.Y, rootPrim.Position.Z);
+            // Apply world-space translation: sim-local position + region offset for neighbor sims.
+            var rootPrim   = rootPrimForLod;
+            var regionOff  = RegionOffset(sim, _client.Network.CurrentSim);
+            var worldPos   = new TkVector3(
+                rootPrim.Position.X + regionOff.X,
+                rootPrim.Position.Y + regionOff.Y,
+                rootPrim.Position.Z);
 
-            if (worldPos != OpenTK.Mathematics.Vector3.Zero)
+            if (worldPos != TkVector3.Zero)
             {
-                // Build a set of face indices that are owned by flexi prims so we
-                // can clear their Transform (the animator owns vertex placement).
                 var flexiFaceIndices = new System.Collections.Generic.HashSet<int>();
                 foreach (var fp in submission.FlexiPrims)
                     for (int fi = fp.FaceStart; fi < fp.FaceStart + fp.FaceCount; fi++)
@@ -543,17 +559,11 @@ internal sealed class SceneObjectStreamer : IDisposable
                 for (int i = 0; i < submission.Faces.Length; i++)
                 {
                     if (flexiFaceIndices.Contains(i))
-                        // Flexi face: leave Transform = Identity; animator writes world-space verts.
                         translated[i] = submission.Faces[i];
                     else
                         translated[i] = submission.Faces[i].WithWorldTranslation(worldPos);
                 }
 
-                // Stash world translation on ExternalTransform so the animator
-                // post-multiplies it without disturbing the prim-local AttachTransform.
-                // (Scene objects have no live bone provider so this is mostly a
-                // consistency change, but it mirrors the avatar-attachment path and
-                // keeps AttachTransform purely prim-local.)
                 foreach (var fp in submission.FlexiPrims)
                     fp.ExternalTransform = worldTransMat;
 
@@ -567,9 +577,9 @@ internal sealed class SceneObjectStreamer : IDisposable
                 };
             }
 
-            _viewport.SubmitSceneObject(rootId, submission);
-            _rendered[rootId] = 0;
-            ObjectBuilt?.Invoke(rootId, submission);
+            _viewport.SubmitSceneObject(sceneKey, submission);
+            _rendered[sceneKey] = 0;
+            ObjectBuilt?.Invoke(rootLocalId, submission);
         }
         catch (OperationCanceledException) { }
         catch (Exception)
@@ -578,16 +588,11 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
         finally
         {
-            if (_inflight.TryRemove(rootId, out var current))
+            if (_inflight.TryRemove(sceneKey, out var current))
                 current.Dispose();
         }
     }
 
-    /// <summary>
-    /// Selects a <see cref="DetailLevel"/> appropriate for the given distance.
-    /// Mirrors the SL viewer's LOD selection heuristic:
-    /// &lt;20 m = Highest, &lt;40 m = High, &lt;80 m = Medium, else Low.
-    /// </summary>
     private static DetailLevel LodForDistance(float distance) => distance switch
     {
         < 20f  => DetailLevel.Highest,
@@ -596,25 +601,21 @@ internal sealed class SceneObjectStreamer : IDisposable
         _      => DetailLevel.Low,
     };
 
-    /// <summary>
-    /// Collect the root prim plus all children that reference it as their parent.
-    /// Returns null if the root is no longer present in the sim's object dict.
-    /// </summary>
-    private List<Primitive>? CollectLinkset(uint rootId)
+    private List<Primitive>? CollectLinkset(Simulator sim, uint rootLocalId)
     {
-        var objs = _client.Network.CurrentSim?.ObjectsPrimitives;
+        var objs = sim.ObjectsPrimitives;
         if (objs == null) return null;
+        if (!objs.TryGetValue(rootLocalId, out var root)) return null;
 
-        if (!objs.TryGetValue(rootId, out var root)) return null;
+        var result   = new List<Primitive> { root };
+        var sceneKey = MakeSceneKey(sim, rootLocalId, _client.Network.CurrentSim);
 
-        var result = new List<Primitive> { root };
-
-        // Use the reverse-parent index for O(1) child lookup instead of an O(n) scan.
-        if (_childrenByParent.TryGetValue(rootId, out var childIds))
+        if (_childrenByParent.TryGetValue(sceneKey, out var childKeys))
         {
-            foreach (var childId in childIds.Keys)
+            foreach (var childKey in childKeys.Keys)
             {
-                if (objs.TryGetValue(childId, out var child))
+                var childLocalId = LocalIdForSceneKey(childKey);
+                if (objs.TryGetValue(childLocalId, out var child))
                     result.Add(child);
             }
         }
@@ -623,21 +624,13 @@ internal sealed class SceneObjectStreamer : IDisposable
 
     private static bool IsWithinRadius(Vector3 primPos, Vector3 avatarPos, float radius)
     {
-        if (primPos == Vector3.Zero) return false; // no position yet
+        if (primPos == Vector3.Zero) return false;
         var dx = primPos.X - avatarPos.X;
         var dy = primPos.Y - avatarPos.Y;
         var dz = primPos.Z - avatarPos.Z;
         return (dx * dx + dy * dy + dz * dz) <= radius * radius;
     }
 
-    /// <summary>
-    /// Returns the world-space position to use for radius checks.
-    /// For root prims this is <paramref name="prim"/>.Position directly.
-    /// For child prims (ParentID != 0) the root's position is looked up in the
-    /// simulator's object dictionary, falling back to the child's own position
-    /// (which is parent-relative and therefore unreliable) only when the root
-    /// is not yet known.
-    /// </summary>
     private Vector3 GetRootWorldPosition(Simulator sim, uint rootId, Primitive prim)
     {
         if (prim.ParentID == 0)
@@ -647,22 +640,20 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (objs != null && objs.TryGetValue(rootId, out var root) && root.Position != Vector3.Zero)
             return root.Position;
 
-        // Root not yet in dictionary — treat child position as approximate world pos.
         return prim.Position;
     }
 
-    /// <summary>
-    /// Squared distance from the avatar to the root prim's current position.
-    /// Returns a large value when the root is not found so it sorts to the back.
-    /// </summary>
-    private float DistanceSq(uint rootId, OpenMetaverse.Vector3 avatarPos)
+    private float DistanceSq(ulong sceneKey, Vector3 avatarPos)
     {
-        var objs = _client.Network.CurrentSim?.ObjectsPrimitives;
-        if (objs != null && objs.TryGetValue(rootId, out var p))
+        var sim         = SimForSceneKey(sceneKey);
+        var rootLocalId = LocalIdForSceneKey(sceneKey);
+        var objs        = sim?.ObjectsPrimitives;
+        if (objs != null && objs.TryGetValue(rootLocalId, out var p))
         {
-            var dx = p.Position.X - avatarPos.X;
-            var dy = p.Position.Y - avatarPos.Y;
-            var dz = p.Position.Z - avatarPos.Z;
+            var off = RegionOffset(sim!, _client.Network.CurrentSim);
+            var dx  = p.Position.X + off.X - avatarPos.X;
+            var dy  = p.Position.Y + off.Y - avatarPos.Y;
+            var dz  = p.Position.Z          - avatarPos.Z;
             return dx * dx + dy * dy + dz * dz;
         }
         return float.MaxValue;
