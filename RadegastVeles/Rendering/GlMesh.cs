@@ -45,7 +45,11 @@ public sealed class GlMesh : IDisposable
     private uint _lebo;      // line EBO (built lazily for ES wireframe)
     private int  _lineCount;
 
-    private const int Stride = 32; // 8 floats × 4 bytes
+    // Exposed so GlInstanceDrawer can set up a shared instance VAO pointing to this mesh's buffers.
+    internal uint Vbo        => _vbo;
+    internal uint Ebo        => _ebo;
+    internal int  IndexCount => _indexCount;
+    internal const int VertexStride = 32; // 8 floats × 4 bytes
 
     public GlMesh(float[] vertices, ushort[] indices)
         : this(vertices, vertices.Length, indices) { }
@@ -80,15 +84,15 @@ public sealed class GlMesh : IDisposable
 
         // Position (location 0)
         gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, Stride, (void*)0);
+        gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, VertexStride, (void*)0);
 
         // Normal (location 1)
         gl.EnableVertexAttribArray(1);
-        gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, Stride, (void*)12);
+        gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, VertexStride, (void*)12);
 
         // TexCoord (location 2)
         gl.EnableVertexAttribArray(2);
-        gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, Stride, (void*)24);
+        gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, VertexStride, (void*)24);
 
         gl.BindVertexArray(0);
     }

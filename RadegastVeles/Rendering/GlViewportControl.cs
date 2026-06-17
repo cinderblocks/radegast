@@ -265,6 +265,11 @@ public class GlViewportControl : Panel
     private readonly List<GlMesh> _faceMeshes = new();
     private readonly ConcurrentQueue<(int FaceIndex, float[] Verts)> _pendingVertexUpdates = new();
 
+    // Instanced rendering support.
+    private GlInstanceDrawer? _instanceDrawer;
+    // Reused per-frame buffer for per-instance float data; grown on demand, never shrunk.
+    private float[] _instanceDataBuf = Array.Empty<float>();
+
     // Per-scene-object vertex updates: (rootId, face-within-root offset, verts, vert count, pool-rented flag).
     // When IsPoolRented is true the Verts buffer was rented from ArrayPool<float>.Shared by the producer
     // (SceneAvatarAnimator) and must be returned after the GL upload.  Flexi-prim buffers are allocated
@@ -674,7 +679,8 @@ public class GlViewportControl : Panel
             _particleShader = GlShader.Compile(
                 ShaderLoader.Load("particle.vert"),
                 ShaderLoader.Load("particle.frag"));
-            _particleBuf = new GlParticleBuffer();
+            _particleBuf    = new GlParticleBuffer();
+            _instanceDrawer = new GlInstanceDrawer();
             // GL ES (ANGLE) doesn't expose PolygonMode; check version string.
             var version = GlApi.Gl.GetStringS(StringName.Version) ?? "";
             _supportsPolygonMode = !version.Contains("OpenGL ES");
@@ -972,8 +978,8 @@ public class GlViewportControl : Panel
         // the geometry was already submitted).
         ApplyTexturePatches();
 
-        DrawFaces(_opaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky);
-        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky);
+        DrawFaces(_opaque,      _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: true, sortForBatching: true);
+        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: true);
 
         // ── Water surface ─────────────────────────────────────────────────
         // Drawn after opaque geometry (correct depth test) but before alpha
@@ -1226,6 +1232,7 @@ public class GlViewportControl : Panel
         _ssaoShader?.Dispose();     _ssaoShader     = null;
         _ssaoBlurShader?.Dispose(); _ssaoBlurShader = null;
         _particleBuf?.Dispose();    _particleBuf    = null;
+        _instanceDrawer?.Dispose(); _instanceDrawer = null;
         _stats.Dispose();
     }
 
@@ -1819,8 +1826,8 @@ public class GlViewportControl : Panel
         // Z mirror flips winding: what was CCW becomes CW from the reflected camera
         GlApi.Gl.FrontFace(FrontFaceDirection.CW);
 
-        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
+        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: true, sortForBatching: true);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: true);
 
         GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
@@ -2101,11 +2108,28 @@ public class GlViewportControl : Panel
             catch { return null; }
         }
 
+        // Per-submission mesh pool: identical non-flexi geometry shares a single GlMesh.
+        // Halves GPU memory for linksets with copy-pasted faces and enables instanced draws.
+        var meshPool = new Dictionary<ulong, GlMesh>(sub.Faces.Length);
+
         foreach (var face in sub.Faces)
         {
-            int vLen      = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
-            var mesh      = new GlMesh(face.Vertices!, vLen, face.Indices);
-            _faceMeshes.Add(mesh);
+            int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
+            GlMesh mesh;
+            if (!face.IsFlexi)
+            {
+                ulong h = VertexHash(face.Vertices!, vLen, face.Indices);
+                if (!meshPool.TryGetValue(h, out mesh!))
+                {
+                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                    meshPool[h] = mesh;
+                }
+            }
+            else
+            {
+                mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+            }
+            _faceMeshes.Add(mesh); // indexed by face position for animation updates
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
             // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
             // PickerVertices (3 floats/vertex) is used for ray–triangle intersection;
@@ -2331,10 +2355,26 @@ public class GlViewportControl : Panel
             catch { return null; }
         }
 
+        // Per-submission mesh pool: same dedup as UploadSubmission.
+        var meshPool = new Dictionary<ulong, GlMesh>(sub.Faces.Length);
+
         foreach (var face in sub.Faces)
         {
-            int vLen      = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
-            var mesh      = new GlMesh(face.Vertices!, vLen, face.Indices);
+            int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
+            GlMesh mesh;
+            if (!face.IsFlexi)
+            {
+                ulong h = VertexHash(face.Vertices!, vLen, face.Indices);
+                if (!meshPool.TryGetValue(h, out mesh!))
+                {
+                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                    meshPool[h] = mesh;
+                }
+            }
+            else
+            {
+                mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+            }
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
             // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
@@ -2826,7 +2866,7 @@ public class GlViewportControl : Panel
             _                             => (tex,    norm, spec,  mr,    em),
         };
 
-    private static void DrawFaces(
+    private void DrawFaces(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
         ref Matrix4 view,
@@ -2836,7 +2876,9 @@ public class GlViewportControl : Panel
         Vector2 screenSize = default,
         Frustum? frustum = null,
         FrameStatsTracker? stats = null,
-        SkySettings? sky = null)
+        SkySettings? sky = null,
+        bool enableInstancing = false,
+        bool sortForBatching = false)
     {
         shader.Use();
 
@@ -2877,10 +2919,100 @@ public class GlViewportControl : Panel
         var viewInvFull = Matrix4.Invert(view);
         var viewInv3 = new Matrix3(viewInvFull.Row0.Xyz, viewInvFull.Row1.Xyz, viewInvFull.Row2.Xyz);
 
+        bool canBatch = enableInstancing && _instanceDrawer != null;
+
+        if (canBatch && sortForBatching)
+        {
+            // Sort opaque list by (mesh ref, tex ref) so identical-geometry faces are
+            // consecutive, maximising instanced batch sizes while minimising texture binds.
+            // Only done for lists without a parallel index array (_opaque, not _sceneOpaque).
+            list.Sort(static (a, b) =>
+            {
+                int mh = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.mesh)
+                         .CompareTo(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.mesh));
+                if (mh != 0) return mh;
+                int tha = a.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.tex);
+                int thb = b.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.tex);
+                return tha.CompareTo(thb);
+            });
+        }
+
+        // Signal the vertex shader which draw path is active. Set to false once up-front;
+        // toggled to true only around instanced batches, then restored.
+        shader.Set("uInstanced", false);
+
         bool cullActive = true;
-        for (int _i = 0; _i < list.Count; _i++)
+        int _i = 0;
+        while (_i < list.Count)
         {
             var (mesh, tex, normalTex, specTex, mrTex, emTex, face) = list[_i];
+
+            // ── Instanced batch detection ─────────────────────────────────
+            // Batch condition: non-PBR, non-material, non-flexi, same mesh+texture+IsTwoSided.
+            // UV transforms for plain TE faces are baked into vertex UVs so per-instance
+            // data is just the transform matrices + color + misc scalars.
+            if (canBatch && !face.IsFlexi && !face.IsPBR && !face.HasMaterial)
+            {
+                int batchEnd = _i + 1;
+                while (batchEnd < list.Count)
+                {
+                    var (bMesh, bTex, _, _, _, _, bFace) = list[batchEnd];
+                    if (!ReferenceEquals(bMesh, mesh) || !ReferenceEquals(bTex, tex) ||
+                        bFace.IsFlexi || bFace.IsPBR || bFace.HasMaterial ||
+                        bFace.IsTwoSided != face.IsTwoSided)
+                        break;
+                    batchEnd++;
+                }
+
+                int batchCount = batchEnd - _i;
+                if (batchCount >= 2)
+                {
+                    // Set cull state for the whole batch.
+                    if (manageCulling)
+                    {
+                        if (face.IsTwoSided && cullActive)     { GlApi.Gl.Disable(EnableCap.CullFace); cullActive = false; }
+                        else if (!face.IsTwoSided && !cullActive) { GlApi.Gl.Enable(EnableCap.CullFace);  cullActive = true;  }
+                    }
+
+                    // Set shared batch uniforms (texture + material-class flags).
+                    bool hasTex0 = tex != null;
+                    shader.Set("uHasTexture",  hasTex0);
+                    if (hasTex0) { tex!.Bind(0); shader.Set("uAlbedo", 0); }
+                    shader.Set("uIsPBR",       false);
+                    shader.Set("uHasMaterial", false);
+                    shader.Set("uHasBump",     false);
+
+                    // Grow the per-instance data buffer if needed.
+                    int needed = batchCount * GlInstanceDrawer.InstanceFloats;
+                    if (needed > _instanceDataBuf.Length)
+                        _instanceDataBuf = new float[needed * 2];
+
+                    // Build per-instance data with individual frustum culling.
+                    shader.Set("uInstanced", true);
+                    int written = 0;
+                    for (int j = _i; j < batchEnd; j++)
+                    {
+                        var (_, _, _, _, _, _, jFace) = list[j];
+                        stats?.RecordFaceConsidered();
+                        if (frustum.HasValue)
+                        {
+                            jFace.GetWorldAabb(out var jMin, out var jMax);
+                            if (!FrustumCuller.IntersectsAabb(frustum.Value, jMin, jMax))
+                            { stats?.RecordFaceCulled(); continue; }
+                        }
+                        WriteInstanceData(_instanceDataBuf, written, jFace, ref view, ref proj);
+                        written++;
+                        stats?.RecordDraw(mesh.IndexCount);
+                    }
+
+                    if (written > 0)
+                        _instanceDrawer!.DrawInstanced(mesh, _instanceDataBuf, written);
+
+                    shader.Set("uInstanced", false);
+                    _i = batchEnd;
+                    continue;
+                }
+            }
 
             // Frustum cull using the face's world-space AABB. Faces with no geometry
             // (empty vertex buffer) fall through with a zero-extent AABB at the face origin,
@@ -2896,6 +3028,7 @@ public class GlViewportControl : Panel
                 if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
                 {
                     stats?.RecordFaceCulled();
+                    _i++;
                     continue;
                 }
             }
@@ -3033,10 +3166,56 @@ public class GlViewportControl : Panel
 
             mesh.Draw();
             stats?.RecordDraw(face.Indices?.Length ?? 0);
+            _i++;
         }
         if (manageCulling && !cullActive)
             GlApi.Gl.Enable(EnableCap.CullFace);
         shader.Unuse();
+    }
+
+    // Writes one instance's data into buf starting at instanceIdx * GlInstanceDrawer.InstanceFloats.
+    // Matrices are transposed from OpenTK row-major to GL column-major order.
+    private static unsafe void WriteInstanceData(
+        float[] buf, int instanceIdx, PrimRenderFace face, ref Matrix4 view, ref Matrix4 proj)
+    {
+        int @base = instanceIdx * GlInstanceDrawer.InstanceFloats;
+        var mv    = face.Transform * view;
+        var mvp   = mv * proj;
+
+        // Column-major upload: OpenTK is row-major, so transpose before copying raw bytes.
+        var mvpT = Matrix4.Transpose(mvp);
+        var mvT  = Matrix4.Transpose(mv);
+        var mvpSpan = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4, float>(ref mvpT), 16);
+        var mvSpan  = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4, float>(ref mvT),  16);
+        mvpSpan.CopyTo(buf.AsSpan(@base,      16));
+        mvSpan.CopyTo( buf.AsSpan(@base + 16, 16));
+
+        var c = face.Color;
+        buf[@base + 32] = c.X;  buf[@base + 33] = c.Y;
+        buf[@base + 34] = c.Z;  buf[@base + 35] = c.W;
+
+        buf[@base + 36] = face.Fullbright ? 1f : 0f;
+        buf[@base + 37] = face.Glow;
+        buf[@base + 38] = face.Shiny;
+        buf[@base + 39] = face.AlphaCutoff;
+        buf[@base + 40] = (float)(int)face.AlphaMode;
+        buf[@base + 41] = 0f; buf[@base + 42] = 0f; buf[@base + 43] = 0f;
+    }
+
+    // FNV-64 hash over raw vertex + index bytes.
+    // Used for per-submission mesh deduplication: identical geometry → shared GlMesh.
+    private static ulong VertexHash(float[] verts, int len, ushort[] indices)
+    {
+        const ulong Prime  = 0x00000100000001B3UL;
+        const ulong Offset = 0xCBF29CE484222325UL;
+        ulong hash = Offset;
+        var vBytes = System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(verts.AsSpan(0, len));
+        foreach (byte b in vBytes) { hash = (hash ^ b) * Prime; }
+        var iBytes = System.Runtime.InteropServices.MemoryMarshal.Cast<ushort, byte>(indices.AsSpan());
+        foreach (byte b in iBytes) { hash = (hash ^ b) * Prime; }
+        return hash;
     }
 
     /// <summary>

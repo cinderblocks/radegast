@@ -5,19 +5,17 @@ in  vec3 vNormal;
 in  vec3 vViewPos;
 in  vec2 vTexCoord;
 
+// Per-face / per-instance data forwarded from prim.vert.
+// For non-instanced draws these mirror the per-face uniforms; for instanced draws
+// they carry per-instance values without any extra fragment-shader branching.
+flat in vec4 vInstColor;
+flat in vec4 vInstMisc;   // x=fullbright01, y=glow, z=shiny, w=alphaCutoff
+flat in int  vInstAlphaMode;
+
 uniform sampler2D uAlbedo;
 uniform int       uHasTexture;
-uniform vec4      uColor;
-uniform float     uGlow;
-uniform int       uFullbright;
-uniform float     uAlphaCutoff;
-
-// Legacy TE shiny factor: 0.0=none, 0.24=low, 0.64=medium, 0.96=high
-uniform float     uShiny;
 // 1 if the TE face has a legacy bump code (Bumpiness != None)
 uniform int       uHasBump;
-// Alpha mode: 0=none(opaque), 1=blend, 2=mask(cutoff), 3=emissive
-uniform int       uAlphaMode;
 
 // -- LLMaterial uniforms ------------------------------------------------------
 uniform int       uHasMaterial;
@@ -218,6 +216,14 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
 
 void main()
 {
+    // Unpack per-face / per-instance data from varyings written by prim.vert.
+    vec4  faceColor    = vInstColor;
+    bool  fullbright   = vInstMisc.x > 0.5;
+    float glow         = vInstMisc.y;
+    float shiny        = vInstMisc.z;
+    float alphaCutoff  = vInstMisc.w;
+    int   alphaMode    = vInstAlphaMode;
+
     // ── PBR path ─────────────────────────────────────────────────────────
     if (uIsPBR != 0)
     {
@@ -230,16 +236,16 @@ void main()
         // data in alpha, not GL transparency.  Mode 1 (blend) and 2 (mask) use the
         // texture alpha; for everything else keep a near-zero sentinel for degenerate
         // fully-transparent fragments produced by bad content.
-        if (uAlphaMode != 0)
+        if (alphaMode != 0)
         {
-            float cutoff = (uAlphaMode == 2) ? uAlphaCutoff : 0.004;
+            float cutoff = (alphaMode == 2) ? alphaCutoff : 0.004;
             if (base.a < cutoff) discard;
         }
 
-        if (uFullbright != 0)
+        if (fullbright)
         {
-            vec3 glowCol = clamp(base.rgb * (1.0 + uGlow), 0.0, 1.0);
-            fragColor = vec4(glowCol, (uAlphaMode == 1) ? base.a : 1.0);
+            vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
+            fragColor = vec4(glowCol, (alphaMode == 1) ? base.a : 1.0);
             return;
         }
 
@@ -296,36 +302,36 @@ void main()
         }
 
         // Add glow as extra emission
-        emissive += albedo * uGlow;
+        emissive += albedo * glow;
 
         vec4 result;
         pbrLighting(albedo, metallic, roughness, occlusion, emissive, n, v,
-                    (uAlphaMode == 1) ? base.a : 1.0, result);
+                    (alphaMode == 1) ? base.a : 1.0, result);
         fragColor = result;
         return;
     }
 
     // ── Legacy Blinn-Phong path ──────────────────────────────────────────
     vec4 base = (uHasTexture != 0)
-        ? texture(uAlbedo, vTexCoord) * uColor
-        : uColor;
+        ? texture(uAlbedo, vTexCoord) * faceColor
+        : faceColor;
 
     // AlphaMode 0 (None/opaque): never discard — baked textures store compositing
     // data in alpha, not GL transparency.  Mode 1 (blend) and 2 (mask) use the
     // texture alpha; for everything else a near-zero sentinel drops degenerate
     // fully-transparent fragments from bad content.
-    if (uAlphaMode != 0)
+    if (alphaMode != 0)
     {
-        float cutoff = (uAlphaMode == 2) ? uAlphaCutoff : 0.004;
+        float cutoff = (alphaMode == 2) ? alphaCutoff : 0.004;
         if (base.a < cutoff) discard;
     }
 
-    if (uFullbright != 0)
+    if (fullbright)
     {
         // Glow adds extra brightness on top of the fully-lit base colour,
         // approximating the emission the face would contribute to a bloom pass.
-        vec3 glowCol = clamp(base.rgb * (1.0 + uGlow), 0.0, 1.0);
-        fragColor = vec4(glowCol, (uAlphaMode == 1) ? base.a : 1.0);
+        vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
+        fragColor = vec4(glowCol, (alphaMode == 1) ? base.a : 1.0);
         return;
     }
 
@@ -386,8 +392,8 @@ void main()
     }
     else
     {
-        specStrength = mix(0.06, 1.4,   uShiny);
-        shininess    = mix(16.0, 128.0, uShiny);
+        specStrength = mix(0.06, 1.4,   shiny);
+        shininess    = mix(16.0, 128.0, shiny);
         specTint     = vec3(specStrength);
     }
 
@@ -423,7 +429,7 @@ void main()
 
     // Glow is additive self-illumination (linear space), approximating the
     // brightness that a bloom post-process would add around glowing faces.
-    col += albedo * uGlow;
+    col += albedo * glow;
 
     // Convert back to sRGB for display.
     col = pow(col, vec3(1.0 / 2.2));
@@ -431,13 +437,13 @@ void main()
     // Emissive alpha mode (3): alpha drives additive emission rather than
     // transparency. The final fragment is fully opaque, mirroring the SL
     // viewer's DIFFUSE_ALPHA_MODE_EMISSIVE behaviour.
-    if (uAlphaMode == 3)
+    if (alphaMode == 3)
     {
         col += base.rgb * base.a;
         fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
         return;
     }
 
-    fragColor = vec4(col, (uAlphaMode == 1) ? base.a : 1.0);
+    fragColor = vec4(col, (alphaMode == 1) ? base.a : 1.0);
 }
 
