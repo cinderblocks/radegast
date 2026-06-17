@@ -21,7 +21,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 using TkMatrix4 = OpenTK.Mathematics.Matrix4;
 using TkVector3 = OpenTK.Mathematics.Vector3;
 using TkVector4 = OpenTK.Mathematics.Vector4;

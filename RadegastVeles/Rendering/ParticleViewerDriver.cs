@@ -255,17 +255,17 @@ internal sealed class ParticleViewerDriver : IDisposable
         // Matches lldrawpoolalpha.cpp blend func mapping in the SL viewer.
         return slBlend switch
         {
-            0 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.One,
-            1 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.Zero,
-            2 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.DstColor,
-            3 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.SrcColor,
-            4 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.OneMinusDstColor,
-            5 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.OneMinusSrcColor,
-            6 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.DstAlpha,
-            7 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.SrcAlpha,
-            8 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.OneMinusDstAlpha,
-            9 => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.OneMinusSrcAlpha,
-            _ => (int)OpenTK.Graphics.OpenGL4.BlendingFactor.SrcAlpha,
+            0 => (int)Silk.NET.OpenGL.BlendingFactor.One,
+            1 => (int)Silk.NET.OpenGL.BlendingFactor.Zero,
+            2 => (int)Silk.NET.OpenGL.BlendingFactor.DstColor,
+            3 => (int)Silk.NET.OpenGL.BlendingFactor.SrcColor,
+            4 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusDstColor,
+            5 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcColor,
+            6 => (int)Silk.NET.OpenGL.BlendingFactor.DstAlpha,
+            7 => (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha,
+            8 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusDstAlpha,
+            9 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcAlpha,
+            _ => (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha,
         };
     }
 }

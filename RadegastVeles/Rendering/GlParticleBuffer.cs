@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
@@ -43,7 +43,7 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class GlParticleBuffer : IDisposable
 {
-    private int  _vao, _vbo;
+    private uint _vao, _vbo;
     private int  _uploadedCount;
     private bool _disposed;
 
@@ -52,30 +52,31 @@ internal sealed class GlParticleBuffer : IDisposable
     private const int VerticesPerParticle = 6;
     private const int Stride = FloatsPerVertex * sizeof(float); // 36 bytes
 
-    public GlParticleBuffer()
+    public unsafe GlParticleBuffer()
     {
-        _vao = GL.GenVertexArray();
-        _vbo = GL.GenBuffer();
+        var gl = GlApi.Gl;
+        _vao = gl.GenVertexArray();
+        _vbo = gl.GenBuffer();
 
-        GL.BindVertexArray(_vao);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
+        gl.BindVertexArray(_vao);
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
 
         // Allocate an empty buffer; we'll grow via BufferData each tick.
-        GL.BufferData(BufferTarget.ArrayBuffer, 0, IntPtr.Zero, BufferUsageHint.StreamDraw);
+        gl.BufferData(BufferTargetARB.ArrayBuffer, 0, null, BufferUsageARB.StreamDraw);
 
         // Position (location 0) – vec3 @ offset 0
-        GL.EnableVertexAttribArray(0);
-        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, Stride, 0);
+        gl.EnableVertexAttribArray(0);
+        gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, Stride, (void*)0);
 
         // TexCoord (location 1) – vec2 @ offset 12
-        GL.EnableVertexAttribArray(1);
-        GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, Stride, 12);
+        gl.EnableVertexAttribArray(1);
+        gl.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, Stride, (void*)12);
 
         // Color (location 2) – vec4 @ offset 20
-        GL.EnableVertexAttribArray(2);
-        GL.VertexAttribPointer(2, 4, VertexAttribPointerType.Float, false, Stride, 20);
+        gl.EnableVertexAttribArray(2);
+        gl.VertexAttribPointer(2, 4, VertexAttribPointerType.Float, false, Stride, (void*)20);
 
-        GL.BindVertexArray(0);
+        gl.BindVertexArray(0);
     }
 
     /// <summary>
@@ -84,7 +85,7 @@ internal sealed class GlParticleBuffer : IDisposable
     /// <param name="particles">Particle snapshots from the simulator.</param>
     /// <param name="cameraRight">Camera right vector in world space.</param>
     /// <param name="cameraUp">Camera up vector in world space.</param>
-    public void Upload(ReadOnlySpan<ParticleVertex> particles, Vector3 cameraRight, Vector3 cameraUp)
+    public unsafe void Upload(ReadOnlySpan<ParticleVertex> particles, Vector3 cameraRight, Vector3 cameraUp)
     {
         _uploadedCount = particles.Length;
         if (_uploadedCount == 0) return;
@@ -141,26 +142,30 @@ internal sealed class GlParticleBuffer : IDisposable
             verts[idx++] = p.Color.X; verts[idx++] = p.Color.Y; verts[idx++] = p.Color.Z; verts[idx++] = p.Color.W;
         }
 
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer,
-            verts.Length * sizeof(float), verts, BufferUsageHint.StreamDraw);
-        GL.BindBuffer(BufferTarget.ArrayBuffer, 0);
+        var gl = GlApi.Gl;
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* p = verts)
+            gl.BufferData(BufferTargetARB.ArrayBuffer,
+                (nuint)(verts.Length * sizeof(float)), p, BufferUsageARB.StreamDraw);
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
     }
 
     /// <summary>Draw all uploaded particle quads.</summary>
     public void Draw()
     {
         if (_uploadedCount == 0) return;
-        GL.BindVertexArray(_vao);
-        GL.DrawArrays(PrimitiveType.Triangles, 0, _uploadedCount * VerticesPerParticle);
-        GL.BindVertexArray(0);
+        var gl = GlApi.Gl;
+        gl.BindVertexArray(_vao);
+        gl.DrawArrays(PrimitiveType.Triangles, 0, (uint)(_uploadedCount * VerticesPerParticle));
+        gl.BindVertexArray(0);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        if (_vao != 0) { GL.DeleteVertexArray(_vao); _vao = 0; }
-        if (_vbo != 0) { GL.DeleteBuffer(_vbo);      _vbo = 0; }
+        var gl = GlApi.Gl;
+        if (_vao != 0) { gl.DeleteVertexArray(_vao); _vao = 0; }
+        if (_vbo != 0) { gl.DeleteBuffer(_vbo);      _vbo = 0; }
     }
 }

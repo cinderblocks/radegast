@@ -19,7 +19,7 @@
 
 using System;
 using System.Diagnostics;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 
 namespace Radegast.Veles.Rendering;
 
@@ -53,7 +53,7 @@ public sealed class FrameStatsTracker : IDisposable
 {
     private const int QueryRing = 4;
 
-    private readonly int[]   _queries = new int[QueryRing];
+    private readonly uint[]  _queries = new uint[QueryRing];
     private readonly bool[]  _started = new bool[QueryRing];
     private int    _writeIndex;
     private bool   _supported;
@@ -84,21 +84,22 @@ public sealed class FrameStatsTracker : IDisposable
             // GL_TIME_ELAPSED queries are desktop-only. On GL ES / ANGLE the
             // glGetQueryObjectiv entry point is not exported, and calling the
             // unbound delegate produces an ExecutionEngineException.
-            var version = GL.GetString(StringName.Version) ?? "";
+            var gl = GlApi.Gl;
+            var version = gl.GetStringS(StringName.Version) ?? "";
             if (version.Contains("OpenGL ES"))
             {
                 _supported = false;
                 return;
             }
 
-            GL.GenQueries(QueryRing, _queries);
+            gl.GenQueries((uint)QueryRing, _queries);
             // GenQueries doesn't fail on unsupported drivers — verify by issuing one Begin/End pair.
-            GL.BeginQuery(QueryTarget.TimeElapsed, _queries[0]);
-            GL.EndQuery(QueryTarget.TimeElapsed);
+            gl.BeginQuery(QueryTarget.TimeElapsed, _queries[0]);
+            gl.EndQuery(QueryTarget.TimeElapsed);
             // If the driver doesn't support it BeginQuery returns silently;
             // we can still read GetError to confirm.
-            var err = GL.GetError();
-            _supported = err == ErrorCode.NoError;
+            var err = gl.GetError();
+            _supported = err == GLEnum.NoError;
         }
         catch
         {
@@ -119,19 +120,20 @@ public sealed class FrameStatsTracker : IDisposable
         if (!_supported) return;
 
         // Try to read back the oldest query (write index points to next slot, oldest is one ahead).
+        var gl = GlApi.Gl;
         int readSlot = (_writeIndex + 1) % QueryRing;
         if (_started[readSlot])
         {
-            GL.GetQueryObject(_queries[readSlot], GetQueryObjectParam.QueryResultAvailable, out int avail);
+            gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.QueryResultAvailable, out int avail);
             if (avail != 0)
             {
-                GL.GetQueryObject(_queries[readSlot], GetQueryObjectParam.QueryResult, out long ns);
+                gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.QueryResult, out long ns);
                 _lastGpuMs = ns / 1_000_000.0;
                 _started[readSlot] = false;
             }
         }
 
-        GL.BeginQuery(QueryTarget.TimeElapsed, _queries[_writeIndex]);
+        gl.BeginQuery(QueryTarget.TimeElapsed, _queries[_writeIndex]);
         _started[_writeIndex] = true;
     }
 
@@ -143,7 +145,7 @@ public sealed class FrameStatsTracker : IDisposable
 
         if (_supported)
         {
-            GL.EndQuery(QueryTarget.TimeElapsed);
+            GlApi.Gl.EndQuery(QueryTarget.TimeElapsed);
             _writeIndex = (_writeIndex + 1) % QueryRing;
         }
 
@@ -199,7 +201,7 @@ public sealed class FrameStatsTracker : IDisposable
         _disposed = true;
         if (_initialized && _supported)
         {
-            try { GL.DeleteQueries(QueryRing, _queries); } catch { /* context may already be gone */ }
+            try { GlApi.Gl.DeleteQueries((uint)QueryRing, _queries); } catch { /* context may already be gone */ }
         }
     }
 }

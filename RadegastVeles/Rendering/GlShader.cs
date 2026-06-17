@@ -19,7 +19,9 @@
 
 using System;
 using System.Collections.Generic;
-using OpenTK.Graphics.OpenGL4;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using Silk.NET.OpenGL;
 using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
@@ -30,7 +32,7 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 public sealed class GlShader : IDisposable
 {
-    private int  _programId;
+    private uint _programId;
     private bool _disposed;
 
     // Cached uniform locations: populated on first Loc(name) call, reused on all subsequent.
@@ -48,44 +50,45 @@ public sealed class GlShader : IDisposable
     private readonly Dictionary<int, float>   _cachedFloat = new();
     private readonly Dictionary<int, Vector4> _cachedVec   = new();
 
-    private GlShader(int programId) => _programId = programId;
+    private GlShader(uint programId) => _programId = programId;
 
     /// <summary>Compile vertex and fragment stages and link into a program.</summary>
     /// <exception cref="InvalidOperationException">If compilation or linking fails.</exception>
     public static GlShader Compile(string vertSrc, string fragSrc)
     {
-        int vert = CompileStage(ShaderType.VertexShader,   vertSrc);
-        int frag = CompileStage(ShaderType.FragmentShader, fragSrc);
+        var gl = GlApi.Gl;
+        uint vert = CompileStage(ShaderType.VertexShader,   vertSrc);
+        uint frag = CompileStage(ShaderType.FragmentShader, fragSrc);
 
-        int prog = GL.CreateProgram();
-        GL.AttachShader(prog, vert);
-        GL.AttachShader(prog, frag);
-        GL.LinkProgram(prog);
+        uint prog = gl.CreateProgram();
+        gl.AttachShader(prog, vert);
+        gl.AttachShader(prog, frag);
+        gl.LinkProgram(prog);
 
-        GL.GetProgram(prog, GetProgramParameterName.LinkStatus, out int ok);
+        gl.GetProgram(prog, ProgramPropertyARB.LinkStatus, out int ok);
         if (ok == 0)
         {
-            string log = GL.GetProgramInfoLog(prog);
-            GL.DeleteProgram(prog);
+            string log = gl.GetProgramInfoLog(prog);
+            gl.DeleteProgram(prog);
             throw new InvalidOperationException($"Shader link error: {log}");
         }
 
-        GL.DetachShader(prog, vert);
-        GL.DetachShader(prog, frag);
-        GL.DeleteShader(vert);
-        GL.DeleteShader(frag);
+        gl.DetachShader(prog, vert);
+        gl.DetachShader(prog, frag);
+        gl.DeleteShader(vert);
+        gl.DeleteShader(frag);
 
         return new GlShader(prog);
     }
 
-    public void Use()   => GL.UseProgram(_programId);
-    public void Unuse() => GL.UseProgram(0);
+    public void Use()   => GlApi.Gl.UseProgram(_programId);
+    public void Unuse() => GlApi.Gl.UseProgram(0);
 
     private int Loc(string name)
     {
         if (!_uniformLocations.TryGetValue(name, out var loc))
         {
-            loc = GL.GetUniformLocation(_programId, name);
+            loc = GlApi.Gl.GetUniformLocation(_programId, name);
             _uniformLocations[name] = loc;
         }
         return loc;
@@ -97,7 +100,7 @@ public sealed class GlShader : IDisposable
         if (loc < 0) return;
         if (_cachedInt.TryGetValue(loc, out var prev) && prev == v) return;
         _cachedInt[loc] = v;
-        GL.Uniform1(loc, v);
+        GlApi.Gl.Uniform1(loc, v);
     }
 
     public void Set(string name, float v)
@@ -106,7 +109,7 @@ public sealed class GlShader : IDisposable
         if (loc < 0) return;
         if (_cachedFloat.TryGetValue(loc, out var prev) && prev == v) return;
         _cachedFloat[loc] = v;
-        GL.Uniform1(loc, v);
+        GlApi.Gl.Uniform1(loc, v);
     }
 
     public void Set(string name, bool v) => Set(name, v ? 1 : 0);
@@ -118,7 +121,7 @@ public sealed class GlShader : IDisposable
         var key = new Vector4(v.X, v.Y, 0f, 0f);
         if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
         _cachedVec[loc] = key;
-        GL.Uniform2(loc, v);
+        GlApi.Gl.Uniform2(loc, v.X, v.Y);
     }
 
     public void Set(string name, Vector3 v)
@@ -128,7 +131,7 @@ public sealed class GlShader : IDisposable
         var key = new Vector4(v.X, v.Y, v.Z, 0f);
         if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
         _cachedVec[loc] = key;
-        GL.Uniform3(loc, v);
+        GlApi.Gl.Uniform3(loc, v.X, v.Y, v.Z);
     }
 
     public void Set(string name, Vector4 v)
@@ -137,7 +140,7 @@ public sealed class GlShader : IDisposable
         if (loc < 0) return;
         if (_cachedVec.TryGetValue(loc, out var prev) && prev == v) return;
         _cachedVec[loc] = v;
-        GL.Uniform4(loc, v);
+        GlApi.Gl.Uniform4(loc, v.X, v.Y, v.Z, v.W);
     }
 
     /// <summary>Upload a uniform vec3 array (e.g. SSAO sample kernel).</summary>
@@ -145,27 +148,40 @@ public sealed class GlShader : IDisposable
     {
         int loc = Loc(name);
         if (loc < 0) return;
+        var gl = GlApi.Gl;
         for (int i = 0; i < values.Length; i++)
-            GL.Uniform3(loc + i, values[i]);
+            gl.Uniform3(loc + i, values[i].X, values[i].Y, values[i].Z);
     }
 
-    public void Set(string name, ref Matrix4 m, bool transpose = false) =>
-        GL.UniformMatrix4(Loc(name), transpose, ref m);
-
-    public void Set(string name, ref Matrix3 m, bool transpose = false) =>
-        GL.UniformMatrix3(Loc(name), transpose, ref m);
-
-    private static int CompileStage(ShaderType type, string src)
+    // OpenTK's Matrix4/Matrix3 are contiguous row-major float blocks (4×Vector4 / 3×Vector3).
+    // Reinterpret them as a float span for Silk.NET's glUniformMatrix*fv (count = 1). The
+    // 'transpose' flag carries through unchanged, so layout handling matches the old OpenTK call.
+    public void Set(string name, ref Matrix4 m, bool transpose = false)
     {
-        int shader = GL.CreateShader(type);
-        GL.ShaderSource(shader, src);
-        GL.CompileShader(shader);
+        ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.As<Matrix4, float>(ref m), 16);
+        GlApi.Gl.UniformMatrix4(Loc(name), 1, transpose, span);
+    }
 
-        GL.GetShader(shader, ShaderParameter.CompileStatus, out int ok);
+    public void Set(string name, ref Matrix3 m, bool transpose = false)
+    {
+        ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.As<Matrix3, float>(ref m), 9);
+        GlApi.Gl.UniformMatrix3(Loc(name), 1, transpose, span);
+    }
+
+    private static uint CompileStage(ShaderType type, string src)
+    {
+        var gl = GlApi.Gl;
+        uint shader = gl.CreateShader(type);
+        gl.ShaderSource(shader, src);
+        gl.CompileShader(shader);
+
+        gl.GetShader(shader, ShaderParameterName.CompileStatus, out int ok);
         if (ok == 0)
         {
-            string log = GL.GetShaderInfoLog(shader);
-            GL.DeleteShader(shader);
+            string log = gl.GetShaderInfoLog(shader);
+            gl.DeleteShader(shader);
             throw new InvalidOperationException($"Shader compile error ({type}): {log}");
         }
 
@@ -176,6 +192,6 @@ public sealed class GlShader : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        GL.DeleteProgram(_programId);
+        GlApi.Gl.DeleteProgram(_programId);
     }
 }

@@ -28,7 +28,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
@@ -148,18 +148,18 @@ public class GlViewportControl : Panel
 
     // ── SSAO resources (GL thread only) ──────────────────────────────────────────
     // GBuffer FBO: depth24 attachment used as texture input for SSAO.
-    private int _gbufFbo, _gbufNormalTex, _gbufDepthTex;
+    private uint _gbufFbo, _gbufNormalTex, _gbufDepthTex;
     private int _gbufW, _gbufH;
     // SSAO FBO: single R8 colour attachment.
-    private int _ssaoFbo, _ssaoColorTex;
+    private uint _ssaoFbo, _ssaoColorTex;
     // Blur FBO: single R8 colour attachment.
-    private int _ssaoBlurFbo, _ssaoBlurTex;
+    private uint _ssaoBlurFbo, _ssaoBlurTex;
     private int _ssaoFboW, _ssaoFboH;
     // Empty VAO for full-screen triangle draw (no vertex data needed).
-    private int _quadVao;
+    private uint _quadVao;
     // Precomputed hemisphere kernel and 4×4 noise texture.
     private OpenTK.Mathematics.Vector3[]? _ssaoKernel;
-    private int _ssaoNoiseTex;
+    private uint _ssaoNoiseTex;
     // Whether SSAO compiled successfully.
     private bool _ssaoReady;
     /// <summary>Enable or disable SSAO. Change takes effect on the next frame.</summary>
@@ -177,8 +177,8 @@ public class GlViewportControl : Panel
 
     // ── Water resources (GL thread only) ─────────────────────────────────────────
     private GlShader? _waterShader;
-    private int _waterReflFbo, _waterReflColorTex, _waterReflDepthRb;
-    private int _waterNormalmapTex, _waterDudvmapTex;
+    private uint _waterReflFbo, _waterReflColorTex, _waterReflDepthRb;
+    private uint _waterNormalmapTex, _waterDudvmapTex;
     private bool _waterReady;
     private float _waterTime;
     private long    _waterLastTick;
@@ -228,13 +228,13 @@ public class GlViewportControl : Panel
     private GlParticleBuffer? _particleBuf;
 
     // Dedicated pick FBO — owned exclusively by the GL thread.
-    private int _pickFbo, _pickRbo, _pickDepth;
+    private uint _pickFbo, _pickRbo, _pickDepth;
     private int _pickFboW, _pickFboH;
 
     // Scene FBO — we own this FBO with RGBA8 colour + DEPTH16 depth renderbuffers.
     // We render the entire scene here, then blit colour to Avalonia's compositing FBO.
     // This guarantees depth-testing is active regardless of what Avalonia's FBO contains.
-    private int _sceneFbo, _sceneColor, _sceneDepth;
+    private uint _sceneFbo, _sceneColor, _sceneDepth;
     private int _sceneFboW, _sceneFboH;
 
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _opaque = new();
@@ -659,7 +659,9 @@ public class GlViewportControl : Panel
     {
         try
         {
-            GL.LoadBindings(new AvaloniaGlBindings(gl));
+            // Bind the Silk.NET GL API to Avalonia's managed GL context. All renderer classes
+            // resolve GL entry points through GlApi.Gl from here on (OpenTK GL is fully retired).
+            GlApi.Initialize(gl.GetProcAddress);
             _primShader = GlShader.Compile(
                 ShaderLoader.Load("prim.vert"),
                 ShaderLoader.Load("prim.frag"));
@@ -674,7 +676,7 @@ public class GlViewportControl : Panel
                 ShaderLoader.Load("particle.frag"));
             _particleBuf = new GlParticleBuffer();
             // GL ES (ANGLE) doesn't expose PolygonMode; check version string.
-            var version = GL.GetString(StringName.Version) ?? "";
+            var version = GlApi.Gl.GetStringS(StringName.Version) ?? "";
             _supportsPolygonMode = !version.Contains("OpenGL ES");
 
             // Per-frame perf instrumentation (GL_TIME_ELAPSED queries + counters).
@@ -688,7 +690,7 @@ public class GlViewportControl : Panel
                 _gnormShader    = GlShader.Compile(ShaderLoader.Load("prim.vert"),      ShaderLoader.Load("gnorm.frag"));
                 _ssaoShader     = GlShader.Compile(ShaderLoader.Load("quad.vert"),      ShaderLoader.Load("ssao.frag"));
                 _ssaoBlurShader = GlShader.Compile(ShaderLoader.Load("quad.vert"),      ShaderLoader.Load("ssaoblur.frag"));
-                _quadVao        = GL.GenVertexArray();
+                _quadVao        = GlApi.Gl.GenVertexArray();
                 _ssaoKernel     = BuildSsaoKernel(32);
                 _ssaoNoiseTex   = BuildSsaoNoiseTex();
                 // Upload the kernel once at init — it never changes at runtime.
@@ -813,30 +815,30 @@ public class GlViewportControl : Panel
         // Render into our own FBO (colour + depth) then blit to Avalonia's FBO.
         EnsureSceneFbo(w, h);
         if (_sceneFbo == 0) return;
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
-        GL.Viewport(0, 0, w, h);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
+        GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
 
         // Full GL state reset — Avalonia's compositing engine may leave masks,
         // scissor, or blend state in any configuration between our render calls.
         // The SL viewer similarly resets all state before each avatar draw pass.
-        GL.ColorMask(true, true, true, true);
-        GL.DepthMask(true);
-        GL.Disable(EnableCap.ScissorTest);
-        GL.Disable(EnableCap.Blend);
-        GL.Disable(EnableCap.StencilTest);
-        GL.Enable(EnableCap.DepthTest);
-        GL.DepthFunc(DepthFunction.Less);
-        GL.Enable(EnableCap.CullFace);
-        GL.CullFace(TriangleFace.Back);
-        GL.FrontFace(FrontFaceDirection.Ccw);
+        GlApi.Gl.ColorMask(true, true, true, true);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.Disable(EnableCap.ScissorTest);
+        GlApi.Gl.Disable(EnableCap.Blend);
+        GlApi.Gl.Disable(EnableCap.StencilTest);
+        GlApi.Gl.Enable(EnableCap.DepthTest);
+        GlApi.Gl.DepthFunc(DepthFunction.Less);
+        GlApi.Gl.Enable(EnableCap.CullFace);
+        GlApi.Gl.CullFace(TriangleFace.Back);
+        GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
 
         // Error: vivid red-tint.  Sky ready: clear to black (sky shader fills it).
         // Fallback: solid SL sky-blue so the viewer looks reasonable without the sky shader.
         float clearR = _initError != null ? 0.55f : (_skyReady ? 0f : 0.39f);
         float clearG = _initError != null ? 0.10f : (_skyReady ? 0f : 0.58f);
         float clearB = _initError != null ? 0.10f : (_skyReady ? 0f : 0.93f);
-        GL.ClearColor(clearR, clearG, clearB, 1f);
-        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        GlApi.Gl.ClearColor(clearR, clearG, clearB, 1f);
+        GlApi.Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         if (_primShader == null)
         {
@@ -880,7 +882,7 @@ public class GlViewportControl : Panel
         bool doSsao = SsaoEnabled && _ssaoReady
                       && opaqueFaceCount > 0
                       && opaqueFaceCount <= SsaoMaxOpaqueFaces;
-        int  ssaoTex = 0; // 0 = no SSAO this frame
+        uint ssaoTex = 0; // 0 = no SSAO this frame
 
         if (doSsao)
         {
@@ -889,33 +891,33 @@ public class GlViewportControl : Panel
             if (_gbufFbo != 0 && _ssaoFbo != 0)
             {
                 // — G-buffer pass —
-                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _gbufFbo);
-                GL.Viewport(0, 0, w, h);
-                GL.ClearColor(0f, 0f, 0f, 0f);
-                GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-                GL.Enable(EnableCap.DepthTest);
-                GL.DepthMask(true);
-                GL.DepthFunc(DepthFunction.Less);
-                GL.Enable(EnableCap.CullFace);
-                GL.Disable(EnableCap.Blend);
+                GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _gbufFbo);
+                GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
+                GlApi.Gl.ClearColor(0f, 0f, 0f, 0f);
+                GlApi.Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                GlApi.Gl.Enable(EnableCap.DepthTest);
+                GlApi.Gl.DepthMask(true);
+                GlApi.Gl.DepthFunc(DepthFunction.Less);
+                GlApi.Gl.Enable(EnableCap.CullFace);
+                GlApi.Gl.Disable(EnableCap.Blend);
                 DrawFacesNormal(_opaque, _gnormShader!, ref view, ref proj);
                 DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj);
 
                 // — SSAO pass —
-                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
-                GL.Viewport(0, 0, w, h);
-                GL.Disable(EnableCap.DepthTest);
-                GL.Disable(EnableCap.Blend);
-                GL.DepthMask(false);
+                GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
+                GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
+                GlApi.Gl.Disable(EnableCap.DepthTest);
+                GlApi.Gl.Disable(EnableCap.Blend);
+                GlApi.Gl.DepthMask(false);
                 _ssaoShader!.Use();
-                GL.ActiveTexture(TextureUnit.Texture0);
-                GL.BindTexture(TextureTarget.Texture2D, _gbufDepthTex);
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+                GlApi.Gl.BindTexture(TextureTarget.Texture2D, _gbufDepthTex);
                 _ssaoShader.Set("uDepthTex", 0);
-                GL.ActiveTexture(TextureUnit.Texture1);
-                GL.BindTexture(TextureTarget.Texture2D, _gbufNormalTex);
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture1);
+                GlApi.Gl.BindTexture(TextureTarget.Texture2D, _gbufNormalTex);
                 _ssaoShader.Set("uNormalTex", 1);
-                GL.ActiveTexture(TextureUnit.Texture2);
-                GL.BindTexture(TextureTarget.Texture2D, _ssaoNoiseTex);
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture2);
+                GlApi.Gl.BindTexture(TextureTarget.Texture2D, _ssaoNoiseTex);
                 _ssaoShader.Set("uNoiseTex", 2);
                 _ssaoShader.Set("uNoiseScale",   new Vector2(w / 4.0f, h / 4.0f));
                 _ssaoShader.Set("uProj",         ref proj);
@@ -923,25 +925,25 @@ public class GlViewportControl : Panel
                 _ssaoShader.Set("uRadius",       0.5f);
                 _ssaoShader.Set("uBias",         0.025f);
                 _ssaoShader.Set("uStrength",     1.2f);
-                GL.BindVertexArray(_quadVao);
-                GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+                GlApi.Gl.BindVertexArray(_quadVao);
+                GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
                 _ssaoShader.Unuse();
 
                 // — Blur pass —
-                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoBlurFbo);
+                GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoBlurFbo);
                 _ssaoBlurShader!.Use();
-                GL.ActiveTexture(TextureUnit.Texture0);
-                GL.BindTexture(TextureTarget.Texture2D, _ssaoColorTex);
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+                GlApi.Gl.BindTexture(TextureTarget.Texture2D, _ssaoColorTex);
                 _ssaoBlurShader.Set("uSsaoTex",   0);
                 _ssaoBlurShader.Set("uTexelSize", new Vector2(1.0f / w, 1.0f / h));
-                GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
+                GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
                 _ssaoBlurShader.Unuse();
-                GL.BindVertexArray(0);
+                GlApi.Gl.BindVertexArray(0);
 
                 // Restore state for the main scene pass.
-                GL.Enable(EnableCap.DepthTest);
-                GL.DepthMask(true);
-                GL.ActiveTexture(TextureUnit.Texture0);
+                GlApi.Gl.Enable(EnableCap.DepthTest);
+                GlApi.Gl.DepthMask(true);
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
                 ssaoTex = _ssaoBlurTex;
             }
         }
@@ -957,12 +959,12 @@ public class GlViewportControl : Panel
             DrawWaterReflection(ref view, ref proj, waterH, w, h);
 
         // ── Main scene pass ───────────────────────────────────────────────
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
-        GL.Viewport(0, 0, w, h);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
+        GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
 
         // Opaque pass
-        GL.Disable(EnableCap.Blend);
-        GL.DepthMask(true);
+        GlApi.Gl.Disable(EnableCap.Blend);
+        GlApi.Gl.DepthMask(true);
         // Apply any pending transform overrides directly to face.Transform so all draw
         // paths (opaque, alpha, wireframe, picking) automatically use the updated position.
         ApplySceneTransformOverrides();
@@ -999,15 +1001,15 @@ public class GlViewportControl : Panel
                 mergedAlpha.Sort(static (a, b) => b.face.AlphaSortKey.CompareTo(a.face.AlphaSortKey));
             }
 
-            GL.Enable(EnableCap.Blend);
-            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-            GL.DepthMask(false);
-            GL.Disable(EnableCap.CullFace);
+            GlApi.Gl.Enable(EnableCap.Blend);
+            GlApi.Gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GlApi.Gl.DepthMask(false);
+            GlApi.Gl.Disable(EnableCap.CullFace);
             // Alpha surfaces don't receive SSAO — matches SL viewer behaviour.
             DrawFaces(mergedAlpha, _primShader, ref view, ref proj, manageCulling: false, frustum: frustum, stats: _stats, sky: Sky);
-            GL.Enable(EnableCap.CullFace);
-            GL.DepthMask(true);
-            GL.Disable(EnableCap.Blend);
+            GlApi.Gl.Enable(EnableCap.CullFace);
+            GlApi.Gl.DepthMask(true);
+            GlApi.Gl.Disable(EnableCap.Blend);
         }
 
         // Wireframe overlay.
@@ -1017,36 +1019,36 @@ public class GlViewportControl : Panel
         // requires geometry shader support; this is a reasonable approximation).
         if (Wireframe && _wireShader != null)
         {
-            GL.Disable(EnableCap.CullFace);
+            GlApi.Gl.Disable(EnableCap.CullFace);
             if (_supportsPolygonMode)
             {
-                GL.Enable(EnableCap.PolygonOffsetLine);
-                GL.PolygonOffset(-1f, -1f);
-                GL.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
+                GlApi.Gl.Enable(EnableCap.PolygonOffsetLine);
+                GlApi.Gl.PolygonOffset(-1f, -1f);
+                GlApi.Gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Line);
                 DrawFacesWireframe(_opaque,      _wireShader, ref view, ref proj);
                 DrawFacesWireframe(_alpha,       _wireShader, ref view, ref proj);
                 DrawFacesWireframe(_sceneOpaque, _wireShader, ref view, ref proj);
                 DrawFacesWireframe(_sceneAlpha,  _wireShader, ref view, ref proj);
-                GL.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
-                GL.Disable(EnableCap.PolygonOffsetLine);
+                GlApi.Gl.PolygonMode(TriangleFace.FrontAndBack, PolygonMode.Fill);
+                GlApi.Gl.Disable(EnableCap.PolygonOffsetLine);
             }
             else
             {
                 // ES fallback: draw edges via line EBO.
                 // LEQUAL lets co-planar edges pass the depth test against the solid surface.
-                GL.DepthFunc(DepthFunction.Lequal);
-                GL.Enable(EnableCap.Blend);
-                GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-                GL.DepthMask(false);
+                GlApi.Gl.DepthFunc(DepthFunction.Lequal);
+                GlApi.Gl.Enable(EnableCap.Blend);
+                GlApi.Gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                GlApi.Gl.DepthMask(false);
                 DrawFacesWireframeEs(_opaque,      _wireShader, ref view, ref proj);
                 DrawFacesWireframeEs(_alpha,       _wireShader, ref view, ref proj);
                 DrawFacesWireframeEs(_sceneOpaque, _wireShader, ref view, ref proj);
                 DrawFacesWireframeEs(_sceneAlpha,  _wireShader, ref view, ref proj);
-                GL.DepthMask(true);
-                GL.Disable(EnableCap.Blend);
-                GL.DepthFunc(DepthFunction.Less);
+                GlApi.Gl.DepthMask(true);
+                GlApi.Gl.Disable(EnableCap.Blend);
+                GlApi.Gl.DepthFunc(DepthFunction.Less);
             }
-            GL.Enable(EnableCap.CullFace);
+            GlApi.Gl.Enable(EnableCap.CullFace);
         }
 
         // ── Particle pass ─────────────────────────────────────────────────
@@ -1099,17 +1101,17 @@ public class GlViewportControl : Panel
             // Guard: only proceed if the pick FBO was successfully created.
             if (_pickFbo != 0)
             {
-                GL.BindFramebuffer(FramebufferTarget.Framebuffer, _pickFbo);
-                GL.Viewport(0, 0, w, h);
-                GL.ClearColor(0f, 0f, 0f, 0f);
-                GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+                GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _pickFbo);
+                GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
+                GlApi.Gl.ClearColor(0f, 0f, 0f, 0f);
+                GlApi.Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
                 // Set explicit state — don't rely on inherited values from the main pass.
-                GL.Enable(EnableCap.DepthTest);
-                GL.DepthFunc(DepthFunction.Less);
-                GL.Disable(EnableCap.Blend);
-                GL.DepthMask(true);
-                GL.Disable(EnableCap.CullFace);
-                GL.ColorMask(true, true, true, true);
+                GlApi.Gl.Enable(EnableCap.DepthTest);
+                GlApi.Gl.DepthFunc(DepthFunction.Less);
+                GlApi.Gl.Disable(EnableCap.Blend);
+                GlApi.Gl.DepthMask(true);
+                GlApi.Gl.Disable(EnableCap.CullFace);
+                GlApi.Gl.ColorMask(true, true, true, true);
 
                 // Rebuild _pickMap/_cpuFaceData to match the exact draw order used
                 // here, including any back-to-front sort applied to _alpha this frame.
@@ -1141,13 +1143,13 @@ public class GlViewportControl : Panel
                 DrawFacesPicking(_sceneOpaque, _pickShader, ref view, ref proj, 1 + _opaque.Count + _alpha.Count);
                 DrawFacesPicking(_sceneAlpha,  _pickShader, ref view, ref proj, 1 + _opaque.Count + _alpha.Count + _sceneOpaque.Count);
 
-                GL.Flush(); // ensure all draw calls are complete before ReadPixels
+                GlApi.Gl.Flush(); // ensure all draw calls are complete before ReadPixels
                 byte[] pixel = new byte[4];
-                GL.ReadPixels(px, py, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
+                GlApi.Gl.ReadPixels(px, py, 1, 1, PixelFormat.Rgba, PixelType.UnsignedByte, pixel);
 
                 // Restore Avalonia's framebuffer (main scene already rendered there).
-                GL.BindFramebuffer(FramebufferTarget.Framebuffer, fb);
-                GL.Enable(EnableCap.CullFace);
+                GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
+                GlApi.Gl.Enable(EnableCap.CullFace);
 
                 // R+G encode a 1-based index into _pickMap (background cleared to 0,0,0,0).
                 // Non-zero R or G means a face was hit; look up the real LocalId/FaceIndex.
@@ -1209,11 +1211,11 @@ public class GlViewportControl : Panel
         DeleteSceneFbo();
         DeletePickFbo();
         DeleteSsaoFbos();
-        if (_gbufDepthTex != 0) { GL.DeleteTexture(_gbufDepthTex); _gbufDepthTex = 0; }
-        if (_gbufNormalTex != 0) { GL.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0; }
-        if (_gbufFbo != 0)       { GL.DeleteFramebuffer(_gbufFbo); _gbufFbo = 0; }
-        if (_ssaoNoiseTex != 0)  { GL.DeleteTexture(_ssaoNoiseTex); _ssaoNoiseTex = 0; }
-        if (_quadVao != 0)       { GL.DeleteVertexArray(_quadVao); _quadVao = 0; }
+        if (_gbufDepthTex != 0) { GlApi.Gl.DeleteTexture(_gbufDepthTex); _gbufDepthTex = 0; }
+        if (_gbufNormalTex != 0) { GlApi.Gl.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0; }
+        if (_gbufFbo != 0)       { GlApi.Gl.DeleteFramebuffer(_gbufFbo); _gbufFbo = 0; }
+        if (_ssaoNoiseTex != 0)  { GlApi.Gl.DeleteTexture(_ssaoNoiseTex); _ssaoNoiseTex = 0; }
+        if (_quadVao != 0)       { GlApi.Gl.DeleteVertexArray(_quadVao); _quadVao = 0; }
         DeleteWaterResources();
         DeleteSkyResources();
         _primShader?.Dispose();     _primShader     = null;
@@ -1412,9 +1414,9 @@ public class GlViewportControl : Panel
         var right = new Vector3(view.Row0.X, view.Row1.X, view.Row2.X);
         var up    = new Vector3(view.Row0.Y, view.Row1.Y, view.Row2.Y);
 
-        GL.Enable(EnableCap.Blend);
-        GL.DepthMask(false);
-        GL.Disable(EnableCap.CullFace);
+        GlApi.Gl.Enable(EnableCap.Blend);
+        GlApi.Gl.DepthMask(false);
+        GlApi.Gl.Disable(EnableCap.CullFace);
         _particleShader.Use();
 
         foreach (var kv in _particleMap)
@@ -1425,7 +1427,7 @@ public class GlViewportControl : Panel
             _particleBuf.Upload(sub.Particles, right, up);
 
             // Per-system blend function.
-            GL.BlendFunc((BlendingFactor)sub.BlendSrc, (BlendingFactor)sub.BlendDst);
+            GlApi.Gl.BlendFunc((BlendingFactor)sub.BlendSrc, (BlendingFactor)sub.BlendDst);
 
             var model = sub.EmitterTransform;
             var mvp   = model * view * proj;
@@ -1435,7 +1437,7 @@ public class GlViewportControl : Panel
             _particleShader.Set("uHasTexture", hasTex);
             if (hasTex)
             {
-                tex!.Bind(TextureUnit.Texture0);
+                tex!.Bind(0);
                 _particleShader.Set("uAlbedo", 0);
             }
             _particleShader.Set("uGlow", 0f);
@@ -1444,9 +1446,9 @@ public class GlViewportControl : Panel
         }
 
         _particleShader.Unuse();
-        GL.Enable(EnableCap.CullFace);
-        GL.DepthMask(true);
-        GL.Disable(EnableCap.Blend);
+        GlApi.Gl.Enable(EnableCap.CullFace);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.Disable(EnableCap.Blend);
     }
 
     private static void DisposePendingBitmaps(PrimRenderSubmission sub)
@@ -1467,32 +1469,32 @@ public class GlViewportControl : Panel
 
         DeletePickFbo();
 
-        _pickFbo   = GL.GenFramebuffer();
-        _pickRbo   = GL.GenRenderbuffer();
-        _pickDepth = GL.GenRenderbuffer();
+        _pickFbo   = GlApi.Gl.GenFramebuffer();
+        _pickRbo   = GlApi.Gl.GenRenderbuffer();
+        _pickDepth = GlApi.Gl.GenRenderbuffer();
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _pickFbo);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _pickFbo);
 
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _pickRbo);
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
-            RenderbufferStorage.Rgba8, w, h);
-        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _pickRbo);
+        GlApi.Gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
+            InternalFormat.Rgba8, (uint)w, (uint)h);
+        GlApi.Gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
             FramebufferAttachment.ColorAttachment0,
             RenderbufferTarget.Renderbuffer, _pickRbo);
 
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _pickDepth);
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
-            RenderbufferStorage.DepthComponent24, w, h);
-        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _pickDepth);
+        GlApi.Gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
+            InternalFormat.DepthComponent24, (uint)w, (uint)h);
+        GlApi.Gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
             FramebufferAttachment.DepthAttachment,
             RenderbufferTarget.Renderbuffer, _pickDepth);
 
-        var status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        var status = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
 
-        if (status != FramebufferErrorCode.FramebufferComplete)
+        if (status != GLEnum.FramebufferComplete)
         {
             // FBO unsupported on this driver/backend — picking disabled.
             DeletePickFbo();
@@ -1506,9 +1508,9 @@ public class GlViewportControl : Panel
     private void DeletePickFbo()
     {
         if (_pickFbo == 0) return;
-        GL.DeleteFramebuffer(_pickFbo);
-        GL.DeleteRenderbuffer(_pickRbo);
-        GL.DeleteRenderbuffer(_pickDepth);
+        GlApi.Gl.DeleteFramebuffer(_pickFbo);
+        GlApi.Gl.DeleteRenderbuffer(_pickRbo);
+        GlApi.Gl.DeleteRenderbuffer(_pickDepth);
         _pickFbo = _pickRbo = _pickDepth = 0;
         _pickFboW = _pickFboH = 0;
     }
@@ -1519,34 +1521,34 @@ public class GlViewportControl : Panel
 
         DeleteSceneFbo();
 
-        _sceneFbo   = GL.GenFramebuffer();
-        _sceneColor = GL.GenRenderbuffer();
-        _sceneDepth = GL.GenRenderbuffer();
+        _sceneFbo   = GlApi.Gl.GenFramebuffer();
+        _sceneColor = GlApi.Gl.GenRenderbuffer();
+        _sceneDepth = GlApi.Gl.GenRenderbuffer();
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
 
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sceneColor);
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
-            RenderbufferStorage.Rgba8, w, h);
-        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sceneColor);
+        GlApi.Gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
+            InternalFormat.Rgba8, (uint)w, (uint)h);
+        GlApi.Gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
             FramebufferAttachment.ColorAttachment0,
             RenderbufferTarget.Renderbuffer, _sceneColor);
 
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sceneDepth);
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _sceneDepth);
         // 24-bit depth is essential — 16-bit only gives 65536 values over the
         // near:far range (0.01–500 = 50000:1) which causes severe z-fighting on
         // closely layered avatar body parts (eyelashes, clothing, overlapping prims).
         // GL ES 3.0 guarantees DEPTH_COMPONENT24 support.
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
-            RenderbufferStorage.DepthComponent24, w, h);
-        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
+        GlApi.Gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer,
+            InternalFormat.DepthComponent24, (uint)w, (uint)h);
+        GlApi.Gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer,
             FramebufferAttachment.DepthAttachment,
             RenderbufferTarget.Renderbuffer, _sceneDepth);
 
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
 
-        var status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
-        if (status != FramebufferErrorCode.FramebufferComplete)
+        var status = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        if (status != GLEnum.FramebufferComplete)
         {
             DeleteSceneFbo();
             return;
@@ -1559,64 +1561,64 @@ public class GlViewportControl : Panel
     private void DeleteSceneFbo()
     {
         if (_sceneFbo == 0) return;
-        GL.DeleteFramebuffer(_sceneFbo);
-        GL.DeleteRenderbuffer(_sceneColor);
-        GL.DeleteRenderbuffer(_sceneDepth);
+        GlApi.Gl.DeleteFramebuffer(_sceneFbo);
+        GlApi.Gl.DeleteRenderbuffer(_sceneColor);
+        GlApi.Gl.DeleteRenderbuffer(_sceneDepth);
         _sceneFbo = _sceneColor = _sceneDepth = 0;
         _sceneFboW = _sceneFboH = 0;
     }
 
     // ── SSAO FBO management ───────────────────────────────────────────────────────
 
-    private void EnsureGbufferFbo(int w, int h)
+    private unsafe void EnsureGbufferFbo(int w, int h)
     {
         if (_gbufFbo != 0 && _gbufW == w && _gbufH == h) return;
 
         // Delete old resources.
-        if (_gbufFbo      != 0) { GL.DeleteFramebuffer(_gbufFbo);   _gbufFbo = 0; }
-        if (_gbufNormalTex != 0) { GL.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0; }
-        if (_gbufDepthTex  != 0) { GL.DeleteTexture(_gbufDepthTex);  _gbufDepthTex = 0; }
+        if (_gbufFbo      != 0) { GlApi.Gl.DeleteFramebuffer(_gbufFbo);   _gbufFbo = 0; }
+        if (_gbufNormalTex != 0) { GlApi.Gl.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0; }
+        if (_gbufDepthTex  != 0) { GlApi.Gl.DeleteTexture(_gbufDepthTex);  _gbufDepthTex = 0; }
 
         // Normal texture — RGBA8, packed [0,1].
-        _gbufNormalTex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, _gbufNormalTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
-            w, h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _gbufNormalTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _gbufNormalTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+            (uint)w, (uint)h, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
         // Depth texture — DEPTH_COMPONENT24 samplable texture.
-        _gbufDepthTex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, _gbufDepthTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.DepthComponent24,
-            w, h, 0, PixelFormat.DepthComponent, PixelType.UnsignedInt, IntPtr.Zero);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.None);
+        _gbufDepthTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _gbufDepthTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.DepthComponent24,
+            (uint)w, (uint)h, 0, PixelFormat.DepthComponent, PixelType.UnsignedInt, null);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.None);
 
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
 
-        _gbufFbo = GL.GenFramebuffer();
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _gbufFbo);
-        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+        _gbufFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _gbufFbo);
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer,
             FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, _gbufNormalTex, 0);
-        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer,
             FramebufferAttachment.DepthAttachment,
             TextureTarget.Texture2D, _gbufDepthTex, 0);
 
-        var status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        var status = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
-        if (status != FramebufferErrorCode.FramebufferComplete)
+        if (status != GLEnum.FramebufferComplete)
         {
-            GL.DeleteFramebuffer(_gbufFbo);  _gbufFbo = 0;
-            GL.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0;
-            GL.DeleteTexture(_gbufDepthTex);  _gbufDepthTex = 0;
+            GlApi.Gl.DeleteFramebuffer(_gbufFbo);  _gbufFbo = 0;
+            GlApi.Gl.DeleteTexture(_gbufNormalTex); _gbufNormalTex = 0;
+            GlApi.Gl.DeleteTexture(_gbufDepthTex);  _gbufDepthTex = 0;
             _ssaoReady = false;
             return;
         }
@@ -1625,54 +1627,54 @@ public class GlViewportControl : Panel
         _gbufH = h;
     }
 
-    private void EnsureSsaoFbos(int w, int h)
+    private unsafe void EnsureSsaoFbos(int w, int h)
     {
         if (_ssaoFbo != 0 && _ssaoFboW == w && _ssaoFboH == h) return;
 
         DeleteSsaoFbos();
 
         // SSAO colour texture.
-        _ssaoColorTex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, _ssaoColorTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.R8,
-            w, h, 0, PixelFormat.Red, PixelType.UnsignedByte, IntPtr.Zero);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _ssaoColorTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _ssaoColorTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+            (uint)w, (uint)h, 0, PixelFormat.Red, PixelType.UnsignedByte, null);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
         // Blur colour texture.
-        _ssaoBlurTex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, _ssaoBlurTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.R8,
-            w, h, 0, PixelFormat.Red, PixelType.UnsignedByte, IntPtr.Zero);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        _ssaoBlurTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _ssaoBlurTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+            (uint)w, (uint)h, 0, PixelFormat.Red, PixelType.UnsignedByte, null);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
 
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
 
         // SSAO FBO.
-        _ssaoFbo = GL.GenFramebuffer();
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
-        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+        _ssaoFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer,
             FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, _ssaoColorTex, 0);
-        var s1 = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        var s1 = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
 
         // Blur FBO.
-        _ssaoBlurFbo = GL.GenFramebuffer();
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoBlurFbo);
-        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer,
+        _ssaoBlurFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoBlurFbo);
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer,
             FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, _ssaoBlurTex, 0);
-        var s2 = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        var s2 = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
-        if (s1 != FramebufferErrorCode.FramebufferComplete ||
-            s2 != FramebufferErrorCode.FramebufferComplete)
+        if (s1 != GLEnum.FramebufferComplete ||
+            s2 != GLEnum.FramebufferComplete)
         {
             DeleteSsaoFbos();
             _ssaoReady = false;
@@ -1685,16 +1687,16 @@ public class GlViewportControl : Panel
 
     private void DeleteSsaoFbos()
     {
-        if (_ssaoFbo != 0)     { GL.DeleteFramebuffer(_ssaoFbo);    _ssaoFbo = 0; }
-        if (_ssaoBlurFbo != 0) { GL.DeleteFramebuffer(_ssaoBlurFbo); _ssaoBlurFbo = 0; }
-        if (_ssaoColorTex != 0){ GL.DeleteTexture(_ssaoColorTex);   _ssaoColorTex = 0; }
-        if (_ssaoBlurTex != 0) { GL.DeleteTexture(_ssaoBlurTex);    _ssaoBlurTex = 0; }
+        if (_ssaoFbo != 0)     { GlApi.Gl.DeleteFramebuffer(_ssaoFbo);    _ssaoFbo = 0; }
+        if (_ssaoBlurFbo != 0) { GlApi.Gl.DeleteFramebuffer(_ssaoBlurFbo); _ssaoBlurFbo = 0; }
+        if (_ssaoColorTex != 0){ GlApi.Gl.DeleteTexture(_ssaoColorTex);   _ssaoColorTex = 0; }
+        if (_ssaoBlurTex != 0) { GlApi.Gl.DeleteTexture(_ssaoBlurTex);    _ssaoBlurTex = 0; }
         _ssaoFboW = _ssaoFboH = 0;
     }
 
     // ── Water rendering ───────────────────────────────────────────────────────────
 
-    private void InitWater()
+    private unsafe void InitWater()
     {
         _waterShader = GlShader.Compile(
             ShaderLoader.Load("water.vert"),
@@ -1707,36 +1709,36 @@ public class GlViewportControl : Panel
         // No per-water VAO needed — the fullscreen triangle uses _quadVao.
 
         // Reflection FBO — fixed WaterReflSize × WaterReflSize
-        _waterReflColorTex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
-            WaterReflSize, WaterReflSize, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        _waterReflColorTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+            WaterReflSize, WaterReflSize, 0, PixelFormat.Rgba, PixelType.UnsignedByte, null);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
 
-        _waterReflDepthRb = GL.GenRenderbuffer();
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _waterReflDepthRb);
-        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.DepthComponent24, WaterReflSize, WaterReflSize);
-        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
+        _waterReflDepthRb = GlApi.Gl.GenRenderbuffer();
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, _waterReflDepthRb);
+        GlApi.Gl.RenderbufferStorage(RenderbufferTarget.Renderbuffer, InternalFormat.DepthComponent24, WaterReflSize, WaterReflSize);
+        GlApi.Gl.BindRenderbuffer(RenderbufferTarget.Renderbuffer, 0);
 
-        _waterReflFbo = GL.GenFramebuffer();
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
-        GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
+        _waterReflFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0,
             TextureTarget.Texture2D, _waterReflColorTex, 0);
-        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+        GlApi.Gl.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
             RenderbufferTarget.Renderbuffer, _waterReflDepthRb);
-        var fbStatus = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        var fbStatus = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
 
-        if (fbStatus != FramebufferErrorCode.FramebufferComplete)
+        if (fbStatus != GLEnum.FramebufferComplete)
         {
             // Reflection FBO unsupported — water still renders with water colour fallback
-            GL.DeleteFramebuffer(_waterReflFbo);
-            GL.DeleteTexture(_waterReflColorTex);
-            GL.DeleteRenderbuffer(_waterReflDepthRb);
+            GlApi.Gl.DeleteFramebuffer(_waterReflFbo);
+            GlApi.Gl.DeleteTexture(_waterReflColorTex);
+            GlApi.Gl.DeleteRenderbuffer(_waterReflDepthRb);
             _waterReflFbo = _waterReflColorTex = _waterReflDepthRb = 0;
         }
 
@@ -1748,7 +1750,7 @@ public class GlViewportControl : Panel
     /// Loads an embedded shader-data PNG as a GL texture with mipmaps.
     /// <paramref name="repeat"/> controls wrap mode (Repeat for tiling, ClampToEdge for one-shot).
     /// </summary>
-    private static int LoadEmbeddedTexture(string filename, bool repeat = false)
+    private static unsafe uint LoadEmbeddedTexture(string filename, bool repeat = false)
     {
         var uri = new Uri("avares://RadegastVeles/Rendering/shader_data/" + filename);
         using var stream = Avalonia.Platform.AssetLoader.Open(uri);
@@ -1757,27 +1759,24 @@ public class GlViewportControl : Panel
 
         using var processed = GlTexture.Preprocess(bitmap);
 
-        int tex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, tex);
+        uint tex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, tex);
 
         var span = processed.GetPixelSpan();
-        unsafe
+        fixed (byte* ptr = span)
         {
-            fixed (byte* ptr = span)
-            {
-                GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8,
-                    processed.Width, processed.Height, 0,
-                    PixelFormat.Rgba, PixelType.UnsignedByte, (IntPtr)ptr);
-            }
+            GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba8,
+                (uint)processed.Width, (uint)processed.Height, 0,
+                PixelFormat.Rgba, PixelType.UnsignedByte, ptr);
         }
 
-        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GlApi.Gl.GenerateMipmap(TextureTarget.Texture2D);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         int wrap = repeat ? (int)TextureWrapMode.Repeat : (int)TextureWrapMode.ClampToEdge;
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, wrap);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, wrap);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, wrap);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, wrap);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
         return tex;
     }
 
@@ -1808,25 +1807,25 @@ public class GlViewportControl : Panel
         var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
         _lastReflViewProj = reflViewProj;
 
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
-        GL.Viewport(0, 0, WaterReflSize, WaterReflSize);
-        GL.ClearColor(0.39f, 0.58f, 0.93f, 1f);
-        GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
-        GL.Enable(EnableCap.DepthTest);
-        GL.DepthMask(true);
-        GL.DepthFunc(DepthFunction.Less);
-        GL.Enable(EnableCap.CullFace);
-        GL.Disable(EnableCap.Blend);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
+        GlApi.Gl.Viewport(0, 0, WaterReflSize, WaterReflSize);
+        GlApi.Gl.ClearColor(0.39f, 0.58f, 0.93f, 1f);
+        GlApi.Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        GlApi.Gl.Enable(EnableCap.DepthTest);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.DepthFunc(DepthFunction.Less);
+        GlApi.Gl.Enable(EnableCap.CullFace);
+        GlApi.Gl.Disable(EnableCap.Blend);
         // Z mirror flips winding: what was CCW becomes CW from the reflected camera
-        GL.FrontFace(FrontFaceDirection.Cw);
+        GlApi.Gl.FrontFace(FrontFaceDirection.CW);
 
         DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
         DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky);
 
-        GL.FrontFace(FrontFaceDirection.Ccw);
+        GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        GL.Viewport(0, 0, w, h);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
         _reflLastTick = nowTick;
     }
 
@@ -1860,50 +1859,50 @@ public class GlViewportControl : Panel
         _waterShader.Set("uLightDir",      lightDir);
         _waterShader.Set("uHasReflection", (_waterReflFbo != 0 && WaterReflectionsEnabled) ? 1 : 0);
 
-        GL.ActiveTexture(TextureUnit.Texture0);
-        GL.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
         _waterShader.Set("uReflectionTex", 0);
 
-        GL.ActiveTexture(TextureUnit.Texture1);
-        GL.BindTexture(TextureTarget.Texture2D, _waterNormalmapTex);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture1);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _waterNormalmapTex);
         _waterShader.Set("uNormalMap", 1);
 
-        GL.ActiveTexture(TextureUnit.Texture2);
-        GL.BindTexture(TextureTarget.Texture2D, _waterDudvmapTex);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture2);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _waterDudvmapTex);
         _waterShader.Set("uDudvMap", 2);
 
-        GL.Enable(EnableCap.Blend);
-        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
-        GL.Disable(EnableCap.CullFace);
+        GlApi.Gl.Enable(EnableCap.Blend);
+        GlApi.Gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+        GlApi.Gl.Disable(EnableCap.CullFace);
         // LessOrEqual: water surface (gl_FragDepth = actual surface hit depth) passes when
         // the surface is closer to the camera than existing geometry, covering underwater
         // terrain.  Also passes at the horizon where the hit is beyond the far plane and
         // gl_FragDepth clamps to 1.0 (== cleared buffer value), keeping horizon water visible.
-        GL.DepthFunc(DepthFunction.Lequal);
+        GlApi.Gl.DepthFunc(DepthFunction.Lequal);
 
-        GL.BindVertexArray(_quadVao);
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
-        GL.BindVertexArray(0);
+        GlApi.Gl.BindVertexArray(_quadVao);
+        GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        GlApi.Gl.BindVertexArray(0);
 
-        GL.DepthFunc(DepthFunction.Less);
-        GL.Enable(EnableCap.CullFace);
-        GL.Disable(EnableCap.Blend);
+        GlApi.Gl.DepthFunc(DepthFunction.Less);
+        GlApi.Gl.Enable(EnableCap.CullFace);
+        GlApi.Gl.Disable(EnableCap.Blend);
         _waterShader.Unuse();
 
         // Clean up texture units so subsequent passes start from a known state
-        GL.ActiveTexture(TextureUnit.Texture2); GL.BindTexture(TextureTarget.Texture2D, 0);
-        GL.ActiveTexture(TextureUnit.Texture1); GL.BindTexture(TextureTarget.Texture2D, 0);
-        GL.ActiveTexture(TextureUnit.Texture0); GL.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture2); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture1); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture0); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
     }
 
     private void DeleteWaterResources()
     {
         _waterShader?.Dispose();     _waterShader = null;
-        if (_waterReflFbo != 0)      { GL.DeleteFramebuffer(_waterReflFbo);      _waterReflFbo = 0; }
-        if (_waterReflColorTex != 0) { GL.DeleteTexture(_waterReflColorTex);     _waterReflColorTex = 0; }
-        if (_waterReflDepthRb != 0)  { GL.DeleteRenderbuffer(_waterReflDepthRb); _waterReflDepthRb = 0; }
-        if (_waterNormalmapTex != 0) { GL.DeleteTexture(_waterNormalmapTex);     _waterNormalmapTex = 0; }
-        if (_waterDudvmapTex != 0)   { GL.DeleteTexture(_waterDudvmapTex);       _waterDudvmapTex = 0; }
+        if (_waterReflFbo != 0)      { GlApi.Gl.DeleteFramebuffer(_waterReflFbo);      _waterReflFbo = 0; }
+        if (_waterReflColorTex != 0) { GlApi.Gl.DeleteTexture(_waterReflColorTex);     _waterReflColorTex = 0; }
+        if (_waterReflDepthRb != 0)  { GlApi.Gl.DeleteRenderbuffer(_waterReflDepthRb); _waterReflDepthRb = 0; }
+        if (_waterNormalmapTex != 0) { GlApi.Gl.DeleteTexture(_waterNormalmapTex);     _waterNormalmapTex = 0; }
+        if (_waterDudvmapTex != 0)   { GlApi.Gl.DeleteTexture(_waterDudvmapTex);       _waterDudvmapTex = 0; }
         _reflLastTick = 0;
         _waterReady = false;
     }
@@ -1929,9 +1928,9 @@ public class GlViewportControl : Panel
         var vp    = view * proj;
         var invVP = Matrix4.Invert(vp);
 
-        GL.DepthMask(false);
-        GL.Disable(EnableCap.DepthTest);
-        GL.Disable(EnableCap.CullFace);
+        GlApi.Gl.DepthMask(false);
+        GlApi.Gl.Disable(EnableCap.DepthTest);
+        GlApi.Gl.Disable(EnableCap.CullFace);
 
         _skyShader.Use();
         _skyShader.Set("uInvViewProj",   ref invVP);
@@ -1945,16 +1944,16 @@ public class GlViewportControl : Panel
         _skyShader.Set("uSunGlowFocus",  Sky.SunGlowFocus);
         _skyShader.Set("uSunGlowSize",   Sky.SunGlowSize);
 
-        GL.BindVertexArray(_quadVao);
-        GL.DrawArrays(PrimitiveType.Triangles, 0, 3);
-        GL.BindVertexArray(0);
+        GlApi.Gl.BindVertexArray(_quadVao);
+        GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
+        GlApi.Gl.BindVertexArray(0);
 
         _skyShader.Unuse();
 
         // Restore depth state for subsequent geometry passes
-        GL.Enable(EnableCap.DepthTest);
-        GL.DepthMask(true);
-        GL.Enable(EnableCap.CullFace);
+        GlApi.Gl.Enable(EnableCap.DepthTest);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.Enable(EnableCap.CullFace);
     }
 
     private void DeleteSkyResources()
@@ -1994,7 +1993,7 @@ public class GlViewportControl : Panel
     /// Each texel stores a random 2D vector used to rotate the SSAO kernel
     /// in the tangent plane, breaking banding artefacts.
     /// </summary>
-    private static int BuildSsaoNoiseTex()
+    private static unsafe uint BuildSsaoNoiseTex()
     {
         const int size = 4;
         var rng  = new Random(7);
@@ -2005,26 +2004,27 @@ public class GlViewportControl : Panel
             data[i * 2 + 0] = (byte)((MathF.Cos(angle) * 0.5f + 0.5f) * 255f);
             data[i * 2 + 1] = (byte)((MathF.Sin(angle) * 0.5f + 0.5f) * 255f);
         }
-        int tex = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, tex);
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rg8,
-            size, size, 0, PixelFormat.Rg, PixelType.UnsignedByte, data);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-        GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        uint tex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, tex);
+        fixed (byte* p = data)
+            GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.RG8,
+                size, size, 0, PixelFormat.RG, PixelType.UnsignedByte, p);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
         return tex;
     }
 
     private void BlitSceneToFb(int fb, int w, int h)
     {
-        GL.Disable(EnableCap.ScissorTest);
-        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sceneFbo);
-        GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, fb);
-        GL.BlitFramebuffer(0, 0, w, h, 0, 0, w, h,
+        GlApi.Gl.Disable(EnableCap.ScissorTest);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.ReadFramebuffer, _sceneFbo);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.DrawFramebuffer, (uint)fb);
+        GlApi.Gl.BlitFramebuffer(0, 0, w, h, 0, 0, w, h,
             ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
-        GL.BindFramebuffer(FramebufferTarget.Framebuffer, fb);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
     }
 
     // ── Rendering helpers ────────────────────────────────────────────────────────
@@ -2553,7 +2553,7 @@ public class GlViewportControl : Panel
     private void ApplyTexturePatches()
     {
         // Cap texture uploads per frame across BOTH deferred retries and new patches.
-        // Each GL.TexImage2D call can take ~0.5–2 ms; 20/frame ≈ 10–40 ms max.
+        // Each TexImage2D call can take ~0.5–2 ms; 20/frame ≈ 10–40 ms max.
         const int MaxPatchesPerFrame = 20;
         int budget = MaxPatchesPerFrame;
 
@@ -2832,7 +2832,7 @@ public class GlViewportControl : Panel
         ref Matrix4 view,
         ref Matrix4 proj,
         bool manageCulling = true,
-        int ssaoTex = 0,
+        uint ssaoTex = 0,
         Vector2 screenSize = default,
         Frustum? frustum = null,
         FrameStatsTracker? stats = null,
@@ -2844,8 +2844,8 @@ public class GlViewportControl : Panel
         bool hasSsao = ssaoTex != 0 && screenSize != default;
         if (hasSsao)
         {
-            GL.ActiveTexture(TextureUnit.Texture4);
-            GL.BindTexture(TextureTarget.Texture2D, ssaoTex);
+            GlApi.Gl.ActiveTexture(TextureUnit.Texture4);
+            GlApi.Gl.BindTexture(TextureTarget.Texture2D, ssaoTex);
             shader.Set("uSsaoMap",    4);
             shader.Set("uHasSsao",    1);
             shader.Set("uScreenSize", screenSize);
@@ -2904,12 +2904,12 @@ public class GlViewportControl : Panel
             {
                 if (face.IsTwoSided && cullActive)
                 {
-                    GL.Disable(EnableCap.CullFace);
+                    GlApi.Gl.Disable(EnableCap.CullFace);
                     cullActive = false;
                 }
                 else if (!face.IsTwoSided && !cullActive)
                 {
-                    GL.Enable(EnableCap.CullFace);
+                    GlApi.Gl.Enable(EnableCap.CullFace);
                     cullActive = true;
                 }
             }
@@ -2943,7 +2943,7 @@ public class GlViewportControl : Panel
             shader.Set("uHasTexture", hasTex);
             if (hasTex)
             {
-                tex!.Bind(TextureUnit.Texture0);
+                tex!.Bind(0);
                 shader.Set("uAlbedo", 0);
             }
 
@@ -2965,7 +2965,7 @@ public class GlViewportControl : Panel
                 shader.Set("uHasNormalMap", hasNorm);
                 if (hasNorm)
                 {
-                    normalTex!.Bind(TextureUnit.Texture1);
+                    normalTex!.Bind(1);
                     shader.Set("uNormalMap", 1);
                 }
                 shader.Set("uPbrNormalUvST",  new Vector4(
@@ -2977,7 +2977,7 @@ public class GlViewportControl : Panel
                 shader.Set("uHasMRMap", hasMR);
                 if (hasMR)
                 {
-                    mrTex!.Bind(TextureUnit.Texture2);
+                    mrTex!.Bind(2);
                     shader.Set("uMetallicRoughnessMap", 2);
                 }
                 shader.Set("uMRUvST",  new Vector4(
@@ -2989,7 +2989,7 @@ public class GlViewportControl : Panel
                 shader.Set("uHasEmissiveMap", hasEm);
                 if (hasEm)
                 {
-                    emTex!.Bind(TextureUnit.Texture3);
+                    emTex!.Bind(3);
                     shader.Set("uEmissiveMap", 3);
                 }
                 shader.Set("uEmissiveUvST",  new Vector4(
@@ -3006,7 +3006,7 @@ public class GlViewportControl : Panel
                 shader.Set("uHasNormalMap", hasNorm);
                 if (hasNorm)
                 {
-                    normalTex!.Bind(TextureUnit.Texture1);
+                    normalTex!.Bind(1);
                     shader.Set("uNormalMap", 1);
                 }
                 shader.Set("uNormalUvST", new Vector4(
@@ -3018,7 +3018,7 @@ public class GlViewportControl : Panel
                 shader.Set("uHasSpecularMap", hasSpec);
                 if (hasSpec)
                 {
-                    specTex!.Bind(TextureUnit.Texture2);
+                    specTex!.Bind(2);
                     shader.Set("uSpecularMap", 2);
                 }
                 shader.Set("uSpecUvST", new Vector4(
@@ -3035,7 +3035,7 @@ public class GlViewportControl : Panel
             stats?.RecordDraw(face.Indices?.Length ?? 0);
         }
         if (manageCulling && !cullActive)
-            GL.Enable(EnableCap.CullFace);
+            GlApi.Gl.Enable(EnableCap.CullFace);
         shader.Unuse();
     }
 

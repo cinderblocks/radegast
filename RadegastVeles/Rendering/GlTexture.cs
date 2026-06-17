@@ -20,7 +20,7 @@
 using System;
 using System.Runtime.InteropServices;
 using SkiaSharp;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 
 namespace Radegast.Veles.Rendering;
 
@@ -84,40 +84,47 @@ public sealed class GlTexture : IDisposable
     /// Ownership of <paramref name="bitmap"/> transfers to this constructor; it is
     /// disposed before the constructor returns.
     /// </summary>
-    public GlTexture(SKBitmap bitmap)
+    public unsafe GlTexture(SKBitmap bitmap)
     {
-        TextureId = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, TextureId);
+        var gl = GlApi.Gl;
+        TextureId = (int)gl.GenTexture();
+        gl.BindTexture(TextureTarget.Texture2D, (uint)TextureId);
 
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba,
-            bitmap.Width, bitmap.Height, 0,
-            PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
+        gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+            (uint)bitmap.Width, (uint)bitmap.Height, 0,
+            PixelFormat.Rgba, PixelType.UnsignedByte, (void*)bitmap.GetPixels());
 
-        GL.TexParameter(TextureTarget.Texture2D,
+        gl.TexParameter(TextureTarget.Texture2D,
             TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-        GL.TexParameter(TextureTarget.Texture2D,
+        gl.TexParameter(TextureTarget.Texture2D,
             TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D,
+        gl.TexParameter(TextureTarget.Texture2D,
             TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-        GL.TexParameter(TextureTarget.Texture2D,
+        gl.TexParameter(TextureTarget.Texture2D,
             TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
 
-        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
+        gl.GenerateMipmap(TextureTarget.Texture2D);
+        gl.BindTexture(TextureTarget.Texture2D, 0);
 
         bitmap.Dispose();
     }
 
-    public void Bind(TextureUnit unit = TextureUnit.Texture0)
+    /// <summary>
+    /// Binds this texture to a texture unit. <paramref name="unit"/> is the zero-based unit
+    /// index (0 = GL_TEXTURE0, 1 = GL_TEXTURE1, …) so callers don't depend on any GL binding
+    /// library's enum during the OpenTK→Silk.NET migration.
+    /// </summary>
+    public void Bind(int unit = 0)
     {
-        GL.ActiveTexture(unit);
-        GL.BindTexture(TextureTarget.Texture2D, TextureId);
+        var gl = GlApi.Gl;
+        gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + unit));
+        gl.BindTexture(TextureTarget.Texture2D, (uint)TextureId);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        GL.DeleteTexture(TextureId);
+        GlApi.Gl.DeleteTexture((uint)TextureId);
     }
 }

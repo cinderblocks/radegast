@@ -62,8 +62,8 @@ public sealed class ParticleRenderSubmission
     /// OpenGL-compatible source blend factor (matches <c>Primitive.ParticleSystem.BlendFunc</c>).
     /// Defaults to SRC_ALPHA.
     /// </summary>
-    public          int BlendSrc { get; init; } = (int)OpenTK.Graphics.OpenGL4.BlendingFactor.SrcAlpha;
+    public          int BlendSrc { get; init; } = (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha;
 
     /// <summary>Defaults to ONE_MINUS_SRC_ALPHA.</summary>
-    public          int BlendDst { get; init; } = (int)OpenTK.Graphics.OpenGL4.BlendingFactor.OneMinusSrcAlpha;
+    public          int BlendDst { get; init; } = (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcAlpha;
 }
