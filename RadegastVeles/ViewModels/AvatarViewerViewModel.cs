@@ -28,14 +28,14 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Numerics;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
-using TkMatrix4    = OpenTK.Mathematics.Matrix4;
-using TkVector3    = OpenTK.Mathematics.Vector3;
-using TkVector4    = OpenTK.Mathematics.Vector4;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
+using Quaternion = System.Numerics.Quaternion;
+using Vector3    = System.Numerics.Vector3;
+using Vector4    = System.Numerics.Vector4;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -70,7 +70,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     private LindenAvatarDefinition?            _avatarDef;
     private Dictionary<string, BoneTransform>? _vpBoneTransforms;
     private Dictionary<string, BoneTransform>? _fittedBoneTransforms;
-    private Dictionary<string, TkMatrix4>?     _invBindMatrices;
+    private Dictionary<string, Matrix4x4>?     _invBindMatrices;
     private AvatarAnimationPlayer?             _animPlayer;
     private CancellationTokenSource?           _animCts;
     private ImmutableArray<AvatarFaceMorphData> _faceMorphData = ImmutableArray<AvatarFaceMorphData>.Empty;
@@ -107,12 +107,12 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
     // Pre-allocated bone matrix buffers reused across AnimTick frames to avoid
     // per-frame Dictionary allocations in ComputeAnimatedBoneWorldMatrices.
-    private Dictionary<string, TkMatrix4> _animBonesBuffer   = new(StringComparer.Ordinal);
-    private Dictionary<string, TkMatrix4> _vpAnimBonesBuffer = new(StringComparer.Ordinal);
+    private Dictionary<string, Matrix4x4> _animBonesBuffer   = new(StringComparer.Ordinal);
+    private Dictionary<string, Matrix4x4> _vpAnimBonesBuffer = new(StringComparer.Ordinal);
     // Attachment-flavour bones (no VP scale propagation through the hierarchy) —
     // used to keep flexi attachment prims aligned with the static AttachTransform
     // built at mesh-build time.
-    private Dictionary<string, TkMatrix4> _attachBonesBuffer = new(StringComparer.Ordinal);
+    private Dictionary<string, Matrix4x4> _attachBonesBuffer = new(StringComparer.Ordinal);
 
     private ParticleViewerDriver? _particles;
     private FlexiPrimAnimator?    _flexi;
@@ -121,13 +121,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     // Arm bones extend along ±Y (lateral axis); rotating around local +X by -θ swings
     // the +Y arm direction toward -Z (floor), producing the SL reference A-pose.
     // Right-arm bones need the opposite sign to also drop toward -Z.
-    private static readonly IReadOnlyDictionary<string, TkQuaternion> s_aPoseDeltas =
-        new Dictionary<string, TkQuaternion>(StringComparer.Ordinal)
+    private static readonly IReadOnlyDictionary<string, Quaternion> s_aPoseDeltas =
+        new Dictionary<string, Quaternion>(StringComparer.Ordinal)
         {
-            ["mCollarLeft"]    = TkQuaternion.FromEulerAngles(-4f  * MathF.PI / 180f, 0f, 0f),
-            ["mShoulderLeft"]  = TkQuaternion.FromEulerAngles(-39f * MathF.PI / 180f, 0f, 0f),
-            ["mCollarRight"]   = TkQuaternion.FromEulerAngles( 4f  * MathF.PI / 180f, 0f, 0f),
-            ["mShoulderRight"] = TkQuaternion.FromEulerAngles( 39f * MathF.PI / 180f, 0f, 0f),
+            ["mCollarLeft"]    = Quaternion.CreateFromYawPitchRoll(0f, -4f  * MathF.PI / 180f, 0f),
+            ["mShoulderLeft"]  = Quaternion.CreateFromYawPitchRoll(0f, -39f * MathF.PI / 180f, 0f),
+            ["mCollarRight"]   = Quaternion.CreateFromYawPitchRoll(0f,  4f  * MathF.PI / 180f, 0f),
+            ["mShoulderRight"] = Quaternion.CreateFromYawPitchRoll(0f,  39f * MathF.PI / 180f, 0f),
         };
 
     [ObservableProperty] private string _avatarName  = "Loading…";
@@ -276,7 +276,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        static OpenMetaverse.Vector3 ToOmv(OpenTK.Mathematics.Vector3 v) => new(v.X, v.Y, v.Z);
+        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {
@@ -414,7 +414,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             if (attachments.Count > 0)
             {
                 _particles = new ParticleViewerDriver(Client, attachments,
-                    (ulong)localId, OpenTK.Mathematics.Vector3.Zero);
+                    (ulong)localId, Vector3.Zero);
                 if (_viewport != null) _particles.SetViewport(_viewport);
                 _particles.Start();
             }
@@ -474,7 +474,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 _invBindMatrices      = result.TposeBoneWorldMatrices != null
                     ? result.TposeBoneWorldMatrices.ToDictionary(
                         kv => kv.Key,
-                        kv => TkMatrix4.Invert(kv.Value))
+                        kv => Matrix4x4.Invert(kv.Value, out var inv) ? inv : Matrix4x4.Identity)
                     : null;
                 int attachCount = CountAttachments(sim, localId);
                 StatusText = $"Ready — {submission.Faces.Length} face(s), {attachCount} attachment(s).";
@@ -765,7 +765,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
         if (invBind == null || avatarDef == null || vpBt == null) return;
 
-        IReadOnlyDictionary<string, TkQuaternion> rotDeltas;
+        IReadOnlyDictionary<string, Quaternion> rotDeltas;
             if (mode == AvatarPoseMode.APose)
                 rotDeltas = s_aPoseDeltas;
             else  // LiveAnimation
@@ -774,7 +774,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 // position effects (height, body mass, proportions) are applied immediately
                 // without waiting for the stand animation asset to finish downloading.
                 var count = liveDeltas?.Count ?? 0;
-                rotDeltas = liveDeltas ?? new Dictionary<string, TkQuaternion>(StringComparer.Ordinal);
+                rotDeltas = liveDeltas ?? new Dictionary<string, Quaternion>(StringComparer.Ordinal);
 
                 // Always refresh flexi attachment bone provider — even when LBS is skipped
                 // below — so attachments keep tracking the body while idle.  Uses the
@@ -785,7 +785,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
                         avatarDef, vpBt, rotDeltas, _attachBonesBuffer);
                     var attachBones = _attachBonesBuffer;
-                    _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : TkMatrix4.Identity);
+                    _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
                 }
 
                 // Optimisation: once the static VP pose has been applied and no animation is
@@ -807,13 +807,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
                 avatarDef, vpBt, rotDeltas, _attachBonesBuffer);
             var attachBones = _attachBonesBuffer;
-            _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : TkMatrix4.Identity);
+            _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
         }
 
         // Rigged/fitted mesh attachments deform with real VP-driven bone transforms
         // (including collision volumes) rather than the body-mesh's VP-less set.
         // Compute the alternate animBones lazily only if any face requests them.
-        Dictionary<string, TkMatrix4>? vpAnimBones = null;
+        Dictionary<string, Matrix4x4>? vpAnimBones = null;
         bool needVpAnim = false;
         foreach (var s in skinData) { if (s.UseVpBoneTransforms) { needVpAnim = true; break; } }
         if (needVpAnim && _fittedBoneTransforms != null)
@@ -828,8 +828,8 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 _physics.SetBonePositionProvider(name =>
                 {
                     if (vpAnimBones != null && vpAnimBones.TryGetValue(name, out var m))
-                        return new TkVector3(m.Row3.X, m.Row3.Y, m.Row3.Z);
-                    return TkVector3.Zero;
+                        return new Vector3(m.M41, m.M42, m.M43);
+                    return Vector3.Zero;
                 });
                 var drivenWeights = _physics.Tick(_physicsElapsed);
                 var boneOffsets   = PhysicsVolumeMorphs.ComputeBoneOffsets(drivenWeights, _physicsVpWeights);
@@ -871,13 +871,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 for (int vi = 0; vi < nvR; vi++)
                 {
                     int o = vi * 8;
-                    var bp = new TkVector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
-                                           skin.BindVerts[o + 2], 1f);
-                    var bn = new TkVector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
-                                           skin.BindVerts[o + 5], 0f);
+                    var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
+                                         skin.BindVerts[o + 2], 1f);
+                    var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
+                                         skin.BindVerts[o + 5], 0f);
 
-                    var ap = TkVector4.Zero;
-                    var an = TkVector4.Zero;
+                    var ap = Vector4.Zero;
+                    var an = Vector4.Zero;
                     float totalW = 0f;
 
                     for (int infl = 0; infl < 4; infl++)
@@ -897,8 +897,8 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                         }
 
                         var ib = ibms[ji];
-                        var sp = TkVector4.TransformRow(TkVector4.TransformRow(bp, ib), m);
-                        var sn = TkVector4.TransformRow(TkVector4.TransformRow(bn, ib), m);
+                        var sp = Vector4.Transform(Vector4.Transform(bp, ib), m);
+                        var sn = Vector4.Transform(Vector4.Transform(bn, ib), m);
                         ap += w * sp;
                         an += w * sn;
                         totalW += w;
@@ -925,23 +925,23 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             for (int vi = 0; vi < nv; vi++)
             {
                 int o  = vi * 8;
-                var bp = new TkVector4(
+                var bp = new Vector4(
                     skin.BindVerts[o],     skin.BindVerts[o + 1],
                     skin.BindVerts[o + 2], 1f);
-                var bn = new TkVector4(
+                var bn = new Vector4(
                     skin.BindVerts[o + 3], skin.BindVerts[o + 4],
                     skin.BindVerts[o + 5], 0f);
 
-                var ap = TkVector4.Zero;
-                var an = TkVector4.Zero;
+                var ap = Vector4.Zero;
+                var an = Vector4.Zero;
 
                 var   b1 = skin.Bone1[vi];
                 float w1 = skin.Weight1[vi];
                 if (w1 > 1e-4f && animBones.TryGetValue(b1, out var m1)
                                && invBind.TryGetValue(b1, out var ib1))
                 {
-                    ap += w1 * TkVector4.TransformRow(TkVector4.TransformRow(bp, ib1), m1);
-                    an += w1 * TkVector4.TransformRow(TkVector4.TransformRow(bn, ib1), m1);
+                    ap += w1 * Vector4.Transform(Vector4.Transform(bp, ib1), m1);
+                    an += w1 * Vector4.Transform(Vector4.Transform(bn, ib1), m1);
                 }
                 else
                 {
@@ -955,8 +955,8 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     var b2 = skin.Bone2[vi];
                     if (animBones.TryGetValue(b2, out var m2) && invBind.TryGetValue(b2, out var ib2))
                     {
-                        ap += w2 * TkVector4.TransformRow(TkVector4.TransformRow(bp, ib2), m2);
-                        an += w2 * TkVector4.TransformRow(TkVector4.TransformRow(bn, ib2), m2);
+                        ap += w2 * Vector4.Transform(Vector4.Transform(bp, ib2), m2);
+                        an += w2 * Vector4.Transform(Vector4.Transform(bn, ib2), m2);
                     }
                     else
                     {

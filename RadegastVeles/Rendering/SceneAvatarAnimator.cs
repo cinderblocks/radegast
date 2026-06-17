@@ -20,12 +20,12 @@
 using System;
 using System.Buffers;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
-using TkMatrix4    = OpenTK.Mathematics.Matrix4;
-using TkVector4    = OpenTK.Mathematics.Vector4;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
+using Quaternion = System.Numerics.Quaternion;
+using Vector4    = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -44,21 +44,21 @@ internal sealed class SceneAvatarAnimator : IDisposable
     private readonly AvatarAnimationPlayer _player;
 
     // Pre-allocated bone matrices buffer (ComputeAnimatedBoneWorldMatrices target).
-    private readonly Dictionary<string, TkMatrix4> _animBonesBuffer    = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4> _animBonesBuffer    = new(StringComparer.Ordinal);
     // Pre-allocated buffer for fitted/VP-bone path (avoids per-tick new Dictionary).
-    private readonly Dictionary<string, TkMatrix4>    _vpAnimBonesBuffer = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4>    _vpAnimBonesBuffer = new(StringComparer.Ordinal);
     // Ping-pong buffers for flexi-attachment bone matrices: AnimTick writes into the inactive
     // buffer then publishes it via _attachBonesPublished so FlexiPrimAnimator's timer thread
     // always reads a stable, fully-written snapshot — no allocation needed each tick.
-    private readonly Dictionary<string, TkMatrix4>    _attachBonesPing   = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TkMatrix4>    _attachBonesPong   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4>    _attachBonesPing   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4>    _attachBonesPong   = new(StringComparer.Ordinal);
     private bool                                       _attachUsePing     = true;
     // The last fully-written attach-bones snapshot, published atomically after each tick write.
-    private volatile Dictionary<string, TkMatrix4>?   _attachBonesPublished;
+    private volatile Dictionary<string, Matrix4x4>?   _attachBonesPublished;
     // Pre-computed combined skin matrix (invBind * animMat) per named bone for the body/2-bone path.
-    private readonly Dictionary<string, TkMatrix4>    _skinMatByName     = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4>    _skinMatByName     = new(StringComparer.Ordinal);
     // Inverted T-pose bone world matrices — computed once at construction, reused every tick.
-    private readonly Dictionary<string, TkMatrix4>    _invBindMatrices   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4>    _invBindMatrices   = new(StringComparer.Ordinal);
 
     private FlexiPrimAnimator? _flexi;
 
@@ -77,11 +77,11 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
         // Precompute inverted T-pose world matrices once — reused every AnimTick.
         // AvatarViewerViewModel does the same inversion after each build; doing it
-        // here avoids per-tick TkMatrix4.Invert calls inside the hot skinning loop.
+        // here avoids per-tick Matrix4x4.Invert calls inside the hot skinning loop.
         if (buildResult.TposeBoneWorldMatrices != null)
         {
             foreach (var kv in buildResult.TposeBoneWorldMatrices)
-                _invBindMatrices[kv.Key] = TkMatrix4.Invert(kv.Value);
+                _invBindMatrices[kv.Key] = Matrix4x4.Invert(kv.Value, out var inv) ? inv : Matrix4x4.Identity;
         }
 
         // Seed with currently active animations so the first tick is not blank.
@@ -101,7 +101,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
     /// flexi prims follow the avatar as it moves around the region.
     /// Called from <see cref="SceneAvatarAnimationStreamer"/> on each terse update.
     /// </summary>
-    public void UpdateAvatarWorldMatrix(TkMatrix4 world)
+    public void UpdateAvatarWorldMatrix(Matrix4x4 world)
         => _flexi?.SetExternalTransform(world);
 
     public void Start()
@@ -169,8 +169,8 @@ internal sealed class SceneAvatarAnimator : IDisposable
         // will never receive an AttachBoneProvider and its flexi attachments will
         // sit at the static T-pose AttachTransform forever.  Push the provider
         // unconditionally as soon as the skeleton is available.
-        IReadOnlyDictionary<string, TkQuaternion>? liveDeltas = null;
-        Dictionary<string, float>?                 morphWeights = null;
+        IReadOnlyDictionary<string, Quaternion>? liveDeltas = null;
+        Dictionary<string, float>?               morphWeights = null;
 
         if (_flexi != null && avatarDef != null && vpBt != null)
         {
@@ -183,7 +183,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
             // Publish the fully-written snapshot; FlexiPrimAnimator reads via the captured reference.
             _attachBonesPublished = writeTarget;
             var published = _attachBonesPublished; // local capture for the closure
-            _flexi.SetBoneProvider(name => published!.TryGetValue(name, out var m) ? m : TkMatrix4.Identity);
+            _flexi.SetBoneProvider(name => published!.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
         }
 
         if (sd == null || sd.Length == 0 || avatarDef == null || vpBt == null || invBind.Count == 0)
@@ -198,7 +198,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
         var animBones = _animBonesBuffer;
 
         // Use pre-allocated _vpAnimBonesBuffer; pass live liveDeltas so attachments animate.
-        Dictionary<string, TkMatrix4>? vpAnimBones = null;
+        Dictionary<string, Matrix4x4>? vpAnimBones = null;
         var fittedBt = _buildResult.FittedBoneTransforms;
         if (fittedBt != null)
         {
@@ -238,7 +238,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
                 // Fix 3b: precompute per-joint skin matrix (invBind[ji] * animMat) before the
                 // vertex loop — replaces 1 dict lookup + 2 TransformRow with 1 array read + 1 TransformRow.
-                TkMatrix4[] skinMats = ArrayPool<TkMatrix4>.Shared.Rent(jointCount);
+                Matrix4x4[] skinMats = ArrayPool<Matrix4x4>.Shared.Rent(jointCount);
                 bool[]      hasSkin  = ArrayPool<bool>.Shared.Rent(jointCount);
                 for (int ji = 0; ji < jointCount; ji++)
                 {
@@ -247,18 +247,40 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     else hasSkin[ji] = false;
                 }
 
+                // GPU fast-path: pack skin matrices and enqueue a compute job instead of
+                // running the CPU vertex loop.  Falls back to CPU when GpuData is not yet
+                // registered (first 1-2 frames) or if compute is unavailable.
+                if (skin.GpuData is { IsDisposed: false } gpuData)
+                {
+                    var mats = new float[jointCount * 16];
+                    for (int ji = 0; ji < jointCount; ji++)
+                    {
+                        if (!hasSkin[ji]) continue;
+                        int b = ji * 16;
+                        ref readonly var m = ref skinMats[ji];
+                        mats[b +  0] = m.M11; mats[b +  1] = m.M12; mats[b +  2] = m.M13; mats[b +  3] = m.M14;
+                        mats[b +  4] = m.M21; mats[b +  5] = m.M22; mats[b +  6] = m.M23; mats[b +  7] = m.M24;
+                        mats[b +  8] = m.M31; mats[b +  9] = m.M32; mats[b + 10] = m.M33; mats[b + 11] = m.M34;
+                        mats[b + 12] = m.M41; mats[b + 13] = m.M42; mats[b + 14] = m.M43; mats[b + 15] = m.M44;
+                    }
+                    ArrayPool<Matrix4x4>.Shared.Return(skinMats);
+                    ArrayPool<bool>.Shared.Return(hasSkin);
+                    _viewport.ScheduleSkinCompute(new SkinComputeJob(gpuData, mats));
+                    continue;
+                }
+
                 int     nvR    = skin.BindVerts.Length / 8;
                 float[] nvBufR = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
 
                 for (int vi = 0; vi < nvR; vi++)
                 {
                     int o  = vi * 8;
-                    var bp = new TkVector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
-                                           skin.BindVerts[o + 2], 1f);
-                    var bn = new TkVector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
-                                           skin.BindVerts[o + 5], 0f);
-                    var ap = TkVector4.Zero;
-                    var an = TkVector4.Zero;
+                    var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
+                                         skin.BindVerts[o + 2], 1f);
+                    var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
+                                         skin.BindVerts[o + 5], 0f);
+                    var ap = Vector4.Zero;
+                    var an = Vector4.Zero;
                     float totalW = 0f;
 
                     for (int infl = 0; infl < 4; infl++)
@@ -268,8 +290,8 @@ internal sealed class SceneAvatarAnimator : IDisposable
                         if (w <= 1e-4f) continue;
                         if ((uint)ji >= (uint)jointCount) continue;
                         if (!hasSkin[ji]) { ap += w * bp; an += w * bn; totalW += w; continue; }
-                        var sp = TkVector4.TransformRow(bp, skinMats[ji]);
-                        var sn = TkVector4.TransformRow(bn, skinMats[ji]);
+                        var sp = Vector4.Transform(bp, skinMats[ji]);
+                        var sn = Vector4.Transform(bn, skinMats[ji]);
                         ap += w * sp; an += w * sn; totalW += w;
                     }
 
@@ -282,12 +304,30 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
                 _viewport.ScheduleSceneVertexUpdate(_sceneKey, skin.FaceIndex, nvBufR, skin.BindVerts.Length, isPoolRented: true);
                 // nvBufR ownership transferred to viewport queue; it will be returned to ArrayPool after GL upload.
-                ArrayPool<TkMatrix4>.Shared.Return(skinMats);
+                ArrayPool<Matrix4x4>.Shared.Return(skinMats);
                 ArrayPool<bool>.Shared.Return(hasSkin);
                 continue;
             }
 
             if (skin.Bone1.Length == 0) continue;
+
+            // GPU fast-path for the 2-bone body path.
+            if (skin.GpuData is { IsDisposed: false } gpuData2)
+            {
+                var boneNames = gpuData2.BoneNames!;
+                var mats2     = new float[boneNames.Length * 16];
+                for (int bi = 0; bi < boneNames.Length; bi++)
+                {
+                    if (!_skinMatByName.TryGetValue(boneNames[bi], out var sm)) continue;
+                    int b = bi * 16;
+                    mats2[b +  0] = sm.M11; mats2[b +  1] = sm.M12; mats2[b +  2] = sm.M13; mats2[b +  3] = sm.M14;
+                    mats2[b +  4] = sm.M21; mats2[b +  5] = sm.M22; mats2[b +  6] = sm.M23; mats2[b +  7] = sm.M24;
+                    mats2[b +  8] = sm.M31; mats2[b +  9] = sm.M32; mats2[b + 10] = sm.M33; mats2[b + 11] = sm.M34;
+                    mats2[b + 12] = sm.M41; mats2[b + 13] = sm.M42; mats2[b + 14] = sm.M43; mats2[b + 15] = sm.M44;
+                }
+                _viewport.ScheduleSkinCompute(new SkinComputeJob(gpuData2, mats2));
+                continue;
+            }
 
             int     nv    = skin.BindVerts.Length / 8;
             float[] nvBuf = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
@@ -295,20 +335,20 @@ internal sealed class SceneAvatarAnimator : IDisposable
             for (int vi = 0; vi < nv; vi++)
             {
                 int o  = vi * 8;
-                var bp = new TkVector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
-                                       skin.BindVerts[o + 2], 1f);
-                var bn = new TkVector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
-                                       skin.BindVerts[o + 5], 0f);
-                var ap = TkVector4.Zero;
-                var an = TkVector4.Zero;
+                var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
+                                     skin.BindVerts[o + 2], 1f);
+                var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
+                                     skin.BindVerts[o + 5], 0f);
+                var ap = Vector4.Zero;
+                var an = Vector4.Zero;
 
                 var   b1 = skin.Bone1[vi];
                 float w1 = skin.Weight1[vi];
                 // Fix 3a applied: single lookup into _skinMatByName (= invBind * animMat)
                 if (w1 > 1e-4f && _skinMatByName.TryGetValue(b1, out var sm1))
                 {
-                    ap += w1 * TkVector4.TransformRow(bp, sm1);
-                    an += w1 * TkVector4.TransformRow(bn, sm1);
+                    ap += w1 * Vector4.Transform(bp, sm1);
+                    an += w1 * Vector4.Transform(bn, sm1);
                 }
                 else { ap += w1 * bp; an += w1 * bn; }
 
@@ -318,8 +358,8 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     var b2 = skin.Bone2[vi];
                     if (_skinMatByName.TryGetValue(b2, out var sm2))
                     {
-                        ap += w2 * TkVector4.TransformRow(bp, sm2);
-                        an += w2 * TkVector4.TransformRow(bn, sm2);
+                        ap += w2 * Vector4.Transform(bp, sm2);
+                        an += w2 * Vector4.Transform(bn, sm2);
                     }
                     else { ap += w2 * bp; an += w2 * bn; }
                 }

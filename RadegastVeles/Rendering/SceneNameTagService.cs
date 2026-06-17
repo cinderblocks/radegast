@@ -19,10 +19,13 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
-using TkVector4 = OpenTK.Mathematics.Vector4;
+using OmVector3 = OpenMetaverse.Vector3;
+using Vector3   = System.Numerics.Vector3;
+using Vector4   = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -143,11 +146,11 @@ internal sealed class SceneNameTagService : IDisposable
             if (av == null) continue;
 
             // World position: sim-local coords + tag height offset (Z-up).
-            var wp = av.Position + new Vector3(0f, 0f, TagHeightOffset);
+            var wp = av.Position + new OmVector3(0f, 0f, TagHeightOffset);
 
             // Clip-space transform.
-            var clip = TkVector4.TransformRow(
-                new TkVector4(wp.X, wp.Y, wp.Z, 1f), vp);
+            var clip = Vector4.Transform(
+                new Vector4(wp.X, wp.Y, wp.Z, 1f), vp);
 
             // Behind the camera — skip.
             if (clip.W <= 0f) continue;
@@ -187,14 +190,14 @@ internal sealed class SceneNameTagService : IDisposable
             if (prim == null || string.IsNullOrEmpty(prim.Text)) continue;
 
             // Only show within 12 m of the camera eye position.
-            var dist = Vector3.Distance(prim.Position, camPosOmv);
+            var dist = Vector3.Distance(new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z), camPosOmv);
             if (dist > HoverTextMaxDist) continue;
 
             // Anchor point: just above the top of the prim.
-            var wp = prim.Position + new Vector3(0f, 0f, prim.Scale.Z * 0.8f);
+            var wp = prim.Position + new OmVector3(0f, 0f, prim.Scale.Z * 0.8f);
 
-            var clip = TkVector4.TransformRow(
-                new TkVector4(wp.X, wp.Y, wp.Z, 1f), vp);
+            var clip = Vector4.Transform(
+                new Vector4(wp.X, wp.Y, wp.Z, 1f), vp);
 
             if (clip.W <= 0f) continue;
 

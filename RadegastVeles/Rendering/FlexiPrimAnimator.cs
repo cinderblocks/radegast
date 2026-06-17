@@ -19,13 +19,13 @@
 
 using System;
 using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
-
-using TkVector3 = OpenTK.Mathematics.Vector3;
-using TkVector4 = OpenTK.Mathematics.Vector4;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
+using Quaternion = System.Numerics.Quaternion;
+using Vector3    = System.Numerics.Vector3;
+using Vector4    = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -69,29 +69,29 @@ internal sealed class FlexiPrimAnimator : IDisposable
         // Spine positions in PHYSICAL prim-local space (metres).
         // [0] is the fixed anchor at the bottom of the prim (−Scale.Z/2).
         // X/Y deflection is in metres; segment spacing along Z is Scale.Z/n.
-        public readonly TkVector3[] Positions;
-        public readonly TkVector3[] Velocities;
+        public readonly Vector3[] Positions;
+        public readonly Vector3[] Velocities;
 
         public FlexiState(FlexiPrimInfo info)
         {
             Info = info;
             int n    = info.PathSegments + 1;
             float sz = info.Scale.Z;
-            Positions  = new TkVector3[n];
-            Velocities = new TkVector3[n];
+            Positions  = new Vector3[n];
+            Velocities = new Vector3[n];
             // Rest pose: straight along +Z, anchor at −sz/2.
             for (int i = 0; i < n; i++)
-                Positions[i] = new TkVector3(0f, 0f, -sz * 0.5f + (float)i / info.PathSegments * sz);
+                Positions[i] = new Vector3(0f, 0f, -sz * 0.5f + (float)i / info.PathSegments * sz);
         }
     }
 
-    private readonly FlexiPrimInfo[]          _flexiPrims;
-    // Delegate that delivers a deformed vertex buffer for one face to the viewport.
-    // The int argument is the absolute face index within the submission's face array;
-    // the float[] argument is the pre-copied vertex buffer (ownership transferred).
-    // Callers supply the appropriate GlViewportControl method directly, removing any
-    // viewer-type branching from the animator itself.
+    private readonly FlexiPrimInfo[]           _flexiPrims;
+    // CPU path: delivers a pre-deformed vertex buffer for one face to the viewport.
     private readonly Action<int, float[]>      _scheduleUpdate;
+    // GPU compute path (optional): delivers spine positions + transform for GL dispatch.
+    // When non-null and GpuData is set on the FlexiPrimInfo, the compute path is taken;
+    // otherwise the CPU path is used as a fallback.
+    private readonly Action<FlexiComputeJob>?  _scheduleCompute;
     private          CancellationTokenSource?  _cts;
     private          bool                      _disposed;
 
@@ -108,10 +108,18 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// Typically one of <see cref="GlViewportControl.ScheduleVertexUpdate(int, float[])"/> or a
     /// lambda wrapping <see cref="GlViewportControl.ScheduleSceneVertexUpdate"/>.
     /// </param>
-    public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[]> scheduleUpdate)
+    /// <param name="scheduleUpdate">CPU-path delegate (always required as fallback).</param>
+    /// <param name="scheduleCompute">
+    /// Optional GPU-path delegate.  When non-null and <see cref="FlexiPrimInfo.GpuData"/>
+    /// is set (registered after GL upload), spine positions are enqueued for compute-shader
+    /// deformation instead of being processed on the CPU.
+    /// </param>
+    public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[]> scheduleUpdate,
+        Action<FlexiComputeJob>? scheduleCompute = null)
     {
-        _flexiPrims     = submission.FlexiPrims;
-        _scheduleUpdate = scheduleUpdate;
+        _flexiPrims      = submission.FlexiPrims;
+        _scheduleUpdate  = scheduleUpdate;
+        _scheduleCompute = scheduleCompute;
     }
 
     public void Start()
@@ -133,7 +141,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// <see cref="AvatarViewerViewModel._vpAnimBonesBuffer"/> via a simple lambda.
     /// Pass <c>null</c> to clear the provider (e.g. on avatar viewer close).
     /// </param>
-    public void SetBoneProvider(Func<string, TkMatrix4>? provider)
+    public void SetBoneProvider(Func<string, Matrix4x4>? provider)
     {
         foreach (var fi in _flexiPrims)
         {
@@ -148,7 +156,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// the owner's world position rather than staying at the build-time location.
     /// Thread-safe: the value is read each tick inside <see cref="TickAndUpload"/>.
     /// </summary>
-    public void SetExternalTransform(TkMatrix4 world)
+    public void SetExternalTransform(Matrix4x4 world)
     {
         foreach (var fi in _flexiPrims)
             fi.ExternalTransform = world;
@@ -184,7 +192,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 prev = now;
 
                 foreach (var state in states)
-                    TickAndUpload(state, dt, _scheduleUpdate);
+                    TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute);
             }
         }
         catch (OperationCanceledException) { }
@@ -192,7 +200,8 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
     // ── Simulation tick + vertex upload ──────────────────────────────────────────
 
-    private static void TickAndUpload(FlexiState state, float dt, Action<int, float[]> scheduleUpdate)
+    private static void TickAndUpload(FlexiState state, float dt,
+        Action<int, float[]> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute)
     {
         var info   = state.Info;
         var flex   = info.Prim.Flexible!;
@@ -210,15 +219,17 @@ internal sealed class FlexiPrimAnimator : IDisposable
             {
                 var boneMatrix = provider(info.AttachJointName);
                 // Strip scale from the bone world matrix (same as AvatarMeshBuilder.StripScale).
-                var r0 = TkVector3.Normalize(boneMatrix.Row0.Xyz);
-                var r1 = TkVector3.Normalize(boneMatrix.Row1.Xyz);
-                var r2 = TkVector3.Normalize(boneMatrix.Row2.Xyz);
-                var stripped = new TkMatrix4(
-                    new TkVector4(r0, 0f), new TkVector4(r1, 0f),
-                    new TkVector4(r2, 0f), boneMatrix.Row3);
+                var r0 = Vector3.Normalize(new Vector3(boneMatrix.M11, boneMatrix.M12, boneMatrix.M13));
+                var r1 = Vector3.Normalize(new Vector3(boneMatrix.M21, boneMatrix.M22, boneMatrix.M23));
+                var r2 = Vector3.Normalize(new Vector3(boneMatrix.M31, boneMatrix.M32, boneMatrix.M33));
+                var stripped = new Matrix4x4(
+                    r0.X, r0.Y, r0.Z, 0f,
+                    r1.X, r1.Y, r1.Z, 0f,
+                    r2.X, r2.Y, r2.Z, 0f,
+                    boneMatrix.M41, boneMatrix.M42, boneMatrix.M43, boneMatrix.M44);
                 attachTx = info.PrimLocalMatrix
-                         * TkMatrix4.CreateFromQuaternion(info.AttachJointRotation)
-                         * TkMatrix4.CreateTranslation(info.AttachJointOffset)
+                         * Matrix4x4.CreateFromQuaternion(info.AttachJointRotation)
+                         * Matrix4x4.CreateTranslation(info.AttachJointOffset)
                          * stripped;
             }
         }
@@ -246,16 +257,16 @@ internal sealed class FlexiPrimAnimator : IDisposable
         float sz = info.Scale.Z;
 
         // Prim world-orientation axes (normalised rows of attachTx rotation block).
-        var primRight = TkVector3.Normalize(attachTx.Row0.Xyz);
-        var primFwd   = TkVector3.Normalize(attachTx.Row1.Xyz);
-        var primUp    = TkVector3.Normalize(attachTx.Row2.Xyz);
+        var primRight = Vector3.Normalize(new Vector3(attachTx.M11, attachTx.M12, attachTx.M13));
+        var primFwd   = Vector3.Normalize(new Vector3(attachTx.M21, attachTx.M22, attachTx.M23));
+        var primUp    = Vector3.Normalize(new Vector3(attachTx.M31, attachTx.M32, attachTx.M33));
 
         // World gravity (0,0,-1) rotated into prim-local space.
-        var wg = new TkVector3(0f, 0f, -1f);
-        var localGrav = new TkVector3(
-            TkVector3.Dot(wg, primRight),
-            TkVector3.Dot(wg, primFwd),
-            TkVector3.Dot(wg, primUp));
+        var wg = new Vector3(0f, 0f, -1f);
+        var localGrav = new Vector3(
+            Vector3.Dot(wg, primRight),
+            Vector3.Dot(wg, primFwd),
+            Vector3.Dot(wg, primUp));
 
         float segLen     = sz / n;                  // metres per spine segment
         float forceFactor = segLen * dt;             // SL: section_length * secondsThisFrame
@@ -278,29 +289,29 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
         // Per-tick position impulses (metres).
         var gravImpulse = localGrav  * (flex.Gravity * forceFactor);
-        var userImpulse = new TkVector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
+        var userImpulse = new Vector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
 
         // ── Anchor (segment 0): fixed at bottom of prim ──────────────────────────
-        state.Positions[0]  = new TkVector3(0f, 0f, -sz * 0.5f);
-        state.Velocities[0] = TkVector3.Zero;
-        var dir0 = TkVector3.UnitZ;  // prim rest-axis direction
+        state.Positions[0]  = new Vector3(0f, 0f, -sz * 0.5f);
+        state.Velocities[0] = Vector3.Zero;
+        var dir0 = Vector3.UnitZ;  // prim rest-axis direction
 
         for (int i = 1; i <= n; i++)
         {
-            ref TkVector3 pos = ref state.Positions[i];
-            ref TkVector3 vel = ref state.Velocities[i];
+            ref Vector3 pos = ref state.Positions[i];
+            ref Vector3 vel = ref state.Velocities[i];
             var lastPos = pos;
 
             // Apply position impulses (SL style — forces directly displace position).
             pos += gravImpulse;
-            pos += new TkVector3(windX, windY, 0f);
+            pos += new Vector3(windX, windY, 0f);
             pos += userImpulse;
 
             // Tension toward parent segment direction.
             var parentPos = state.Positions[i - 1];
             var parentDir = (i == 1)
                 ? dir0
-                : TkVector3.Normalize(state.Positions[i - 1] - state.Positions[i - 2]);
+                : Vector3.Normalize(state.Positions[i - 1] - state.Positions[i - 2]);
             var currentVec = pos - parentPos;
             var diff       = parentDir * segLen - currentVec;
             pos += diff * tFactor;
@@ -310,20 +321,46 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
             // Clamp to segment length.
             var d = pos - parentPos;
-            float dLen = d.Length;
+            float dLen = d.Length();
             if (dLen > 1e-6f)
                 pos = parentPos + d * (segLen / dLen);
 
             // Velocity = positional displacement this tick.
             vel = pos - lastPos;
-            if (vel.LengthSquared > 1f) vel = TkVector3.Normalize(vel);
+            if (vel.LengthSquared() > 1f) vel = Vector3.Normalize(vel);
         }
 
         // ── Deform vertex buffers ────────────────────────────────────────────────
         //
+        // GPU compute path: if GpuData is registered (set by GlViewportControl on the
+        // GL thread after upload), pack the spine positions as a flat float[] and enqueue
+        // a FlexiComputeJob.  The compute shader (flexi.comp) does the per-vertex math
+        // in parallel directly on the GPU, writing into the mesh VBO.
+        //
+        // CPU fallback: identical logic to the GPU shader, used for the first frame or
+        // two before GpuData is set, or permanently when compute is unavailable.
+        if (scheduleCompute != null && info.GpuData is { IsDisposed: false } gpuData)
+        {
+            // Pack spine positions into a vec4 array (x,y,z,0 per segment).
+            int spineCount  = n + 1;
+            var spineFloats = new float[spineCount * 4];
+            for (int i = 0; i < spineCount; i++)
+            {
+                var p = state.Positions[i];
+                spineFloats[i * 4 + 0] = p.X;
+                spineFloats[i * 4 + 1] = p.Y;
+                spineFloats[i * 4 + 2] = p.Z;
+                // [i*4+3] = 0 (zero-initialised)
+            }
+            scheduleCompute(new FlexiComputeJob(gpuData, spineFloats, attachTx));
+            return;
+        }
+
+        // CPU path — mirrors the GPU shader exactly so the two paths produce
+        // the same result for correctness during the GPU warm-up window.
+        //
         // BaseVertices are raw prim-local (normalised) coordinates:
         //   X ∈ [≈-0.5, 0.5],  Y ∈ [≈-0.5, 0.5],  Z ∈ [-0.5, 0.5]
-        // The GPU applies face.Transform = Scale×Rotation to place them in world space.
         //
         // Strategy:
         //   1. Convert base vertex to physical metres: (bx*sx, by*sy, bz*sz).
@@ -331,7 +368,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
         //   3. Look up the deformed spine position (metres) and tangent.
         //   4. Rotate the physical cross-section XY by the spine rotation.
         //   5. Write result back in NORMALISED coordinates (divide by scale)
-        //      so the GPU scale step produces the correct metre positions.
+        //      so AttachTransform's scale step produces the correct metre positions.
         for (int fi = 0; fi < info.FaceCount; fi++)
         {
             var src    = info.BaseVertices[fi];
@@ -347,17 +384,14 @@ internal sealed class FlexiPrimAnimator : IDisposable
             {
                 int o = vi * 8;
 
-                // Base vertex in normalised prim-local space.
                 float bxN = src[o];
                 float byN = src[o + 1];
                 float bzN = src[o + 2];
 
-                // Convert to physical metres.
                 float bxM = bxN * sx;
                 float byM = byN * sy;
-                float bzM = bzN * sz;   // Z in [-sz/2, +sz/2]
+                float bzM = bzN * sz;
 
-                // Path parameter t ∈ [0,1] from physical Z.
                 float t    = Math.Clamp(bzM / sz + 0.5f, 0f, 1f);
                 float segF = t * n;
                 int   segI = Math.Min((int)segF, n - 1);
@@ -365,46 +399,32 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
                 var spineA = state.Positions[segI];
                 var spineB = state.Positions[segI + 1];
-                var spine  = TkVector3.Lerp(spineA, spineB, segT);     // metres
+                var spine  = Vector3.Lerp(spineA, spineB, segT);
 
-                var tangent = TkVector3.Normalize(spineB - spineA);
-                var rot     = RotationFromTo(TkVector3.UnitZ, tangent);
+                var d       = spineB - spineA;
+                var tangent = d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.UnitZ;
+                var rot     = RotationFromTo(Vector3.UnitZ, tangent);
 
-                // Rotate physical cross-section offset and add to spine (all metres).
-                var crossM   = new TkVector3(bxM, byM, 0f);
-                var rotCross = TkVector3.TransformVector(crossM, rot);
+                var crossM   = new Vector3(bxM, byM, 0f);
+                var rotCross = Vector3.TransformNormal(crossM, rot);
 
-                // Physical deformed position (metres).
                 float pxM = spine.X + rotCross.X;
                 float pyM = spine.Y + rotCross.Y;
                 float pzM = spine.Z + rotCross.Z;
 
-                // Rotate normal.
-                var normal    = new TkVector3(src[o + 3], src[o + 4], src[o + 5]);
-                var rotNormal = TkVector3.TransformVector(normal, rot);
+                var normal    = new Vector3(src[o + 3], src[o + 4], src[o + 5]);
+                var rotNormal = Vector3.TransformNormal(normal, rot);
 
-                // Unified output path: face.Transform == Identity for every flexi face
-                // (enforced by PrimMeshBuilder), and AttachTransform carries the full
-                // placement matrix for both scene prims and avatar attachments:
-                //   • PrimViewer:   AttachTransform = Scale(prim) × Rot(prim)
-                //   • SceneViewer:  AttachTransform = Scale(prim) × Rot(prim) × Trans(world)
-                //   • Attachment:   AttachTransform = Scale(prim) × Rot(prim) × Trans(prim)
-                //                                     × JointRot × JointOffset × bone
-                // Since AttachTransform re-applies prim scale, we must normalise the
-                // physical (metre) positions back to prim-local before transforming;
-                // otherwise scale is applied twice and the prim collapses.
                 float pxN = (sx > 1e-6f) ? pxM / sx : pxM;
                 float pyN = (sy > 1e-6f) ? pyM / sy : pyM;
                 float pzN = (sz > 1e-6f) ? pzM / sz : pzM;
-                var p4 = TkVector4.TransformRow(new TkVector4(pxN, pyN, pzN, 1f), attachTx);
-                var n4 = TkVector4.TransformRow(new TkVector4(rotNormal, 0f),      attachTx);
+                var p4 = Vector4.Transform(new Vector4(pxN, pyN, pzN, 1f), attachTx);
+                var n4 = Vector4.Transform(new Vector4(rotNormal.X, rotNormal.Y, rotNormal.Z, 0f), attachTx);
                 dst[o]     = p4.X; dst[o + 1] = p4.Y; dst[o + 2] = p4.Z;
                 dst[o + 3] = n4.X; dst[o + 4] = n4.Y; dst[o + 5] = n4.Z;
-                // UV unchanged.
             }
 
             scheduleUpdate(info.FaceStart + fi, dst);
-            // dst ownership is transferred to the viewport's vertex-update queue.
         }
     }
 
@@ -423,30 +443,30 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// Builds the shortest-arc rotation matrix that maps unit vector <paramref name="from"/>
     /// onto unit vector <paramref name="to"/>.
     /// </summary>
-    private static TkMatrix4 RotationFromTo(TkVector3 from, TkVector3 to)
+    private static Matrix4x4 RotationFromTo(Vector3 from, Vector3 to)
     {
-        float dot = TkVector3.Dot(from, to);
+        float dot = Vector3.Dot(from, to);
         if (dot >= 1f - 1e-6f)
-            return TkMatrix4.Identity;
+            return Matrix4x4.Identity;
 
         if (dot <= -1f + 1e-6f)
         {
             // 180-degree flip — pick an arbitrary perpendicular axis.
             var perp = MathF.Abs(from.X) < 0.9f
-                ? new TkVector3(1f, 0f, 0f)
-                : new TkVector3(0f, 1f, 0f);
-            var axis = TkVector3.Normalize(TkVector3.Cross(from, perp));
-            return TkMatrix4.CreateFromAxisAngle(axis, MathF.PI);
+                ? new Vector3(1f, 0f, 0f)
+                : new Vector3(0f, 1f, 0f);
+            var axis = Vector3.Normalize(Vector3.Cross(from, perp));
+            return Matrix4x4.CreateFromAxisAngle(axis, MathF.PI);
         }
 
-        var cross = TkVector3.Cross(from, to);
+        var cross = Vector3.Cross(from, to);
         float s    = MathF.Sqrt((1f + dot) * 2f);
         float invS = 1f / s;
-        var q = new OpenTK.Mathematics.Quaternion(
+        var q = new Quaternion(
             cross.X * invS,
             cross.Y * invS,
             cross.Z * invS,
             s * 0.5f);
-        return TkMatrix4.CreateFromQuaternion(q);
+        return Matrix4x4.CreateFromQuaternion(q);
     }
 }

@@ -25,7 +25,9 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Numerics;
 using OpenMetaverse;
+using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
 
@@ -169,7 +171,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             // Use rootLocalId as key; world pos is zero since the object viewer
             // renders in object-local space (no world translation needed).
             _particles = new ParticleViewerDriver(Client, prims, (ulong)_rootLocalId,
-                OpenTK.Mathematics.Vector3.Zero);
+                Vector3.Zero);
             if (_viewport != null) _particles.SetViewport(_viewport);
             _particles.Start();
 
@@ -233,7 +235,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        static OpenMetaverse.Vector3 ToOmv(OpenTK.Mathematics.Vector3 v) => new(v.X, v.Y, v.Z);
+        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {

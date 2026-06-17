@@ -19,8 +19,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using OpenMetaverse;
-using TkVector3 = OpenTK.Mathematics.Vector3;
+using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
 
@@ -64,7 +65,7 @@ internal sealed class PhysicsChannel
     public readonly int[] DrivenParamIds;
 
     /// <summary>World-space unit vector that projects joint movement onto this channel's axis.</summary>
-    public readonly TkVector3 MotionDirection;
+    public readonly Vector3 MotionDirection;
 
     // VP IDs for the wearable behaviour scalars.
     // These are the group=0 "Breast_Physics_Mass" etc. params.
@@ -85,11 +86,11 @@ internal sealed class PhysicsChannel
     internal float AccelerationJointLocal; // previous joint acceleration (smoothed)
     internal float PositionLastUpdate;     // position at last visual-param update
     internal float LastTime = -1f;         // integration clock; <0 = not yet started
-    internal TkVector3 PositionWorld;      // joint world position at previous tick
+    internal Vector3 PositionWorld;      // joint world position at previous tick
 
     public PhysicsChannel(
         int driverParamId, int[] drivenParamIds,
-        TkVector3 motionDirection,
+        Vector3 motionDirection,
         int massId, int gravityId, int dragId,
         int dampingId, int maxEffectId, int springId, int gainId)
     {
@@ -114,7 +115,7 @@ internal sealed class PhysicsChannel
         AccelerationJointLocal = 0f;
         PositionLastUpdate  = 0.5f;
         LastTime            = -1f;
-        PositionWorld       = TkVector3.Zero;
+        PositionWorld       = Vector3.Zero;
     }
 }
 
@@ -151,7 +152,7 @@ internal sealed class AvatarPhysicsSimulator
     // Bone world-position delegates: called each tick to get the current
     // world position of the relevant joint so joint velocity can be derived.
     // Keys match the SL joint names ("mChest", "mPelvis").
-    private Func<string, TkVector3>? _getBoneWorldPos;
+    private Func<string, Vector3>? _getBoneWorldPos;
 
     public AvatarPhysicsSimulator()
     {
@@ -175,7 +176,7 @@ internal sealed class AvatarPhysicsSimulator
     /// Provide a delegate that returns the current world position for a named joint.
     /// Required for velocity-based joint-motion input.
     /// </summary>
-    public void SetBonePositionProvider(Func<string, TkVector3> getBoneWorldPos)
+    public void SetBonePositionProvider(Func<string, Vector3> getBoneWorldPos)
     {
         _getBoneWorldPos = getBoneWorldPos;
     }
@@ -239,7 +240,7 @@ internal sealed class AvatarPhysicsSimulator
         float positionUserLocal = GetDriverPositionLocal(ch);
 
         // Current joint world position → velocity in motion-direction space.
-        TkVector3 jointPos = _getBoneWorldPos != null ? GetJointPos(ch) : ch.PositionWorld;
+        Vector3 jointPos = _getBoneWorldPos != null ? GetJointPos(ch) : ch.PositionWorld;
         float dtScaled = timeDelta * JointLocalFactor;
         float velocityJointLocal = CalculateVelocity(ch, jointPos, dtScaled);
         float accelJointLocal    = CalculateAcceleration(ch, velocityJointLocal, dtScaled);
@@ -267,7 +268,7 @@ internal sealed class AvatarPhysicsSimulator
             float springLength = positionNew - positionUserLocal;
 
             // SL gravity direction: (0,0,1) world up in toLocal gives gravity force.
-            var gravWorld   = new TkVector3(0f, 0f, 1f);
+            var gravWorld   = new Vector3(0f, 0f, 1f);
             float gravLocal = ToLocal(ch, gravWorld);
 
             float forceSpring  = -springLength * spring;
@@ -298,7 +299,7 @@ internal sealed class AvatarPhysicsSimulator
             ch.VelocityJointLocal     = 0f;
             ch.AccelerationJointLocal = 0f;
             ch.PositionLocal          = 0f;
-            ch.PositionWorld          = TkVector3.Zero;
+            ch.PositionWorld          = Vector3.Zero;
         }
 
         float clamped = Math.Clamp(positionNew, 0f, 1f);
@@ -321,17 +322,17 @@ internal sealed class AvatarPhysicsSimulator
     /// We approximate joint world rotation as identity here (avatar-space == world-space
     /// in the viewer context), which is the same simplification SL makes for the standing pose.
     /// </summary>
-    private static float ToLocal(PhysicsChannel ch, TkVector3 worldVec)
+    private static float ToLocal(PhysicsChannel ch, Vector3 worldVec)
     {
         // In SL: dir_world = mMotionDirectionVec * joint.getWorldRotation(); normalize; dot.
         // We use the motion direction directly (avatar always upright in this viewer).
         var dir = ch.MotionDirection;
-        if (dir.LengthSquared > 1e-10f) dir.Normalize();
-        return TkVector3.Dot(worldVec, dir);
+        if (dir.LengthSquared() > 1e-10f) dir = Vector3.Normalize(dir);
+        return Vector3.Dot(worldVec, dir);
     }
 
     /// <summary>Get current joint world position for velocity derivation.</summary>
-    private TkVector3 GetJointPos(PhysicsChannel ch)
+    private Vector3 GetJointPos(PhysicsChannel ch)
     {
         // The joint name is inferred from the channel's motion direction and driver name.
         // Rather than storing it explicitly, we determine it from context:
@@ -349,7 +350,7 @@ internal sealed class AvatarPhysicsSimulator
     /// Compute joint velocity in local space.
     /// Matches <c>LLPhysicsMotion::calculateVelocity_local</c>.
     /// </summary>
-    private static float CalculateVelocity(PhysicsChannel ch, TkVector3 posNow, float dtScaled)
+    private static float CalculateVelocity(PhysicsChannel ch, Vector3 posNow, float dtScaled)
     {
         if (dtScaled <= 1e-6f) return 0f;
         var change = (posNow - ch.PositionWorld) * WorldToModelScale;
@@ -402,7 +403,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mChest, dir=(0,0,-1)
         new PhysicsChannel(
             driverParamId: 1100, drivenParamIds: [1200],
-            motionDirection: new TkVector3(0f, 0f, -1f),
+            motionDirection: new Vector3(0f, 0f, -1f),
             massId: 10000, gravityId: 10001, dragId: 10002,
             dampingId: 10006, maxEffectId: 10003, springId: 10004, gainId: 10005),
 
@@ -411,7 +412,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mChest, dir=(-1,0,0)
         new PhysicsChannel(
             driverParamId: 1101, drivenParamIds: [1201],
-            motionDirection: new TkVector3(-1f, 0f, 0f),
+            motionDirection: new Vector3(-1f, 0f, 0f),
             massId: 10000, gravityId: 10001, dragId: 10002,
             dampingId: 10010, maxEffectId: 10007, springId: 10008, gainId: 10009),
 
@@ -420,7 +421,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mChest, dir=(0,-1,0)
         new PhysicsChannel(
             driverParamId: 1105, drivenParamIds: [1207],
-            motionDirection: new TkVector3(0f, -1f, 0f),
+            motionDirection: new Vector3(0f, -1f, 0f),
             massId: 10000, gravityId: 10001, dragId: 10002,
             dampingId: 10032, maxEffectId: 10029, springId: 10030, gainId: 10031),
 
@@ -429,7 +430,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mPelvis, dir=(0,0,-1)
         new PhysicsChannel(
             driverParamId: 1103, drivenParamIds: [1205],
-            motionDirection: new TkVector3(0f, 0f, -1f),
+            motionDirection: new Vector3(0f, 0f, -1f),
             massId: 10018, gravityId: 10019, dragId: 10020,
             dampingId: 10024, maxEffectId: 10021, springId: 10022, gainId: 10023),
 
@@ -438,7 +439,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mPelvis, dir=(0,-1,0)
         new PhysicsChannel(
             driverParamId: 1104, drivenParamIds: [1206],
-            motionDirection: new TkVector3(0f, -1f, 0f),
+            motionDirection: new Vector3(0f, -1f, 0f),
             massId: 10018, gravityId: 10019, dragId: 10020,
             dampingId: 10028, maxEffectId: 10025, springId: 10026, gainId: 10027),
 
@@ -447,7 +448,7 @@ internal sealed class AvatarPhysicsSimulator
         // joint=mPelvis, dir=(0,0,-1)
         new PhysicsChannel(
             driverParamId: 1102, drivenParamIds: [1202, 1203, 1204],
-            motionDirection: new TkVector3(0f, 0f, -1f),
+            motionDirection: new Vector3(0f, 0f, -1f),
             massId: 10011, gravityId: 10012, dragId: 10013,
             dampingId: 10017, maxEffectId: 10014, springId: 10015, gainId: 10016),
     ];

@@ -18,7 +18,7 @@
  */
 
 using System.Runtime.CompilerServices;
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -48,11 +48,10 @@ public static class FrustumCuller
     /// Planes are normalised so the <c>w</c> component is a true signed distance.
     /// </summary>
     /// <remarks>
-    /// OpenTK matrices are row-major in memory but math-column-major in their accessors:
-    /// <c>m.Row0</c> is the first math row. The Gribb-Hartmann derivation is expressed
-    /// in math rows here.
+    /// System.Numerics Matrix4x4 field names are Mrc (row, column). The Gribb-Hartmann
+    /// derivation is expressed in math rows here.
     /// </remarks>
-    public static Frustum ExtractPlanes(in Matrix4 viewProj)
+    public static Frustum ExtractPlanes(in Matrix4x4 viewProj)
     {
         // Rows of (V·P) as math vectors.
         var r0 = new Vector4(viewProj.M11, viewProj.M21, viewProj.M31, viewProj.M41);

@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -103,7 +103,7 @@ internal static class PlaceholderMeshFactory
             // Two triangles: 0-1-2 and 0-2-3.
             ushort[] indices = [0, 1, 2, 0, 2, 3];
 
-            var transform = Matrix4.CreateTranslation(worldPosition);
+            var transform = Matrix4x4.CreateTranslation(worldPosition);
 
             faces[fi] = new PrimRenderFace
             {

@@ -18,8 +18,8 @@
  */
 
 using System;
+using System.Numerics;
 using Silk.NET.OpenGL;
-using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
 

@@ -18,8 +18,8 @@
  */
 
 using System;
+using System.Numerics;
 using SkiaSharp;
-using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -116,11 +116,11 @@ public sealed class PrimRenderFace
     /// </summary>
     public          SKBitmap? Texture   { get; init; }
 
-    private         Matrix4   _transform = Matrix4.Identity;
-    private         Matrix3   _modelInv3;
+    private         Matrix4x4 _transform = Matrix4x4.Identity;
+    private         Matrix3x3 _modelInv3;
     private         bool      _modelInv3Ready;
 
-    public          Matrix4   Transform
+    public          Matrix4x4 Transform
     {
         get => _transform;
         set { _transform = value; _modelInv3Ready = false; }
@@ -133,7 +133,7 @@ public sealed class PrimRenderFace
     /// part here lets the draw loop skip the per-face 4×4 invert for static geometry —
     /// only a single 3×3 multiply remains per face. Accessed on the GL thread only.
     /// </summary>
-    internal Matrix3 ModelInverse3
+    internal Matrix3x3 ModelInverse3
     {
         get
         {
@@ -155,7 +155,7 @@ public sealed class PrimRenderFace
     /// terse update changes their Transform) caused load-time hitching. Computing only the
     /// 3×3 we actually need is also cheaper than a full 4×4 inverse.
     /// </summary>
-    private static Matrix3 InvertUpper3x3(in Matrix4 t)
+    private static Matrix3x3 InvertUpper3x3(in Matrix4x4 t)
     {
         float a = t.M11, b = t.M12, c = t.M13;
         float d = t.M21, e = t.M22, f = t.M23;
@@ -166,10 +166,10 @@ public sealed class PrimRenderFace
         float C = d * h - e * g;
         float det = a * A + b * B + c * C;
         if (System.Math.Abs(det) < 1e-12f)
-            return Matrix3.Identity;
+            return Matrix3x3.Identity;
 
         float id = 1f / det;
-        return new Matrix3(
+        return new Matrix3x3(
             A * id,                 (c * h - b * i) * id,   (b * f - c * e) * id,
             B * id,                 (a * i - c * g) * id,   (c * d - a * f) * id,
             C * id,                 (b * g - a * h) * id,   (a * e - b * d) * id);
@@ -335,7 +335,7 @@ public sealed class PrimRenderFace
                 (i & 1) == 0 ? _localMin.X : _localMax.X,
                 (i & 2) == 0 ? _localMin.Y : _localMax.Y,
                 (i & 4) == 0 ? _localMin.Z : _localMax.Z);
-            var w = Vector3.TransformPosition(c, t);
+            var w = Vector3.Transform(c, t);
             if (w.X < wMin.X) wMin.X = w.X; if (w.X > wMax.X) wMax.X = w.X;
             if (w.Y < wMin.Y) wMin.Y = w.Y; if (w.Y > wMax.Y) wMax.Y = w.Y;
             if (w.Z < wMin.Z) wMin.Z = w.Z; if (w.Z > wMax.Z) wMax.Z = w.Z;
@@ -396,7 +396,7 @@ public sealed class PrimRenderFace
     /// </summary>
     internal PrimRenderFace WithWorldTranslation(Vector3 worldTranslation)
     {
-        var newTransform = Transform * Matrix4.CreateTranslation(worldTranslation);
+        var newTransform = Transform * Matrix4x4.CreateTranslation(worldTranslation);
         var newCentroid  = Centroid + worldTranslation;
         return WithWorldTransform(newTransform, newCentroid);
     }
@@ -406,7 +406,7 @@ public sealed class PrimRenderFace
     /// All other properties (textures, material, etc.) are shared by reference.
     /// Bitmaps are <em>not</em> cloned.
     /// </summary>
-    internal PrimRenderFace WithWorldTransform(Matrix4 worldTransform, Vector3 worldCentroid)
+    internal PrimRenderFace WithWorldTransform(Matrix4x4 worldTransform, Vector3 worldCentroid)
     {
         return new PrimRenderFace
         {
@@ -517,7 +517,7 @@ public sealed class FlexiPrimInfo
     /// attachment joint matrix each tick:
     /// <c>live_attachTx = PrimLocalMatrix × SlotRotation × SlotOffset × StripScale(liveBone)</c>
     /// </summary>
-    public OpenTK.Mathematics.Matrix4 PrimLocalMatrix { get; init; } = OpenTK.Mathematics.Matrix4.Identity;
+    public Matrix4x4 PrimLocalMatrix { get; init; } = Matrix4x4.Identity;
 
     /// <summary>
     /// Transform applied to the deformed spine positions to bring them from prim-local space
@@ -529,7 +529,7 @@ public sealed class FlexiPrimInfo
     /// <see cref="AttachBoneProvider"/> so the flexi prim follows the animated skeleton.
     /// </para>
     /// </summary>
-    public OpenTK.Mathematics.Matrix4 AttachTransform { get; set; } = OpenTK.Mathematics.Matrix4.Identity;
+    public Matrix4x4 AttachTransform { get; set; } = Matrix4x4.Identity;
 
     /// <summary>
     /// Additional transform applied <em>after</em> <see cref="AttachTransform"/> (or its
@@ -546,7 +546,7 @@ public sealed class FlexiPrimInfo
     /// </list>
     /// Default is Identity (no extra transform).
     /// </summary>
-    public OpenTK.Mathematics.Matrix4 ExternalTransform { get; set; } = OpenTK.Mathematics.Matrix4.Identity;
+    public Matrix4x4 ExternalTransform { get; set; } = Matrix4x4.Identity;
 
     // ── Live attachment tracking (avatar attachments only) ────────────────────
 
@@ -561,12 +561,12 @@ public sealed class FlexiPrimInfo
     /// Combined with <see cref="AttachJointOffset"/> and the live bone matrix to
     /// produce the per-tick transform.
     /// </summary>
-    public OpenTK.Mathematics.Quaternion AttachJointRotation { get; init; }
+    public Quaternion AttachJointRotation { get; init; }
 
     /// <summary>
     /// Default positional offset of the attachment point slot (from avatar_lad.xml).
     /// </summary>
-    public OpenTK.Mathematics.Vector3 AttachJointOffset { get; init; }
+    public Vector3 AttachJointOffset { get; init; }
 
     /// <summary>
     /// Live bone-matrix provider: given a joint name returns the current animated
@@ -574,7 +574,16 @@ public sealed class FlexiPrimInfo
     /// flexi animator can keep the attachment planted on the moving skeleton.
     /// Null for stand-alone scene prims (static <see cref="AttachTransform"/> used).
     /// </summary>
-    public Func<string, OpenTK.Mathematics.Matrix4>? AttachBoneProvider { get; set; }
+    public Func<string, Matrix4x4>? AttachBoneProvider { get; set; }
+
+    /// <summary>
+    /// GPU-side buffers for compute-shader vertex deformation.
+    /// Set by GlViewportControl on the GL thread after the face meshes are uploaded;
+    /// null until then (and permanently null when compute shaders are not supported).
+    /// Read by FlexiPrimAnimator on the physics background thread — write is done once
+    /// so visibility is guaranteed by the happens-before on the periodic timer.
+    /// </summary>
+    internal volatile FlexiGpuData? GpuData;
 }
 
 /// <summary>
@@ -598,7 +607,13 @@ public sealed class PrimRenderSubmission
     /// Flexi prim simulation descriptors — one entry per flexi prim in the linkset.
     /// Empty when the linkset contains no flexi prims.
     /// </summary>
-    public          FlexiPrimInfo[]  FlexiPrims { get; init; } = [];
+    public          FlexiPrimInfo[]      FlexiPrims { get; init; } = [];
+
+    /// <summary>
+    /// Per-face skinning data for avatar LBS animation.
+    /// Populated by AvatarMeshBuilder; empty for non-avatar submissions.
+    /// </summary>
+    internal        AvatarFaceSkinData[] SkinData   { get; init; } = [];
 }
 
 /// <summary>

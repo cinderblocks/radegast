@@ -717,24 +717,24 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
                 // is never auto-nulled by the ListBox binding.
                 var selectedId = SelectedObject?.Id;
 
-                var newById = results.ToDictionary(e => e.Id);
+                var newByLocalId = results.ToDictionary(e => e.LocalId);
 
                 // Remove items no longer in results (iterate backwards to keep indices valid)
                 for (int i = Objects.Count - 1; i >= 0; i--)
                 {
-                    if (!newById.ContainsKey(Objects[i].Id))
+                    if (!newByLocalId.ContainsKey(Objects[i].LocalId))
                         Objects.RemoveAt(i);
                 }
 
                 // Build current index lookup
-                var existingIndex = new Dictionary<UUID, int>(Objects.Count);
+                var existingIndex = new Dictionary<uint, int>(Objects.Count);
                 for (int i = 0; i < Objects.Count; i++)
-                    existingIndex[Objects[i].Id] = i;
+                    existingIndex[Objects[i].LocalId] = i;
 
                 // Update existing items and add new ones
                 foreach (var newItem in results)
                 {
-                    if (existingIndex.TryGetValue(newItem.Id, out int idx))
+                    if (existingIndex.TryGetValue(newItem.LocalId, out int idx))
                     {
                         var existing = Objects[idx];
                         if (existing.Distance != newItem.Distance || existing.Name != newItem.Name)

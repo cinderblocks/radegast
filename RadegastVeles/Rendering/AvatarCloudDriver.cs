@@ -19,12 +19,10 @@
 
 using System;
 using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using Silk.NET.OpenGL;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
-using TkVector3 = OpenTK.Mathematics.Vector3;
-using TkVector4 = OpenTK.Mathematics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -54,13 +52,13 @@ internal sealed class AvatarCloudDriver : IDisposable
     private          bool               _disposed;
 
     // World-space position (updated from the avatar streamer as the avatar moves).
-    private TkVector3     _worldPos;
+    private Vector3       _worldPos;
     private readonly object _lock = new();
 
     // Simple cloud particle state: an array of live cloud puffs.
     private sealed class Puff
     {
-        public TkVector3 Pos;       // offset from emitter centre
+        public Vector3   Pos;       // offset from emitter centre
         public float     Age;       // seconds since spawn
         public float     Lifetime;  // seconds
         public float     StartScale;
@@ -71,7 +69,7 @@ internal sealed class AvatarCloudDriver : IDisposable
     private readonly Puff[] _puffs = new Puff[16];
     private readonly Random _rng   = new();
 
-    public AvatarCloudDriver(uint localId, TkVector3 worldPos, GlViewportControl viewport)
+    public AvatarCloudDriver(uint localId, Vector3 worldPos, GlViewportControl viewport)
     {
         // Encode the avatar LocalID in the lower 32 bits with the cloud flag.
         _key      = AvatarCloudKeyFlag | localId;
@@ -82,7 +80,7 @@ internal sealed class AvatarCloudDriver : IDisposable
             _puffs[i] = new Puff { Age = float.MaxValue }; // all dead initially
     }
 
-    public void UpdateWorldPos(TkVector3 worldPos)
+    public void UpdateWorldPos(Vector3 worldPos)
     {
         lock (_lock) _worldPos = worldPos;
     }
@@ -152,7 +150,7 @@ internal sealed class AvatarCloudDriver : IDisposable
             float theta = (float)(_rng.NextDouble() * Math.PI * 2.0);
             float phi   = (float)(Math.Acos(2.0 * _rng.NextDouble() - 1.0));
             float r     = BurstRadius * (float)Math.Cbrt(_rng.NextDouble());
-            _puffs[i].Pos       = new TkVector3(
+            _puffs[i].Pos       = new Vector3(
                 r * MathF.Sin(phi) * MathF.Cos(theta),
                 r * MathF.Sin(phi) * MathF.Sin(theta),
                 r * MathF.Cos(phi) + 0.85f); // offset upward toward torso
@@ -183,7 +181,7 @@ internal sealed class AvatarCloudDriver : IDisposable
 
         if (count == 0) return;
 
-        TkVector3 wp;
+        Vector3 wp;
         lock (_lock) wp = _worldPos;
 
         var verts = new ParticleVertex[count];
@@ -200,7 +198,7 @@ internal sealed class AvatarCloudDriver : IDisposable
             verts[vi++] = new ParticleVertex
             {
                 Position = puff.Pos,
-                Color    = new TkVector4(1f, 1f, 1f, alpha),
+                Color    = new Vector4(1f, 1f, 1f, alpha),
                 HalfW    = scale * 0.5f,
                 HalfH    = scale * 0.5f,
                 Glow     = 0f,
@@ -210,7 +208,7 @@ internal sealed class AvatarCloudDriver : IDisposable
         // World translation applied via EmitterTransform (particles are emitter-relative).
         vp.SubmitParticles(_key, new ParticleRenderSubmission
         {
-            EmitterTransform = TkMatrix4.CreateTranslation(wp),
+            EmitterTransform = Matrix4x4.CreateTranslation(wp),
             Particles        = verts,
             Texture          = null,
             // SL cloud uses SRC_ALPHA / ONE_MINUS_SRC_ALPHA blending

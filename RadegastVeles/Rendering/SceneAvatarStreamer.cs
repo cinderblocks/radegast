@@ -21,12 +21,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
-using TkMatrix4     = OpenTK.Mathematics.Matrix4;
-using TkQuaternion  = OpenTK.Mathematics.Quaternion;
-using TkVector3     = OpenTK.Mathematics.Vector3;
+using OmVector3  = OpenMetaverse.Vector3;
+using Quaternion = System.Numerics.Quaternion;
+using Vector3    = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
 
@@ -113,28 +114,28 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
     /// <summary>
     /// Computes the current world matrix for the avatar with the given local ID.
-    /// Returns <see cref="TkMatrix4.Identity"/> if the avatar is not found.
+    /// Returns <see cref="Matrix4x4"/> identity if the avatar is not found.
     /// Used by <see cref="SceneFlexiStreamer"/> to seed <c>ExternalTransform</c>
     /// on a freshly-built flexi animator so attachments appear at the correct
     /// world position from the very first tick rather than snapping from origin.
     /// </summary>
-    public TkMatrix4 GetCurrentWorldMatrix(uint localId)
+    public Matrix4x4 GetCurrentWorldMatrix(uint localId)
     {
         var sim = _client.Network.CurrentSim;
-        if (sim == null) return TkMatrix4.Identity;
+        if (sim == null) return Matrix4x4.Identity;
 
         if (localId == _client.Self.LocalID)
         {
             var p = _client.Self.SimPosition;
             var r = _client.Self.SimRotation;
-            return AvatarWorldMatrix(new TkVector3(p.X, p.Y, p.Z), r);
+            return AvatarWorldMatrix(new Vector3(p.X, p.Y, p.Z), r);
         }
 
         if (!sim.ObjectsAvatars.TryGetValue(localId, out var av))
-            return TkMatrix4.Identity;
+            return Matrix4x4.Identity;
 
         var (wp, wr) = ResolveAvatarWorldTransform(sim, av);
-        return AvatarWorldMatrix(new TkVector3(wp.X, wp.Y, wp.Z), wr);
+        return AvatarWorldMatrix(new Vector3(wp.X, wp.Y, wp.Z), wr);
     }
 
     public SceneAvatarStreamer(GridClient client, GlViewportControl viewport,
@@ -181,7 +182,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
             // Re-resolve and push the updated world transform.
             var (resolvedPos, resolvedRot) = ResolveAvatarWorldTransform(sim, av);
-            var wp = new TkVector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
+            var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
             _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(wp, resolvedRot));
         }
 
@@ -200,7 +201,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             {
                 var resolvedPos = _client.Self.SimPosition;
                 var resolvedRot = _client.Self.SimRotation;
-                var wp = new TkVector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
+                var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
                 _viewport.SetSceneObjectTransform(SceneKey(selfId), AvatarWorldMatrix(wp, resolvedRot));
             }
         }
@@ -228,7 +229,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (_rendered.ContainsKey(avatar.LocalID))
         {
             // Fast-path: update world transform (translation + yaw) without a mesh rebuild.
-            var wp = new TkVector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
+            var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
             var worldMatrix = AvatarWorldMatrix(wp, resolvedRot);
             _viewport.SetSceneObjectTransform(
                 SceneKey(avatar.LocalID),
@@ -241,7 +242,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         {
             // Avatar not yet rendered — update cloud driver position if active.
             if (_cloudDrivers.TryGetValue(avatar.LocalID, out var cloud))
-                cloud.UpdateWorldPos(new TkVector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z));
+                cloud.UpdateWorldPos(new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z));
             // Trigger a full build.
             OnAvatarUpdate(sim, avatar);
         }
@@ -505,14 +506,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
         var camFwd = cam.ForwardDirection;
 
         // Resolve avatar world position for frustum test.
-        TkVector3 avObjPos = default;
+        Vector3 avObjPos = default;
         bool hasPosForFrustum = false;
         if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var avForFrustum))
         {
             var (fp, _) = ResolveAvatarWorldTransform(sim, avForFrustum);
-            if (fp != Vector3.Zero)
+            if (fp != OmVector3.Zero)
             {
-                avObjPos = new TkVector3(fp.X, fp.Y, fp.Z);
+                avObjPos = new Vector3(fp.X, fp.Y, fp.Z);
                 hasPosForFrustum = true;
             }
         }
@@ -536,11 +537,10 @@ internal sealed class SceneAvatarStreamer : IDisposable
             if (av != null)
             {
                 var (rawPos, rawRot) = ResolveAvatarWorldTransform(sim, av);
-                if (rawPos != Vector3.Zero)
+                if (rawPos != OmVector3.Zero)
                 {
-                    var worldPos = new TkVector3(rawPos.X, rawPos.Y, rawPos.Z);
-                    var worldRot = new OpenTK.Mathematics.Quaternion(
-                        rawRot.X, rawRot.Y, rawRot.Z, rawRot.W);
+                    var worldPos = new Vector3(rawPos.X, rawPos.Y, rawPos.Z);
+                    var worldRot = new Quaternion(rawRot.X, rawRot.Y, rawRot.Z, rawRot.W);
                     var placeholder = AvatarPlaceholderFactory.Build(
                         $"ph:av:{localId}", worldPos, worldRot, avatarLocalId: localId);
                     _viewport.SubmitSceneObject(SceneKey(localId), placeholder);
@@ -597,7 +597,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
                   ?? new Avatar { LocalID = localId };
 
             var (rawWorldPos, worldRot) = ResolveAvatarWorldTransform(sim, avatarObj);
-            var worldPos = new TkVector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
+            var worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
             var result = await _builder.BuildAsync(
                 localId,
@@ -606,7 +606,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 progress:     null,
                 ct:           token,
                 lodLevel:     AvatarLodForDistance(
-                    Vector3.Distance(rawWorldPos, _client.Self.SimPosition)),
+                    OmVector3.Distance(rawWorldPos, _client.Self.SimPosition)),
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
@@ -620,7 +620,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
             // Apply world-space position so the avatar stands at its sim-local coords.
             var submission = result.Submission;
-            if (rawWorldPos != Vector3.Zero)
+            if (rawWorldPos != OmVector3.Zero)
             {
                 var worldMatrix = AvatarWorldMatrix(worldPos, worldRot);
 
@@ -697,12 +697,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// Avatar geometry is built in bind pose oriented along +Y, so a yaw (rotation
     /// around the up-axis / Z) is all that is needed to face the correct heading.
     /// </summary>
-    private static TkMatrix4 AvatarWorldMatrix(TkVector3 worldPos, OpenMetaverse.Quaternion rotation)
+    private static Matrix4x4 AvatarWorldMatrix(Vector3 worldPos, OpenMetaverse.Quaternion rotation)
     {
-        // Extract yaw from the OpenMetaverse quaternion (rotation around Z = up in SL coords).
-        var q  = new TkQuaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
-        var rot = TkMatrix4.CreateFromQuaternion(q);
-        return rot * TkMatrix4.CreateTranslation(worldPos);
+        var q   = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
+        var rot = Matrix4x4.CreateFromQuaternion(q);
+        return rot * Matrix4x4.CreateTranslation(worldPos);
     }
 
     /// <summary>
@@ -712,7 +711,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// full linkset hierarchy up to the root prim to compute the world-space
     /// transform (mirrors <c>AgentManager.SimPosition</c> logic).
     /// </summary>
-    private (Vector3 worldPos, OpenMetaverse.Quaternion worldRot) ResolveAvatarWorldTransform(
+    private (OmVector3 worldPos, OpenMetaverse.Quaternion worldRot) ResolveAvatarWorldTransform(
         Simulator sim, Avatar avatar)
     {
         float hoverZ = avatar.HoverHeight.Z;
@@ -762,9 +761,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
         return (worldPos, worldRot);
     }
 
-    private static bool IsWithinRadius(Vector3 pos, Vector3 origin, float radius)
+    private static bool IsWithinRadius(OmVector3 pos, OmVector3 origin, float radius)
     {
-        if (pos == Vector3.Zero) return false;
+        if (pos == OmVector3.Zero) return false;
         var dx = pos.X - origin.X;
         var dy = pos.Y - origin.Y;
         var dz = pos.Z - origin.Z;

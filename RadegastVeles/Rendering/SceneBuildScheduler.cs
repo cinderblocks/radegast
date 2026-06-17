@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -102,15 +103,15 @@ internal sealed class SceneBuildScheduler : IDisposable
     public static float ScoreWithFrustum(
         float distanceSq,
         float typeMultiplier,
-        OpenTK.Mathematics.Vector3 eyePos,
-        OpenTK.Mathematics.Vector3 cameraForward,
-        OpenTK.Mathematics.Vector3 objectPos)
+        Vector3 eyePos,
+        Vector3 cameraForward,
+        Vector3 objectPos)
     {
         float baseScore = typeMultiplier / (distanceSq + 1f);
 
         // Direction from eye to object (unnormalised is fine — we only need the sign).
         var toObj = objectPos - eyePos;
-        float dot = OpenTK.Mathematics.Vector3.Dot(toObj, cameraForward);
+        float dot = Vector3.Dot(toObj, cameraForward);
         // dot > 0 → object is in front; normalise to [0,1] so directly-ahead = 1.
         float forward01 = distanceSq > 0.01f
             ? Math.Clamp(dot / MathF.Sqrt(distanceSq), 0f, 1f)

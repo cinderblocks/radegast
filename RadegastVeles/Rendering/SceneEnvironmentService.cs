@@ -21,7 +21,7 @@ using System;
 using System.Collections.Generic;
 using OpenMetaverse.Messages.Linden;
 using OpenMetaverse.StructuredData;
-using OpenTK.Mathematics;
+using System.Numerics;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.Rendering;
@@ -237,13 +237,13 @@ public sealed class SceneEnvironmentService : IDisposable
             else
             {
                 // Legacy Windlight: reconstruct from sun_angle (elevation) + east_angle (azimuth).
-                float sunAngle  = ReadScalar(map, "sun_angle",  MathHelper.PiOver2);
+                float sunAngle  = ReadScalar(map, "sun_angle",  MathF.PI / 2f);
                 float eastAngle = ReadScalar(map, "east_angle", 0f);
                 var sunDir = new Vector3(
                     MathF.Cos(eastAngle) * MathF.Cos(sunAngle),
                     MathF.Sin(eastAngle) * MathF.Cos(sunAngle),
                     MathF.Sin(sunAngle));
-                if (sunDir.LengthSquared < 0.001f) sunDir = Vector3.UnitZ;
+                if (sunDir.LengthSquared() < 0.001f) sunDir = Vector3.UnitZ;
                 sunRot = QuatFromTo(Vector3.UnitZ, Vector3.Normalize(sunDir));
             }
 
@@ -314,24 +314,24 @@ public sealed class SceneEnvironmentService : IDisposable
     // ── Quaternion helpers ────────────────────────────────────────────────────────
 
     private static Quaternion NormaliseQuat(Quaternion q) =>
-        q.LengthSquared > 0.0001f ? Quaternion.Normalize(q) : Quaternion.Identity;
+        q.LengthSquared() > 0.0001f ? Quaternion.Normalize(q) : Quaternion.Identity;
 
     // Build the shortest-arc quaternion that rotates 'from' to 'to'.
     private static Quaternion QuatFromTo(Vector3 from, Vector3 to)
     {
         var  axis = Vector3.Cross(from, to);
         float dot = Vector3.Dot(from, to);
-        if (axis.LengthSquared < 1e-10f)
+        if (axis.LengthSquared() < 1e-10f)
             return dot >= 0f ? Quaternion.Identity
-                             : Quaternion.FromAxisAngle(Vector3.UnitX, MathF.PI);
-        float angle = MathF.Acos(MathHelper.Clamp(dot, -1f, 1f));
-        return Quaternion.FromAxisAngle(Vector3.Normalize(axis), angle);
+                             : Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI);
+        float angle = MathF.Acos(Math.Clamp(dot, -1f, 1f));
+        return Quaternion.CreateFromAxisAngle(Vector3.Normalize(axis), angle);
     }
 
     // Rotate vector v by quaternion q: v' = q * v * q⁻¹ (Rodrigues formula).
     private static Vector3 RotateByQuat(Quaternion q, Vector3 v)
     {
-        var xyz  = q.Xyz;
+        var xyz  = new Vector3(q.X, q.Y, q.Z);
         var temp = Vector3.Cross(xyz, v) + q.W * v;
         return v + 2f * Vector3.Cross(xyz, temp);
     }
@@ -428,12 +428,12 @@ public sealed class SceneEnvironmentService : IDisposable
             SunDirection  = Vector3.Normalize(RotateByQuat(sunRot, Vector3.UnitZ)),
             BlueHorizon   = Vector3.Lerp(a.BlueHorizon,   b.BlueHorizon,   t),
             BlueDensity   = Vector3.Lerp(a.BlueDensity,   b.BlueDensity,   t),
-            HazeHorizon   = MathHelper.Lerp(a.HazeHorizon, b.HazeHorizon, t),
-            HazeDensity   = MathHelper.Lerp(a.HazeDensity, b.HazeDensity, t),
+            HazeHorizon   = a.HazeHorizon + (b.HazeHorizon - a.HazeHorizon) * t,
+            HazeDensity   = a.HazeDensity + (b.HazeDensity - a.HazeDensity) * t,
             SunlightColor = Vector3.Lerp(a.SunlightColor, b.SunlightColor, t),
             Ambient       = Vector3.Lerp(a.Ambient,       b.Ambient,       t),
-            SunGlowFocus  = MathHelper.Lerp(a.GlowFocus,  b.GlowFocus,  t),
-            SunGlowSize   = MathHelper.Lerp(a.GlowSize,   b.GlowSize,   t),
+            SunGlowFocus  = a.GlowFocus + (b.GlowFocus - a.GlowFocus) * t,
+            SunGlowSize   = a.GlowSize  + (b.GlowSize  - a.GlowSize)  * t,
         };
     }
 }

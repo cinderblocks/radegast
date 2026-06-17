@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -136,8 +136,8 @@ internal static class AvatarPlaceholderFactory
         }
 
         // ── World transform ───────────────────────────────────────────────────
-        var worldMatrix = Matrix4.CreateFromQuaternion(worldRotation)
-                        * Matrix4.CreateTranslation(worldPosition);
+        var worldMatrix = Matrix4x4.CreateFromQuaternion(worldRotation)
+                        * Matrix4x4.CreateTranslation(worldPosition);
 
         var centre = worldPosition + new Vector3(0f, 0f, CentreZ);
 

@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -29,13 +30,11 @@ using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
-// Alias OpenTK math types to avoid conflicts with identically-named OpenMetaverse types.
 // Alias System.IO.Path to avoid clash with OpenMetaverse.Rendering.Path.
-using SysPath      = System.IO.Path;
-using TkMatrix4    = OpenTK.Mathematics.Matrix4;
-using TkVector3    = OpenTK.Mathematics.Vector3;
-using TkVector4    = OpenTK.Mathematics.Vector4;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
+using SysPath    = System.IO.Path;
+using Vector3    = System.Numerics.Vector3;
+using Vector4    = System.Numerics.Vector4;
+using Quaternion = System.Numerics.Quaternion;
 
 namespace Radegast.Veles.Rendering;
 
@@ -50,17 +49,17 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// Intermediate per-face geometry before textures are downloaded.
     /// </summary>
     private sealed record BodyFaceData(
-        float[]   Verts,
-        ushort[]  Indices,
-        TkVector3 Centroid,
-        bool      IsTwoSided,
-        float     AlphaCutoff,
-        UUID      TexId,
-        string?   BakeName,
-        string[]  Bone1,
-        float[]   Weight1,
-        string[]  Bone2,
-        float[]   Weight2);
+        float[]  Verts,
+        ushort[] Indices,
+        Vector3  Centroid,
+        bool     IsTwoSided,
+        float    AlphaCutoff,
+        UUID     TexId,
+        string?  BakeName,
+        string[] Bone1,
+        float[]  Weight1,
+        string[] Bone2,
+        float[]  Weight2);
 
     // IMG_DEFAULT_AVATAR: sentinel UUID meaning "no custom texture set".
     // Equivalent to LLVOAvatar's IMG_DEFAULT_AVATAR (llvoavatar.cpp:8871).
@@ -112,9 +111,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     private Dictionary<int, AttachPoint>? _attachPoints;
 
     private sealed record AttachPoint(
-        string       JointName,
-        TkVector3    Position,
-        TkQuaternion Rotation);
+        string     JointName,
+        Vector3    Position,
+        Quaternion Rotation);
 
     // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -131,7 +130,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // 1. Load avatar definition and build VP-morphed bone world matrices.
         LindenAvatarDefinition?            avatarDef         = null;
         Dictionary<string, BoneTransform>? boneTransforms    = null;
-        Dictionary<string, TkMatrix4>?     boneWorldMatrices = null;
+        Dictionary<string, Matrix4x4>?     boneWorldMatrices = null;
         try
         {
             progress?.Report("Loading avatar definition…");
@@ -165,8 +164,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             {
                 Label     = label,
                 Faces     = [],
-                BoundsMin = new TkVector3(-0.5f),
-                BoundsMax = new TkVector3( 0.5f),
+                BoundsMin = new Vector3(-0.5f),
+                BoundsMax = new Vector3( 0.5f),
             };
             return new AvatarBuildResult(emptySub, [], null, null, null, null,
                 ImmutableArray<AvatarFaceMorphData>.Empty);
@@ -231,8 +230,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 {
                     Label      = label,
                     Faces      = greyFaces,
-                    BoundsMin  = gMin.X < float.MaxValue ? gMin : new TkVector3(-0.5f),
-                    BoundsMax  = gMax.X > float.MinValue ? gMax : new TkVector3( 0.5f),
+                    BoundsMin  = gMin.X < float.MaxValue ? gMin : new Vector3(-0.5f),
+                    BoundsMax  = gMax.X > float.MinValue ? gMax : new Vector3( 0.5f),
                     FlexiPrims = [],
                 };
                 onGeometryReady(greySub);
@@ -244,7 +243,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // VP-deformed bone world matrices: used only for attachment placement so that
         // attachment points follow the body-proportion-adjusted skeleton.  They are NOT
         // used for body-mesh LBS (that uses the default boneWorldMatrices above).
-        Dictionary<string, TkMatrix4>? vpBoneWorldMatrices = null;
+        Dictionary<string, Matrix4x4>? vpBoneWorldMatrices = null;
         if (boneTransforms != null)
             vpBoneWorldMatrices = BuildBoneWorldMatrices(avatarDef.Skeleton, boneTransforms);
 
@@ -267,8 +266,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
                 // Flexi rigid attachment faces are driven by FlexiPrimAnimator, not skinData.
                 // Key: prim LocalID  Value: (source Primitive, prim-to-avatar-local transform, attach-point metadata, ordered face-slot list)
-                var pendingFlexi = new Dictionary<uint, (Primitive prim, TkMatrix4 attachTx, TkMatrix4 primLocalMatrix, string jointName, TkVector3 jointOffset, TkQuaternion jointRot, List<(int faceIdx, float[] verts)> faceList)>();
-                var emptyDeltas = System.Collections.Immutable.ImmutableDictionary<string, TkQuaternion>.Empty;
+                var pendingFlexi = new Dictionary<uint, (Primitive prim, Matrix4x4 attachTx, Matrix4x4 primLocalMatrix, string jointName, Vector3 jointOffset, Quaternion jointRot, List<(int faceIdx, float[] verts)> faceList)>();
+                var emptyDeltas = System.Collections.Immutable.ImmutableDictionary<string, Quaternion>.Empty;
                 var tposeAttachmentBones = ComputeAttachmentBoneWorldMatrices(avatarDef, boneTransforms!, emptyDeltas);
 
                 for (int i = 0; i < attFaces.Count; i++)
@@ -291,12 +290,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     for (int vi = 0; vi < nv; vi++)
                     {
                         int o  = vi * 8;
-                        var wp = TkVector4.TransformRow(
-                            new TkVector4(origFace.Vertices[o],     origFace.Vertices[o + 1],
-                                          origFace.Vertices[o + 2], 1f), faceTransform);
-                        var wn = TkVector4.TransformRow(
-                            new TkVector4(origFace.Vertices[o + 3], origFace.Vertices[o + 4],
-                                          origFace.Vertices[o + 5], 0f), faceTransform);
+                        var wp = Vector4.Transform(
+                            new Vector4(origFace.Vertices[o],     origFace.Vertices[o + 1],
+                                        origFace.Vertices[o + 2], 1f), faceTransform);
+                        var wn = Vector4.Transform(
+                            new Vector4(origFace.Vertices[o + 3], origFace.Vertices[o + 4],
+                                        origFace.Vertices[o + 5], 0f), faceTransform);
                         worldVerts[o]     = wp.X; worldVerts[o + 1] = wp.Y; worldVerts[o + 2] = wp.Z;
                         worldVerts[o + 3] = wn.X; worldVerts[o + 4] = wn.Y; worldVerts[o + 5] = wn.Z;
                         worldVerts[o + 6] = origFace.Vertices[o + 6];
@@ -315,7 +314,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         PrimLocalId              = origFace.PrimLocalId,
                         FaceIndex                = origFace.FaceIndex,
                         Texture                  = origFace.Texture,
-                        Transform                = TkMatrix4.Identity,
+                        Transform                = Matrix4x4.Identity,
                         Centroid                 = origFace.Centroid,
                         IsTwoSided               = origFace.IsTwoSided,
                         AlphaCutoff              = origFace.AlphaCutoff,
@@ -382,12 +381,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                 // Compute the prim's own SRT — Scale × Rotation × Translation.
                                 // This is the prim-local part that prefixes the attachment joint
                                 // matrix and must be combined with the live bone each tick.
-                                var ps = new TkVector3(srcPrim.Scale.X,    srcPrim.Scale.Y,    srcPrim.Scale.Z);
-                                var pr = new TkQuaternion(srcPrim.Rotation.X, srcPrim.Rotation.Y, srcPrim.Rotation.Z, srcPrim.Rotation.W);
-                                var pp = new TkVector3(srcPrim.Position.X, srcPrim.Position.Y, srcPrim.Position.Z);
-                                var primLocalMatrix = TkMatrix4.CreateScale(ps)
-                                                   * TkMatrix4.CreateFromQuaternion(pr)
-                                                   * TkMatrix4.CreateTranslation(pp);
+                                var ps = new Vector3(srcPrim.Scale.X,    srcPrim.Scale.Y,    srcPrim.Scale.Z);
+                                var pr = new Quaternion(srcPrim.Rotation.X, srcPrim.Rotation.Y, srcPrim.Rotation.Z, srcPrim.Rotation.W);
+                                var pp = new Vector3(srcPrim.Position.X, srcPrim.Position.Y, srcPrim.Position.Z);
+                                var primLocalMatrix = Matrix4x4.CreateScale(ps)
+                                                   * Matrix4x4.CreateFromQuaternion(pr)
+                                                   * Matrix4x4.CreateTranslation(pp);
 
                                 // Child prims in an attachment linkset are positioned in the root
                                 // prim's orientation space (see PrimMeshBuilder.TessellateAttachmentAsync:
@@ -401,11 +400,11 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                     sim.ObjectsPrimitives.TryGetValue(ai.PrimLocalId, out var rootPrim) &&
                                     rootPrim != null)
                                 {
-                                    var rr = new TkQuaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
-                                    var rp = new TkVector3(rootPrim.Position.X, rootPrim.Position.Y, rootPrim.Position.Z);
+                                    var rr = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
+                                    var rp = new Vector3(rootPrim.Position.X, rootPrim.Position.Y, rootPrim.Position.Z);
                                     primLocalMatrix = primLocalMatrix
-                                                    * TkMatrix4.CreateFromQuaternion(rr)
-                                                    * TkMatrix4.CreateTranslation(rp);
+                                                    * Matrix4x4.CreateFromQuaternion(rr)
+                                                    * Matrix4x4.CreateTranslation(rp);
                                 }
                                 entry = (srcPrim, faceTransform, primLocalMatrix,
                                          ai.JointName ?? string.Empty,
@@ -441,7 +440,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 {
                     foreach (var (faceIdx, _) in entry.faceList)
                     {
-                        faces[faceIdx].Transform = TkMatrix4.Identity;
+                        faces[faceIdx].Transform = Matrix4x4.Identity;
                         // See PrimRenderFace.IsFlexi — keeps ApplySceneTransformOverrides
                         // from stomping this identity transform with the avatar's world matrix.
                         faces[faceIdx].IsFlexi   = true;
@@ -477,8 +476,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 }
                 if (aBMin.X < float.MaxValue)
                 {
-                    bMin = TkVector3.ComponentMin(bMin, aBMin);
-                    bMax = TkVector3.ComponentMax(bMax, aBMax);
+                    bMin = Vector3.Min(bMin, aBMin);
+                    bMax = Vector3.Max(bMax, aBMax);
                 }
             }
             catch (OperationCanceledException) { throw; }
@@ -487,10 +486,11 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
         if (faces.Count == 0 || bMin.X >= float.MaxValue)
         {
-            bMin = new TkVector3(-0.5f);
-            bMax = new TkVector3( 0.5f);
+            bMin = new Vector3(-0.5f);
+            bMax = new Vector3( 0.5f);
         }
 
+        var skinArray = skinData.ToArray();
         var submission = new PrimRenderSubmission
         {
             Label      = label,
@@ -498,12 +498,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             BoundsMin  = bMin,
             BoundsMax  = bMax,
             FlexiPrims = flexiInfos.ToArray(),
+            SkinData   = skinArray,
         };
         // Pass empty BoneTransforms so AnimTick uses the default skeleton + rotation-only LBS.
         // VP bone scale/position changes come from mesh morphs (BindVerts), not bone matrices.
         // FittedBoneTransforms carries the real VP-deformed values for rigged / fitted mesh
         // faces (see AvatarFaceSkinData.UseVpBoneTransforms).
-        return new AvatarBuildResult(submission, skinData.ToArray(), avatarDef,
+        return new AvatarBuildResult(submission, skinArray, avatarDef,
             new Dictionary<string, BoneTransform>(), boneWorldMatrices,
             boneTransforms ?? new Dictionary<string, BoneTransform>(),
             faceMorphData);
@@ -516,24 +517,27 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// leaving only rotation and translation. Used for attachment placement so VP bone scale
     /// (which adjusts skeleton proportions) does not stretch rigid attachment geometry.
     /// </summary>
-    private static TkMatrix4 StripScale(TkMatrix4 m)
+    private static Matrix4x4 StripScale(Matrix4x4 m)
     {
-        var r0 = m.Row0.Xyz; if (r0.LengthSquared > 1e-10f) r0.Normalize();
-        var r1 = m.Row1.Xyz; if (r1.LengthSquared > 1e-10f) r1.Normalize();
-        var r2 = m.Row2.Xyz; if (r2.LengthSquared > 1e-10f) r2.Normalize();
-        return new TkMatrix4(
-            new TkVector4(r0, 0f),
-            new TkVector4(r1, 0f),
-            new TkVector4(r2, 0f),
-            m.Row3);
+        var r0 = new Vector3(m.M11, m.M12, m.M13);
+        if (r0.LengthSquared() > 1e-10f) r0 = Vector3.Normalize(r0);
+        var r1 = new Vector3(m.M21, m.M22, m.M23);
+        if (r1.LengthSquared() > 1e-10f) r1 = Vector3.Normalize(r1);
+        var r2 = new Vector3(m.M31, m.M32, m.M33);
+        if (r2.LengthSquared() > 1e-10f) r2 = Vector3.Normalize(r2);
+        return new Matrix4x4(
+            r0.X, r0.Y, r0.Z, 0f,
+            r1.X, r1.Y, r1.Z, 0f,
+            r2.X, r2.Y, r2.Z, 0f,
+            m.M41, m.M42, m.M43, m.M44);
     }
 
-    private static Dictionary<string, TkMatrix4> BuildBoneWorldMatrices(
+    private static Dictionary<string, Matrix4x4> BuildBoneWorldMatrices(
         LindenSkeleton                    skeleton,
         Dictionary<string, BoneTransform> boneTransforms)
     {
-        var result = new Dictionary<string, TkMatrix4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(skeleton.bone, TkMatrix4.Identity, boneTransforms, result);
+        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
+        BuildBoneMatricesRecursive(skeleton.bone, Matrix4x4.Identity, boneTransforms, result);
         return result;
     }
 
@@ -544,10 +548,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
     private static void BuildBoneMatricesRecursive(
         Joint                             joint,
-        TkMatrix4                         parentWorld,
+        Matrix4x4                         parentWorld,
         Dictionary<string, BoneTransform> boneTransforms,
-        Dictionary<string, TkMatrix4>     result,
-        IReadOnlyDictionary<string, TkQuaternion>? rotDeltas = null,
+        Dictionary<string, Matrix4x4>     result,
+        IReadOnlyDictionary<string, Quaternion>? rotDeltas = null,
         bool                              applyVpScale = true)
     {
         var world = BuildLocalMatrix(joint, boneTransforms, rotDeltas, applyVpScale) * parentWorld;
@@ -585,86 +589,80 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         }
     }
 
-    private static TkMatrix4 BuildLocalMatrix(
+    private static Matrix4x4 BuildLocalMatrix(
         JointBase                         joint,
         Dictionary<string, BoneTransform> boneTransforms,
-        IReadOnlyDictionary<string, TkQuaternion>? rotDeltas = null,
+        IReadOnlyDictionary<string, Quaternion>? rotDeltas = null,
         bool                              applyVpScale = true)
     {
         if (string.IsNullOrEmpty(joint.name))
-            return TkMatrix4.Identity;
+            return Matrix4x4.Identity;
 
-        TkVector3 pos, scale;
+        Vector3 pos, scale;
         if (boneTransforms.TryGetValue(joint.name, out var bt))
         {
-            pos   = new TkVector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
+            pos   = new Vector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
             // When applyVpScale is false (attachment LBS), use the XML default scale so that
             // VP scale deformations do not compound multiplicatively through the hierarchy.
             // VP position deltas are still applied to preserve proportional bone spacing.
             scale = applyVpScale
-                ? new TkVector3(bt.Scale.X, bt.Scale.Y, bt.Scale.Z)
+                ? new Vector3(bt.Scale.X, bt.Scale.Y, bt.Scale.Z)
                 : (joint.scale?.Length >= 3
-                    ? new TkVector3(joint.scale[0], joint.scale[1], joint.scale[2])
-                    : TkVector3.One);
+                    ? new Vector3(joint.scale[0], joint.scale[1], joint.scale[2])
+                    : Vector3.One);
         }
         else
         {
             pos   = joint.pos?.Length   >= 3
-                ? new TkVector3(joint.pos[0],   joint.pos[1],   joint.pos[2])
-                : TkVector3.Zero;
+                ? new Vector3(joint.pos[0],   joint.pos[1],   joint.pos[2])
+                : Vector3.Zero;
             scale = joint.scale?.Length >= 3
-                ? new TkVector3(joint.scale[0], joint.scale[1], joint.scale[2])
-                : TkVector3.One;
+                ? new Vector3(joint.scale[0], joint.scale[1], joint.scale[2])
+                : Vector3.One;
         }
 
-        float rx = joint.rot?.Length > 0
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(joint.rot[0]) : 0f;
-        float ry = joint.rot?.Length > 1
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(joint.rot[1]) : 0f;
-        float rz = joint.rot?.Length > 2
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(joint.rot[2]) : 0f;
-        var rot = TkQuaternion.FromEulerAngles(rx, ry, rz);
+        float rx = joint.rot?.Length > 0 ? joint.rot[0] * (MathF.PI / 180f) : 0f;
+        float ry = joint.rot?.Length > 1 ? joint.rot[1] * (MathF.PI / 180f) : 0f;
+        float rz = joint.rot?.Length > 2 ? joint.rot[2] * (MathF.PI / 180f) : 0f;
+        var rot = Quaternion.CreateFromYawPitchRoll(ry, rx, rz);
 
         // Apply animation delta on top of the T-pose rotation (mirrors deformbone in RenderAvatar).
         if (rotDeltas != null && rotDeltas.TryGetValue(joint.name, out var delta))
             rot = rot * delta;
 
-        return TkMatrix4.CreateScale(scale)
-             * TkMatrix4.CreateFromQuaternion(rot)
-             * TkMatrix4.CreateTranslation(pos);
+        return Matrix4x4.CreateScale(scale)
+             * Matrix4x4.CreateFromQuaternion(rot)
+             * Matrix4x4.CreateTranslation(pos);
     }
 
-    private static TkMatrix4 BuildCollisionVolumeLocalMatrix(
+    private static Matrix4x4 BuildCollisionVolumeLocalMatrix(
         CollisionVolume                   volume,
         Dictionary<string, BoneTransform> boneTransforms)
     {
-        TkVector3 pos, scale;
+        Vector3 pos, scale;
         if (!string.IsNullOrEmpty(volume.name) && boneTransforms.TryGetValue(volume.name, out var bt))
         {
-            pos   = new TkVector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
-            scale = new TkVector3(bt.Scale.X,    bt.Scale.Y,    bt.Scale.Z);
+            pos   = new Vector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
+            scale = new Vector3(bt.Scale.X,    bt.Scale.Y,    bt.Scale.Z);
         }
         else
         {
             pos = volume.pos?.Length >= 3
-                ? new TkVector3(volume.pos[0], volume.pos[1], volume.pos[2])
-                : TkVector3.Zero;
+                ? new Vector3(volume.pos[0], volume.pos[1], volume.pos[2])
+                : Vector3.Zero;
             scale = volume.scale?.Length >= 3
-                ? new TkVector3(volume.scale[0], volume.scale[1], volume.scale[2])
-                : TkVector3.One;
+                ? new Vector3(volume.scale[0], volume.scale[1], volume.scale[2])
+                : Vector3.One;
         }
 
-        float rx = volume.rot?.Length > 0
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(volume.rot[0]) : 0f;
-        float ry = volume.rot?.Length > 1
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(volume.rot[1]) : 0f;
-        float rz = volume.rot?.Length > 2
-            ? OpenTK.Mathematics.MathHelper.DegreesToRadians(volume.rot[2]) : 0f;
-        var rot = TkQuaternion.FromEulerAngles(rx, ry, rz);
+        float rx = volume.rot?.Length > 0 ? volume.rot[0] * (MathF.PI / 180f) : 0f;
+        float ry = volume.rot?.Length > 1 ? volume.rot[1] * (MathF.PI / 180f) : 0f;
+        float rz = volume.rot?.Length > 2 ? volume.rot[2] * (MathF.PI / 180f) : 0f;
+        var rot = Quaternion.CreateFromYawPitchRoll(ry, rx, rz);
 
-        return TkMatrix4.CreateScale(scale)
-             * TkMatrix4.CreateFromQuaternion(rot)
-             * TkMatrix4.CreateTranslation(pos);
+        return Matrix4x4.CreateScale(scale)
+             * Matrix4x4.CreateFromQuaternion(rot)
+             * Matrix4x4.CreateTranslation(pos);
     }
 
     /// <summary>
@@ -673,13 +671,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// Equivalent to calling <see cref="BuildBoneWorldMatrices"/> but with live
     /// animation values threaded through <see cref="BuildLocalMatrix"/>.
     /// </summary>
-    internal static Dictionary<string, TkMatrix4> ComputeAnimatedBoneWorldMatrices(
-        LindenAvatarDefinition                    avatarDef,
-        Dictionary<string, BoneTransform>         boneTransforms,
-        IReadOnlyDictionary<string, TkQuaternion> rotDeltas)
+    internal static Dictionary<string, Matrix4x4> ComputeAnimatedBoneWorldMatrices(
+        LindenAvatarDefinition                   avatarDef,
+        Dictionary<string, BoneTransform>        boneTransforms,
+        IReadOnlyDictionary<string, Quaternion>  rotDeltas)
     {
-        var result = new Dictionary<string, TkMatrix4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, TkMatrix4.Identity,
+        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
+        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
             boneTransforms, result, rotDeltas);
         return result;
     }
@@ -689,13 +687,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// caller can keep a pre-allocated dictionary alive across frames.
     /// </summary>
     internal static void ComputeAnimatedBoneWorldMatrices(
-        LindenAvatarDefinition                    avatarDef,
-        Dictionary<string, BoneTransform>         boneTransforms,
-        IReadOnlyDictionary<string, TkQuaternion> rotDeltas,
-        Dictionary<string, TkMatrix4>             result)
+        LindenAvatarDefinition                   avatarDef,
+        Dictionary<string, BoneTransform>        boneTransforms,
+        IReadOnlyDictionary<string, Quaternion>  rotDeltas,
+        Dictionary<string, Matrix4x4>            result)
     {
         result.Clear();
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, TkMatrix4.Identity,
+        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
             boneTransforms, result, rotDeltas);
     }
 
@@ -707,13 +705,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// Matches the SL viewer: scale deformations affect only the avatar body mesh
     /// via vertex morphs, not the animBone matrices used for attachment skinning.
     /// </summary>
-    internal static Dictionary<string, TkMatrix4> ComputeAttachmentBoneWorldMatrices(
-        LindenAvatarDefinition                    avatarDef,
-        Dictionary<string, BoneTransform>         boneTransforms,
-        IReadOnlyDictionary<string, TkQuaternion> rotDeltas)
+    internal static Dictionary<string, Matrix4x4> ComputeAttachmentBoneWorldMatrices(
+        LindenAvatarDefinition                   avatarDef,
+        Dictionary<string, BoneTransform>        boneTransforms,
+        IReadOnlyDictionary<string, Quaternion>  rotDeltas)
     {
-        var result = new Dictionary<string, TkMatrix4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, TkMatrix4.Identity,
+        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
+        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
             boneTransforms, result, rotDeltas, applyVpScale: false);
         return result;
     }
@@ -722,13 +720,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     /// Reuse-overload: clears and refills <paramref name="result"/> in-place.
     /// </summary>
     internal static void ComputeAttachmentBoneWorldMatrices(
-        LindenAvatarDefinition                    avatarDef,
-        Dictionary<string, BoneTransform>         boneTransforms,
-        IReadOnlyDictionary<string, TkQuaternion> rotDeltas,
-        Dictionary<string, TkMatrix4>             result)
+        LindenAvatarDefinition                   avatarDef,
+        Dictionary<string, BoneTransform>        boneTransforms,
+        IReadOnlyDictionary<string, Quaternion>  rotDeltas,
+        Dictionary<string, Matrix4x4>            result)
     {
         result.Clear();
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, TkMatrix4.Identity,
+        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
             boneTransforms, result, rotDeltas, applyVpScale: false);
     }
 
@@ -736,7 +734,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         PrimMeshBuilder.AttachmentRiggedSkin skin,
         float[]                              bindVerts,
         int                                  vertexCount,
-        Dictionary<string, TkMatrix4>        tposeBones)
+        Dictionary<string, Matrix4x4>        tposeBones)
     {
         if (skin.InvBindMatrices.Length == 0 || skin.JointNames.Length == 0) return;
 
@@ -747,7 +745,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         {
             int o  = vi * 8;
             int si = vi * 4;
-            var bp = new TkVector4(bindVerts[o], bindVerts[o + 1], bindVerts[o + 2], 1f);
+            var bp = new Vector4(bindVerts[o], bindVerts[o + 1], bindVerts[o + 2], 1f);
 
             RejectOutlierInfluence(skin.JointNames, skin.InvBindMatrices, tposeBones, bp, maxDeltaSq,
                 skin.Joints[si],     ref skin.Weights[si]);
@@ -769,7 +767,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             }
             else
             {
-                skin.Joints[si] = FindNearestJoint(skin.JointNames, bp.Xyz, tposeBones);
+                skin.Joints[si] = FindNearestJoint(skin.JointNames, new Vector3(bp.X, bp.Y, bp.Z), tposeBones);
                 skin.Joints[si + 1] = skin.Joints[si + 2] = skin.Joints[si + 3] = skin.Joints[si];
                 skin.Weights[si]     = 1f;
                 skin.Weights[si + 1] = skin.Weights[si + 2] = skin.Weights[si + 3] = 0f;
@@ -778,13 +776,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     }
 
     private static void RejectOutlierInfluence(
-        string[]                       jointNames,
-        TkMatrix4[]                    invBindMatrices,
-        Dictionary<string, TkMatrix4>  tposeBones,
-        TkVector4                      bindPos,
-        float                          maxDeltaSq,
-        int                            jointIndex,
-        ref float                      weight)
+        string[]                      jointNames,
+        Matrix4x4[]                   invBindMatrices,
+        Dictionary<string, Matrix4x4> tposeBones,
+        Vector4                       bindPos,
+        float                         maxDeltaSq,
+        int                           jointIndex,
+        ref float                     weight)
     {
         if (weight <= 1e-4f) return;
         if ((uint)jointIndex >= (uint)jointNames.Length || (uint)jointIndex >= (uint)invBindMatrices.Length)
@@ -799,24 +797,24 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             return;
         }
 
-        var bindCheck = TkVector4.TransformRow(
-            TkVector4.TransformRow(bindPos, invBindMatrices[jointIndex]), tposeBone);
-        if ((bindCheck.Xyz - bindPos.Xyz).LengthSquared > maxDeltaSq)
+        var bindCheck = Vector4.Transform(Vector4.Transform(bindPos, invBindMatrices[jointIndex]), tposeBone);
+        var deltaXyz  = new Vector3(bindCheck.X - bindPos.X, bindCheck.Y - bindPos.Y, bindCheck.Z - bindPos.Z);
+        if (deltaXyz.LengthSquared() > maxDeltaSq)
             weight = 0f;
     }
 
     private static int FindNearestJoint(
         string[]                      jointNames,
-        TkVector3                     pos,
-        Dictionary<string, TkMatrix4> tposeBones)
+        Vector3                       pos,
+        Dictionary<string, Matrix4x4> tposeBones)
     {
         int best = 0;
         float bestD2 = float.MaxValue;
         for (int i = 0; i < jointNames.Length; i++)
         {
             if (!tposeBones.TryGetValue(jointNames[i], out var m)) continue;
-            var bonePos = new TkVector3(m.Row3.X, m.Row3.Y, m.Row3.Z);
-            float d2 = (bonePos - pos).LengthSquared;
+            var bonePos = new Vector3(m.M41, m.M42, m.M43);
+            float d2 = (bonePos - pos).LengthSquared();
             if (d2 < bestD2)
             {
                 bestD2 = d2;
@@ -968,18 +966,18 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         float[]                       verts,
         int                           nv,
         int[]                         j0, int[] j1, int[] j2, int[] j3,
-        Dictionary<string, TkMatrix4> tposeVpBones)
+        Dictionary<string, Matrix4x4> tposeVpBones)
     {
         // Build T-pose world-space positions and group assignments for every joint.
-        var bonePos      = new TkVector3[jointNames.Length];
+        var bonePos      = new Vector3[jointNames.Length];
         var boneGroupArr = new BoneGroup[jointNames.Length];
         var activeIdx    = new List<int>(jointNames.Length);
         for (int j = 0; j < jointNames.Length; j++)
         {
             if (tposeVpBones.TryGetValue(jointNames[j], out var m))
-                bonePos[j] = new TkVector3(m.Row3.X, m.Row3.Y, m.Row3.Z);
+                bonePos[j] = new Vector3(m.M41, m.M42, m.M43);
             else
-                bonePos[j] = new TkVector3(float.NaN, float.NaN, float.NaN);
+                bonePos[j] = new Vector3(float.NaN, float.NaN, float.NaN);
 
             if (s_boneGroups.TryGetValue(jointNames[j], out var grp) && !float.IsNaN(bonePos[j].X))
             {
@@ -1000,7 +998,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             int dom = j0[vi];
             if ((uint)dom >= (uint)jointNames.Length) continue;
 
-            var vPos = new TkVector3(
+            var vPos = new Vector3(
                 verts[vi * 8 + 0],
                 verts[vi * 8 + 1],
                 verts[vi * 8 + 2]);
@@ -1011,7 +1009,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             float bestD2   = snapThresh * snapThresh;
             foreach (int ai in activeIdx)
             {
-                float d2 = (bonePos[ai] - vPos).LengthSquared;
+                float d2 = (bonePos[ai] - vPos).LengthSquared();
                 if (d2 < bestD2) { bestD2 = d2; bestBone = ai; }
             }
             if (bestBone < 0) continue;   // vertex is far from all mobile bones — skip
@@ -1042,20 +1040,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         }
     }
 
-    private static TkMatrix4[] ComputeFreshInvBindMatrices(
-        string[]                       jointNames,
-        Dictionary<string, TkMatrix4>  tposeVpBones,
-        TkMatrix4[]                    fallbackIBMs)
+    private static Matrix4x4[] ComputeFreshInvBindMatrices(
+        string[]                      jointNames,
+        Dictionary<string, Matrix4x4> tposeVpBones,
+        Matrix4x4[]                   fallbackIBMs)
     {
-        var result = new TkMatrix4[jointNames.Length];
+        var result = new Matrix4x4[jointNames.Length];
         for (int j = 0; j < jointNames.Length; j++)
         {
             // v_bind and animBone world matrices are both in metres, so IBM = Invert(tposeVpBone).
             // No unit-conversion scale is needed here (the SL viewer's 39.37 factor belongs to
             // its internal inch-to-metre pipeline which does not apply to our coordinate space).
             result[j] = tposeVpBones.TryGetValue(jointNames[j], out var m)
-                ? TkMatrix4.Invert(m)
-                : (fallbackIBMs != null && j < fallbackIBMs.Length ? fallbackIBMs[j] : TkMatrix4.Identity);
+                ? (Matrix4x4.Invert(m, out var inv) ? inv : Matrix4x4.Identity)
+                : (fallbackIBMs != null && j < fallbackIBMs.Length ? fallbackIBMs[j] : Matrix4x4.Identity);
         }
         return result;
     }
@@ -1064,23 +1062,23 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
     private async Task<(List<PrimRenderFace> faces, List<AvatarFaceSkinData> skinData,
                          ImmutableArray<AvatarFaceMorphData> faceMorphData,
-                         TkVector3 bMin, TkVector3 bMax)>
+                         Vector3 bMin, Vector3 bMax)>
 
         BuildBodyMeshFacesAsync(
             LindenAvatarDefinition          avatarDef,
             Avatar?                         avatarObj,
             IReadOnlyDictionary<int, float> visualParams,
-            Dictionary<string, TkMatrix4>?  boneWorldMatrices,
+            Dictionary<string, Matrix4x4>?  boneWorldMatrices,
             IProgress<string>?              progress,
             CancellationToken               ct,
             int                             lodLevel        = 0,
-            Action<PrimRenderFace[], TkVector3, TkVector3>? onGeometryReady = null,
+            Action<PrimRenderFace[], Vector3, Vector3>? onGeometryReady = null,
             uint                            avatarLocalId   = 0,
             IProgress<SceneTexturePatch>?   texturePatch    = null)
     {
         var faceData = new List<BodyFaceData>();
-        var bMin     = new TkVector3(float.MaxValue);
-        var bMax     = new TkVector3(float.MinValue);
+        var bMin     = new Vector3(float.MaxValue);
+        var bMax     = new Vector3(float.MinValue);
 
         var morphParams      = s_cachedMorphParams      ??= TryLoadMeshMorphParams();
         var dynamicMorphSets = s_cachedDynamicMorphNames  ??= TryLoadDynamicMorphNames();
@@ -1219,8 +1217,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             {
                 Vertices    = fd.Verts,
                 Indices     = fd.Indices,
-                Color       = new TkVector4(0.45f, 0.45f, 0.45f, 1f),
-                Transform   = TkMatrix4.Identity,
+                Color       = new Vector4(0.45f, 0.45f, 0.45f, 1f),
+                Transform   = Matrix4x4.Identity,
                 Centroid    = fd.Centroid,
                 IsTwoSided  = fd.IsTwoSided,
                 AlphaCutoff = fd.AlphaCutoff,
@@ -1367,8 +1365,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             {
                 Vertices    = fd.Verts,
                 Indices     = fd.Indices,
-                Color       = TkVector4.One,
-                Transform   = TkMatrix4.Identity,
+                Color       = Vector4.One,
+                Transform   = Matrix4x4.Identity,
                 Centroid    = fd.Centroid,
                 IsTwoSided  = fd.IsTwoSided,
                 AlphaCutoff = fd.AlphaCutoff,
@@ -1404,11 +1402,11 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     private static BodyFaceData? ExtractBodyMeshFaceData(
         LindenMesh                     mesh,
         string                         meshType,
-        Dictionary<string, TkMatrix4>? boneWorldMatrices,
+        Dictionary<string, Matrix4x4>? boneWorldMatrices,
         UUID                           texId,
         string?                        bakeName,
-        ref TkVector3                  bMin,
-        ref TkVector3                  bMax)
+        ref Vector3                    bMin,
+        ref Vector3                    bMax)
     {
         if (mesh.NumVertices == 0 || mesh.NumFaces == 0) return null;
 
@@ -1421,7 +1419,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             "eyeBallRightMesh" => "mEyeRight",
             _ => null,
         };
-        TkMatrix4? eyeBoneMat = null;
+        Matrix4x4? eyeBoneMat = null;
         if (boneName != null && boneWorldMatrices != null
                              && boneWorldMatrices.TryGetValue(boneName, out var bm))
             eyeBoneMat = bm;
@@ -1433,10 +1431,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             int o = vi * 8;
             if (eyeBoneMat.HasValue)
             {
-                var wp = TkVector4.TransformRow(
-                    new TkVector4(v.Coord.X, v.Coord.Y, v.Coord.Z, 1f), eyeBoneMat.Value);
-                var wn = TkVector4.TransformRow(
-                    new TkVector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), eyeBoneMat.Value);
+                var wp = Vector4.Transform(
+                    new Vector4(v.Coord.X, v.Coord.Y, v.Coord.Z, 1f), eyeBoneMat.Value);
+                var wn = Vector4.Transform(
+                    new Vector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), eyeBoneMat.Value);
                 verts[o + 0] = wp.X; verts[o + 1] = wp.Y; verts[o + 2] = wp.Z;
                 verts[o + 3] = wn.X; verts[o + 4] = wn.Y; verts[o + 5] = wn.Z;
             }
@@ -1457,13 +1455,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             indices[fi * 3 + 2] = (ushort)mesh.Faces[fi].Indices[2];
         }
 
-        var centroidSum = TkVector3.Zero;
+        var centroidSum = Vector3.Zero;
         for (int vi = 0; vi < mesh.NumVertices; vi++)
         {
             int o  = vi * 8;
-            var wp = new TkVector3(verts[o], verts[o + 1], verts[o + 2]);
-            bMin         = TkVector3.ComponentMin(bMin, wp);
-            bMax         = TkVector3.ComponentMax(bMax, wp);
+            var wp = new Vector3(verts[o], verts[o + 1], verts[o + 2]);
+            bMin         = Vector3.Min(bMin, wp);
+            bMax         = Vector3.Max(bMax, wp);
             centroidSum += wp;
         }
         var centroid = centroidSum * (1f / mesh.NumVertices);
@@ -1508,20 +1506,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
     /// <summary>Per-attachment metadata used to track which bone a flexi prim follows.</summary>
     private readonly record struct AttachmentBuildInfo(
-        string       JointName,
-        TkVector3    JointOffset,
-        TkQuaternion JointRotation,
-        uint         PrimLocalId);
+        string     JointName,
+        Vector3    JointOffset,
+        Quaternion JointRotation,
+        uint       PrimLocalId);
 
     private async Task<(List<PrimRenderFace> faces, List<string> faceBonesNames,
                          List<PrimMeshBuilder.AttachmentRiggedSkin?> riggedSkins,
                          List<AttachmentBuildInfo> attachInfos,
-                         TkVector3 bMin, TkVector3 bMax)>
+                         Vector3 bMin, Vector3 bMax)>
         BuildAttachmentsAsync(
             uint                          avatarLocalId,
             Avatar?                       avatarObj,
             Simulator                     sim,
-            Dictionary<string, TkMatrix4> boneWorldMatrices,
+            Dictionary<string, Matrix4x4> boneWorldMatrices,
             IProgress<string>?            progress,
             CancellationToken             ct,
             IProgress<SceneTexturePatch>? texturePatch = null)
@@ -1530,8 +1528,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         var allFaceBones   = new List<string>();
         var allRigged      = new List<PrimMeshBuilder.AttachmentRiggedSkin?>();
         var allAttachInfos = new List<AttachmentBuildInfo>();
-        var bMin           = new TkVector3(float.MaxValue);
-        var bMax           = new TkVector3(float.MinValue);
+        var bMin           = new Vector3(float.MaxValue);
+        var bMax           = new Vector3(float.MinValue);
 
         var attachPoints = TryLoadAttachPoints();
         if (attachPoints == null) return (allFaces, allFaceBones, allRigged, allAttachInfos, bMin, bMax);
@@ -1568,8 +1566,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 if (!attachPoints.TryGetValue(apId, out var apoint)) return default;
                 if (!boneWorldMatrices.TryGetValue(apoint.JointName, out var boneMatrix)) return default;
 
-                var attachJointMatrix = TkMatrix4.CreateFromQuaternion(apoint.Rotation)
-                                      * TkMatrix4.CreateTranslation(apoint.Position)
+                var attachJointMatrix = Matrix4x4.CreateFromQuaternion(apoint.Rotation)
+                                      * Matrix4x4.CreateTranslation(apoint.Position)
                                       * StripScale(boneMatrix);
 
                 var linkset = new List<Primitive> { root };
@@ -1594,9 +1592,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
         progress?.Report($"Building {attachTasks.Count} attachment(s)…");
 
-        (string JointName, TkVector3 JointPos, TkQuaternion JointRot, uint RootLocalId,
+        (string JointName, Vector3 JointPos, Quaternion JointRot, uint RootLocalId,
          List<PrimRenderFace> attFaces, List<PrimMeshBuilder.AttachmentRiggedSkin?> attRigged,
-         TkVector3 aBMin, TkVector3 aBMax, bool ok)[] attachResults;
+         Vector3 aBMin, Vector3 aBMax, bool ok)[] attachResults;
         try
         {
             attachResults = await Task.WhenAll(attachTasks).ConfigureAwait(false);
@@ -1619,8 +1617,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             allFaces.AddRange(r.attFaces);
             if (r.aBMin.X < float.MaxValue)
             {
-                bMin = TkVector3.ComponentMin(bMin, r.aBMin);
-                bMax = TkVector3.ComponentMax(bMax, r.aBMax);
+                bMin = Vector3.Min(bMin, r.aBMin);
+                bMax = Vector3.Max(bMax, r.aBMax);
             }
         }
 
@@ -1687,10 +1685,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 if (string.IsNullOrEmpty(jointName)) continue;
                 var pos    = ParseXmlVector3(el.Attribute("position")?.Value ?? "0 0 0");
                 var rotDeg = ParseXmlVector3(el.Attribute("rotation")?.Value ?? "0 0 0");
-                var rot    = TkQuaternion.FromEulerAngles(
-                    OpenTK.Mathematics.MathHelper.DegreesToRadians(rotDeg.X),
-                    OpenTK.Mathematics.MathHelper.DegreesToRadians(rotDeg.Y),
-                    OpenTK.Mathematics.MathHelper.DegreesToRadians(rotDeg.Z));
+                var rot    = Quaternion.CreateFromYawPitchRoll(
+                    rotDeg.Y * (MathF.PI / 180f),
+                    rotDeg.X * (MathF.PI / 180f),
+                    rotDeg.Z * (MathF.PI / 180f));
                 result[id] = new AttachPoint(jointName, pos, rot);
             }
             return _attachPoints = result;
@@ -1698,7 +1696,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         catch { return null; }
     }
 
-    private static TkVector3 ParseXmlVector3(string s)
+    private static Vector3 ParseXmlVector3(string s)
     {
         var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         float x = parts.Length > 0 && float.TryParse(parts[0],
@@ -1710,7 +1708,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         float z = parts.Length > 2 && float.TryParse(parts[2],
             System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var pz) ? pz : 0f;
-        return new TkVector3(x, y, z);
+        return new Vector3(x, y, z);
     }
 
     // ── VP morph application ──────────────────────────────────────────────────────

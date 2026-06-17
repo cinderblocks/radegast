@@ -20,9 +20,10 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using OpenMetaverse;
-using TkVector3 = OpenTK.Mathematics.Vector3;
+using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
 
@@ -88,7 +89,7 @@ internal sealed class SceneParticleStreamer : IDisposable
         // Fast-path: if driver already running, just update its world position.
         if (prim.ParentID == 0 && _drivers.TryGetValue(rootId, out var existing))
         {
-            existing.UpdateWorldPos(new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z));
+            existing.UpdateWorldPos(new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z));
             return;
         }
 
@@ -102,7 +103,7 @@ internal sealed class SceneParticleStreamer : IDisposable
         if (sim != _client.Network.CurrentSim) return;
         var rootId = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
         if (prim.ParentID == 0 && _drivers.TryGetValue(rootId, out var driver))
-            driver.UpdateWorldPos(new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z));
+            driver.UpdateWorldPos(new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z));
     }
 
     /// <summary>Seed the streamer with all currently known prims in the sim (called on scene open).</summary>
@@ -196,7 +197,7 @@ internal sealed class SceneParticleStreamer : IDisposable
             old.Dispose();
 
         var root = prims[0];
-        var worldPos = new TkVector3(root.Position.X, root.Position.Y, root.Position.Z);
+        var worldPos = new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
 
         var driver = new ParticleViewerDriver(_client, prims, (ulong)rootId, worldPos);
         driver.SetViewport(_viewport);

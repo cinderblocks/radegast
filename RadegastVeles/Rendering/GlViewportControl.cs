@@ -29,7 +29,7 @@ using Avalonia.Media;
 using Avalonia.OpenGL;
 using Avalonia.OpenGL.Controls;
 using Silk.NET.OpenGL;
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -158,7 +158,7 @@ public class GlViewportControl : Panel
     // Empty VAO for full-screen triangle draw (no vertex data needed).
     private uint _quadVao;
     // Precomputed hemisphere kernel and 4×4 noise texture.
-    private OpenTK.Mathematics.Vector3[]? _ssaoKernel;
+    private Vector3[]? _ssaoKernel;
     private uint _ssaoNoiseTex;
     // Whether SSAO compiled successfully.
     private bool _ssaoReady;
@@ -187,7 +187,7 @@ public class GlViewportControl : Panel
     private long    _reflLastTick;
     // Last reflected-camera view-projection matrix (saved in DrawWaterReflection,
     // consumed in DrawWater for correct planar-reflection UV lookup).
-    private Matrix4 _lastReflViewProj;
+    private Matrix4x4 _lastReflViewProj;
     private const int WaterReflSize     = 512;
     private const int kReflIntervalMs   = 150; // ~7 fps for reflection updates
 
@@ -246,11 +246,13 @@ public class GlViewportControl : Panel
     // CPU-side vertex data for ray-triangle intersection and hit-attribute fetch.
     // PickerVerts: positions only, stride 3 (X,Y,Z) — used for the fast Möller–Trumbore loop.
     // NormalUvVerts: normals+UVs, stride 5 (nx,ny,nz,u,v) — used for normals/UV after the hit.
-    private readonly List<(float[] PickerVerts, float[] NormalUvVerts, ushort[] Indices, Matrix4 Model)> _cpuFaceData = new();
+    private readonly List<(float[] PickerVerts, float[] NormalUvVerts, ushort[] Indices, Matrix4x4 Model)> _cpuFaceData = new();
 
     // ── Scene-object layer (additive over the base terrain submission) ────────────
     // keyed by scene key (ulong: upper 32 bits = sim index, lower 32 bits = localId)
     private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
+    // FlexiGpuData for scene objects, parallel to _sceneObjects (only populated when compute is available).
+    private readonly Dictionary<ulong, FlexiGpuData[]> _flexiGpuDataMap = new();
     // Pending scene-object updates: (sceneKey, submission).  null submission means "remove".
     private readonly ConcurrentQueue<(ulong RootId, PrimRenderSubmission? Sub)> _pendingSceneObjects = new();
     // Flat draw lists rebuilt from _sceneObjects each time objects are added/removed.
@@ -266,7 +268,15 @@ public class GlViewportControl : Panel
     private readonly ConcurrentQueue<(int FaceIndex, float[] Verts)> _pendingVertexUpdates = new();
 
     // Instanced rendering support.
-    private GlInstanceDrawer? _instanceDrawer;
+    private GlInstanceDrawer?  _instanceDrawer;
+    private GlFlexiDeformer?   _flexiDeformer;
+    private GlSkinDeformer?    _skinDeformer;
+    // FlexiGpuData objects for the current base submission (PrimViewer/AvatarViewer).
+    private readonly List<FlexiGpuData>       _submissionFlexiGpu = new();
+    // AvatarSkinGpuData for the current base submission (AvatarViewer single-model path).
+    private readonly List<AvatarSkinGpuData>  _submissionSkinGpu  = new();
+    // AvatarSkinGpuData per scene object (scene viewer avatar path).
+    private readonly Dictionary<ulong, AvatarSkinGpuData[]> _skinGpuDataMap = new();
     // Reused per-frame buffer for per-instance float data; grown on demand, never shrunk.
     private float[] _instanceDataBuf = Array.Empty<float>();
 
@@ -278,9 +288,9 @@ public class GlViewportControl : Panel
 
     // Per-root model-matrix overrides (e.g. avatar position updates without a full re-upload).
     // When a sceneKey is present here its matrix replaces face.Transform for every face in that object.
-    private readonly ConcurrentDictionary<ulong, Matrix4> _sceneObjectTransformOverrides = new();
+    private readonly ConcurrentDictionary<ulong, Matrix4x4> _sceneObjectTransformOverrides = new();
     // Pending transform override updates enqueued from non-GL threads.
-    private readonly ConcurrentQueue<(ulong RootId, Matrix4 Transform)> _pendingTransformOverrides = new();
+    private readonly ConcurrentQueue<(ulong RootId, Matrix4x4 Transform)> _pendingTransformOverrides = new();
 
     // Pending single-texture patches for already-live scene objects (progressive texture streaming).
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingTexturePatches = new();
@@ -299,8 +309,8 @@ public class GlViewportControl : Panel
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredSubmissionPatches = new();
 
     // ── Last-frame camera state (GL thread only) — used for pick ray construction ──
-    private Matrix4 _lastView = Matrix4.Identity;
-    private Matrix4 _lastProj = Matrix4.Identity;
+    private Matrix4x4 _lastView = Matrix4x4.Identity;
+    private Matrix4x4 _lastProj = Matrix4x4.Identity;
     private int     _lastW, _lastH;
 
     // ── Cross-thread submission queue (lock-free single slot) ────────────────────
@@ -555,7 +565,7 @@ public class GlViewportControl : Panel
     /// Set the orbit target in world space and optionally adjust distance/pitch,
     /// without reframing from the submission bounds.  Safe to call from any thread.
     /// </summary>
-    public void SetCameraTarget(OpenTK.Mathematics.Vector3 target, float distance = -1f, float pitch = -1000f)
+    public void SetCameraTarget(Vector3 target, float distance = -1f, float pitch = -1000f)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
@@ -571,7 +581,7 @@ public class GlViewportControl : Panel
     /// resetting the user's current orbit angle or zoom distance.
     /// Safe to call from any thread.
     /// </summary>
-    public void UpdateCameraFollow(OpenTK.Mathematics.Vector3 target)
+    public void UpdateCameraFollow(Vector3 target)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
@@ -713,6 +723,26 @@ public class GlViewportControl : Panel
                 _ssaoReady = false;
             }
 
+            // Flexi-prim compute deformer (best-effort; falls back to CPU when unavailable).
+            try
+            {
+                _flexiDeformer = new GlFlexiDeformer(ShaderLoader.Load("flexi.comp"));
+            }
+            catch
+            {
+                _flexiDeformer = null;
+            }
+
+            // Avatar LBS compute deformer (best-effort; falls back to CPU when unavailable).
+            try
+            {
+                _skinDeformer = new GlSkinDeformer(ShaderLoader.Load("skin.comp"));
+            }
+            catch
+            {
+                _skinDeformer = null;
+            }
+
             // Water rendering (best-effort; viewer works fine without it)
             try { InitWater(); }
             catch { _waterReady = false; }
@@ -806,6 +836,11 @@ public class GlViewportControl : Panel
             if (su.IsPoolRented)
                 ArrayPool<float>.Shared.Return(su.Verts);
         }
+
+        // Dispatch GPU compute jobs for flexi prims and avatar LBS (after CPU vertex
+        // updates so the GPU path is always the last write into each mesh VBO each frame).
+        _flexiDeformer?.DispatchPending();
+        _skinDeformer?.DispatchPending();
 
         // Use physical pixels for the GL viewport to handle HiDPI correctly.
         var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1.0;
@@ -1003,7 +1038,7 @@ public class GlViewportControl : Panel
                 // then reads the cached float, avoiding a vector subtraction + LengthSquared
                 // on every one of the O(N log N) comparisons performed by Sort.
                 for (int i = 0; i < mergedAlpha.Count; i++)
-                    mergedAlpha[i].face.AlphaSortKey = (mergedAlpha[i].face.Centroid - eye).LengthSquared;
+                    mergedAlpha[i].face.AlphaSortKey = (mergedAlpha[i].face.Centroid - eye).LengthSquared();
                 mergedAlpha.Sort(static (a, b) => b.face.AlphaSortKey.CompareTo(a.face.AlphaSortKey));
             }
 
@@ -1233,6 +1268,8 @@ public class GlViewportControl : Panel
         _ssaoBlurShader?.Dispose(); _ssaoBlurShader = null;
         _particleBuf?.Dispose();    _particleBuf    = null;
         _instanceDrawer?.Dispose(); _instanceDrawer = null;
+        _flexiDeformer?.Dispose();  _flexiDeformer  = null;
+        _skinDeformer?.Dispose();   _skinDeformer   = null;
         _stats.Dispose();
     }
 
@@ -1310,13 +1347,13 @@ public class GlViewportControl : Panel
 
         // Unproject: row-vector convention (v' = v * M), so world→clip is
         // v_clip = v_world * view * proj.  Invert: v_world = v_clip * inv(view * proj).
-        var invVP = Matrix4.Invert(_lastView * _lastProj);
-        var nearH  = new Vector4(ndcX, ndcY, -1f, 1f) * invVP;
-        var farH   = new Vector4(ndcX, ndcY,  1f, 1f) * invVP;
+        Matrix4x4.Invert(_lastView * _lastProj, out var invVP);
+        var nearH  = Vector4.Transform(new Vector4(ndcX, ndcY, -1f, 1f), invVP);
+        var farH   = Vector4.Transform(new Vector4(ndcX, ndcY,  1f, 1f), invVP);
         nearH /= nearH.W;
         farH  /= farH.W;
-        var rayOrigin = nearH.Xyz;
-        var rayDir    = Vector3.Normalize(farH.Xyz - nearH.Xyz);
+        var rayOrigin = new Vector3(nearH.X, nearH.Y, nearH.Z);
+        var rayDir    = Vector3.Normalize(new Vector3(farH.X, farH.Y, farH.Z) - rayOrigin);
 
         float bestT  = float.MaxValue;
         float bestU  = 0f, bestV = 0f;
@@ -1329,9 +1366,9 @@ public class GlViewportControl : Panel
             int i2 = indices[i + 2] * PickerStride;
 
             // Transform vertex positions to world space.
-            var p0w = (new Vector4(pickerVerts[i0], pickerVerts[i0+1], pickerVerts[i0+2], 1f) * model).Xyz;
-            var p1w = (new Vector4(pickerVerts[i1], pickerVerts[i1+1], pickerVerts[i1+2], 1f) * model).Xyz;
-            var p2w = (new Vector4(pickerVerts[i2], pickerVerts[i2+1], pickerVerts[i2+2], 1f) * model).Xyz;
+            var _t0 = Vector4.Transform(new Vector4(pickerVerts[i0], pickerVerts[i0+1], pickerVerts[i0+2], 1f), model); var p0w = new Vector3(_t0.X, _t0.Y, _t0.Z);
+            var _t1 = Vector4.Transform(new Vector4(pickerVerts[i1], pickerVerts[i1+1], pickerVerts[i1+2], 1f), model); var p1w = new Vector3(_t1.X, _t1.Y, _t1.Z);
+            var _t2 = Vector4.Transform(new Vector4(pickerVerts[i2], pickerVerts[i2+1], pickerVerts[i2+2], 1f), model); var p2w = new Vector3(_t2.X, _t2.Y, _t2.Z);
 
             // Möller–Trumbore.
             var edge1 = p1w - p0w;
@@ -1412,14 +1449,14 @@ public class GlViewportControl : Panel
         };
     }
 
-    private void DrawParticles(ref Matrix4 view, ref Matrix4 proj)
+    private void DrawParticles(ref Matrix4x4 view, ref Matrix4x4 proj)
     {
         if (_particleBuf == null || _particleShader == null || _particleMap.Count == 0) return;
 
         // Build camera basis vectors (world space) for CPU billboarding.
-        // In our Z-up view matrix the right vector is Row0.XYZ and up is Row1.XYZ.
-        var right = new Vector3(view.Row0.X, view.Row1.X, view.Row2.X);
-        var up    = new Vector3(view.Row0.Y, view.Row1.Y, view.Row2.Y);
+        // In our Z-up view matrix the right vector is column 0 and up is column 1.
+        var right = new Vector3(view.M11, view.M21, view.M31);
+        var up    = new Vector3(view.M12, view.M22, view.M32);
 
         GlApi.Gl.Enable(EnableCap.Blend);
         GlApi.Gl.DepthMask(false);
@@ -1793,7 +1830,7 @@ public class GlViewportControl : Panel
     /// Flips front-face winding to correct back-face culling after the Z mirror.
     /// Leaves FBO state unbound; the caller must rebind the scene FBO before continuing.
     /// </summary>
-    private void DrawWaterReflection(ref Matrix4 view, ref Matrix4 proj, float waterHeight, int w, int h)
+    private void DrawWaterReflection(ref Matrix4x4 view, ref Matrix4x4 proj, float waterHeight, int w, int h)
     {
         if (_waterReflFbo == 0 || _primShader == null) return;
 
@@ -1804,11 +1841,11 @@ public class GlViewportControl : Panel
         // Build reflected view: Z mirror about z = waterHeight in world space.
         // Row-vector convention: reflMat transforms v_world -> v_reflected_world.
         //   (x, y, z, 1) * reflMat = (x, y, 2*wh - z, 1)
-        var reflMat = new Matrix4(
-            new Vector4(1f, 0f, 0f,              0f),
-            new Vector4(0f, 1f, 0f,              0f),
-            new Vector4(0f, 0f, -1f,             0f),
-            new Vector4(0f, 0f, 2f * waterHeight, 1f));
+        var reflMat = new Matrix4x4(
+            1f, 0f, 0f, 0f,
+            0f, 1f, 0f, 0f,
+            0f, 0f, -1f, 0f,
+            0f, 0f, 2f * waterHeight, 1f);
         var reflView     = reflMat * view;
         var reflViewProj = reflView * proj;
         var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
@@ -1840,7 +1877,7 @@ public class GlViewportControl : Panel
     /// Draws the infinite water surface at <paramref name="waterHeight"/>.
     /// Called after the opaque pass so depth is written for underwater geometry.
     /// </summary>
-    private void DrawWater(ref Matrix4 view, ref Matrix4 proj, float waterHeight)
+    private void DrawWater(ref Matrix4x4 view, ref Matrix4x4 proj, float waterHeight)
     {
         if (_waterShader == null) return;
 
@@ -1852,7 +1889,7 @@ public class GlViewportControl : Panel
 
         var eye       = _camera.EyePosition;
         var viewProj  = view * proj;
-        var invVP     = Matrix4.Invert(viewProj);
+        Matrix4x4.Invert(viewProj, out var invVP);
         var lightDir  = Vector3.Normalize(Sky.SunDirection);
 
         _waterShader.Use();
@@ -1928,12 +1965,12 @@ public class GlViewportControl : Panel
     /// Draws the sky background as a full-screen triangle into the currently-bound FBO.
     /// Must be called before any opaque geometry so it fills pixels not covered by terrain.
     /// </summary>
-    private void DrawSky(ref Matrix4 view, ref Matrix4 proj, int w, int h)
+    private void DrawSky(ref Matrix4x4 view, ref Matrix4x4 proj, int w, int h)
     {
         if (_skyShader == null) return;
 
         var vp    = view * proj;
-        var invVP = Matrix4.Invert(vp);
+        Matrix4x4.Invert(vp, out var invVP);
 
         GlApi.Gl.DepthMask(false);
         GlApi.Gl.Disable(EnableCap.DepthTest);
@@ -2173,6 +2210,31 @@ public class GlViewportControl : Panel
                 face.EmissiveTexture.Dispose();
         }
 
+        // Register flexi-prim GPU resources for compute deformation.
+        if (_flexiDeformer != null)
+        {
+            foreach (var fp in sub.FlexiPrims)
+            {
+                var meshes = new GlMesh[fp.FaceCount];
+                for (int fi = 0; fi < fp.FaceCount; fi++)
+                    meshes[fi] = _faceMeshes[fp.FaceStart + fi];
+                var gpuData = FlexiGpuData.Create(fp, meshes);
+                _submissionFlexiGpu.Add(gpuData);
+                fp.GpuData = gpuData;
+            }
+        }
+
+        // Register avatar skin GPU resources for compute LBS.
+        if (_skinDeformer != null)
+        {
+            foreach (var skin in sub.SkinData)
+            {
+                var gpuData = AvatarSkinGpuData.Create(skin, _faceMeshes[skin.FaceIndex]);
+                _submissionSkinGpu.Add(gpuData);
+                skin.GpuData = gpuData;
+            }
+        }
+
         // _pickMap and _cpuFaceData are rebuilt at pick time (inside the pick pass)
         // so they always reflect the current draw order, including any per-frame
         // back-to-front sort applied to alpha faces.
@@ -2185,6 +2247,10 @@ public class GlViewportControl : Panel
     private void FreeGpuResourcesExcept(HashSet<GlTexture>? preserve)
     {
         while (_pendingVertexUpdates.TryDequeue(out _)) { }
+        foreach (var gd in _submissionFlexiGpu) gd.Dispose();
+        _submissionFlexiGpu.Clear();
+        foreach (var gd in _submissionSkinGpu) gd.Dispose();
+        _submissionSkinGpu.Clear();
         _faceMeshes.Clear();
 
         // Collect unique GlTexture instances to avoid double-dispose when faces share a texture.
@@ -2226,6 +2292,13 @@ public class GlViewportControl : Panel
 
     private void FreeSceneObjectResources()
     {
+        foreach (var gpuDatas in _flexiGpuDataMap.Values)
+            foreach (var gd in gpuDatas) gd.Dispose();
+        _flexiGpuDataMap.Clear();
+        foreach (var gpuDatas in _skinGpuDataMap.Values)
+            foreach (var gd in gpuDatas) gd.Dispose();
+        _skinGpuDataMap.Clear();
+
         var textures = new HashSet<GlTexture>();
         foreach (var faces in _sceneObjects.Values)
         {
@@ -2283,9 +2356,12 @@ public class GlViewportControl : Panel
             }
         }
         foreach (var tex in textures) tex.Dispose();
-
         _sceneObjects.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
+        if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
+            foreach (var gd in gpuDatas) gd.Dispose();
+        if (_skinGpuDataMap.Remove(rootId, out var skinGpuDatas))
+            foreach (var gd in skinGpuDatas) gd.Dispose();
         RebuildSceneFlatLists();
     }
 
@@ -2319,6 +2395,10 @@ public class GlViewportControl : Panel
         foreach (var tex in textures) tex.Dispose();
         _sceneObjects.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
+        if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
+            foreach (var gd in gpuDatas) gd.Dispose();
+        if (_skinGpuDataMap.Remove(rootId, out var skinGpuDatas))
+            foreach (var gd in skinGpuDatas) gd.Dispose();
     }
 
     private void UploadSceneObject(ulong rootId, PrimRenderSubmission sub)
@@ -2401,6 +2481,37 @@ public class GlViewportControl : Panel
         }
 
         _sceneObjects[rootId] = faces;
+
+        // Register flexi-prim GPU resources when compute deformation is available.
+        if (_flexiDeformer != null && sub.FlexiPrims.Length > 0)
+        {
+            var gpuDatas = new FlexiGpuData[sub.FlexiPrims.Length];
+            for (int pi = 0; pi < sub.FlexiPrims.Length; pi++)
+            {
+                var fp     = sub.FlexiPrims[pi];
+                var meshes = new GlMesh[fp.FaceCount];
+                for (int fi = 0; fi < fp.FaceCount; fi++)
+                    meshes[fi] = faces[fp.FaceStart + fi].Item1;
+                var gpuData = FlexiGpuData.Create(fp, meshes);
+                gpuDatas[pi] = gpuData;
+                fp.GpuData   = gpuData;
+            }
+            _flexiGpuDataMap[rootId] = gpuDatas;
+        }
+
+        // Register avatar skin GPU resources when compute LBS is available.
+        if (_skinDeformer != null && sub.SkinData.Length > 0)
+        {
+            var skinGpuDatas = new AvatarSkinGpuData[sub.SkinData.Length];
+            for (int si = 0; si < sub.SkinData.Length; si++)
+            {
+                var skin        = sub.SkinData[si];
+                var gpuData     = AvatarSkinGpuData.Create(skin, faces[skin.FaceIndex].Item1);
+                skinGpuDatas[si] = gpuData;
+                skin.GpuData    = gpuData;
+            }
+            _skinGpuDataMap[rootId] = skinGpuDatas;
+        }
     }
 
     private void RebuildSceneFlatLists()
@@ -2458,7 +2569,7 @@ public class GlViewportControl : Panel
     /// updates (e.g. walking avatars) without a full mesh re-upload.
     /// Safe to call from any thread.
     /// </summary>
-    public void SetSceneObjectTransform(ulong sceneKey, Matrix4 transform)
+    public void SetSceneObjectTransform(ulong sceneKey, Matrix4x4 transform)
     {
         _pendingTransformOverrides.Enqueue((sceneKey, transform));
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
@@ -2554,6 +2665,20 @@ public class GlViewportControl : Panel
         _pendingSceneVertexUpdates.Enqueue((rootId, faceOffset, verts, vertsLength, isPoolRented));
         // No UI-thread post needed: the 30 fps heartbeat will pick this up.
     }
+
+    /// <summary>
+    /// Queues a GPU compute-shader deformation job for a flexi prim.
+    /// Thread-safe; called from the FlexiPrimAnimator physics background thread.
+    /// No-op when compute deformation is not available.
+    /// </summary>
+    internal void ScheduleFlexiCompute(FlexiComputeJob job) => _flexiDeformer?.Enqueue(job);
+
+    /// <summary>
+    /// Enqueues an avatar skin compute job for the GL thread.
+    /// Thread-safe; called from the SceneAvatarAnimator background thread.
+    /// No-op when compute deformation is not available.
+    /// </summary>
+    internal void ScheduleSkinCompute(SkinComputeJob job) => _skinDeformer?.Enqueue(job);
 
     /// <summary>
     /// Drains <see cref="_pendingTransformOverrides"/>, stores the latest matrix per root,
@@ -2869,8 +2994,8 @@ public class GlViewportControl : Panel
     private void DrawFaces(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
-        ref Matrix4 view,
-        ref Matrix4 proj,
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj,
         bool manageCulling = true,
         uint ssaoTex = 0,
         Vector2 screenSize = default,
@@ -2904,9 +3029,9 @@ public class GlViewportControl : Panel
             SkySettings s  = sky ?? SkySettings.Default;
             var worldSun   = s.SunDirection;
             var sunViewDir = new Vector3(
-                Vector3.Dot(view.Row0.Xyz, worldSun),
-                Vector3.Dot(view.Row1.Xyz, worldSun),
-                Vector3.Dot(view.Row2.Xyz, worldSun));
+                Vector3.Dot(new Vector3(view.M11, view.M12, view.M13), worldSun),
+                Vector3.Dot(new Vector3(view.M21, view.M22, view.M23), worldSun),
+                Vector3.Dot(new Vector3(view.M31, view.M32, view.M33), worldSun));
             shader.Set("uSunDir",       sunViewDir);
             shader.Set("uSunColor",     s.SunlightColor);
             shader.Set("uAmbientColor", s.Ambient);
@@ -2914,10 +3039,10 @@ public class GlViewportControl : Panel
 
         // View inverse (upper-3×3) is constant for every face this frame. The per-face
         // normal matrix (MV⁻¹)ᵀ = (V⁻¹)₃ × (M⁻¹)₃, so combining this with the face's cached
-        // model inverse avoids a full 4×4 Matrix4.Invert per face per frame (see
+        // model inverse avoids a full 4×4 Matrix4x4.Invert per face per frame (see
         // PrimRenderFace.ModelInverse3).
-        var viewInvFull = Matrix4.Invert(view);
-        var viewInv3 = new Matrix3(viewInvFull.Row0.Xyz, viewInvFull.Row1.Xyz, viewInvFull.Row2.Xyz);
+        Matrix4x4.Invert(view, out var viewInvFull);
+        var viewInv3 = new Matrix3x3(new Vector3(viewInvFull.M11, viewInvFull.M12, viewInvFull.M13), new Vector3(viewInvFull.M21, viewInvFull.M22, viewInvFull.M23), new Vector3(viewInvFull.M31, viewInvFull.M32, viewInvFull.M33));
 
         bool canBatch = enableInstancing && _instanceDrawer != null;
 
@@ -3047,13 +3172,12 @@ public class GlViewportControl : Panel
                 }
             }
 
-            Matrix4 model = face.Transform;
+            Matrix4x4 model = face.Transform;
             var mv  = model * view;
             var mvp = mv * proj;
 
-            // Normal matrix = (MV^-1)^T. OpenTK stores Matrix3 column-major in memory
-            // (Row[k] = math column k), so sending with transpose:true makes GL swap
-            // rows and columns before loading, giving GLSL the correct (MV^-1)^T
+            // Normal matrix = (MV^-1)^T. Matrix3x3 is row-major, so sending with transpose:true
+            // makes GL swap rows and columns before loading, giving GLSL the correct (MV^-1)^T
             // transform. Without the transpose, normals end up in world space rather
             // than view space, breaking lighting as the camera orbits.
             //
@@ -3174,21 +3298,21 @@ public class GlViewportControl : Panel
     }
 
     // Writes one instance's data into buf starting at instanceIdx * GlInstanceDrawer.InstanceFloats.
-    // Matrices are transposed from OpenTK row-major to GL column-major order.
+    // Matrices are transposed from System.Numerics row-major to GL column-major order.
     private static unsafe void WriteInstanceData(
-        float[] buf, int instanceIdx, PrimRenderFace face, ref Matrix4 view, ref Matrix4 proj)
+        float[] buf, int instanceIdx, PrimRenderFace face, ref Matrix4x4 view, ref Matrix4x4 proj)
     {
         int @base = instanceIdx * GlInstanceDrawer.InstanceFloats;
         var mv    = face.Transform * view;
         var mvp   = mv * proj;
 
-        // Column-major upload: OpenTK is row-major, so transpose before copying raw bytes.
-        var mvpT = Matrix4.Transpose(mvp);
-        var mvT  = Matrix4.Transpose(mv);
+        // Column-major upload: System.Numerics is row-major, so transpose before copying raw bytes.
+        var mvpT = Matrix4x4.Transpose(mvp);
+        var mvT  = Matrix4x4.Transpose(mv);
         var mvpSpan = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4, float>(ref mvpT), 16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvpT), 16);
         var mvSpan  = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4, float>(ref mvT),  16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvT),  16);
         mvpSpan.CopyTo(buf.AsSpan(@base,      16));
         mvSpan.CopyTo( buf.AsSpan(@base + 16, 16));
 
@@ -3225,14 +3349,14 @@ public class GlViewportControl : Panel
     private static void DrawFacesNormal(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
-        ref Matrix4 view,
-        ref Matrix4 proj)
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj)
     {
         shader.Use();
         // Per-frame view inverse (upper-3×3); combined with each face's cached model
         // inverse to form the normal matrix without a per-face 4×4 invert.
-        var viewInvFull = Matrix4.Invert(view);
-        var viewInv3 = new Matrix3(viewInvFull.Row0.Xyz, viewInvFull.Row1.Xyz, viewInvFull.Row2.Xyz);
+        Matrix4x4.Invert(view, out var viewInvFull);
+        var viewInv3 = new Matrix3x3(new Vector3(viewInvFull.M11, viewInvFull.M12, viewInvFull.M13), new Vector3(viewInvFull.M21, viewInvFull.M22, viewInvFull.M23), new Vector3(viewInvFull.M31, viewInvFull.M32, viewInvFull.M33));
         foreach (var (mesh, _, _, _, _, _, face) in list)
         {
             var mv  = face.Transform * view;
@@ -3249,8 +3373,8 @@ public class GlViewportControl : Panel
     private static void DrawFacesWireframe(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
-        ref Matrix4 view,
-        ref Matrix4 proj)
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj)
     {
         shader.Use();
         foreach (var (mesh, _, _, _, _, _, face) in list)
@@ -3266,8 +3390,8 @@ public class GlViewportControl : Panel
     private static void DrawFacesWireframeEs(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
-        ref Matrix4 view,
-        ref Matrix4 proj)
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj)
     {
         shader.Use();
         foreach (var (mesh, _, _, _, _, _, face) in list)
@@ -3288,8 +3412,8 @@ public class GlViewportControl : Panel
     private static void DrawFacesPicking(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
-        ref Matrix4 view,
-        ref Matrix4 proj,
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj,
         int startIdx)
     {
         shader.Use();

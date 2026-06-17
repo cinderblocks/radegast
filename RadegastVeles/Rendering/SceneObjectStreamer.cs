@@ -21,12 +21,14 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
-using TkVector3 = OpenTK.Mathematics.Vector3;
+using OmVector3  = OpenMetaverse.Vector3;
+using Quaternion = System.Numerics.Quaternion;
+using Vector3    = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
 
@@ -174,10 +176,9 @@ internal sealed class SceneObjectStreamer : IDisposable
                 var r   = prim.Rotation;
                 var p   = prim.Position;
                 var off = RegionOffset(sim, currentSim);
-                var scale = TkMatrix4.CreateScale(s.X, s.Y, s.Z);
-                var rot   = TkMatrix4.CreateFromQuaternion(
-                                new OpenTK.Mathematics.Quaternion(r.X, r.Y, r.Z, r.W));
-                var trans = TkMatrix4.CreateTranslation(p.X + off.X, p.Y + off.Y, p.Z);
+                var scale = Matrix4x4.CreateScale(s.X, s.Y, s.Z);
+                var rot   = Matrix4x4.CreateFromQuaternion(new Quaternion(r.X, r.Y, r.Z, r.W));
+                var trans = Matrix4x4.CreateTranslation(p.X + off.X, p.Y + off.Y, p.Z);
                 _viewport.SetSceneObjectTransform(sceneKey, scale * rot * trans);
 
                 bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
@@ -259,7 +260,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             var rootLocalId = LocalIdForSceneKey(sceneKey);
             var objs        = sim.ObjectsPrimitives;
             if (objs == null || !objs.TryGetValue(rootLocalId, out var root)) continue;
-            var worldPos = ApplyRegionOffset(root.Position, sim, currentSim);
+            var worldPos = ApplyRegionOffset(new Vector3(root.Position.X, root.Position.Y, root.Position.Z), sim, currentSim);
             if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
                 CancelAndRemove(sceneKey);
         }
@@ -332,12 +333,12 @@ internal sealed class SceneObjectStreamer : IDisposable
     // ── Region offset helpers ─────────────────────────────────────────────────────
 
     // Returns the world-space offset of `sim` relative to `currentSim` in metres.
-    private static TkVector3 RegionOffset(Simulator sim, Simulator? currentSim)
+    private static Vector3 RegionOffset(Simulator sim, Simulator? currentSim)
     {
-        if (currentSim == null || sim == currentSim) return TkVector3.Zero;
+        if (currentSim == null || sim == currentSim) return Vector3.Zero;
         Utils.LongToUInts(currentSim.Handle, out uint cx, out uint cy);
         Utils.LongToUInts(sim.Handle,        out uint sx, out uint sy);
-        return new TkVector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
+        return new Vector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
     }
 
     private static Vector3 ApplyRegionOffset(Vector3 localPos, Simulator sim, Simulator? currentSim)
@@ -373,9 +374,9 @@ internal sealed class SceneObjectStreamer : IDisposable
 
     private float ScoreDue(
         ulong sceneKey,
-        Vector3 avatarPos,
-        TkVector3 eyePos,
-        TkVector3 camFwd)
+        OmVector3 avatarPos,
+        Vector3 eyePos,
+        Vector3 camFwd)
     {
         float distSq    = DistanceSq(sceneKey, avatarPos);
         var sim         = SimForSceneKey(sceneKey);
@@ -384,7 +385,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (ovPrims != null && ovPrims.TryGetValue(rootLocalId, out var rp))
         {
             var off    = RegionOffset(sim!, _client.Network.CurrentSim);
-            var objPos = new TkVector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
+            var objPos = new Vector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
             return SceneBuildScheduler.ScoreWithFrustum(
                 distSq, SceneBuildScheduler.PrimMultiplier, eyePos, camFwd, objPos);
         }
@@ -465,7 +466,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         var eyePos      = cam.EyePosition;
         var camFwd      = cam.ForwardDirection;
 
-        TkVector3 objPos      = default;
+        Vector3 objPos        = default;
         bool hasPosForFrustum = false;
         var sim         = SimForSceneKey(sceneKey);
         var rootLocalId = LocalIdForSceneKey(sceneKey);
@@ -473,7 +474,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (ovPrims != null && ovPrims.TryGetValue(rootLocalId, out var rp))
         {
             var off = RegionOffset(sim!, _client.Network.CurrentSim);
-            objPos           = new TkVector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
+            objPos           = new Vector3(rp.Position.X + off.X, rp.Position.Y + off.Y, rp.Position.Z);
             hasPosForFrustum = true;
         }
 
@@ -489,8 +490,8 @@ internal sealed class SceneObjectStreamer : IDisposable
                 rootPrim.Scale.LengthSquared() > 0f)
             {
                 var off     = RegionOffset(sim, _client.Network.CurrentSim);
-                var scale   = new TkVector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
-                var wPos    = new TkVector3(rootPrim.Position.X + off.X, rootPrim.Position.Y + off.Y, rootPrim.Position.Z);
+                var scale   = new Vector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
+                var wPos    = new Vector3(rootPrim.Position.X + off.X, rootPrim.Position.Y + off.Y, rootPrim.Position.Z);
                 var placeholder = PlaceholderMeshFactory.Build(
                     $"ph:{rootLocalId}", scale, wPos, rootPrimLocalId: rootLocalId);
                 _viewport.SubmitSceneObject(sceneKey, placeholder);
@@ -518,7 +519,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             }
 
             var rootPrimForLod = prims.Find(p => p.LocalID == rootLocalId) ?? prims[0];
-            float dist = Vector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
+            float dist = OmVector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
             var   lod  = LodForDistance(dist);
 
             var submission = await _builder.BuildAsync(
@@ -547,19 +548,19 @@ internal sealed class SceneObjectStreamer : IDisposable
             // Apply world-space translation: sim-local position + region offset for neighbor sims.
             var rootPrim   = rootPrimForLod;
             var regionOff  = RegionOffset(sim, _client.Network.CurrentSim);
-            var worldPos   = new TkVector3(
+            var worldPos   = new Vector3(
                 rootPrim.Position.X + regionOff.X,
                 rootPrim.Position.Y + regionOff.Y,
                 rootPrim.Position.Z);
 
-            if (worldPos != TkVector3.Zero)
+            if (worldPos != Vector3.Zero)
             {
                 var flexiFaceIndices = new System.Collections.Generic.HashSet<int>();
                 foreach (var fp in submission.FlexiPrims)
                     for (int fi = fp.FaceStart; fi < fp.FaceStart + fp.FaceCount; fi++)
                         flexiFaceIndices.Add(fi);
 
-                var worldTransMat = TkMatrix4.CreateTranslation(worldPos);
+                var worldTransMat = Matrix4x4.CreateTranslation(worldPos);
 
                 var translated = new PrimRenderFace[submission.Faces.Length];
                 for (int i = 0; i < submission.Faces.Length; i++)
@@ -628,7 +629,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         return result;
     }
 
-    private static bool IsWithinRadius(Vector3 primPos, Vector3 avatarPos, float radius)
+    private static bool IsWithinRadius(Vector3 primPos, OmVector3 avatarPos, float radius)
     {
         if (primPos == Vector3.Zero) return false;
         var dx = primPos.X - avatarPos.X;
@@ -640,16 +641,16 @@ internal sealed class SceneObjectStreamer : IDisposable
     private Vector3 GetRootWorldPosition(Simulator sim, uint rootId, Primitive prim)
     {
         if (prim.ParentID == 0)
-            return prim.Position;
+            return new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
 
         var objs = sim.ObjectsPrimitives;
-        if (objs != null && objs.TryGetValue(rootId, out var root) && root.Position != Vector3.Zero)
-            return root.Position;
+        if (objs != null && objs.TryGetValue(rootId, out var root) && root.Position != OmVector3.Zero)
+            return new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
 
-        return prim.Position;
+        return new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
     }
 
-    private float DistanceSq(ulong sceneKey, Vector3 avatarPos)
+    private float DistanceSq(ulong sceneKey, OmVector3 avatarPos)
     {
         var sim         = SimForSceneKey(sceneKey);
         var rootLocalId = LocalIdForSceneKey(sceneKey);

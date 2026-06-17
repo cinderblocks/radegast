@@ -19,9 +19,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using OpenMetaverse;
 using OpenMetaverse.Assets;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
+using Quaternion = System.Numerics.Quaternion;
 
 namespace Radegast.Veles.Rendering;
 
@@ -61,20 +62,20 @@ internal sealed class AvatarAnimationPlayer : IDisposable
     // momentarily empty (e.g. an asset is still downloading or an animation transition
     // leaves a one-frame gap between remove and add).  Also used as the ease-in source
     // so blending goes from the previous pose → new pose rather than T-pose → new pose.
-    private Dictionary<string, TkQuaternion>? _lastDeltas;
+    private Dictionary<string, Quaternion>? _lastDeltas;
     private Dictionary<string, float>         _lastMorphWeights = new(StringComparer.Ordinal);
 
     // ── Advance() zero-allocation reuse buffers ───────────────────────────────────
     // Ping-pong result/morph buffers so the dict we're filling never aliases
     // _lastDeltas (which may still be read by ease-in logic on the same or next tick).
     private bool                                                              _advanceUseA = true;
-    private readonly Dictionary<string, TkQuaternion>                         _resultA     = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, TkQuaternion>                         _resultB     = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Quaternion>                         _resultA     = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Quaternion>                         _resultB     = new(StringComparer.Ordinal);
     private readonly Dictionary<string, float>                                _morphA      = new(StringComparer.Ordinal);
     private readonly Dictionary<string, float>                                _morphB      = new(StringComparer.Ordinal);
     // Per-joint contribution lists: cleared each tick, pooled by joint name to avoid new List<> per joint.
-    private readonly Dictionary<string, List<(TkQuaternion q, int priority)>> _contribs   = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, List<(TkQuaternion q, int priority)>> _listPool   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(Quaternion q, int priority)>> _contribs   = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<(Quaternion q, int priority)>> _listPool   = new(StringComparer.Ordinal);
     // Lock-minimised snapshot buffer — AddRange under lock, iterate outside.
     private readonly List<AnimEntry>                                           _snapshotBuf = new();
 
@@ -196,7 +197,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
     /// rotation (<c>localRot = tposeRot * delta</c>).
     /// Returns an empty dictionary when no animations are active.
     /// </returns>
-    public Dictionary<string, TkQuaternion> Advance(float dt,
+    public Dictionary<string, Quaternion> Advance(float dt,
         out Dictionary<string, float> morphWeights)
     {
         // Flip ping-pong so we never clear the dict that _lastDeltas still points at.
@@ -292,7 +293,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
                 // Reconstruct unit quaternion (SL stores xyz; w = sqrt(max(0, 1 − x²−y²−z²))).
                 float wsq = 1f - lx * lx - ly * ly - lz * lz;
                 float w   = wsq > 0f ? MathF.Sqrt(wsq) : 0f;
-                var   q   = new TkQuaternion(lx, ly, lz, w);
+                var   q   = new Quaternion(lx, ly, lz, w);
 
                 // Apply ease-in/ease-out by slerping toward the previous frame's pose
                 // for this joint (falling back to identity when no prior data exists).
@@ -301,8 +302,8 @@ internal sealed class AvatarAnimationPlayer : IDisposable
                 if (easeScale < 1f)
                 {
                     var easeFrom = (_lastDeltas != null && _lastDeltas.TryGetValue(joint.Name, out var prev))
-                        ? prev : TkQuaternion.Identity;
-                    q = TkQuaternion.Slerp(easeFrom, q, easeScale);
+                        ? prev : Quaternion.Identity;
+                    q = Quaternion.Slerp(easeFrom, q, easeScale);
                 }
 
                 // If a same-priority contribution already exists, clear the list
@@ -314,7 +315,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
                 {
                     // Borrow a pre-cleared list from the pool; allocate only on first encounter.
                     if (!_listPool.TryGetValue(joint.Name, out existing))
-                        existing = new List<(TkQuaternion, int)>();
+                        existing = new List<(Quaternion, int)>();
                     contributions[joint.Name] = existing;
                 }
                 existing.Add((q, jointPriority));
@@ -366,7 +367,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
             if (list.Count == 0) continue;
             var blended = list[0].q;
             for (int i = 1; i < list.Count; i++)
-                blended = TkQuaternion.Slerp(blended, list[i].q, 1f / (i + 1));
+                blended = Quaternion.Slerp(blended, list[i].q, 1f / (i + 1));
             result[jointName] = blended;
         }
 

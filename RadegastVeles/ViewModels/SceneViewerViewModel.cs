@@ -26,10 +26,12 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using System.Numerics;
 using OpenMetaverse;
+using OmVector3 = OpenMetaverse.Vector3;
+using Vector3   = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
-using TkVector3 = OpenTK.Mathematics.Vector3;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -552,7 +554,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // Compute the region offset and skip if the entire neighbor region is beyond draw distance.
         Utils.LongToUInts(currentSim.Handle, out uint cx, out uint cy);
         Utils.LongToUInts(sim.Handle,        out uint sx, out uint sy);
-        var regionOffset = new TkVector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
+        var regionOffset = new Vector3((int)sx - (int)cx, (int)sy - (int)cy, 0f);
 
         // Nearest point on the neighbor region's world-space footprint to the agent.
         // Clamp the agent's position to [regionOffset, regionOffset+255] on each axis.
@@ -748,8 +750,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         // SimPosition is (0,0,0) before the first update — fall back to region centre.
         var target = (pos.X == 0f && pos.Y == 0f && pos.Z == 0f)
-            ? new OpenTK.Mathematics.Vector3(128f, 128f, sim.WaterHeight + 2f)
-            : new OpenTK.Mathematics.Vector3(pos.X, pos.Y, pos.Z + 1.0f); // eye-level target
+            ? new Vector3(128f, 128f, sim.WaterHeight + 2f)
+            : new Vector3(pos.X, pos.Y, pos.Z + 1.0f); // eye-level target
 
         // Derive the camera yaw from the avatar's current heading so it starts
         // directly behind the avatar (heading + 180°), matching SL's follow-camera.
@@ -758,7 +760,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         float headingRad = MathF.Atan2(
             2f * (rot.W * rot.Z + rot.X * rot.Y),
             1f - 2f * (rot.Y * rot.Y + rot.Z * rot.Z));
-        float cameraYaw = OpenTK.Mathematics.MathHelper.RadiansToDegrees(headingRad) + 180f;
+        float cameraYaw = headingRad * (180f / MathF.PI) + 180f;
 
         // ~3.5 m distance, 15° pitch — matches SL's default third-person camera.
         // Reset the tracked heading so FollowAvatar doesn't apply a stale delta
@@ -830,7 +832,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         float headingRad = MathF.Atan2(
             2f * (rot.W * rot.Z + rot.X * rot.Y),
             1f - 2f * (rot.Y * rot.Y + rot.Z * rot.Z));
-        float headingDeg = OpenTK.Mathematics.MathHelper.RadiansToDegrees(headingRad);
+        float headingDeg = headingRad * (180f / MathF.PI);
 
         // Compute the heading delta and rotate the camera yaw to stay behind the avatar.
         if (!float.IsNaN(_lastKnownHeadingDeg))
@@ -851,7 +853,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         // Use the same eye-level offset as CenterCameraOnAvatar so the camera
         // target stays at head height, not at the avatar's feet.
-        _viewport.UpdateCameraFollow(new OpenTK.Mathematics.Vector3(pos.X, pos.Y, pos.Z + 1.0f));
+        _viewport.UpdateCameraFollow(new Vector3(pos.X, pos.Y, pos.Z + 1.0f));
     }
 
     [RelayCommand]
@@ -892,8 +894,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (sim == null || SelectedLocalId == 0) return;
         _ = _instance.Client.Objects.ClickObjectAsync(
                 sim, SelectedLocalId,
-                Vector3.Zero, Vector3.Zero, 0,
-                Vector3.Zero, Vector3.Zero, Vector3.Zero);
+                OmVector3.Zero, OmVector3.Zero, 0,
+                OmVector3.Zero, OmVector3.Zero, OmVector3.Zero);
     }
 
     /// <summary>
@@ -906,7 +908,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         var sim = _instance.Client.Network.CurrentSim;
         if (sim == null || SelectedLocalId == 0) return;
         if (!sim.ObjectsPrimitives.TryGetValue(SelectedLocalId, out var prim)) return;
-        _instance.Client.Self.RequestSit(prim.ID, Vector3.Zero);
+        _instance.Client.Self.RequestSit(prim.ID, OmVector3.Zero);
         _instance.Client.Self.Sit();
         ContextIsSitting = true;
     }
@@ -933,15 +935,15 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (sim == null) return;
 
         bool isAvatar = ContextIsAvatar;
-        Vector3 pos   = Vector3.Zero;
+        OmVector3 pos = OmVector3.Zero;
 
         if (isAvatar && sim.ObjectsAvatars.TryGetValue(SelectedLocalId, out var av))
             pos = av.Position;
         else if (!isAvatar && sim.ObjectsPrimitives.TryGetValue(SelectedLocalId, out var prim))
             pos = prim.Position;
 
-        if (pos == Vector3.Zero) return;
-        _viewport.SetCameraTarget(new OpenTK.Mathematics.Vector3(pos.X, pos.Y, pos.Z));
+        if (pos == OmVector3.Zero) return;
+        _viewport.SetCameraTarget(new Vector3(pos.X, pos.Y, pos.Z));
         _viewport.RequestRender();
     }
 
@@ -957,7 +959,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (sim == null || SelectedLocalId == 0) return;
         if (!sim.ObjectsAvatars.TryGetValue(SelectedLocalId, out var av)) return;
 
-        var dest = av.Position + new Vector3(2f, 0f, 0f); // land next to, not on top of
+        var dest = av.Position + new OmVector3(2f, 0f, 0f); // land next to, not on top of
         _ = Task.Run(() => _instance.Client.Self.Teleport(
                 sim.Handle, dest, _instance.Client.Self.SimPosition));
     }

@@ -18,9 +18,9 @@
  */
 
 using System.Collections.Generic;
-using OpenMetaverse.Rendering;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
 using System.Collections.Immutable;
+using System.Numerics;
+using OpenMetaverse.Rendering;
 
 namespace Radegast.Veles.Rendering;
 
@@ -43,7 +43,7 @@ internal sealed record AvatarBuildResult(
     Dictionary<string, BoneTransform>? BoneTransforms,
 
     /// <summary>T-pose bone world matrices, one per named joint. Null when the definition failed to load.</summary>
-    Dictionary<string, TkMatrix4>?     TposeBoneWorldMatrices,
+    Dictionary<string, Matrix4x4>?     TposeBoneWorldMatrices,
 
     /// <summary>
     /// VP-deformed bone transforms used by AnimTick when a face has

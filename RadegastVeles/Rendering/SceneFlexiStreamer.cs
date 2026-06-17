@@ -147,7 +147,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
             ? (faceIndex, verts) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, verts.Length, isPoolRented: false)
             : vp.ScheduleVertexUpdate;
 
-        var animator = new FlexiPrimAnimator(submission, schedule);
+        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute);
         animator.Start();
         _animators[key] = animator;
 

@@ -21,8 +21,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using OpenMetaverse;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -67,7 +67,7 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
     /// for <paramref name="localId"/> so flexi prims track the avatar's position.
     /// Called by <see cref="SceneAvatarStreamer"/> on each terse avatar update.
     /// </summary>
-    public void OnFlexiWorldUpdate(uint localId, TkMatrix4 world)
+    public void OnFlexiWorldUpdate(uint localId, Matrix4x4 world)
     {
         if (_disposed) return;
         if (_animators.TryGetValue(localId, out var anim))

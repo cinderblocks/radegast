@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenTK.Mathematics;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -58,8 +58,8 @@ public sealed class Camera3D
     {
         get
         {
-            float y = MathHelper.DegreesToRadians(Yaw);
-            float p = MathHelper.DegreesToRadians(Pitch);
+            float y = Yaw   * (MathF.PI / 180f);
+            float p = Pitch * (MathF.PI / 180f);
             return Target + new Vector3(
                 Distance * MathF.Cos(p) * MathF.Cos(y),
                 Distance * MathF.Cos(p) * MathF.Sin(y),
@@ -76,18 +76,18 @@ public sealed class Camera3D
         get
         {
             var dir = Target - EyePosition;
-            float len = dir.Length;
+            float len = dir.Length();
             return len > 1e-5f ? dir / len : -Vector3.UnitX;
         }
     }
 
     // Z-up view matrix; matches Second Life's coordinate system.
-    public Matrix4 GetViewMatrix() =>
-        Matrix4.LookAt(EyePosition, Target, Vector3.UnitZ);
+    public Matrix4x4 GetViewMatrix() =>
+        Matrix4x4.CreateLookAt(EyePosition, Target, Vector3.UnitZ);
 
-    public Matrix4 GetProjectionMatrix(float aspect) =>
-        Matrix4.CreatePerspectiveFieldOfView(
-            MathHelper.DegreesToRadians(Fov), aspect, Near, Far);
+    public Matrix4x4 GetProjectionMatrix(float aspect) =>
+        Matrix4x4.CreatePerspectiveFieldOfView(
+            Fov * (MathF.PI / 180f), aspect, Near, Far);
 
     /// <summary>Orbit around target on left-button drag.</summary>
     public void OrbitDrag(float dx, float dy)
@@ -107,11 +107,10 @@ public sealed class Camera3D
     public void PanDrag(float dx, float dy)
     {
         var view  = GetViewMatrix();
-        // OpenTK Row[k] stores math column k (column-major layout), so the
-        // camera right vector lives in element [0] of each Row, and the up
-        // vector lives in element [1] of each Row.
-        var right = new Vector3(view.Row0.X, view.Row1.X, view.Row2.X);
-        var up    = new Vector3(view.Row0.Y, view.Row1.Y, view.Row2.Y);
+        // In the view matrix, column 0 = right, column 1 = up (camera basis vectors).
+        // System.Numerics M[row][col] (1-indexed): right = (M11,M21,M31), up = (M12,M22,M32).
+        var right = new Vector3(view.M11, view.M21, view.M31);
+        var up    = new Vector3(view.M12, view.M22, view.M32);
         float s   = Distance * 0.002f;
         Target   -= right * dx * s;
         Target   += up    * dy * s;
@@ -125,7 +124,7 @@ public sealed class Camera3D
     public void FrameBounds(Vector3 min, Vector3 max)
     {
         Target   = (min + max) * 0.5f;
-        Distance = Math.Max((max - min).Length * 1.5f, 0.5f);
+        Distance = Math.Max((max - min).Length() * 1.5f, 0.5f);
         Yaw   = 45f;
         Pitch = 20f;
     }
@@ -143,7 +142,7 @@ public sealed class Camera3D
     public void FrameBoundsFront(Vector3 min, Vector3 max)
     {
         Target   = (min + max) * 0.5f;
-        Distance = Math.Max((max - min).Length * 1.5f, 0.5f);
+        Distance = Math.Max((max - min).Length() * 1.5f, 0.5f);
         Yaw   = 180f;
         Pitch = 0f;
     }
@@ -159,7 +158,7 @@ public sealed class Camera3D
     public void FrameBoundsAvatarFront(Vector3 min, Vector3 max)
     {
         Target   = (min + max) * 0.5f;
-        Distance = Math.Max((max - min).Length * 1.5f, 0.5f);
+        Distance = Math.Max((max - min).Length() * 1.5f, 0.5f);
         Yaw   = 0f;
         Pitch = 10f;
     }
@@ -178,7 +177,7 @@ public sealed class Camera3D
     public float ComputeProjectedPixelHeight(float objectHeight, float viewportHeightPx)
     {
         if (Distance < 1e-4f || viewportHeightPx <= 0f) return 0f;
-        float halfFovRad = MathHelper.DegreesToRadians(Fov) * 0.5f;
+        float halfFovRad = Fov * (MathF.PI / 180f) * 0.5f;
         float focalLen   = viewportHeightPx * 0.5f / MathF.Tan(halfFovRad);
         return objectHeight / Distance * focalLen;
     }

@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
+using System.Numerics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -61,7 +61,7 @@ internal sealed class AvatarFaceSkinData
     /// Already combined with the mesh's <c>BindShapeMatrix</c> so that
     /// <c>v_anim = v_bind × invBind × animBone</c> works directly on the bind-space vertex.
     /// </summary>
-    public TkMatrix4[]? InvBindMatrices;
+    public Matrix4x4[]? InvBindMatrices;
 
     /// <summary>
     /// Interleaved joint indices: <c>Joints[vi * 4 + k]</c> is influence k of vertex vi.
@@ -81,4 +81,11 @@ internal sealed class AvatarFaceSkinData
     /// Body-mesh faces leave this false — VP deformation there comes from mesh morphs, not bones.
     /// </summary>
     public bool UseVpBoneTransforms;
+
+    /// <summary>
+    /// GPU compute resources for this face, assigned on the GL thread after upload.
+    /// Null until the GL thread registers this face; AnimTick falls back to the CPU
+    /// path for any tick where GpuData is null or disposed.
+    /// </summary>
+    internal volatile AvatarSkinGpuData? GpuData;
 }

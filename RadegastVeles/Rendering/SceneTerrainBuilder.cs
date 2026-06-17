@@ -19,14 +19,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using OpenMetaverse;
 using OpenMetaverse.Rendering;
 using SkiaSharp;
-using TkVector3 = OpenTK.Mathematics.Vector3;
-using TkVector4 = OpenTK.Mathematics.Vector4;
-using TkMatrix4 = OpenTK.Mathematics.Matrix4;
+using Vector3 = System.Numerics.Vector3;
+using Vector4 = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -58,7 +58,7 @@ internal sealed class SceneTerrainBuilder
     /// </summary>
     public async Task<PrimRenderSubmission?> RebuildAsync(
         Simulator? sim = null,
-        TkVector3  regionOffset = default,
+        Vector3    regionOffset = default,
         CancellationToken ct = default)
     {
         sim ??= _client.Network.CurrentSim;
@@ -95,16 +95,16 @@ internal sealed class SceneTerrainBuilder
         // ── Assemble terrain face ─────────────────────────────────────────────
         // Water is rendered analytically by the full-screen water shader; no water
         // mesh is needed here.
-        var offsetMat = regionOffset == TkVector3.Zero
-            ? TkMatrix4.Identity
-            : TkMatrix4.CreateTranslation(regionOffset);
+        var offsetMat = regionOffset == Vector3.Zero
+            ? Matrix4x4.Identity
+            : Matrix4x4.CreateTranslation(regionOffset);
 
         var terrainCentroid = (bMin + bMax) * 0.5f + regionOffset;
         var terrainFaceOut  = new PrimRenderFace
         {
             Vertices    = PackVertices(terrainFace),
             Indices     = terrainFace.Indices.ToArray(),
-            Color       = TkVector4.One,
+            Color       = Vector4.One,
             Transform   = offsetMat,
             Texture     = splatBmp,
             Fullbright  = false,
@@ -146,19 +146,19 @@ internal sealed class SceneTerrainBuilder
         return hm;
     }
 
-    private (Face face, TkVector3 bMin, TkVector3 bMax) BuildTerrainMesh(float[,] heightmap)
+    private (Face face, Vector3 bMin, Vector3 bMax) BuildTerrainMesh(float[,] heightmap)
     {
         var face = _mesher.TerrainMesh(heightmap, 0f, 255f, 0f, 255f);
 
-        var bMin = new TkVector3(float.MaxValue);
-        var bMax = new TkVector3(float.MinValue);
+        var bMin = new Vector3(float.MaxValue);
+        var bMax = new Vector3(float.MinValue);
         foreach (var v in face.Vertices)
         {
-            var p = new TkVector3(v.Position.X, v.Position.Y, v.Position.Z);
-            bMin = TkVector3.ComponentMin(bMin, p);
-            bMax = TkVector3.ComponentMax(bMax, p);
+            var p = new Vector3(v.Position.X, v.Position.Y, v.Position.Z);
+            bMin = Vector3.Min(bMin, p);
+            bMax = Vector3.Max(bMax, p);
         }
-        if (face.Vertices.Count == 0) { bMin = TkVector3.Zero; bMax = new TkVector3(255f, 255f, 0f); }
+        if (face.Vertices.Count == 0) { bMin = Vector3.Zero; bMax = new Vector3(255f, 255f, 0f); }
 
         return (face, bMin, bMax);
     }

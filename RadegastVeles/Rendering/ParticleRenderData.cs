@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using OpenTK.Mathematics;
+using System.Numerics;
 using SkiaSharp;
 
 namespace Radegast.Veles.Rendering;
@@ -50,7 +50,7 @@ public struct ParticleVertex
 public sealed class ParticleRenderSubmission
 {
     /// <summary>Emitter world transform (translation contains the emitter world position).</summary>
-    public required Matrix4     EmitterTransform { get; init; }
+    public required Matrix4x4   EmitterTransform { get; init; }
 
     /// <summary>Particle data.  May be empty when the emitter is active but spawns nothing yet.</summary>
     public required ParticleVertex[] Particles { get; init; }

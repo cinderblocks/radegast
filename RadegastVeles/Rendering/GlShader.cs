@@ -19,10 +19,10 @@
 
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Silk.NET.OpenGL;
-using OpenTK.Mathematics;
 
 namespace Radegast.Veles.Rendering;
 
@@ -51,6 +51,27 @@ public sealed class GlShader : IDisposable
     private readonly Dictionary<int, Vector4> _cachedVec   = new();
 
     private GlShader(uint programId) => _programId = programId;
+
+    /// <summary>Compile a compute shader and link into a program.</summary>
+    /// <exception cref="InvalidOperationException">If compilation or linking fails.</exception>
+    public static GlShader CompileCompute(string compSrc)
+    {
+        var gl = GlApi.Gl;
+        uint comp = CompileStage(ShaderType.ComputeShader, compSrc);
+        uint prog = gl.CreateProgram();
+        gl.AttachShader(prog, comp);
+        gl.LinkProgram(prog);
+        gl.GetProgram(prog, ProgramPropertyARB.LinkStatus, out int ok);
+        if (ok == 0)
+        {
+            string log = gl.GetProgramInfoLog(prog);
+            gl.DeleteProgram(prog);
+            throw new InvalidOperationException($"Compute shader link error: {log}");
+        }
+        gl.DetachShader(prog, comp);
+        gl.DeleteShader(comp);
+        return new GlShader(prog);
+    }
 
     /// <summary>Compile vertex and fragment stages and link into a program.</summary>
     /// <exception cref="InvalidOperationException">If compilation or linking fails.</exception>
@@ -153,20 +174,19 @@ public sealed class GlShader : IDisposable
             gl.Uniform3(loc + i, values[i].X, values[i].Y, values[i].Z);
     }
 
-    // OpenTK's Matrix4/Matrix3 are contiguous row-major float blocks (4×Vector4 / 3×Vector3).
-    // Reinterpret them as a float span for Silk.NET's glUniformMatrix*fv (count = 1). The
-    // 'transpose' flag carries through unchanged, so layout handling matches the old OpenTK call.
-    public void Set(string name, ref Matrix4 m, bool transpose = false)
+    // System.Numerics Matrix4x4/Matrix3x3 are contiguous row-major float blocks.
+    // Reinterpret them as a float span for Silk.NET's glUniformMatrix*fv (count = 1).
+    public void Set(string name, ref Matrix4x4 m, bool transpose = false)
     {
         ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
-            ref Unsafe.As<Matrix4, float>(ref m), 16);
+            ref Unsafe.As<Matrix4x4, float>(ref m), 16);
         GlApi.Gl.UniformMatrix4(Loc(name), 1, transpose, span);
     }
 
-    public void Set(string name, ref Matrix3 m, bool transpose = false)
+    public void Set(string name, ref Matrix3x3 m, bool transpose = false)
     {
         ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
-            ref Unsafe.As<Matrix3, float>(ref m), 9);
+            ref Unsafe.As<Matrix3x3, float>(ref m), 9);
         GlApi.Gl.UniformMatrix3(Loc(name), 1, transpose, span);
     }
 

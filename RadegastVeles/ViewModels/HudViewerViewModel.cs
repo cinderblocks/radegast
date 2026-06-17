@@ -26,7 +26,9 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse.Appearance;
+using System.Numerics;
 using OpenMetaverse;
+using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
 
@@ -186,8 +188,8 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        // Convert OpenTK Vector3 → OpenMetaverse Vector3.
-        static OpenMetaverse.Vector3 ToOmv(OpenTK.Mathematics.Vector3 v) => new(v.X, v.Y, v.Z);
+        // Convert System.Numerics Vector3 → OpenMetaverse Vector3.
+        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {

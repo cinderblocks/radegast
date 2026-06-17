@@ -21,6 +21,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse.Materials;
@@ -29,11 +30,10 @@ using OpenMetaverse.Assets;
 using OpenMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
-// Alias OpenTK math types to avoid conflicts with identically-named OpenMetaverse types.
-using TkMatrix4    = OpenTK.Mathematics.Matrix4;
-using TkVector3    = OpenTK.Mathematics.Vector3;
-using TkVector4    = OpenTK.Mathematics.Vector4;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
+using OmQuaternion = OpenMetaverse.Quaternion;
+using Quaternion   = System.Numerics.Quaternion;
+using Vector3      = System.Numerics.Vector3;
+using Vector4      = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -56,15 +56,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
         float[]       Vertices,
         int           VerticesLength,
         ushort[]      Indices,
-        TkVector4     Color,
+        Vector4       Color,
         bool          Fullbright,
         float         Glow,
         bool          HasAlpha,
         UUID          TextureId,
-        TkMatrix4     Transform,
+        Matrix4x4     Transform,
         uint          PrimLocalId,
         int           FaceIndex,
-        TkVector3     Centroid,
+        Vector3       Centroid,
         bool          IsTwoSided  = false,
         bool          ForceOpaque = false,
         float         AlphaCutoff = 0.004f,
@@ -137,7 +137,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     // ── Tessellation ──────────────────────────────────────────────────────────────
 
-    private async Task<(List<RawFace> faces, TkVector3 bMin, TkVector3 bMax, List<FlexiPrimInfo> flexiPrims)> TessellateAsync(
+    private async Task<(List<RawFace> faces, Vector3 bMin, Vector3 bMax, List<FlexiPrimInfo> flexiPrims)> TessellateAsync(
         IReadOnlyList<Primitive> prims,
         uint                    rootLocalId,
         IProgress<string>?      progress,
@@ -147,11 +147,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
     {
         var faces      = new List<RawFace>();
         var flexiPrims = new List<FlexiPrimInfo>();
-        var bMin       = new TkVector3(float.MaxValue);
-        var bMax       = new TkVector3(float.MinValue);
+        var bMin       = new Vector3(float.MaxValue);
+        var bMax       = new Vector3(float.MinValue);
 
         var rootPrim = prims.FirstOrDefault(p => p.LocalID == rootLocalId) ?? prims[0];
-        var rootRot = ToTkQuaternion(rootPrim.Rotation);
+        var rootRot = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
 
         for (int pi = 0; pi < prims.Count; pi++)
         {
@@ -165,21 +165,21 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (mesh == null) continue;
 
             // ── Build per-prim transform ──────────────────────────────────
-            var scale = new TkVector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
-            TkMatrix4 transform;
+            var scale = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
+            Matrix4x4 transform;
             if (prim.LocalID == rootLocalId)
             {
-                transform = TkMatrix4.CreateScale(scale)
-                          * TkMatrix4.CreateFromQuaternion(rootRot);
+                transform = Matrix4x4.CreateScale(scale)
+                          * Matrix4x4.CreateFromQuaternion(rootRot);
             }
             else
             {
-                var pos = new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
-                var rot = ToTkQuaternion(prim.Rotation);
-                transform = TkMatrix4.CreateScale(scale)
-                          * TkMatrix4.CreateFromQuaternion(rot)
-                          * TkMatrix4.CreateTranslation(pos)
-                          * TkMatrix4.CreateFromQuaternion(rootRot);
+                var pos = new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
+                var rot = new Quaternion(prim.Rotation.X, prim.Rotation.Y, prim.Rotation.Z, prim.Rotation.W);
+                transform = Matrix4x4.CreateScale(scale)
+                          * Matrix4x4.CreateFromQuaternion(rot)
+                          * Matrix4x4.CreateTranslation(pos)
+                          * Matrix4x4.CreateFromQuaternion(rootRot);
             }
 
             // ── Flexi prim bookkeeping ────────────────────────────────────
@@ -220,7 +220,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             // Flexi faces are positioned entirely by the animator via FlexiPrimInfo.AttachTransform;
             // the GPU must NOT apply the rest-pose prim transform on top of the deformed verts.
             AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax,
-                        faceTransformOverride: flexiBaseVerts != null ? TkMatrix4.Identity : (TkMatrix4?)null);
+                        faceTransformOverride: flexiBaseVerts != null ? Matrix4x4.Identity : (Matrix4x4?)null);
 
             if (flexiBaseVerts != null)
             {
@@ -240,7 +240,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                         BaseVertices       = flexiBaseVerts,
                         PathSegments       = segments,
                         ProfileVertexCount = profileVerts,
-                        Scale              = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z),
+                        Scale              = prim.Scale,
                         AttachTransform    = transform,
                     });
                 }
@@ -249,8 +249,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
         if (faces.Count == 0 || bMin.X == float.MaxValue)
         {
-            bMin = new TkVector3(-0.5f);
-            bMax = new TkVector3( 0.5f);
+            bMin = new Vector3(-0.5f);
+            bMax = new Vector3( 0.5f);
         }
 
         return (faces, bMin, bMax, flexiPrims);
@@ -351,7 +351,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 float alphaCutoff = alphaMode == FaceAlphaMode.Mask ? pbr.AlphaCutoff : 0.004f;
 
                 var bcf = pbr.BaseColorFactor;
-                var baseColorFactor = new TkVector4(
+                var baseColorFactor = new Vector4(
                     bcf.R * rf.Color.X, bcf.G * rf.Color.Y,
                     bcf.B * rf.Color.Z, bcf.A * rf.Color.W);
 
@@ -378,7 +378,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     BaseColorFactor          = baseColorFactor,
                     MetallicFactor           = pbr.MetallicFactor,
                     RoughnessFactor          = pbr.RoughnessFactor,
-                    EmissiveFactor           = new TkVector3(
+                    EmissiveFactor           = new Vector3(
                         pbr.EmissiveFactor.X, pbr.EmissiveFactor.Y, pbr.EmissiveFactor.Z),
                     BaseColorUvXform         = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_BASE_COLOR]),
                     PbrNormalUvXform         = ToUvXform(pbr.TextureTransforms[AssetMaterial.TEXTURE_NORMAL]),
@@ -418,7 +418,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
                 var normalUv  = UvTransform.Default;
                 var specUv    = UvTransform.Default;
-                var specColor = TkVector4.One;
+                var specColor = Vector4.One;
                 float specExp = 0f;
                 float envInt  = 0f;
                 if (mat != null)
@@ -431,7 +431,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                         (float)mat.SpecularMapOffsetX, (float)mat.SpecularMapOffsetY,
                         (float)mat.SpecularMapRepeatX, (float)mat.SpecularMapRepeatY,
                         (float)mat.SpecularMapRotation);
-                    specColor = new TkVector4(
+                    specColor = new Vector4(
                         mat.SpecularColor.R, mat.SpecularColor.G,
                         mat.SpecularColor.B, mat.SpecularColor.A);
                     specExp = mat.SpecularExponent / 255f;
@@ -838,12 +838,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// </summary>
     private void AppendFaces(
         FacetedMesh   mesh,
-        Primitive     prim,
-        TkMatrix4     transform,
+        Primitive   prim,
+        Matrix4x4   transform,
         List<RawFace> faces,
-        ref TkVector3 bMin,
-        ref TkVector3 bMax,
-        TkMatrix4?    faceTransformOverride = null)
+        ref Vector3 bMin,
+        ref Vector3 bMax,
+        Matrix4x4?  faceTransformOverride = null)
     {
         var faceTransform = faceTransformOverride ?? transform;
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
@@ -859,7 +859,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             // Rent from the shared pool to avoid LOH pressure; return after faces.Add.
             int needed = face.Vertices.Count * 8;
             float[] verts = ArrayPool<float>.Shared.Rent(needed);
-            var centroidSum = TkVector3.Zero;
+            var centroidSum = Vector3.Zero;
             for (int vi = 0; vi < face.Vertices.Count; vi++)
             {
                 var v = face.Vertices[vi];
@@ -874,15 +874,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 verts[o + 7] = v.TexCoord.Y;
 
                 // Accumulate world-space AABB for camera framing.
-                var wp = TkVector3.TransformPosition(
-                    new TkVector3(v.Position.X, v.Position.Y, v.Position.Z), transform);
-                bMin = TkVector3.ComponentMin(bMin, wp);
-                bMax = TkVector3.ComponentMax(bMax, wp);
+                var wp = Vector3.Transform(
+                    new Vector3(v.Position.X, v.Position.Y, v.Position.Z), transform);
+                bMin = Vector3.Min(bMin, wp);
+                bMax = Vector3.Max(bMax, wp);
                 centroidSum += wp;
             }
             var centroid = face.Vertices.Count > 0
                 ? centroidSum * (1f / face.Vertices.Count)
-                : TkVector3.Zero;
+                : Vector3.Zero;
 
             ushort[] indices = face.Indices.ToArray();
 
@@ -926,7 +926,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (a <= 0.01f) continue;
 
             faces.Add(new RawFace(verts, needed, indices,
-                new TkVector4(r, g, b, a), fullbright, glow, hasAlpha, texId, faceTransform,
+                new Vector4(r, g, b, a), fullbright, glow, hasAlpha, texId, faceTransform,
                 prim.LocalID, fi, centroid,
                 Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
                 MaterialId: materialId, RenderMaterialId: renderMaterialId));
@@ -945,7 +945,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
     internal sealed class AttachmentRiggedSkin
     {
         public string[]    JointNames      = [];
-        public TkMatrix4[] InvBindMatrices = [];
+        public Matrix4x4[] InvBindMatrices = [];
         /// <summary>
         /// Interleaved per-vertex joint indices: <c>Joints[vi * 4 + k]</c> is influence k of vertex vi.
         /// </summary>
@@ -966,10 +966,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// Tuple with the built faces, a parallel list of per-face rigged skin data
     /// (null entries for non-rigged rigid faces), and the world-space AABB.
     /// </returns>
-    internal async Task<(List<PrimRenderFace> faces, List<AttachmentRiggedSkin?> riggedSkins, TkVector3 bMin, TkVector3 bMax)>
+    internal async Task<(List<PrimRenderFace> faces, List<AttachmentRiggedSkin?> riggedSkins, Vector3 bMin, Vector3 bMax)>
         BuildAttachmentFacesAsync(
             IReadOnlyList<Primitive> prims,
-            TkMatrix4                attachJointMatrix,
+            Matrix4x4                attachJointMatrix,
             IProgress<string>?       progress,
             CancellationToken        ct,
             Func<UUID, UUID>?        bakedTexResolver    = null,
@@ -1010,37 +1010,37 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// attachment joint matrix are ignored — placement is driven entirely by the
     /// avatar skeleton via the returned <see cref="AttachmentRiggedSkin"/>.
     /// </remarks>
-    private async Task<(List<RawFace> rawFaces, List<AttachmentRiggedSkin?> riggedSkins, TkVector3 bMin, TkVector3 bMax)>
+    private async Task<(List<RawFace> rawFaces, List<AttachmentRiggedSkin?> riggedSkins, Vector3 bMin, Vector3 bMax)>
         TessellateAttachmentAsync(
             IReadOnlyList<Primitive> prims,
-            TkMatrix4                attachJointMatrix,
+            Matrix4x4                attachJointMatrix,
             IProgress<string>?       progress,
             CancellationToken        ct,
             Func<UUID, UUID>?        bakedTexResolver = null)
     {
         var rawFaces    = new List<RawFace>();
         var riggedSkins = new List<AttachmentRiggedSkin?>();
-        var bMin        = new TkVector3(float.MaxValue);
-        var bMax        = new TkVector3(float.MinValue);
+        var bMin        = new Vector3(float.MaxValue);
+        var bMax        = new Vector3(float.MinValue);
 
         if (prims.Count == 0)
             return (rawFaces, riggedSkins, bMin, bMax);
 
         var root      = prims[0];
-        var rootScale = new TkVector3(root.Scale.X,    root.Scale.Y,    root.Scale.Z);
-        var rootRot   = ToTkQuaternion(root.Rotation);
-        var rootPos   = new TkVector3(root.Position.X, root.Position.Y, root.Position.Z);
+        var rootScale = new Vector3(root.Scale.X,    root.Scale.Y,    root.Scale.Z);
+        var rootRot   = new Quaternion(root.Rotation.X, root.Rotation.Y, root.Rotation.Z, root.Rotation.W);
+        var rootPos   = new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
 
         // Root prim: scale → rotate → translate by user offset → attachment joint transform.
-        var rootWorldMatrix = TkMatrix4.CreateScale(rootScale)
-                            * TkMatrix4.CreateFromQuaternion(rootRot)
-                            * TkMatrix4.CreateTranslation(rootPos)
+        var rootWorldMatrix = Matrix4x4.CreateScale(rootScale)
+                            * Matrix4x4.CreateFromQuaternion(rootRot)
+                            * Matrix4x4.CreateTranslation(rootPos)
                             * attachJointMatrix;
 
         // Child prims are positioned in root-orientation space; root scale is NOT inherited
         // (SL linkset semantics: child positions are in metres relative to root centre).
-        var linkSpaceToWorld = TkMatrix4.CreateFromQuaternion(rootRot)
-                             * TkMatrix4.CreateTranslation(rootPos)
+        var linkSpaceToWorld = Matrix4x4.CreateFromQuaternion(rootRot)
+                             * Matrix4x4.CreateTranslation(rootPos)
                              * attachJointMatrix;
 
         for (int pi = 0; pi < prims.Count; pi++)
@@ -1051,19 +1051,19 @@ internal sealed class PrimMeshBuilder(GridClient client)
             var mesh = await GetPrimMeshAsync(prim, ct, DetailLevel.High).ConfigureAwait(false);
             if (mesh == null) continue;
 
-            TkMatrix4 transform;
+            Matrix4x4 transform;
             if (pi == 0)
             {
                 transform = rootWorldMatrix;
             }
             else
             {
-                var childScale = new TkVector3(prim.Scale.X,    prim.Scale.Y,    prim.Scale.Z);
-                var childRot   = ToTkQuaternion(prim.Rotation);
-                var childPos   = new TkVector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
-                transform = TkMatrix4.CreateScale(childScale)
-                          * TkMatrix4.CreateFromQuaternion(childRot)
-                          * TkMatrix4.CreateTranslation(childPos)
+                var childScale = new Vector3(prim.Scale.X,    prim.Scale.Y,    prim.Scale.Z);
+                var childRot   = new Quaternion(prim.Rotation.X, prim.Rotation.Y, prim.Rotation.Z, prim.Rotation.W);
+                var childPos   = new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
+                transform = Matrix4x4.CreateScale(childScale)
+                          * Matrix4x4.CreateFromQuaternion(childRot)
+                          * Matrix4x4.CreateTranslation(childPos)
                           * linkSpaceToWorld;
             }
 
@@ -1073,8 +1073,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
         if (rawFaces.Count == 0 || bMin.X >= float.MaxValue)
         {
-            bMin = new TkVector3(-0.5f);
-            bMax = new TkVector3( 0.5f);
+            bMin = new Vector3(-0.5f);
+            bMax = new Vector3( 0.5f);
         }
 
         return (rawFaces, riggedSkins, bMin, bMax);
@@ -1089,11 +1089,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
     private void AppendAttachmentFaces(
         FacetedMesh                    mesh,
         Primitive                      prim,
-        TkMatrix4                      transform,
+        Matrix4x4                      transform,
         List<RawFace>                  faces,
         List<AttachmentRiggedSkin?>    riggedSkins,
-        ref TkVector3                  bMin,
-        ref TkVector3                  bMax,
+        ref Vector3                    bMin,
+        ref Vector3                    bMax,
         Func<UUID, UUID>?              bakedTexResolver = null)
     {
         // Non-rigged meshes: reuse the shared rigid path.
@@ -1145,7 +1145,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             int      nv      = face.Vertices.Count;
             int      nv8     = nv * 8;
             float[]  verts   = ArrayPool<float>.Shared.Rent(nv8);
-            var      centSum = TkVector3.Zero;
+            var      centSum = Vector3.Zero;
             int      nv4     = nv * 4;
             int[]    joints  = new int  [nv4];
             float[]  weights = new float[nv4];
@@ -1153,10 +1153,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
             for (int vi = 0; vi < nv; vi++)
             {
                 var v = face.Vertices[vi];
-                var bp = TkVector4.TransformRow(
-                    new TkVector4(v.Position.X, v.Position.Y, v.Position.Z, 1f), bindShape);
-                var bn = TkVector4.TransformRow(
-                    new TkVector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), bindShape);
+                var bp = Vector4.Transform(
+                    new Vector4(v.Position.X, v.Position.Y, v.Position.Z, 1f), bindShape);
+                var bn = Vector4.Transform(
+                    new Vector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), bindShape);
 
                 int o = vi * 8;
                 verts[o    ] = bp.X; verts[o + 1] = bp.Y; verts[o + 2] = bp.Z;
@@ -1166,9 +1166,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
                 // Bind-space AABB (rigged faces don't use a prim transform, so the bind-space
                 // position IS the avatar-local resting position — good enough for framing).
-                var wp = new TkVector3(bp.X, bp.Y, bp.Z);
-                bMin = TkVector3.ComponentMin(bMin, wp);
-                bMax = TkVector3.ComponentMax(bMax, wp);
+                var wp = new Vector3(bp.X, bp.Y, bp.Z);
+                bMin = Vector3.Min(bMin, wp);
+                bMax = Vector3.Max(bMax, wp);
                 centSum += wp;
 
                 var vw = vi < face.Weights.Count ? face.Weights[vi] : default;
@@ -1221,8 +1221,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (a <= 0.01f) continue;
 
             faces.Add(new RawFace(verts, nv8, indices,
-                new TkVector4(r, g, b, a), fullbright, glow, hasAlpha, texId,
-                TkMatrix4.Identity,          // rigged faces: drawn in avatar-local bind space
+                new Vector4(r, g, b, a), fullbright, glow, hasAlpha, texId,
+                Matrix4x4.Identity,          // rigged faces: drawn in avatar-local bind space
                 prim.LocalID, fi, centroid,
                 Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
                 MaterialId: materialId, RenderMaterialId: renderMaterialId));
@@ -1244,10 +1244,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
         FacetedMesh   mesh,
         int           faceIndex,
         Primitive     prim,
-        TkMatrix4     transform,
+        Matrix4x4     transform,
         List<RawFace> faces,
-        ref TkVector3 bMin,
-        ref TkVector3 bMax)
+        ref Vector3   bMin,
+        ref Vector3   bMax)
     {
         // Build a temporary single-face FacetedMesh view and forward.  This keeps all of
         // the TE/material extraction in AppendFaces authoritative without duplicating it.
@@ -1267,11 +1267,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
         }
     }
 
-    /// <summary>Converts a 16-element row-major float array to an OpenTK Matrix4.</summary>
-    private static TkMatrix4 FloatsToMatrix(float[] f)
+    /// <summary>Converts a 16-element row-major float array to a Matrix4x4.</summary>
+    private static Matrix4x4 FloatsToMatrix(float[] f)
     {
-        if (f == null || f.Length < 16) return TkMatrix4.Identity;
-        return new TkMatrix4(
+        if (f == null || f.Length < 16) return Matrix4x4.Identity;
+        return new Matrix4x4(
             f[ 0], f[ 1], f[ 2], f[ 3],
             f[ 4], f[ 5], f[ 6], f[ 7],
             f[ 8], f[ 9], f[10], f[11],
@@ -1286,10 +1286,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// <see cref="MeshSkinData.InverseBindMatrices"/>.  This matches the SL viewer branch:
     /// <c>use_alt_ibm = skin.mJointOverrides.size() &gt; 0</c>.
     /// </summary>
-    private static TkMatrix4[] BuildInvBindMatrices(MeshSkinData skin)
+    private static Matrix4x4[] BuildInvBindMatrices(MeshSkinData skin)
     {
         int n = skin.JointNames.Length;
-        var result = new TkMatrix4[n];
+        var result = new Matrix4x4[n];
 
         // Prefer alt IBMs when present — they account for custom joint positions baked
         // into the mesh by the uploader (e.g. a dress whose skeleton was exported at a
@@ -1304,7 +1304,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (i < have)
             {
                 int b = i * 16;
-                result[i] = new TkMatrix4(
+                result[i] = new Matrix4x4(
                     raw[b    ], raw[b + 1], raw[b + 2], raw[b + 3],
                     raw[b + 4], raw[b + 5], raw[b + 6], raw[b + 7],
                     raw[b + 8], raw[b + 9], raw[b +10], raw[b +11],
@@ -1312,7 +1312,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             }
             else
             {
-                result[i] = TkMatrix4.Identity;
+                result[i] = Matrix4x4.Identity;
             }
         }
 
@@ -1349,8 +1349,4 @@ internal sealed class PrimMeshBuilder(GridClient client)
         w1 = 0f; w2 = 0f; w3 = 0f;
     }
 
-    // ── Utility ───────────────────────────────────────────────────────────────────
-
-    private static TkQuaternion ToTkQuaternion(Quaternion q) =>
-        new(q.X, q.Y, q.Z, q.W);
 }

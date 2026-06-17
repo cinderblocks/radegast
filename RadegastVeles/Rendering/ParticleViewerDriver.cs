@@ -20,18 +20,17 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
 using OpenMetaverse;
 using SkiaSharp;
 using Radegast.Veles.Core;
-using TkMatrix4    = OpenTK.Mathematics.Matrix4;
-using TkVector3    = OpenTK.Mathematics.Vector3;
-using TkVector4    = OpenTK.Mathematics.Vector4;
-using TkQuaternion = OpenTK.Mathematics.Quaternion;
 using OmVector3    = OpenMetaverse.Vector3;
 using OmQuaternion = OpenMetaverse.Quaternion;
+using Vector3      = System.Numerics.Vector3;
+using Vector4      = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -53,7 +52,7 @@ internal sealed class ParticleViewerDriver : IDisposable
     private          bool                     _disposed;
 
     // World-space position of the root emitter prim (updated externally).
-    private TkVector3 _worldPos;
+    private Vector3 _worldPos;
     private readonly object _worldPosLock = new();
 
     // Per-emitter state (one entry per prim that has a particle system).
@@ -62,9 +61,9 @@ internal sealed class ParticleViewerDriver : IDisposable
         public readonly Primitive           Prim;
         public readonly ParticleSimulator   Sim;
         public          SKBitmap?           PendingBmp; // downloaded async, consumed once
-        public          TkMatrix4           Transform;  // object-space transform
+        public          Matrix4x4           Transform;  // object-space transform
 
-        public EmitterState(Primitive prim, ParticleSimulator sim, TkMatrix4 transform)
+        public EmitterState(Primitive prim, ParticleSimulator sim, Matrix4x4 transform)
         {
             Prim      = prim;
             Sim       = sim;
@@ -72,7 +71,7 @@ internal sealed class ParticleViewerDriver : IDisposable
         }
     }
 
-    public ParticleViewerDriver(GridClient client, IReadOnlyList<Primitive> prims, ulong key, TkVector3 worldPos)
+    public ParticleViewerDriver(GridClient client, IReadOnlyList<Primitive> prims, ulong key, Vector3 worldPos)
     {
         _client   = client;
         _prims    = prims;
@@ -81,7 +80,7 @@ internal sealed class ParticleViewerDriver : IDisposable
     }
 
     /// <summary>Update the world-space root position (called when the prim moves).</summary>
-    public void UpdateWorldPos(TkVector3 worldPos)
+    public void UpdateWorldPos(Vector3 worldPos)
     {
         lock (_worldPosLock) _worldPos = worldPos;
     }
@@ -162,16 +161,16 @@ internal sealed class ParticleViewerDriver : IDisposable
             };
 
             // Build a simple object-space translation transform for child prims.
-            TkMatrix4 transform;
+            Matrix4x4 transform;
             if (i == 0)
             {
-                transform = TkMatrix4.Identity;
+                transform = Matrix4x4.Identity;
             }
             else
             {
                 // Rotate child position by root prim's rotation and offset.
                 var pos = RotateVec(prim.Position, rootRot);
-                transform = TkMatrix4.CreateTranslation(pos.X, pos.Y, pos.Z);
+                transform = Matrix4x4.CreateTranslation(pos.X, pos.Y, pos.Z);
             }
 
             result.Add(new EmitterState(prim, sim, transform));
@@ -202,8 +201,8 @@ internal sealed class ParticleViewerDriver : IDisposable
             var p = liveParticles[i];
             pverts[i] = new ParticleVertex
             {
-                Position = new TkVector3(p.Position.X, p.Position.Y, p.Position.Z),
-                Color    = new TkVector4(p.Color.R, p.Color.G, p.Color.B, p.Color.A),
+                Position = new Vector3(p.Position.X, p.Position.Y, p.Position.Z),
+                Color    = new Vector4(p.Color.R, p.Color.G, p.Color.B, p.Color.A),
                 HalfW    = p.ScaleX * 0.5f,
                 HalfH    = p.ScaleY * 0.5f,
                 Glow     = p.Glow,
@@ -212,9 +211,9 @@ internal sealed class ParticleViewerDriver : IDisposable
 
         // Apply world-space translation of the root prim so particles appear at the
         // correct sim-local position regardless of the child prim's local offset.
-        TkVector3 wp;
+        Vector3 wp;
         lock (_worldPosLock) wp = _worldPos;
-        var worldTranslation = TkMatrix4.CreateTranslation(wp);
+        var worldTranslation = Matrix4x4.CreateTranslation(wp);
         var emitterWorld = em.Transform * worldTranslation;
 
         vp.SubmitParticles(_key, new ParticleRenderSubmission
