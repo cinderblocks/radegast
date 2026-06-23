@@ -214,9 +214,11 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     public void SetViewport(GlViewportControl viewport)
     {
         if (_viewport != null) _viewport.FaceClicked -= OnFaceClicked;
-        _viewport           = viewport;
-        _viewport.Wireframe  = Wireframe;
+        _viewport            = viewport;
+        _viewport.Wireframe   = Wireframe;
         _viewport.SsaoEnabled = SsaoEnabled;
+        _viewport.ShowSky     = false;
+        _viewport.Sky         = SkySettings.Studio;
         _viewport.FaceClicked += OnFaceClicked;
 
         // A fresh viewport always needs SubmitAvatarFront so the camera gets framed,

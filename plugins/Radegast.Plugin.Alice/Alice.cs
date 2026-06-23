@@ -21,6 +21,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 using LibreMetaverse;
@@ -431,7 +432,7 @@ namespace Radegast.Plugin.Alice
             }
 
             // Ignore muted agents
-            if (Client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == e.SourceID) != null)
+            if (Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == e.SourceID))
             {
                 return;
             }
@@ -545,8 +546,8 @@ namespace Radegast.Plugin.Alice
             }
 
             // Ignore muted agents
-            if (Client.Self.MuteList.Find(muteEntry => muteEntry.Type == MuteType.Resident
-                && muteEntry.ID == e.IM.FromAgentID) != null)
+            if (Client.Self.MuteList.Values.Any(muteEntry => muteEntry.Type == MuteType.Resident
+                && muteEntry.ID == e.IM.FromAgentID))
             {
                 return;
             }

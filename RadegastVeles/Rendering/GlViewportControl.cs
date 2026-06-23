@@ -220,6 +220,19 @@ public class GlViewportControl : Panel
     /// </summary>
     public SceneEnvironmentService? EnvironmentService { get; set; }
 
+    /// <summary>
+    /// When false, the sky dome is not drawn and <see cref="EnvironmentService"/>
+    /// is not sampled for sky/water. <see cref="Sky"/> retains whatever value was
+    /// assigned directly (e.g. <see cref="SkySettings.Studio"/> for isolated viewers).
+    /// Defaults to true.
+    /// </summary>
+    public bool ShowSky { get; set; } = true;
+
+    /// <summary>
+    /// GL clear color used when <see cref="ShowSky"/> is false.
+    /// </summary>
+    public Vector3 BackgroundColor { get; set; } = new Vector3(0.40f, 0.50f, 0.85f);
+
     // ── Particle state ────────────────────────────────────────────────────────────
     // Pending submissions from any thread: key → submission (null = remove).
     private readonly ConcurrentDictionary<ulong, ParticleRenderSubmission?> _pendingParticleMap = new();
@@ -873,11 +886,13 @@ public class GlViewportControl : Panel
         GlApi.Gl.CullFace(TriangleFace.Back);
         GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
 
-        // Error: vivid red-tint.  Sky ready: clear to black (sky shader fills it).
-        // Fallback: solid SL sky-blue so the viewer looks reasonable without the sky shader.
-        float clearR = _initError != null ? 0.55f : (_skyReady ? 0f : 0.39f);
-        float clearG = _initError != null ? 0.10f : (_skyReady ? 0f : 0.58f);
-        float clearB = _initError != null ? 0.10f : (_skyReady ? 0f : 0.93f);
+        // Error: vivid red-tint.  No sky: use BackgroundColor.  Sky ready: clear to black
+        // (sky shader fills it).  Fallback: solid SL sky-blue without the sky shader.
+        float clearR, clearG, clearB;
+        if (_initError != null)        { clearR = 0.55f; clearG = 0.10f; clearB = 0.10f; }
+        else if (!ShowSky)             { clearR = BackgroundColor.X; clearG = BackgroundColor.Y; clearB = BackgroundColor.Z; }
+        else if (_skyReady)            { clearR = 0f;    clearG = 0f;    clearB = 0f;    }
+        else                           { clearR = 0.39f; clearG = 0.58f; clearB = 0.93f; }
         GlApi.Gl.ClearColor(clearR, clearG, clearB, 1f);
         GlApi.Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -903,15 +918,15 @@ public class GlViewportControl : Panel
         // Sample the environment service once per frame so sky and water colour
         // track the in-world day/night cycle.  Done before DrawSky so the sky
         // shader already receives the updated parameters on the same frame.
-        if (EnvironmentService != null)
+        if (ShowSky && EnvironmentService != null)
         {
-            Sky          = EnvironmentService.GetCurrentSky();
+            Sky           = EnvironmentService.GetCurrentSky();
             WaterFogColor = EnvironmentService.GetCurrentWaterFogColor();
         }
 
         // ── Sky background ────────────────────────────────────────────────
         // Drawn before everything else so it fills pixels not covered by geometry.
-        if (_skyReady)
+        if (ShowSky && _skyReady)
             DrawSky(ref view, ref proj, w, h);
 
         // ── SSAO pre-pass ─────────────────────────────────────────────────

@@ -51,7 +51,7 @@ namespace RadegastSpeech.Conversation
                 case "yes":
                 case "go":
                     Talker.SayMore("Here we go.");
-                    Client.Self.Teleport(asset.AssetUUID);
+                    _ = Client.Self.TeleportAsync(asset.AssetUUID);
                     // TODO Should force conversation to Chat here.
                     FinishInterruption();
                     return true;

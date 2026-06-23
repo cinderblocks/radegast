@@ -460,9 +460,8 @@ namespace SimpleBuilderNamespace
         {
             if (selectedPrim != null)
             {
-                selectedPrim.Rotation.X = (float)rotX.Value;
-                selectedPrim.Rotation.Y = (float)rotY.Value;
-                selectedPrim.Rotation.Z = (float)rotZ.Value;
+                selectedPrim.Rotation = new Quaternion(
+                    (float)rotX.Value, (float)rotY.Value, (float)rotZ.Value, selectedPrim.Rotation.W);
 
                 client.Objects.SetRotation(client.Network.CurrentSim, selectedPrim.LocalID, selectedPrim.Rotation);
             }
@@ -472,9 +471,8 @@ namespace SimpleBuilderNamespace
         {
             if (selectedPrim != null)
             {
-                selectedPrim.Scale.X = (float)scaleX.Value;
-                selectedPrim.Scale.Y = (float)scaleY.Value;
-                selectedPrim.Scale.Z = (float)scaleZ.Value;
+                selectedPrim.Scale = new Vector3(
+                    (float)scaleX.Value, (float)scaleY.Value, (float)scaleZ.Value);
 
                 client.Objects.SetScale(client.Network.CurrentSim, selectedPrim.LocalID, selectedPrim.Scale, true, false);
             }
@@ -484,9 +482,8 @@ namespace SimpleBuilderNamespace
         {
             if (selectedPrim != null)
             {
-                selectedPrim.Position.X = (float)posX.Value;
-                selectedPrim.Position.Y = (float)posY.Value;
-                selectedPrim.Position.Z = (float)posZ.Value;
+                selectedPrim.Position = new Vector3(
+                    (float)posX.Value, (float)posY.Value, (float)posZ.Value);
 
                 client.Objects.SetPosition(client.Network.CurrentSim, selectedPrim.LocalID, selectedPrim.Position);
             }

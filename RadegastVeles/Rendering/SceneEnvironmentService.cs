@@ -43,6 +43,9 @@ public sealed class SceneEnvironmentService : IDisposable
     private int _dayLength = 14400;  // one full cycle (default 4 h)
     private int _dayOffset = 57600;  // offset from Unix epoch to cycle-start
 
+    // Rate-limit guard: don't re-fetch the EEP cap more than once per 30 s.
+    private long _lastFetchTick;
+
     // Parsed keyframe tracks – sorted by normalised time [0, 1).
     // Written from the network thread, read from the GL thread.
     // List references are replaced atomically; reads always see a consistent snapshot.
@@ -76,7 +79,7 @@ public sealed class SceneEnvironmentService : IDisposable
         instance.Client.Environment.RegionEnvironmentUpdated += OnRegionEnvironmentUpdated;
 
         // Kick off an initial fetch; result arrives via the event.
-        _ = instance.Client.Environment.GetRegionEnvironmentAsync();
+        RequestEnvironmentThrottled();
     }
 
     public void Dispose()
@@ -94,6 +97,14 @@ public sealed class SceneEnvironmentService : IDisposable
     {
         _skyTrack   = MakeDefaultSkyTrack();
         _waterTrack = MakeDefaultWaterTrack();
+        RequestEnvironmentThrottled();
+    }
+
+    private void RequestEnvironmentThrottled()
+    {
+        long now = Environment.TickCount64;
+        if (now - _lastFetchTick < 30_000) return;
+        _lastFetchTick = now;
         _ = _instance.Client.Environment.GetRegionEnvironmentAsync();
     }
 
@@ -247,12 +258,12 @@ public sealed class SceneEnvironmentService : IDisposable
                 sunRot = QuatFromTo(Vector3.UnitZ, Vector3.Normalize(sunDir));
             }
 
-            var  blueH  = ReadVec3(map, "blue_horizon",   new Vector3(0.4f, 0.4f, 0.9f));
-            var  blueD  = ReadVec3(map, "blue_density",   new Vector3(0.2f, 0.4f, 0.4f));
+            var  blueH  = ReadColorRgb(map, "blue_horizon",   new Vector3(0.4f, 0.4f, 0.9f));
+            var  blueD  = ReadColorRgb(map, "blue_density",   new Vector3(0.2f, 0.4f, 0.4f));
             float hazeH = ReadScalar(map, "haze_horizon", 0.19f);
             float hazeD = ReadScalar(map, "haze_density", 0.70f);
-            var  sunC   = ReadVec3(map, "sun_moon_color", new Vector3(0.8f, 0.8f, 0.8f));
-            var  amb    = ReadVec3(map, "sky_ambient",    new Vector3(0.25f, 0.25f, 0.25f));
+            var  sunC   = ReadColorRgb(map, "sun_moon_color", new Vector3(0.8f, 0.8f, 0.8f));
+            var  amb    = ReadColorRgb(map, "sky_ambient",    new Vector3(0.25f, 0.25f, 0.25f));
 
             float[] g     = ReadFloatArr(map, "glow", [5.0f, 0f, -0.01f, 1.0f]);
             float   focus = g[0] / 20.0f;
@@ -281,6 +292,18 @@ public sealed class SceneEnvironmentService : IDisposable
     {
         if (map.ContainsKey(key) && map[key] is OSDArray a && a.Count >= 3)
             return new Vector3((float)a[0].AsReal(), (float)a[1].AsReal(), (float)a[2].AsReal());
+        return def;
+    }
+
+    // EEP sky color params are [r, g, b, intensity] — multiply RGB by the 4th component.
+    private static Vector3 ReadColorRgb(OSDMap map, string key, Vector3 def)
+    {
+        if (map.ContainsKey(key) && map[key] is OSDArray a && a.Count >= 3)
+        {
+            float r = (float)a[0].AsReal(), g = (float)a[1].AsReal(), b = (float)a[2].AsReal();
+            float i = a.Count >= 4 ? (float)a[3].AsReal() : 1.0f;
+            return new Vector3(r * i, g * i, b * i);
+        }
         return def;
     }
 

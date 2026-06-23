@@ -75,4 +75,21 @@ public sealed class SkySettings
 
     /// <summary>Returns a new <see cref="SkySettings"/> with SL default midday values.</summary>
     public static SkySettings Default => new();
+
+    /// <summary>
+    /// Neutral studio lighting for isolated object and avatar viewers.
+    /// Overhead sun, elevated ambient — no sky dome needed.
+    /// </summary>
+    public static SkySettings Studio => new()
+    {
+        SunDirection  = Vector3.UnitZ,
+        SunlightColor = new Vector3(0.7f, 0.7f, 0.7f),
+        Ambient       = new Vector3(0.45f, 0.45f, 0.45f),
+        BlueHorizon   = new Vector3(0.4f, 0.4f, 0.9f),
+        BlueDensity   = new Vector3(0.2f, 0.4f, 0.4f),
+        HazeHorizon   = 0.19f,
+        HazeDensity   = 0.7f,
+        SunGlowFocus  = 0.1f,
+        SunGlowSize   = 1.75f,
+    };
 }

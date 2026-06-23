@@ -243,34 +243,23 @@ internal sealed class PrimSerializer
             return result;
         }
 
-        var remaining = new HashSet<UUID>(exportable);
-        var gate = new ManualResetEventSlim(false);
-
-        foreach (var id in exportable)
+        var tasks = exportable.Select(async id =>
         {
-            _client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
+            var asset = await _client.Assets.RequestImageAsync(id, ImageType.Normal).ConfigureAwait(false);
+            if (asset?.AssetData != null)
             {
-                if (state == TextureRequestState.Finished && asset?.AssetData != null)
-                {
-                    lock (result)
-                        result[asset.AssetID] = asset.AssetData;
-                    _log($"[ImportExport] Downloaded texture {asset.AssetID}");
-                }
-                else
-                {
-                    _log($"[ImportExport] Texture {id} download state: {state}");
-                }
+                lock (result)
+                    result[asset.AssetID] = asset.AssetData;
+                _log($"[ImportExport] Downloaded texture {asset.AssetID}");
+            }
+            else
+            {
+                _log($"[ImportExport] Texture {id} download failed");
+            }
+        });
 
-                lock (remaining)
-                {
-                    remaining.Remove(id);
-                    if (remaining.Count == 0)
-                        gate.Set();
-                }
-            });
-        }
-
-        if (!gate.Wait(TimeSpan.FromSeconds(60)))
+        var allDone = System.Threading.Tasks.Task.WhenAll(tasks);
+        if (!allDone.Wait(TimeSpan.FromSeconds(60)))
             _log("[ImportExport] Texture download timed out — some textures may be missing.");
         else
             _log($"[ImportExport] Downloaded {result.Count}/{exportable.Count} texture(s).");
@@ -563,28 +552,24 @@ internal sealed class PrimSerializer
 
     private UUID UploadTexture(byte[] data, string name, Action<string> log)
     {
-        var tcs = new TaskCompletionSource<UUID>();
+        var folder = _client.Inventory.FindFolderForType(AssetType.Texture);
+        var uploadTask = System.Threading.Tasks.Task.Run(() =>
+            _client.Inventory.CreateItemFromAssetAsync(data, name, string.Empty,
+                AssetType.Texture, InventoryType.Texture, folder,
+                Permissions.FullPermissions));
 
-        _client.Inventory.RequestCreateItemFromAsset(data, name, string.Empty,
-            AssetType.Texture, InventoryType.Texture,
-            _client.Inventory.FindFolderForType(AssetType.Texture),
-            (success, status, itemID, assetID) =>
-            {
-                tcs.TrySetResult(success ? assetID : UUID.Zero);
-            });
-
-        if (!tcs.Task.Wait(TimeSpan.FromSeconds(60)))
+        if (!uploadTask.Wait(TimeSpan.FromSeconds(60)))
         {
             log($"[ImportExport] Texture upload timed out: {name}");
             return UUID.Zero;
         }
 
-        var id = tcs.Task.Result;
-        if (id != UUID.Zero)
-            log($"[ImportExport] Uploaded texture {name} → {id}");
+        var r = uploadTask.Result;
+        if (r.Success)
+            log($"[ImportExport] Uploaded texture {name} → {r.AssetID}");
         else
-            log($"[ImportExport] Failed to upload texture {name}");
+            log($"[ImportExport] Failed to upload texture {name}: {r.Status}");
 
-        return id;
+        return r.Success ? r.AssetID : UUID.Zero;
     }
 }

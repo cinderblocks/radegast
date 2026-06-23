@@ -99,9 +99,11 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
         if (_viewport != null)
             _viewport.FaceClicked -= OnFaceClicked;
 
-        _viewport           = viewport;
-        _viewport.Wireframe  = Wireframe;
+        _viewport            = viewport;
+        _viewport.Wireframe   = Wireframe;
         _viewport.SsaoEnabled = SsaoEnabled;
+        _viewport.ShowSky     = false;
+        _viewport.Sky         = SkySettings.Studio;
         _viewport.FaceClicked += OnFaceClicked;
 
         // If geometry was already loaded before the viewport was attached, send it now.

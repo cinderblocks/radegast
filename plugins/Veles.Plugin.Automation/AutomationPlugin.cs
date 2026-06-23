@@ -277,7 +277,7 @@ public sealed class AutomationPlugin : IVelesPlugin
 
         if (needsTeleport)
         {
-            _ctx.Client.Self.Teleport(_pseudoHomeRegion, _pseudoHomePosition);
+            _ = _ctx.Client.Self.TeleportAsync(_pseudoHomeRegion, _pseudoHomePosition);
         }
         else
         {

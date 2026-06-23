@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <TargetFramework>net481</TargetFramework>
 	<UseWindowsForms>true</UseWindowsForms>
 	<AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
