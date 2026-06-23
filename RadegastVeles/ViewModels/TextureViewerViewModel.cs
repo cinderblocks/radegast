@@ -24,8 +24,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CoreJ2K;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -78,59 +78,28 @@ public partial class TextureViewerViewModel : ObservableObject, IDisposable
         DownloadProgress = 0;
         StatusText = "Downloading...";
 
-        Client.Assets.ImageReceiveProgress += OnImageReceiveProgress;
-        Client.Assets.RequestImage(_assetId, ImageType.Normal, OnImageReceived, true);
-    }
-
-    private void OnImageReceiveProgress(object? sender, ImageReceiveProgressEventArgs e)
-    {
-        if (e.ImageID != _assetId || e.Total <= 0) return;
-        int pct = (int)(e.Received * 100L / e.Total);
-        Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
-            DownloadProgress = pct;
-            StatusText = $"Downloading... {pct}%";
-        });
-    }
-
-    private async void OnImageReceived(TextureRequestState state, AssetTexture? assetTexture)
-    {
-        if (state == TextureRequestState.Timeout || state == TextureRequestState.NotFound)
-        {
-            Client.Assets.ImageReceiveProgress -= OnImageReceiveProgress;
-            Dispatcher.UIThread.Post(() => { IsLoading = false; StatusText = "Failed to load texture."; });
-            return;
-        }
-
-        if (state != TextureRequestState.Finished) return;
-
-        Client.Assets.ImageReceiveProgress -= OnImageReceiveProgress;
-
-        if (assetTexture == null) return;
-        var data = assetTexture.AssetData;
-        Bitmap? bitmap = null;
-        try
-        {
-            bitmap = await Task.Run(() => J2kImage.DecodeToImage<WriteableBitmap>(data));
-        }
-        catch
-        {
-            // ignore decode failures
-        }
-
-        Dispatcher.UIThread.Post(() =>
-        {
-            IsLoading = false;
-            if (bitmap == null)
+            var assetTexture = await Client.Assets.RequestImageAsync(_assetId, ImageType.Normal);
+            if (assetTexture == null)
             {
-                StatusText = "Failed to decode texture.";
+                Dispatcher.UIThread.Post(() => { IsLoading = false; StatusText = "Failed to load texture."; });
                 return;
             }
-            TextureBitmap = bitmap;
-            ImageWidth = (int)bitmap.Size.Width;
-            ImageHeight = (int)bitmap.Size.Height;
-            StatusText = $"{ImageWidth} \u00d7 {ImageHeight}";
-            DownloadProgress = 100;
+            var data = assetTexture.AssetData;
+            Bitmap? bitmap = null;
+            try { bitmap = await Task.Run(() => J2kImage.DecodeToImage<WriteableBitmap>(data)); }
+            catch { }
+            Dispatcher.UIThread.Post(() =>
+            {
+                IsLoading = false;
+                if (bitmap == null) { StatusText = "Failed to decode texture."; return; }
+                TextureBitmap = bitmap;
+                ImageWidth = (int)bitmap.Size.Width;
+                ImageHeight = (int)bitmap.Size.Height;
+                StatusText = $"{ImageWidth} \u00d7 {ImageHeight}";
+                DownloadProgress = 100;
+            });
         });
     }
 

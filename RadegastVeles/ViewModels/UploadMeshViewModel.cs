@@ -27,8 +27,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.ImportExport;
+using LibreMetaverse;
+using LibreMetaverse.ImportExport;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -141,12 +141,11 @@ public partial class UploadMeshViewModel : ObservableObject, IDisposable
                             UseModelAsPhysics = false
                         };
 
-                        await uploader.Upload(
-                            res => Dispatcher.UIThread.Post(() =>
-                                AppendLog(res == null
-                                    ? $"Upload failed: {fileName}"
-                                    : $"Upload success: {fileName}")),
-                            token);
+                        var res = await uploader.UploadAsync(token);
+                        Dispatcher.UIThread.Post(() =>
+                            AppendLog(res == null
+                                ? $"Upload failed: {fileName}"
+                                : $"Upload success: {fileName}"));
 
                     }, token);
                 }

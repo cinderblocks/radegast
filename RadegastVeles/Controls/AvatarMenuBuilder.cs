@@ -22,7 +22,7 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
 
@@ -87,7 +87,7 @@ public static class AvatarMenuBuilder
                 Command = new RelayCommand(() =>
                 {
                     var sim = instance.Client.Network.CurrentSim;
-                    if (sim != null && sim.AvatarPositions.TryGetValue(agentId, out var pos))
+                    if (sim != null && instance.State.TryGetCoarsePosition(sim, agentId, out var pos))
                         instance.Client.Self.Movement.TurnToward(pos);
                 })
             });
@@ -97,7 +97,7 @@ public static class AvatarMenuBuilder
                 Command = new RelayCommand(() =>
                 {
                     var sim = instance.Client.Network.CurrentSim;
-                    if (sim != null && sim.AvatarPositions.TryGetValue(agentId, out var pos))
+                    if (sim != null && instance.State.TryGetCoarsePosition(sim, agentId, out var pos))
                         instance.State.MoveTo(sim, pos, false);
                 })
             });

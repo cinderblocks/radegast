@@ -24,8 +24,8 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OmVector3  = OpenMetaverse.Vector3;
+using LibreMetaverse;
+using OmVector3  = LibreMetaverse.Vector3;
 using Quaternion = System.Numerics.Quaternion;
 using Vector3    = System.Numerics.Vector3;
 
@@ -397,20 +397,16 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         var tasks = wearables.Select(wearable => Task.Run(async () =>
         {
-            var tcs = new TaskCompletionSource<OpenMetaverse.Assets.Asset?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _client.Assets.RequestAsset(wearable.AssetID, wearable.AssetType, true,
-                (_, asset) => tcs.TrySetResult(asset));
-
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-            linked.Token.Register(() => tcs.TrySetCanceled());
-
-            OpenMetaverse.Assets.Asset? asset;
-            try   { asset = await tcs.Task.ConfigureAwait(false); }
-            catch { return; }
-
-            if (asset is OpenMetaverse.Assets.AssetWearable assetWearable && assetWearable.Decode())
-                wearable.Asset = assetWearable;
+            try
+            {
+                var asset = await _client.Assets.RequestAssetAsync(wearable.AssetID, wearable.AssetType, true, linked.Token)
+                    .ConfigureAwait(false);
+                if (asset is LibreMetaverse.Assets.AssetWearable assetWearable && assetWearable.Decode())
+                    wearable.Asset = assetWearable;
+            }
+            catch { }
         }, ct)).ToList();
 
         try   { await Task.WhenAll(tasks).ConfigureAwait(false); }
@@ -697,7 +693,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// Avatar geometry is built in bind pose oriented along +Y, so a yaw (rotation
     /// around the up-axis / Z) is all that is needed to face the correct heading.
     /// </summary>
-    private static Matrix4x4 AvatarWorldMatrix(Vector3 worldPos, OpenMetaverse.Quaternion rotation)
+    private static Matrix4x4 AvatarWorldMatrix(Vector3 worldPos, LibreMetaverse.Quaternion rotation)
     {
         var q   = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);
         var rot = Matrix4x4.CreateFromQuaternion(q);
@@ -711,7 +707,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// full linkset hierarchy up to the root prim to compute the world-space
     /// transform (mirrors <c>AgentManager.SimPosition</c> logic).
     /// </summary>
-    private (OmVector3 worldPos, OpenMetaverse.Quaternion worldRot) ResolveAvatarWorldTransform(
+    private (OmVector3 worldPos, LibreMetaverse.Quaternion worldRot) ResolveAvatarWorldTransform(
         Simulator sim, Avatar avatar)
     {
         float hoverZ = avatar.HoverHeight.Z;
@@ -719,14 +715,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (avatar.LocalID == _client.Self.LocalID)
         {
             var pos = _client.Self.SimPosition;
-            pos.Z += hoverZ;
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
             return (pos, _client.Self.SimRotation);
         }
 
         if (avatar.ParentID == 0)
         {
             var pos = avatar.Position;
-            pos.Z += hoverZ;
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
             return (pos, avatar.Rotation);
         }
 
@@ -735,7 +731,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (!sim.ObjectsPrimitives.TryGetValue(avatar.ParentID, out var seatPrim))
         {
             var pos = avatar.Position;
-            pos.Z += hoverZ;
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
             return (pos, avatar.Rotation);
         }
 
@@ -769,7 +765,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         var dz = pos.Z - origin.Z;
         return (dx * dx + dy * dy + dz * dz) <= radius * radius;
     }
-    private float AvatarDistanceSq(Simulator? sim, uint localId, OpenMetaverse.Vector3 avatarPos)
+    private float AvatarDistanceSq(Simulator? sim, uint localId, LibreMetaverse.Vector3 avatarPos)
     {
         if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var av))
         {

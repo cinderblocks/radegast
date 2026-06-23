@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -20,8 +20,8 @@
 
 using System;
 using System.Threading;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -44,7 +44,12 @@ namespace Radegast
 
             // Start download
             tlblStatus.Text = "Downloading...";
-            client.Assets.RequestAsset(gesture.AssetUUID, AssetType.Gesture, true, Assets_OnAssetReceived);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var asset = await client.Assets.RequestAssetAsync(gesture.AssetUUID, AssetType.Gesture, true);
+                var transfer = new AssetDownload { Success = asset != null };
+                Assets_OnAssetReceived(transfer, asset);
+            });
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -113,7 +118,7 @@ namespace Radegast
 
         private void tbtnPlay_Click(object sender, EventArgs e)
         {
-            client.Self.PlayGesture(gesture.AssetUUID);
+            _ = client.Self.PlayGestureAsync(gesture.AssetUUID);
         }
 
         private void UpdateStatus(string msg)

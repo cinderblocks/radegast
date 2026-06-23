@@ -27,8 +27,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Marketplace;
+using LibreMetaverse;
+using LibreMetaverse.Marketplace;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;

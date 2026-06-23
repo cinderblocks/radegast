@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -61,7 +61,7 @@ namespace Radegast
         public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
         {
             // GetCurrentOutfitLinks lazily initializes COF if it hasn't been yet
-            await GetCurrentOutfitLinks(cancellationToken).ConfigureAwait(false);
+            await GetCurrentOutfitLinksAsync(cancellationToken).ConfigureAwait(false);
             return COF != null;
         }
     }

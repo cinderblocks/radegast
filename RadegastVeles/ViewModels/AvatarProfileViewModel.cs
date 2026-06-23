@@ -27,8 +27,8 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Messages.Linden;
+using LibreMetaverse;
+using LibreMetaverse.Messages.Linden;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -195,7 +195,11 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
         // Also try cap path for potentially faster property data
         if (Client.Avatars.AgentProfileAvailable())
         {
-            _ = Client.Avatars.RequestAgentProfile(AgentID, OnAgentProfileReply);
+            _ = Task.Run(async () =>
+            {
+                var (success, profile) = await Client.Avatars.RequestAgentProfileAsync(AgentID);
+                OnAgentProfileReply(success, profile);
+            });
         }
     }
 
@@ -426,7 +430,7 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
         var legacyName = _instance.Names.GetLegacyName(AgentID);
         if (IsMuted)
         {
-            var entry = Client.Self.MuteList.Find(m => m.Type == MuteType.Resident && m.ID == AgentID);
+            var entry = Client.Self.MuteList.Values.FirstOrDefault(m => m.Type == MuteType.Resident && m.ID == AgentID);
             if (entry != null)
                 Client.Self.RemoveMuteListEntry(entry.ID, entry.Name);
             else
@@ -456,7 +460,7 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
         bool httpOk = false;
         if (Client.Avatars.AgentProfileAvailable())
         {
-            try { await Client.Self.UpdateProfileNotesHttp(AgentID, Notes, ct); httpOk = true; }
+            try { await Client.Self.UpdateProfileNotesAsync(AgentID, Notes, ct); httpOk = true; }
             catch { }
         }
         if (!httpOk)
@@ -637,7 +641,7 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
         bool httpOk = false;
         if (Client.Avatars.AgentProfileAvailable())
         {
-            try { await Client.Self.UpdateProfileHttp(props, ct); httpOk = true; }
+            try { await Client.Self.UpdateProfileAsync(props, ct); httpOk = true; }
             catch { }
         }
         if (!httpOk)
@@ -754,7 +758,7 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
                 break;
 
             case InventoryFolder folder:
-                Client.Inventory.GiveFolder(folder.UUID, folder.Name, AgentID, true);
+                _ = Task.Run(() => Client.Inventory.GiveFolderAsync(folder.UUID, folder.Name, AgentID, true));
                 _instance.ShowNotificationInChat($"Offered folder '{folder.Name}' to {DisplayName}.");
                 break;
         }

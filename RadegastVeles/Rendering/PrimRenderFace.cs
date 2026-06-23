@@ -476,8 +476,8 @@ public enum FaceAlphaMode : byte
 /// </summary>
 public sealed class FlexiPrimInfo
 {
-    /// <summary>The prim whose <see cref="OpenMetaverse.Primitive.Flexible"/> data drives simulation.</summary>
-    public required OpenMetaverse.Primitive Prim { get; init; }
+    /// <summary>The prim whose <see cref="LibreMetaverse.Primitive.Flexible"/> data drives simulation.</summary>
+    public required LibreMetaverse.Primitive Prim { get; init; }
 
     /// <summary>
     /// Index of the first face in <see cref="PrimRenderSubmission.Faces"/> that belongs to this prim.
@@ -508,7 +508,7 @@ public sealed class FlexiPrimInfo
     /// <summary>
     /// The prim's scale baked into the base vertices — needed to rebuild per-segment transforms.
     /// </summary>
-    public required OpenMetaverse.Vector3 Scale { get; init; }
+    public required LibreMetaverse.Vector3 Scale { get; init; }
 
     /// <summary>
     /// The prim's own Scale × Rotation × Translation matrix, independent of the skeleton.

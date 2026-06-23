@@ -26,7 +26,7 @@ using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Veles.ViewModels;
 

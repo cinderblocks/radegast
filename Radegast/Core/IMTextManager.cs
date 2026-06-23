@@ -20,11 +20,12 @@
 
 using System;
 using System.Collections;
+using System.Linq;
 using System.Drawing;
 using System.Text;
 using System.IO;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -108,7 +109,7 @@ namespace Radegast
                 e.IM.Dialog == InstantMessageDialog.StopTyping)
                 return;
 
-            if (instance.Client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID) != null)
+            if (instance.Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID))
             {
                 return;
             }

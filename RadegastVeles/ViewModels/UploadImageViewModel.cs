@@ -29,7 +29,7 @@ using CoreJ2K;
 using CoreJ2K.Configuration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Pfim;
 using Radegast.Veles.Core;
 using SkiaSharp;

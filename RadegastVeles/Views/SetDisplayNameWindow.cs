@@ -25,7 +25,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Veles.Views;
 
@@ -154,13 +154,10 @@ public sealed class SetDisplayNameWindow : Window
         ShowStatus("Fetching current display name...", isError: false);
 
         string? currentDisplayName = null;
-        await _client.Avatars.GetDisplayNames(
-            new List<UUID> { _client.Self.AgentID },
-            (success, names, _) =>
-            {
-                if (success && names is { Length: > 0 })
-                    currentDisplayName = names[0].DisplayName ?? string.Empty;
-            });
+        var (success, names, _) = await _client.Avatars.GetDisplayNamesAsync(
+            new List<UUID> { _client.Self.AgentID });
+        if (success && names is { Length: > 0 })
+            currentDisplayName = names[0].DisplayName ?? string.Empty;
 
         if (currentDisplayName == null)
         {

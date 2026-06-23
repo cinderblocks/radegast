@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

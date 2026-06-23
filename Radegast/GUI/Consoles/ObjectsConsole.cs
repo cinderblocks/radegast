@@ -26,7 +26,7 @@ using System.Text;
 using System.Timers;
 using System.Windows.Forms;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading.Tasks;
 using LibreMetaverse;
 
@@ -1201,7 +1201,7 @@ namespace Radegast
                 {
                     using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
                     {
-                        await instance.COF.Detach(itemToDetach, cts.Token);
+                        await instance.COF.DetachAsync(itemToDetach, cts.Token);
                     }
                 }
                 catch (TaskCanceledException ex)
@@ -1367,7 +1367,7 @@ namespace Radegast
 
             if (CurrentPrim.Properties != null)
             {
-                bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
+                bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
 
                 if (isMuted)
                 {
@@ -1485,7 +1485,7 @@ namespace Radegast
 
         private void UpdateMuteButton()
         {
-            bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
+            bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
 
             btnMute.Text = isMuted ? "Unmute" : "Mute";
         }

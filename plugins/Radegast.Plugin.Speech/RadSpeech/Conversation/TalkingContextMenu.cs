@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -20,7 +20,7 @@
 
 using System;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast;
 
 namespace RadegastSpeech.Conversation
@@ -33,7 +33,7 @@ namespace RadegastSpeech.Conversation
         private RadegastContextMenuStrip menuStrip;
         private readonly PluginControl control;
         private string menuFor;
-        private OpenMetaverse.UUID id;
+        private LibreMetaverse.UUID id;
 
         internal TalkingContextMenu(PluginControl pc)
         {
@@ -107,7 +107,7 @@ namespace RadegastSpeech.Conversation
             {
                 menuStrip = e.Menu;
                 menuFor = string.Empty;
-                id = OpenMetaverse.UUID.Zero;
+                id = LibreMetaverse.UUID.Zero;
 
                 // Figure out what this menu applies to.
                 if (menuStrip.Selection is string selection)
@@ -121,7 +121,7 @@ namespace RadegastSpeech.Conversation
                 else if (menuStrip.Selection is InventoryItem item)
                 {
                     // Something in Inventory.
-                    menuFor = ((OpenMetaverse.InventoryItem)item).Name;
+                    menuFor = ((LibreMetaverse.InventoryItem)item).Name;
                 }
                 else if (menuStrip.Selection is FriendInfo f)
                 {

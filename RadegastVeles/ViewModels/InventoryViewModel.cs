@@ -29,9 +29,9 @@ using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
-using OpenMetaverse.Marketplace;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse.Marketplace;
 using Radegast.Veles.Core;
 using InvClipboard = Radegast.Veles.Core.InventoryClipboard;
 using InvClipboardMode = Radegast.Veles.Core.InventoryClipboardMode;
@@ -566,7 +566,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 //     additive by default, matching SL's InventoryAddAttachmentBehavior=false.
                 //     Use WearAtPoint to explicitly replace at a given point.
                 bool replace = invItem is not InventoryObject;
-                _instance.COF.AddToOutfit(invItem, replace, CancellationToken.None);
+                _ = _instance.COF.AddToOutfitAsync(invItem, replace, CancellationToken.None);
                 VelesNotificationService.Show("Outfit", $"Wearing {invItem.Name}...");
             }
             else
@@ -600,7 +600,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
         if (_instance.COF != null)
         {
-            _instance.COF.AddToOutfit(invItem, false, CancellationToken.None);
+            _ = _instance.COF.AddToOutfitAsync(invItem, false, CancellationToken.None);
             VelesNotificationService.Show("Outfit", $"Adding {invItem.Name}...");
         }
         else
@@ -664,7 +664,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (SelectedNode == null || !SelectedNode.IsFolder) return;
 
         // Request folder contents from server
-        Client.Inventory.RequestFolderContents(
+        _ = Client.Inventory.RequestFolderContentsAsync(
             SelectedNode.ItemId, Client.Self.AgentID,
             true, true, InventorySortOrder.ByDate);
     }
@@ -875,9 +875,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (SelectedNode == null || SelectedNode.IsFolder) return;
         if (!Inventory.TryGetValue<InventoryLandmark>(SelectedNode.ItemId, out var lm)) return;
 
-        Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (!transfer.Success || asset is not AssetLandmark decoded) return;
+            var asset = await Client.Assets.RequestAssetAsync(lm.AssetUUID, AssetType.Landmark, true);
+            if (asset is not AssetLandmark decoded) return;
             decoded.Decode();
 
             Client.Grid.RegionHandleReply += HandleSlurlRegionReply;
@@ -888,7 +889,6 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 if (e.RegionID != decoded.RegionID) return;
                 Client.Grid.RegionHandleReply -= HandleSlurlRegionReply;
 
-                // Look up region name from our known regions cache.
                 string regionName = "Unknown";
                 if (Client.Grid.RegionsByHandleReadOnly.TryGetValue(e.RegionHandle, out var region))
                     regionName = region.Name;
@@ -916,9 +916,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (SelectedNode == null || SelectedNode.IsFolder) return;
         if (!Inventory.TryGetValue<InventoryLandmark>(SelectedNode.ItemId, out var lm)) return;
 
-        Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (!transfer.Success || asset is not AssetLandmark decoded) return;
+            var asset = await Client.Assets.RequestAssetAsync(lm.AssetUUID, AssetType.Landmark, true);
+            if (asset is not AssetLandmark decoded) return;
             decoded.Decode();
 
             Client.Grid.RegionHandleReply += HandleMapRegionReply;
@@ -952,7 +953,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     {
         if (SelectedNode == null || SelectedNode.IsFolder) return;
         if (!Inventory.TryGetValue<InventoryGesture>(SelectedNode.ItemId, out var gesture)) return;
-        Client.Self.PlayGesture(gesture.AssetUUID);
+        _ = Client.Self.PlayGestureAsync(gesture.AssetUUID);
     }
 
     [RelayCommand]
@@ -1005,10 +1006,11 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat("Cannot create items in this folder.");
             return;
         }
-        Client.Inventory.RequestCreateItem(
-            SelectedNode.ItemId, "New Notecard", string.Empty,
-            AssetType.Notecard, UUID.Random(), InventoryType.Notecard,
-            PermissionMask.All, (_, _) => { });
+        _ = Task.Run(async () =>
+            await Client.Inventory.CreateItemAsync(
+                SelectedNode.ItemId, "New Notecard", string.Empty,
+                AssetType.Notecard, UUID.Random(), InventoryType.Notecard,
+                PermissionMask.All));
     }
 
     [RelayCommand]
@@ -1021,10 +1023,11 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat("Cannot create items in this folder.");
             return;
         }
-        Client.Inventory.RequestCreateItem(
-            SelectedNode.ItemId, "New Script", string.Empty,
-            AssetType.LSLText, UUID.Random(), InventoryType.LSL,
-            PermissionMask.All, (_, _) => { });
+        _ = Task.Run(async () =>
+            await Client.Inventory.CreateItemAsync(
+                SelectedNode.ItemId, "New Script", string.Empty,
+                AssetType.LSLText, UUID.Random(), InventoryType.LSL,
+                PermissionMask.All));
     }
 
     // ── Trash ────────────────────────────────────────────────────────────────
@@ -1140,15 +1143,15 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (destFolderId == UUID.Zero)
             destFolderId = Client.Inventory.FindFolderForType(AssetType.Unknown);
 
-        Client.Inventory.RequestCopyItem(
-            libItem.UUID, destFolderId, libItem.Name, Client.Self.AgentID,
-            copied =>
-            {
-                if (copied != null)
-                    _instance.ShowNotificationInChat($"Copied '{libItem.Name}' to inventory.");
-                else
-                    _instance.ShowNotificationInChat($"Failed to copy '{libItem.Name}' to inventory.");
-            });
+        _ = Task.Run(async () =>
+        {
+            var copied = await Client.Inventory.RequestCopyItemAsync(
+                libItem.UUID, destFolderId, libItem.Name, Client.Self.AgentID);
+            if (copied != null)
+                _instance.ShowNotificationInChat($"Copied '{libItem.Name}' to inventory.");
+            else
+                _instance.ShowNotificationInChat($"Failed to copy '{libItem.Name}' to inventory.");
+        });
     }
 
     [RelayCommand]
@@ -1215,10 +1218,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             if (InvClipboard.IsFolder)
                 _instance.ShowNotificationInChat("Folder copy is not supported by the server.");
             else
-                Client.Inventory.RequestCopyItem(
-                    InvClipboard.ItemId, destFolder.UUID,
-                    InvClipboard.ItemName, Client.Self.AgentID,
-                    _ => { });
+                _ = Task.Run(async () =>
+                    await Client.Inventory.RequestCopyItemAsync(
+                        InvClipboard.ItemId, destFolder.UUID,
+                        InvClipboard.ItemName, Client.Self.AgentID));
         }
     }
 
@@ -1241,12 +1244,14 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (!Inventory.TryGetValue<InventoryFolder>(destNode.ItemId, out var destFolder)) return;
         if (!Inventory.TryGetValue<InventoryItem>(InvClipboard.ItemId, out var srcItem)) return;
 
-        Client.Inventory.CreateLink(destFolder.UUID, srcItem,
-            (_, created) =>
-            {
-                if (created != null)
-                    _instance.ShowNotificationInChat($"Link to {srcItem.Name} created.");
-            });
+        _ = Task.Run(async () =>
+        {
+            var created = await Client.Inventory.CreateLinkAsync(
+                destFolder.UUID, srcItem.UUID, srcItem.Name, string.Empty,
+                srcItem.InventoryType, UUID.Random());
+            if (created != null)
+                _instance.ShowNotificationInChat($"Link to {srcItem.Name} created.");
+        });
     }
 
     // ── Copy Asset UUID ───────────────────────────────────────────────────────
@@ -1325,12 +1330,14 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var srcItem)) return;
 
         // Create link in same folder as the source item
-        Client.Inventory.CreateLink(srcItem.ParentUUID, srcItem,
-            (_, created) =>
-            {
-                if (created != null)
-                    _instance.ShowNotificationInChat($"Link to {srcItem.Name} created.");
-            });
+        _ = Task.Run(async () =>
+        {
+            var created = await Client.Inventory.CreateLinkAsync(
+                srcItem.ParentUUID, srcItem.UUID, srcItem.Name, string.Empty,
+                srcItem.InventoryType, UUID.Random());
+            if (created != null)
+                _instance.ShowNotificationInChat($"Link to {srcItem.Name} created.");
+        });
     }
 
     // ── Move to folder (drag-drop target) ────────────────────────────────────
@@ -1405,7 +1412,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
         if (_instance.COF != null)
         {
-            _ = _instance.COF.RemoveFromOutfit(invItem, CancellationToken.None);
+            _ = _instance.COF.RemoveFromOutfitAsync(invItem, CancellationToken.None);
             VelesNotificationService.Show("Outfit", $"Removing {invItem.Name}...");
         }
     }
@@ -1451,7 +1458,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (!Inventory.TryGetValue<InventoryItem>(SelectedNode.ItemId, out var invItem)) return;
         if (_instance.COF == null) return;
 
-        await _instance.COF.Attach(invItem, point, true, CancellationToken.None).ConfigureAwait(false);
+        await _instance.COF.AttachAsync(invItem, point, true, CancellationToken.None).ConfigureAwait(false);
         VelesNotificationService.Show("Outfit", $"Wearing {invItem.Name} at {point}...");
     }
 
@@ -1472,7 +1479,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         }
         var items = GetFolderWearableItems(SelectedNode.ItemId);
         if (items.Count == 0) return;
-        _ = _instance.COF.AddToOutfit(items, false, CancellationToken.None);
+        _ = _instance.COF.AddToOutfitAsync(items, false, CancellationToken.None);
         VelesNotificationService.Show("Outfit", $"Adding {SelectedNode.Name} to outfit...");
     }
 
@@ -1491,7 +1498,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat($"'{SelectedNode.Name}' contains no wearable items.");
             return;
         }
-        _ = _instance.COF.ReplaceOutfit(SelectedNode.ItemId, CancellationToken.None);
+        _ = _instance.COF.ReplaceOutfitAsync(SelectedNode.ItemId, CancellationToken.None);
         VelesNotificationService.Show("Outfit", $"Replacing outfit with {SelectedNode.Name}...");
     }
 
@@ -1507,7 +1514,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         }
         var items = GetFolderWearableItems(SelectedNode.ItemId);
         if (items.Count == 0) return;
-        _ = _instance.COF.RemoveFromOutfit(items, CancellationToken.None);
+        _ = _instance.COF.RemoveFromOutfitAsync(items, CancellationToken.None);
         VelesNotificationService.Show("Outfit", $"Removing {SelectedNode.Name} from outfit...");
     }
 
@@ -1571,7 +1578,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             return;
         }
         await Task.Delay(500).ConfigureAwait(false);
-        var links = await cof.GetCurrentOutfitLinks().ConfigureAwait(false);
+        var links = await cof.GetCurrentOutfitLinksAsync().ConfigureAwait(false);
         foreach (var link in links)
         {
             var actual = cof.ResolveInventoryLink(link);
@@ -1579,7 +1586,6 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             await Client.Inventory.CreateLinkAsync(
                 newFolderId, actual.UUID, actual.Name,
                 string.Empty, actual.InventoryType, UUID.Random(),
-                (_, _) => { },
                 CancellationToken.None
             ).ConfigureAwait(false);
         }
@@ -1875,7 +1881,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 StatusText = $"Loading inventory... {folderKeys.Count} folders remaining");
 
             var tasks = folderKeys.Select(folderId =>
-                Client.Inventory.RequestFolderContents(
+                Client.Inventory.RequestFolderContentsAsync(
                     folderId, Client.Self.AgentID,
                     true, true, InventorySortOrder.ByDate, token));
 

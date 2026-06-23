@@ -47,7 +47,7 @@ public partial class GroupsPanel : UserControl
         }
         entry ??= vm.SelectedGroup;
 
-        if (entry == null || entry.Id == OpenMetaverse.UUID.Zero) return;
+        if (entry == null || entry.Id == LibreMetaverse.UUID.Zero) return;
 
         var menu = GroupMenuBuilder.Build(vm.Instance, entry.Id, entry.Name);
         menu.Open(lb);

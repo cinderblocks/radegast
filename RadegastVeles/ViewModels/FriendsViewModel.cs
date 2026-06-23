@@ -24,7 +24,7 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -243,7 +243,7 @@ public partial class FriendsViewModel : InstanceViewModelBase, IDisposable
                 return;
             }
 
-            Client.Self.Teleport(e.RegionHandle, e.Location);
+            _ = Client.Self.TeleportAsync(e.RegionHandle, e.Location);
         }
 
         Client.Friends.FriendFoundReply += OnFriendFound;

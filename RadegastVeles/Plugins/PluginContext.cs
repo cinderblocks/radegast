@@ -24,7 +24,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.PluginApi;
 using Radegast.Veles.ViewModels;
@@ -168,14 +168,14 @@ internal sealed class PluginContext : IPluginContext
     public void SetSetting(string key, string value)
     {
         string settingsKey = $"Plugin_{_pluginId}_{key}";
-        _instance.GlobalSettings[settingsKey] = OpenMetaverse.StructuredData.OSD.FromString(value);
+        _instance.GlobalSettings[settingsKey] = LibreMetaverse.StructuredData.OSD.FromString(value);
     }
 
     public string? GetSetting(string key)
     {
         string settingsKey = $"Plugin_{_pluginId}_{key}";
         var osd = _instance.GlobalSettings[settingsKey];
-        if (osd.Type == OpenMetaverse.StructuredData.OSDType.Unknown)
+        if (osd.Type == LibreMetaverse.StructuredData.OSDType.Unknown)
             return null;
         return osd.AsString();
     }

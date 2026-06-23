@@ -19,13 +19,13 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using OpenMetaverse;
 using Radegast.Automation;
 
 namespace Radegast
@@ -177,6 +177,21 @@ namespace Radegast
         public bool CameraTracksOwnAvatar = true;
         public Vector3 DefaultCameraOffset = new Vector3(-5, 0, 0);
 
+        private readonly ConcurrentDictionary<ulong, IReadOnlyDictionary<UUID, Vector3>> _coarsePositions
+            = new ConcurrentDictionary<ulong, IReadOnlyDictionary<UUID, Vector3>>();
+
+        public bool TryGetCoarsePosition(Simulator sim, UUID agentId, out Vector3 pos)
+        {
+            if (_coarsePositions.TryGetValue(sim.Handle, out var snap))
+                return snap.TryGetValue(agentId, out pos);
+            pos = Vector3.Zero;
+            return false;
+        }
+
+        public IReadOnlyDictionary<UUID, Vector3> GetCoarsePositions(Simulator sim)
+            => _coarsePositions.TryGetValue(sim.Handle, out var snap) ? snap
+               : (IReadOnlyDictionary<UUID, Vector3>)new Dictionary<UUID, Vector3>();
+
         public StateManager(RadegastInstance instance)
         {
             this.instance = instance;
@@ -204,6 +219,7 @@ namespace Radegast
             client.Self.AlertMessage += Self_AlertMessage;
             client.Self.TeleportProgress += Self_TeleportProgress;
             client.Network.SimChanged += Network_SimChanged;
+            client.Grid.CoarseLocationUpdate += Grid_CoarseLocationUpdate;
         }
 
         private void UnregisterClientEvents(GridClient client)
@@ -214,6 +230,12 @@ namespace Radegast
             client.Self.AlertMessage -= Self_AlertMessage;
             client.Self.TeleportProgress -= Self_TeleportProgress;
             client.Network.SimChanged -= Network_SimChanged;
+            client.Grid.CoarseLocationUpdate -= Grid_CoarseLocationUpdate;
+        }
+
+        private void Grid_CoarseLocationUpdate(object? sender, CoarseLocationUpdateEventArgs e)
+        {
+            _coarsePositions[e.Simulator.Handle] = e.Positions;
         }
 
         private bool _disposed;
@@ -370,7 +392,7 @@ namespace Radegast
                         if (s == null) continue;
                         if (s.ObjectsAvatars.Any(a => a.Value?.ID == avatarID))
                             return s;
-                        if (s.AvatarPositions.ContainsKey(avatarID))
+                        if (_coarsePositions.TryGetValue(s.Handle, out var snap) && snap.ContainsKey(avatarID))
                             return s;
                     }
                 }
@@ -477,7 +499,7 @@ namespace Radegast
             {
                 foreach (var s in Simulators)
                 {
-                    if (s.AvatarPositions.TryGetValue(person, out var avatarPosition))
+                    if (_coarsePositions.TryGetValue(s.Handle, out var coarseSnap) && coarseSnap.TryGetValue(person, out var avatarPosition))
                     {
                         position = avatarPosition;
                         sim = s;
@@ -779,7 +801,7 @@ namespace Radegast
                 return AvatarPosition(sim, av.Value);
             }
 
-            if (!sim.AvatarPositions.TryGetValue(avID, out var coarse)) { return Vector3.Zero; }
+            if (!TryGetCoarsePosition(sim, avID, out var coarse)) { return Vector3.Zero; }
             return coarse.Z > 0.01 ? coarse : Vector3.Zero;
         }
 
@@ -1079,13 +1101,13 @@ namespace Radegast
         {
             var stop = new Dictionary<UUID, bool>();
 
-            Client.Self.SignaledAnimations.ForEach(anim =>
+            foreach (var anim in Client.Self.SignaledAnimations.Keys)
             {
                 if (!KnownAnimations.ContainsKey(anim))
                 {
                     stop.Add(anim, false);
                 }
-            });
+            }
 
             if (stop.Count > 0)
             {

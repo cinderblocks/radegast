@@ -24,7 +24,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.VisualTree;
-using OpenMetaverse.Marketplace;
+using LibreMetaverse.Marketplace;
 using Radegast.Veles.Controls;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
@@ -661,7 +661,7 @@ public partial class InventoryPanel : UserControl
         _ = on; // suppress unused warning — visual feedback deferred to future binding
     }
 
-    private static bool IsMarketplaceMoveAllowed(InvTreeNode dragged, InvTreeNode target, OpenMetaverse.Inventory? store)
+    private static bool IsMarketplaceMoveAllowed(InvTreeNode dragged, InvTreeNode target, LibreMetaverse.Inventory? store)
     {
         if (store == null) return true;
 

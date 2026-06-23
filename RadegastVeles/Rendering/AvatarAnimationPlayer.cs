@@ -20,8 +20,9 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using System.Threading.Tasks;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Quaternion = System.Numerics.Quaternion;
 
 namespace Radegast.Veles.Rendering;
@@ -169,10 +170,12 @@ internal sealed class AvatarAnimationPlayer : IDisposable
                 }
                 else if (_requested.Add(id))
                 {
-                    // Download the asset; keep a local copy of the ID for the closure.
                     var capturedId = id;
-                    _client.Assets.RequestAsset(id, AssetType.Animation, false,
-                        (transfer, asset) => OnAnimationReceived(capturedId, asset));
+                    _ = Task.Run(async () =>
+                    {
+                        var asset = await _client.Assets.RequestAssetAsync(capturedId, AssetType.Animation, false);
+                        OnAnimationReceived(capturedId, asset);
+                    });
                 }
             }
         }

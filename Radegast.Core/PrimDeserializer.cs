@@ -21,9 +21,9 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
-using ClientHelpers = OpenMetaverse.Helpers;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
+using ClientHelpers = LibreMetaverse.Helpers;
 
 namespace Radegast
 {
@@ -115,7 +115,7 @@ namespace Radegast
                     // HACK: Import the structure just above our head
                     // We need a more elaborate solution for importing with relative or absolute offsets
                     linkset.RootPrim.Position = Client.Self.SimPosition;
-                    linkset.RootPrim.Position.Z += 3.0f;
+                    linkset.RootPrim.Position = new Vector3(linkset.RootPrim.Position.X, linkset.RootPrim.Position.Y, linkset.RootPrim.Position.Z + 3.0f);
                     currentPosition = linkset.RootPrim.Position;
 
                     // Rez the root prim with no rotation

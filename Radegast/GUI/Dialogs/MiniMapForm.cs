@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
@@ -17,7 +17,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Windows.Forms;
 
 namespace Radegast.GUI.Dialogs

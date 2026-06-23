@@ -23,7 +23,7 @@ using System.IO;
 using System.Threading.Tasks;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.PluginApi;
 
 namespace Veles.Plugin.ImportExport;

@@ -29,7 +29,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
 using LibreMetaverse.Voice.WebRTC;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -337,7 +337,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     /// </summary>
     public void NotifyTypingStarted()
     {
-        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
         Client.Self.Chat(string.Empty, 0, ChatType.StartTyping);
     }
@@ -348,7 +348,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     /// </summary>
     public void NotifyTypingStopped()
     {
-        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
         Client.Self.Chat(string.Empty, 0, ChatType.StopTyping);
     }
@@ -809,14 +809,16 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         var sim = e.Simulator;
         var agentId = Client.Self.AgentID;
 
-        var agentPosition = sim.AvatarPositions.TryGetValue(agentId, out var myPos)
+        var positions = e.Positions;
+
+        var agentPosition = positions.TryGetValue(agentId, out var myPos)
             ? PositionHelper.ToGlobalPosition(sim.Handle, myPos)
             : Client.Self.GlobalPosition;
         if (agentPosition.Z < 0.1)
             agentPosition.Z = Client.Self.GlobalPosition.Z;
 
-        var globalPositions = new Dictionary<UUID, Vector3d>(sim.AvatarPositions.Count);
-        foreach (var kv in sim.AvatarPositions)
+        var globalPositions = new Dictionary<UUID, Vector3d>(positions.Count);
+        foreach (var kv in positions)
             globalPositions[kv.Key] = PositionHelper.ToGlobalPosition(sim.Handle, kv.Value);
 
         var avatarsById = new Dictionary<UUID, Avatar>(sim.ObjectsAvatars.Count);
@@ -826,8 +828,8 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
                 avatarsById[kv.Value.ID] = kv.Value;
         }
 
-        var precomputedNames = new Dictionary<UUID, string>(sim.AvatarPositions.Count);
-        foreach (var id in sim.AvatarPositions.Keys)
+        var precomputedNames = new Dictionary<UUID, string>(positions.Count);
+        foreach (var id in positions.Keys)
             precomputedNames[id] = id == agentId
                 ? _instance.Names.Get(id, Client.Self.Name)
                 : _instance.Names.Get(id);
@@ -852,7 +854,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         bool changed = removed.Count > 0;
 
         // Add new avatars
-        foreach (var avatarPos in e.Simulator.AvatarPositions)
+        foreach (var avatarPos in e.Positions)
         {
             existing.Add(avatarPos.Key);
             if (_agentSimHandle.ContainsKey(avatarPos.Key)) continue;
@@ -881,7 +883,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
             if (entry.IsSelf) continue;
 
             if (!existing.Contains(entry.Id) ||
-                !e.Simulator.AvatarPositions.TryGetValue(entry.Id, out var pos))
+                !e.Positions.TryGetValue(entry.Id, out var pos))
             {
                 removed.Add(entry.Id);
                 changed = true;
@@ -993,9 +995,10 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
                 rotationById[kv.Value!.ID] = kv.Value.Rotation;
         }
 
+        var coarsePositions = _instance.State.GetCoarsePositions(sim);
         foreach (var av in NearbyAvatars)
         {
-            if (!sim.AvatarPositions.TryGetValue(av.Id, out var pos)) continue;
+            if (!coarsePositions.TryGetValue(av.Id, out var pos)) continue;
 
             float? heading = null;
             if (av.IsSelf)
@@ -1022,7 +1025,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     {
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
-        Client.Self.Teleport(sim.Handle, new Vector3(x, y, Client.Self.SimPosition.Z));
+        _ = Client.Self.TeleportAsync(sim.Handle, new Vector3(x, y, Client.Self.SimPosition.Z));
     }
 
     private void UpdateLocationText()

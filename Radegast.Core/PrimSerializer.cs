@@ -22,9 +22,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using LibreMetaverse;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
-using ClientHelpers = OpenMetaverse.Helpers;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
+using ClientHelpers = LibreMetaverse.Helpers;
 
 namespace Radegast
 {

@@ -21,8 +21,8 @@
 using System;
 using System.Timers;
 
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast.Automation
 {

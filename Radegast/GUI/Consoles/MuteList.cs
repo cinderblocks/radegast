@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -20,8 +20,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -90,22 +91,21 @@ namespace Radegast
                 lvMuteList.BeginUpdate();
                 lvMuteList.Items.Clear();
 
-                client.Self.MuteList.ForEach(me =>
+                foreach (var me in client.Self.MuteList.Values)
+                {
+                    string type = "";
+                    switch (me.Type)
                     {
-                        string type = "";
-                        switch (me.Type)
-                        {
-                            case MuteType.ByName: type = "Object by name"; break;
-                            case MuteType.Object: type = "Object"; break;
-                            case MuteType.Resident: type = "Resident"; break;
-                            case MuteType.Group: type = "Group"; break;
-                        }
-
-                        var item = new ListViewItem(type) {Tag = me};
-                        item.SubItems.Add(new ListViewItem.ListViewSubItem(item, me.Name));
-                        lvMuteList.Items.Add(item);
+                        case MuteType.ByName: type = "Object by name"; break;
+                        case MuteType.Object: type = "Object"; break;
+                        case MuteType.Resident: type = "Resident"; break;
+                        case MuteType.Group: type = "Group"; break;
                     }
-                );
+
+                    var item = new ListViewItem(type) {Tag = me};
+                    item.SubItems.Add(new ListViewItem.ListViewSubItem(item, me.Name));
+                    lvMuteList.Items.Add(item);
+                }
             }
             finally
             {

@@ -22,7 +22,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreJ2K;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 
 namespace Radegast.Veles.Rendering;
@@ -233,34 +233,10 @@ internal static class TerrainSplat
     private static async Task<SKBitmap?> FetchDetailTextureAsync(
         GridClient client, UUID id, CancellationToken ct)
     {
-        var tcs = new TaskCompletionSource<SKBitmap?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var reg = ct.Register(() => tcs.TrySetResult(null));
-
-        client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
-        {
-            if (state is TextureRequestState.Pending or TextureRequestState.Started
-                      or TextureRequestState.Progress)
-                return;
-
-            if (state == TextureRequestState.Finished && asset?.AssetData != null)
-            {
-                Task.Run(() =>
-                {
-                    try
-                    {
-                        var bmp = J2kImage.DecodeToImage<SKBitmap>(asset.AssetData);
-                        tcs.TrySetResult(bmp);
-                    }
-                    catch { tcs.TrySetResult(null); }
-                }, ct);
-            }
-            else
-            {
-                tcs.TrySetResult(null);
-            }
-        });
-
-        return await tcs.Task.ConfigureAwait(false);
+        var assetTexture = await client.Assets.RequestImageAsync(id, ImageType.Normal, ct).ConfigureAwait(false);
+        if (assetTexture?.AssetData == null) return null;
+        try { return await Task.Run(() => J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData), ct).ConfigureAwait(false); }
+        catch { return null; }
     }
 
     private static SKBitmap EnsureBgraSize(SKBitmap src, int size)

@@ -19,7 +19,7 @@
  */
 
 using LibreMetaverse.RLV;
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -309,7 +309,7 @@ namespace Radegast.Core.RLV
         public async Task<(bool Success, InventoryMap? InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
         {
             // Get current attached items <InventoryItem>
-            var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinks(cancellationToken);
+            var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinksAsync(cancellationToken);
             var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
 
             // Build shared folder

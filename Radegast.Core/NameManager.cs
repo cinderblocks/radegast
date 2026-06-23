@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -29,7 +29,7 @@ using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -203,17 +203,11 @@ namespace Radegast
             else
             {
                 // use display names
-                _ = Client.Avatars.GetDisplayNames(batchedListBuffer, (success, names, badIDs) =>
-                {
-                    if (success)
-                    {
-                        ProcessDisplayNames(names!);
-                    }
-                    else
-                    {
-                        Logger.Warn("Failed fetching display names", Client);
-                    }
-                }, cancellationToken);
+                var (success, names, _) = await Client.Avatars.GetDisplayNamesAsync(batchedListBuffer, cancellationToken).ConfigureAwait(false);
+                if (success)
+                    ProcessDisplayNames(names!);
+                else
+                    Logger.Warn("Failed fetching display names", Client);
             }
 
             batchedNamesBuffer.Clear();

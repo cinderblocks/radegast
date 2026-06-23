@@ -34,7 +34,7 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {

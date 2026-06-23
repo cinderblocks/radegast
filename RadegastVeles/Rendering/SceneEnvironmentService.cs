@@ -19,8 +19,8 @@
 
 using System;
 using System.Collections.Generic;
-using OpenMetaverse.Messages.Linden;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.Messages.Linden;
+using LibreMetaverse.StructuredData;
 using System.Numerics;
 using Radegast.Veles.Core;
 
@@ -115,7 +115,7 @@ public sealed class SceneEnvironmentService : IDisposable
 
     // ── Event handlers ────────────────────────────────────────────────────────────
 
-    private void OnRegionEnvironmentUpdated(object? sender, OpenMetaverse.RegionEnvironmentEventArgs e)
+    private void OnRegionEnvironmentUpdated(object? sender, LibreMetaverse.RegionEnvironmentEventArgs e)
         => ParseEnvironment(e.Environment?.Environment);
 
     // ── Parsing ───────────────────────────────────────────────────────────────────

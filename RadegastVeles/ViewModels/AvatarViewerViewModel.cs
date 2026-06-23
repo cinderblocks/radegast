@@ -29,8 +29,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Numerics;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
 using Quaternion = System.Numerics.Quaternion;
@@ -182,7 +182,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     {
         _instance = instance;
         _avatarId = avatarId;
-        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
         _isSelf   = avatarId == Client.Self.AgentID;
         _builder  = new AvatarMeshBuilder(Client);
@@ -276,7 +276,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
+        static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {
@@ -523,20 +523,16 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
         var tasks = wearables.Select(wearable => Task.Run(async () =>
         {
-            var tcs = new TaskCompletionSource<OpenMetaverse.Assets.Asset?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            Client.Assets.RequestAsset(wearable.AssetID, wearable.AssetType, true,
-                (_, asset) => tcs.TrySetResult(asset));
-
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-            linked.Token.Register(() => tcs.TrySetCanceled());
-
-            OpenMetaverse.Assets.Asset? asset;
-            try   { asset = await tcs.Task.ConfigureAwait(false); }
-            catch { return; }
-
-            if (asset is OpenMetaverse.Assets.AssetWearable assetWearable && assetWearable.Decode())
-                wearable.Asset = assetWearable;
+            try
+            {
+                var asset = await Client.Assets.RequestAssetAsync(wearable.AssetID, wearable.AssetType, true, linked.Token)
+                    .ConfigureAwait(false);
+                if (asset is LibreMetaverse.Assets.AssetWearable assetWearable && assetWearable.Decode())
+                    wearable.Asset = assetWearable;
+            }
+            catch { }
         }, ct)).ToList();
 
         try   { await Task.WhenAll(tasks).ConfigureAwait(false); }
@@ -839,7 +835,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     foreach (var (boneName, offset) in boneOffsets)
                     {
                         if (!physicsPatched.TryGetValue(boneName, out var bt)) continue;
-                        bt.Position = new OpenMetaverse.Vector3(
+                        bt.Position = new LibreMetaverse.Vector3(
                             bt.Position.X + offset.X,
                             bt.Position.Y + offset.Y,
                             bt.Position.Z + offset.Z);

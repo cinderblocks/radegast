@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;

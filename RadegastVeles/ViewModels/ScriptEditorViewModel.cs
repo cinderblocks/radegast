@@ -24,8 +24,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -71,26 +71,21 @@ public partial class ScriptEditorViewModel : ObservableObject, IDisposable
         }
         IsLoading = true;
         StatusText = "Loading...";
-        Client.Assets.RequestInventoryAsset(_item, true, UUID.Random(), OnAssetReceived);
-    }
-
-    private void OnAssetReceived(AssetDownload transfer, Asset? asset)
-    {
-        Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
-            IsLoading = false;
-            if (!transfer.Success || asset is not AssetScriptText scriptAsset)
+            var asset = await Client.Assets.RequestInventoryAssetAsync(_item, true, UUID.Random());
+            Dispatcher.UIThread.Post(() =>
             {
-                StatusText = "Failed to load";
-                return;
-            }
-            scriptAsset.Decode();
-            _isSettingText = true;
-            ScriptText = scriptAsset.Source ?? string.Empty;
-            _isSettingText = false;
-            IsModified = false;
-            StatusText = "Ready";
-            SaveCommand.NotifyCanExecuteChanged();
+                IsLoading = false;
+                if (asset is not AssetScriptText scriptAsset) { StatusText = "Failed to load"; return; }
+                scriptAsset.Decode();
+                _isSettingText = true;
+                ScriptText = scriptAsset.Source ?? string.Empty;
+                _isSettingText = false;
+                IsModified = false;
+                StatusText = "Ready";
+                SaveCommand.NotifyCanExecuteChanged();
+            });
         });
     }
 
@@ -117,28 +112,9 @@ public partial class ScriptEditorViewModel : ObservableObject, IDisposable
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-            var tcs = new TaskCompletionSource<(bool uploadOk, bool compileOk, List<string>? messages)>(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-
-            cts.Token.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false);
-
-            InventoryManager.ScriptUpdatedCallback cb = (uploadSuccess, _, compileSuccess, msgs, _, _) =>
-                tcs.TrySetResult((uploadSuccess, compileSuccess, msgs));
-
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Client.Inventory.RequestUpdateScriptAgentInventoryAsync(
-                        scriptAsset.AssetData, _item.UUID, true, cb, cts.Token).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetException(ex);
-                }
-            }, cts.Token);
-
-            var (uploadOk, compileOk, messages) = await tcs.Task.ConfigureAwait(false);
+            var (uploadOk, _, compileOk, messages, _, _) = await Client.Inventory
+                .RequestUpdateScriptAgentInventoryAsync(scriptAsset.AssetData, _item.UUID, true, cts.Token)
+                .ConfigureAwait(false);
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {

@@ -21,7 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Avalonia.Platform.Storage;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Veles.PluginApi;
 

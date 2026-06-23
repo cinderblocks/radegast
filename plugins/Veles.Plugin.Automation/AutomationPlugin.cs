@@ -22,7 +22,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using Avalonia.Platform.Storage;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.PluginApi;
 using Veles.Plugin.Automation.UI;
 

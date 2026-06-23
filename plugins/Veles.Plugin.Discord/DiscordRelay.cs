@@ -23,7 +23,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Discord;
 using Discord.WebSocket;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.PluginApi;
 
 namespace Veles.Plugin.Discord;

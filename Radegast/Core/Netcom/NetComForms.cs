@@ -22,7 +22,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

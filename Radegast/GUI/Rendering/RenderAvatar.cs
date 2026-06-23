@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -25,9 +25,9 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Xml;
-using OpenMetaverse;
+using LibreMetaverse;
 using OpenTK.Graphics.OpenGL;
-using OpenMetaverse.Rendering;
+using LibreMetaverse.Rendering;
 using Path = System.IO.Path;
 using System.Collections.Concurrent;
 
@@ -687,7 +687,7 @@ namespace Radegast.Rendering
             attachment_points.Clear();
 
 
-            string basedir = Path.Combine(OpenMetaverse.Settings.RESOURCE_DIR, "character");
+            string basedir = Path.Combine(LibreMetaverse.Settings.ResourceDir, "character");
 
             XmlDocument lad = new XmlDocument();
             lad.Load(Path.Combine(basedir, LODfilename));
@@ -1272,7 +1272,7 @@ namespace Radegast.Rendering
 
         // Add animations to the global decoded list
         // TODO garbage collect unused animations somehow
-        public static void addanimation(OpenMetaverse.Assets.Asset asset, UUID tid, BinBVHAnimationReader b, UUID animKey)
+        public static void addanimation(LibreMetaverse.Assets.Asset asset, UUID tid, BinBVHAnimationReader b, UUID animKey)
         {
             RenderAvatar av;
             mAnimationTransactions.TryGetValue(tid, out av);
@@ -1803,11 +1803,11 @@ namespace Radegast.Rendering
         public Bone(Bone source)
         {
             name = source.name;
-            pos = new Vector3(source.pos);
-            rot = new Quaternion(source.rot);
-            scale = new Vector3(source.scale);
-            piviot = new Vector3(source.piviot);
-            offset_pos = new Vector3(source.offset_pos);
+            pos = source.pos;
+            rot = source.rot;
+            scale = source.scale;
+            piviot = source.piviot;
+            offset_pos = source.offset_pos;
 
             orig_piviot = source.orig_piviot;
             orig_pos = source.orig_pos;
@@ -1846,7 +1846,7 @@ namespace Radegast.Rendering
             string rot = bone.Attributes.GetNamedItem("rot").Value;
             string[] rotparts = rot.Split(' ');
             b.rot = Quaternion.CreateFromEulers((float)(float.Parse(rotparts[0], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[1], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[2], Utils.EnUsCulture) * Math.PI / 180f));
-            b.orig_rot = new Quaternion(b.rot);
+            b.orig_rot = b.rot;
 
             string scale = bone.Attributes.GetNamedItem("scale").Value;
             string[] scaleparts = scale.Split(' ');
@@ -2562,16 +2562,15 @@ namespace Radegast.Rendering
                             ankle.Z * knee_scale.Z -
                             foot.Z * ankle_scale.Z;
 
-            Vector3 new_body_size = new Vector3();
-            new_body_size.Z = mPelvisToFoot +
+            float body_size_z = mPelvisToFoot +
                 // the sqrt(2) correction below is an approximate
                 // correction to get to the top of the head
                                F_SQRT2 * (skull.Z * head_scale.Z) +
                                head.Z * neck_scale.Z +
                                neck.Z * chest_scale.Z +
                                chest.Z * torso_scale.Z +
-                               torso.Z * pelvis_scale.Z +
-                               new_body_size.Z;
+                               torso.Z * pelvis_scale.Z;
+            Vector3 new_body_size = new Vector3(0f, 0f, body_size_z);
 
             Height = new_body_size.Z;
             PelvisToFoot = mPelvisToFoot;

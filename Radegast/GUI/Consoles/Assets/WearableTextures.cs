@@ -19,8 +19,8 @@
  */
 
 using System;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using System.Windows.Forms;
 
 namespace Radegast
@@ -41,7 +41,12 @@ namespace Radegast
 
             if (item != null)
             {
-                Client.Assets.RequestInventoryAsset(item, true, UUID.Random(), Assets_OnAssetReceived);
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    var asset = await Client.Assets.RequestInventoryAssetAsync(item, true, UUID.Random());
+                    var xfer = new AssetDownload { Success = asset != null };
+                    Assets_OnAssetReceived(xfer, asset);
+                });
             }
         }
 

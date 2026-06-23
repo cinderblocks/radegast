@@ -18,8 +18,8 @@
  */
 
 using System;
-using OpenMetaverse;
-using OpenMetaverse.Marketplace;
+using LibreMetaverse;
+using LibreMetaverse.Marketplace;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Radegast.Veles.ViewModels;

@@ -23,8 +23,8 @@ using System.Collections.Generic;
 using System.Collections;
 using System.IO;
 using System.Xml;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast
 {

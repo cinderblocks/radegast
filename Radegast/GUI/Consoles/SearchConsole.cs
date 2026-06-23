@@ -21,7 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Diagnostics;
 using System.Globalization;
 
@@ -733,7 +733,7 @@ namespace Radegast
         {
             var evt = (DirectoryManager.EventInfo)pnlEventDetail.Tag;
             ulong handle = Helpers.GlobalPosToRegionHandle((float)evt.GlobalPos.X, (float)evt.GlobalPos.Y, out var localX, out var localY);
-            client.Self.Teleport(handle, new Vector3(localX, localY, (float)evt.GlobalPos.Z));
+            _ = client.Self.TeleportAsync(handle, new Vector3(localX, localY, (float)evt.GlobalPos.Z));
         }
 
         private void btnShowOnMap_Click(object sender, EventArgs e)

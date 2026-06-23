@@ -22,17 +22,17 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using System.IO;
 using CoreJ2K;
-using OpenMetaverse.Imaging;
+using LibreMetaverse.Imaging;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 using System.Threading.Tasks;
 using System.Runtime.Caching;
 using System.Threading;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -261,19 +261,11 @@ namespace Radegast
                 return;
             }
 
-            client.Assets.RequestImage(imageID, ImageType.Normal, 101300.0f, 0, 0,
-                delegate (TextureRequestState state, AssetTexture assetTexture)
-                {
-                    if (state == TextureRequestState.Finished || state == TextureRequestState.Timeout)
-                    {
-                        Assets_OnImageReceived(assetTexture);
-                    }
-                    else if (state == TextureRequestState.Progress)
-                    {
-                        DisplayPartialImage(assetTexture);
-                    }
-                },
-                true);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var assetTexture = await client.Assets.RequestImageAsync(imageID, ImageType.Normal);
+                Assets_OnImageReceived(assetTexture);
+            });
         }
 
         private void Assets_ImageReceiveProgress(object sender, ImageReceiveProgressEventArgs e)

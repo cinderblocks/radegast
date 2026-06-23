@@ -26,8 +26,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse.Voice.WebRTC;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -286,28 +286,28 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     internal async Task JoinGroupVoiceAsync(UUID groupId)
     {
         if (_voice == null) return;
-        try { await _voice.JoinGroupVoice(groupId); }
+        try { await _voice.JoinGroupVoiceAsync(groupId); }
         catch (Exception ex) { StatusText = $"Group voice failed: {ex.Message}"; }
     }
 
     internal async Task LeaveGroupVoiceAsync(UUID groupId)
     {
         if (_voice == null) return;
-        try { await _voice.LeaveGroupVoice(groupId); }
+        try { await _voice.LeaveGroupVoiceAsync(groupId); }
         catch { }
     }
 
     internal async Task JoinConferenceVoiceAsync(UUID sessionId)
     {
         if (_voice == null) return;
-        try { await _voice.JoinConferenceVoice(sessionId); }
+        try { await _voice.JoinConferenceVoiceAsync(sessionId); }
         catch (Exception ex) { StatusText = $"Conference voice failed: {ex.Message}"; }
     }
 
     internal async Task LeaveConferenceVoiceAsync(UUID sessionId)
     {
         if (_voice == null) return;
-        try { await _voice.LeaveConferenceVoice(sessionId); }
+        try { await _voice.LeaveConferenceVoiceAsync(sessionId); }
         catch { }
     }
 
@@ -421,7 +421,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         StatusText = "Connecting...";
         try
         {
-            bool ok = await _voice.ConnectPrimaryRegion();
+            bool ok = await _voice.ConnectPrimaryRegionAsync();
             if (!ok)
             {
                 StatusText = "Failed to connect";
@@ -597,7 +597,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             onAccept: async () =>
             {
                 if (_voice == null) return;
-                var ok = await _voice.AcceptIncomingP2PCall(callerId);
+                var ok = await _voice.AcceptIncomingP2PCallAsync(callerId);
                 if (!ok)
                     Dispatcher.UIThread.Post(() => StatusText = $"Could not connect voice call from {name}");
             },

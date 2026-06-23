@@ -27,7 +27,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
 

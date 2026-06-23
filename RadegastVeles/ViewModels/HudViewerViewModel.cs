@@ -27,7 +27,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse.Appearance;
 using System.Numerics;
-using OpenMetaverse;
+using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
@@ -189,7 +189,7 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         if (sim == null) return;
 
         // Convert System.Numerics Vector3 → OpenMetaverse Vector3.
-        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
+        static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {
@@ -226,7 +226,7 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            await _instance.COF.Detach(item, cts.Token).ConfigureAwait(false);
+            await _instance.COF.DetachAsync(item, cts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

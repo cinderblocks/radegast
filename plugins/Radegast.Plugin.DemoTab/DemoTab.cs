@@ -1,4 +1,4 @@
-﻿#region Copyright
+#region Copyright
 // 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
@@ -41,7 +41,7 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using Radegast;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Threading;
 #endregion
 

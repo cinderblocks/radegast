@@ -22,8 +22,8 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OmVector3 = OpenMetaverse.Vector3;
+using LibreMetaverse;
+using OmVector3 = LibreMetaverse.Vector3;
 using Vector3   = System.Numerics.Vector3;
 using Vector4   = System.Numerics.Vector4;
 

@@ -20,7 +20,7 @@
 
 using System;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

@@ -27,8 +27,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Numerics;
-using OpenMetaverse;
-using OmVector3 = OpenMetaverse.Vector3;
+using LibreMetaverse;
+using OmVector3 = LibreMetaverse.Vector3;
 using Vector3   = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
@@ -131,13 +131,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     public SceneViewerViewModel(RadegastInstanceAvalonia instance)
     {
         _instance    = instance;
-        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
-        _frustumCullingEnabled = instance.GlobalSettings["frustum_culling_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _frustumCullingEnabled = instance.GlobalSettings["frustum_culling_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["frustum_culling_enabled"].AsBoolean() : true;
-        _waterReflectionsEnabled = instance.GlobalSettings["water_reflections_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _waterReflectionsEnabled = instance.GlobalSettings["water_reflections_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["water_reflections_enabled"].AsBoolean() : false;
-        _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? (float)instance.GlobalSettings["scene_draw_distance"].AsReal() : 96f;
     }
 
@@ -694,11 +694,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
             // Fire the grab/degrab touch
             // Convert OpenTK vectors to LibreMetaverse vectors for the packet.
-            var uvCoord  = new OpenMetaverse.Vector3(hit.UvCoord.X,  hit.UvCoord.Y,  hit.UvCoord.Z);
-            var stCoord  = new OpenMetaverse.Vector3(hit.StCoord.X,  hit.StCoord.Y,  hit.StCoord.Z);
-            var position = new OpenMetaverse.Vector3(hit.Position.X, hit.Position.Y, hit.Position.Z);
-            var normal   = new OpenMetaverse.Vector3(hit.Normal.X,   hit.Normal.Y,   hit.Normal.Z);
-            var binormal = new OpenMetaverse.Vector3(hit.Binormal.X, hit.Binormal.Y, hit.Binormal.Z);
+            var uvCoord  = new LibreMetaverse.Vector3(hit.UvCoord.X,  hit.UvCoord.Y,  hit.UvCoord.Z);
+            var stCoord  = new LibreMetaverse.Vector3(hit.StCoord.X,  hit.StCoord.Y,  hit.StCoord.Z);
+            var position = new LibreMetaverse.Vector3(hit.Position.X, hit.Position.Y, hit.Position.Z);
+            var normal   = new LibreMetaverse.Vector3(hit.Normal.X,   hit.Normal.Y,   hit.Normal.Z);
+            var binormal = new LibreMetaverse.Vector3(hit.Binormal.X, hit.Binormal.Y, hit.Binormal.Z);
             _ = _instance.Client.Objects.ClickObjectAsync(
                     sim, realId, uvCoord, stCoord, faceIndex, position, normal, binormal);
         }
@@ -794,21 +794,21 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         var fwd = cam.ForwardDirection;           // unit vector toward target
 
         // Convert to LibreMetaverse/SL coordinate types.
-        var pos   = new OpenMetaverse.Vector3(eye.X, eye.Y, eye.Z);
-        var atDir = new OpenMetaverse.Vector3(fwd.X, fwd.Y, fwd.Z);
+        var pos   = new LibreMetaverse.Vector3(eye.X, eye.Y, eye.Z);
+        var atDir = new LibreMetaverse.Vector3(fwd.X, fwd.Y, fwd.Z);
 
         // Build a right-handed camera frame (SL: X=left, Y=at/forward, Z=up).
         // Up is always world-Z in the scene viewer.
-        var worldUp = OpenMetaverse.Vector3.UnitZ;
-        var left    = OpenMetaverse.Vector3.Cross(worldUp, atDir);
+        var worldUp = LibreMetaverse.Vector3.UnitZ;
+        var left    = LibreMetaverse.Vector3.Cross(worldUp, atDir);
         if (left.LengthSquared() < 1e-6f)
         {
             // Camera is looking straight up/down — fall back to Y as up reference.
-            left = OpenMetaverse.Vector3.Cross(OpenMetaverse.Vector3.UnitY, atDir);
+            left = LibreMetaverse.Vector3.Cross(LibreMetaverse.Vector3.UnitY, atDir);
         }
-        left.Normalize();
-        var up = OpenMetaverse.Vector3.Cross(atDir, left);
-        up.Normalize();
+        left = LibreMetaverse.Vector3.Normalize(left);
+        var up = LibreMetaverse.Vector3.Cross(atDir, left);
+        up = LibreMetaverse.Vector3.Normalize(up);
 
         var mv = _instance.Client.Self.Movement;
         mv.Camera.Position = pos;
@@ -960,8 +960,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (!sim.ObjectsAvatars.TryGetValue(SelectedLocalId, out var av)) return;
 
         var dest = av.Position + new OmVector3(2f, 0f, 0f); // land next to, not on top of
-        _ = Task.Run(() => _instance.Client.Self.Teleport(
-                sim.Handle, dest, _instance.Client.Self.SimPosition));
+        _ = _instance.Client.Self.TeleportAsync(sim.Handle, dest, _instance.Client.Self.SimPosition);
     }
 
     /// <summary>
@@ -1127,11 +1126,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
             const float TurnDelta = 0.1f; // seconds per tick
             if (turnLeft)
-                mv.BodyRotation *= OpenMetaverse.Quaternion.CreateFromAxisAngle(
-                    OpenMetaverse.Vector3.UnitZ, TurnDelta);
+                mv.BodyRotation *= LibreMetaverse.Quaternion.CreateFromAxisAngle(
+                    LibreMetaverse.Vector3.UnitZ, TurnDelta);
             else if (turnRight)
-                mv.BodyRotation *= OpenMetaverse.Quaternion.CreateFromAxisAngle(
-                    OpenMetaverse.Vector3.UnitZ, -TurnDelta);
+                mv.BodyRotation *= LibreMetaverse.Quaternion.CreateFromAxisAngle(
+                    LibreMetaverse.Vector3.UnitZ, -TurnDelta);
         }
 
         mv.SendUpdate();
@@ -1298,22 +1297,22 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     // ── Nearby chat overlay ───────────────────────────────────────────────────────
 
     // Delivered on the UI thread by NetComAvalonia.PostToUI.
-    private void OnChatReceived(object? sender, OpenMetaverse.ChatEventArgs e)
+    private void OnChatReceived(object? sender, LibreMetaverse.ChatEventArgs e)
     {
         if (_disposed) return;
-        if (e.Type is OpenMetaverse.ChatType.StartTyping or OpenMetaverse.ChatType.StopTyping) return;
-        if (e.SourceType == OpenMetaverse.ChatSourceType.System && string.IsNullOrWhiteSpace(e.Message)) return;
+        if (e.Type is LibreMetaverse.ChatType.StartTyping or LibreMetaverse.ChatType.StopTyping) return;
+        if (e.SourceType == LibreMetaverse.ChatSourceType.System && string.IsNullOrWhiteSpace(e.Message)) return;
 
         var lineType = e.SourceType switch
         {
-            OpenMetaverse.ChatSourceType.Agent when e.FromName == _instance.Client.Self.Name => ChatLineType.Self,
-            OpenMetaverse.ChatSourceType.Agent => ChatLineType.Normal,
-            OpenMetaverse.ChatSourceType.Object => ChatLineType.Object,
+            LibreMetaverse.ChatSourceType.Agent when e.FromName == _instance.Client.Self.Name => ChatLineType.Self,
+            LibreMetaverse.ChatSourceType.Agent => ChatLineType.Normal,
+            LibreMetaverse.ChatSourceType.Object => ChatLineType.Object,
             _ => ChatLineType.System
         };
 
-        string prefix = e.Type == OpenMetaverse.ChatType.Shout   ? " shouts" :
-                        e.Type == OpenMetaverse.ChatType.Whisper  ? " whispers" : "";
+        string prefix = e.Type == LibreMetaverse.ChatType.Shout   ? " shouts" :
+                        e.Type == LibreMetaverse.ChatType.Whisper  ? " whispers" : "";
         string text;
         if (e.Message.StartsWith("/me ", StringComparison.OrdinalIgnoreCase))
         {

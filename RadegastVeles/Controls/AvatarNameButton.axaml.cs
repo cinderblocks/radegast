@@ -22,7 +22,7 @@ using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.Controls;

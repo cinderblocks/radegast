@@ -24,9 +24,9 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse.StructuredData;
 
 namespace Veles.Plugin.ImportExport;
 

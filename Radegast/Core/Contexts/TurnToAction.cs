@@ -20,7 +20,7 @@
 
 using System;
 using LibreMetaverse;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2025, Sjofn, LLC
  * All rights reserved.
@@ -18,7 +18,7 @@
  */
 
 using LibreMetaverse;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Core.RLV;
 using Radegast.Media;

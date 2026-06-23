@@ -24,7 +24,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using BugSplatDotNetStandard;
 using Microsoft.Extensions.Logging;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core;
 using Radegast.Veles.Core;
 
@@ -67,12 +67,12 @@ internal static class Program
             if (File.Exists(settingsFile))
             {
                 var settingsXml = File.ReadAllText(settingsFile);
-                if (OpenMetaverse.StructuredData.OSDParser.DeserializeLLSDXml(settingsXml)
-                        is OpenMetaverse.StructuredData.OSDMap map)
+                if (LibreMetaverse.StructuredData.OSDParser.DeserializeLLSDXml(settingsXml)
+                        is LibreMetaverse.StructuredData.OSDMap map)
                 {
-                    if (map["decode_reserved_ram_mb"].Type != OpenMetaverse.StructuredData.OSDType.Unknown)
+                    if (map["decode_reserved_ram_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
                         reservedMb  = map["decode_reserved_ram_mb"].AsInteger();
-                    if (map["decode_per_decode_mb"].Type != OpenMetaverse.StructuredData.OSDType.Unknown)
+                    if (map["decode_per_decode_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
                         perDecodeMb = map["decode_per_decode_mb"].AsReal();
                 }
             }

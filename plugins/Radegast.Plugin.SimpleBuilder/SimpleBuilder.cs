@@ -1,4 +1,4 @@
-﻿#region Copyright
+#region Copyright
 // 
 // Radegast SimpleBuilder plugin extension
 //
@@ -38,7 +38,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Windows.Forms;
 using Radegast;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core;
 using System.Threading;
 using System.Threading.Tasks;

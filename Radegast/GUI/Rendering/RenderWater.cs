@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -44,7 +44,7 @@ namespace Radegast.Rendering
 
         private int reflectionFBO = -1;
         private int refractionFBO = -1;
-        private OpenMetaverse.Vector3 lastReflectionCameraPos;
+        private LibreMetaverse.Vector3 lastReflectionCameraPos;
         private float lastReflectionCameraYaw;
         private float lastReflectionCameraPitch;
 
@@ -329,12 +329,12 @@ namespace Radegast.Rendering
                 framesSinceReflection++;
                 
                 // Calculate camera movement since last reflection update
-                OpenMetaverse.Vector3 currentPos = Camera.RenderPosition;
-                float cameraMoved = OpenMetaverse.Vector3.Distance(currentPos, lastReflectionCameraPos);
+                LibreMetaverse.Vector3 currentPos = Camera.RenderPosition;
+                float cameraMoved = LibreMetaverse.Vector3.Distance(currentPos, lastReflectionCameraPos);
                 
                 // Calculate camera rotation (approximate yaw/pitch from focal point)
-                OpenMetaverse.Vector3 lookDir = Camera.RenderFocalPoint - Camera.RenderPosition;
-                lookDir.Normalize();
+                LibreMetaverse.Vector3 lookDir = Camera.RenderFocalPoint - Camera.RenderPosition;
+                lookDir = LibreMetaverse.Vector3.Normalize(lookDir);
                 float currentYaw = (float)System.Math.Atan2(lookDir.Y, lookDir.X);
                 float currentPitch = (float)System.Math.Asin(lookDir.Z);
                 float yawDelta = System.Math.Abs(currentYaw - lastReflectionCameraYaw);

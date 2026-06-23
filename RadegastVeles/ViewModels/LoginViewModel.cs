@@ -24,7 +24,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.Models;
 

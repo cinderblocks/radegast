@@ -21,7 +21,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Veles.Core;
 

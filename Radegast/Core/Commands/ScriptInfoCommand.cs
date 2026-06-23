@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -20,8 +20,8 @@
 
 using System.Text;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OpenMetaverse.Messages.Linden;
+using LibreMetaverse;
+using LibreMetaverse.Messages.Linden;
 
 namespace Radegast.Commands
 {
@@ -56,11 +56,10 @@ namespace Radegast.Commands
         public async Task ParcelInfo(ConsoleWriteLine WriteLine)
         {
             WriteLine("Requesting script resources information...");
-            UUID currentParcel = Client.Parcels.RequestRemoteParcelID(Client.Self.SimPosition, Client.Network.CurrentSim.Handle, Client.Network.CurrentSim.ID);
-            await Client.Parcels.GetParcelResources(currentParcel, true, (success, info) =>
+            UUID currentParcel = await Client.Parcels.RequestRemoteParcelIDAsync(Client.Self.SimPosition, Client.Network.CurrentSim.Handle, Client.Network.CurrentSim.ID);
+            var (success, info) = await Client.Parcels.GetParcelResourcesAsync(currentParcel, true);
+            if (success && info != null)
             {
-                if (!success || info == null) return;
-
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("Summary:");
                 sb.AppendFormat("Memory used {0} KB out of {1} KB available.", info.SummaryUsed["memory"] / 1024, info.SummaryAvailable["memory"] / 1024);
@@ -82,18 +81,18 @@ namespace Radegast.Commands
                     }
                 }
                 WriteLine(sb.ToString());
-            });
+            }
         }
 
         public async Task AttachmentInfo(ConsoleWriteLine WriteLine)
         {
-            await Client.Self.GetAttachmentResources((success, info) =>
+            var (success, info) = await Client.Self.GetAttachmentResourcesAsync();
+            if (!success || info == null)
             {
-                if (!success || info == null)
-                {
-                    WriteLine("Failed to get the script info.");
-                    return;
-                }
+                WriteLine("Failed to get the script info.");
+                return;
+            }
+            {
                 StringBuilder sb = new StringBuilder();
                 sb.AppendLine("Summary:");
                 sb.AppendFormat("Memory used {0} KB out of {1} KB available.", info.SummaryUsed["memory"] / 1024, info.SummaryAvailable["memory"] / 1024);
@@ -115,7 +114,6 @@ namespace Radegast.Commands
 
                 WriteLine(sb.ToString());
             }
-            );
         }
     }
 }

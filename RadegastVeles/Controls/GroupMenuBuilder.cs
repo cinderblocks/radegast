@@ -21,7 +21,7 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.Controls;
@@ -84,7 +84,7 @@ public static class GroupMenuBuilder
                 instance.ShowAvatarPicker($"Invite to {groupName}", entry =>
                 {
                     instance.Client.Groups.Invite(groupId,
-                        new System.Collections.Generic.List<OpenMetaverse.UUID> { OpenMetaverse.UUID.Zero },
+                        new System.Collections.Generic.List<LibreMetaverse.UUID> { LibreMetaverse.UUID.Zero },
                         entry.Id);
                     instance.ShowNotificationInChat($"Invited {entry.Name} to {groupName}.");
                 }))

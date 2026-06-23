@@ -29,7 +29,7 @@ using Avalonia.Skia;
 using Avalonia.Threading;
 using CoreJ2K;
 using CoreJ2K.Configuration;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 
 namespace Radegast.Veles.Core;
@@ -354,92 +354,45 @@ public static class GridTextureHelper
         if (!Pending.TryAdd(textureId, 0))
             return;
 
-        client.Assets.RequestImage(textureId, ImageType.Normal, (state, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (state is TextureRequestState.Pending or TextureRequestState.Started)
-                return;
-
-            if (state == TextureRequestState.Progress)
-            {
-                // Throttle progressive decodes to at most one every 250 ms per texture
-                var now = Environment.TickCount64;
-                var last = ProgressDecodeTime.GetOrAdd(textureId, 0L);
-                if (now - last < 250L) return;
-                ProgressDecodeTime[textureId] = now;
-
-                var partialData = asset?.AssetData;
-                if (partialData == null) return;
-
-                Task.Run(() =>
-                {
-                    try
-                    {
-                        // ResolutionLevel=2 is robust on truncated codestreams: SL delivers
-                        // low-frequency subbands first, so low-res decodes succeed reliably
-                        // on partial data and are ~10× cheaper than a full-res attempt.
-                        using var skBmp = J2kImage.FromBytes(partialData, PreviewDecoderCfg).As<SKBitmap>();
-                        if (skBmp == null) return;
-                        var preview = SkBitmapToAvaloniaBitmap(skBmp);
-                        if (preview != null) Dispatcher.UIThread.Post(() => onComplete(preview));
-                    }
-                    catch { }
-                });
-                return;
-            }
-
-            // Terminal state — clean up throttle tracking
+            var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal);
             ProgressDecodeTime.TryRemove(textureId, out _);
-
-            if (state != TextureRequestState.Finished || asset?.AssetData == null)
+            if (asset?.AssetData == null)
             {
                 Pending.TryRemove(textureId, out _);
                 Dispatcher.UIThread.Post(() => onComplete(null));
                 return;
             }
-
             var data = asset.AssetData;
-            Task.Run(() =>
+            Bitmap? bitmap = null;
+            try
             {
-                Bitmap? bitmap = null;
-                try
+                TextureDiskCache.PutAsync(textureId, data);
+                using (var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>())
                 {
-                    // Persist the raw J2K bytes before decoding — no re-encode needed.
-                    TextureDiskCache.PutAsync(textureId, data);
-
-                    // Two-pass: emit a cheap preview first so the UI shows something
-                    // immediately, then replace with the full-resolution cached bitmap.
-                    using (var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>())
-                    {
-                        var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
-                        if (previewBmp != null)
-                            Dispatcher.UIThread.Post(() => onComplete(previewBmp));
-                    }
-
-                    using var skBitmap = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
-                    if (skBitmap != null)
-                    {
-                        bitmap = SkBitmapToAvaloniaBitmap(skBitmap);
-                        if (bitmap != null)
-                        {
-                            Cache.AddOrUpdate(textureId, bitmap);
-                        }
-                    }
+                    var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
+                    if (previewBmp != null)
+                        Dispatcher.UIThread.Post(() => onComplete(previewBmp));
                 }
-                catch
+                using var skBitmap = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
+                if (skBitmap != null)
                 {
-                    // The downloaded bytes were written to the disk cache via PutAsync above;
-                    // evict them now so a future call re-downloads rather than hitting a
-                    // corrupt cache entry.
-                    TextureDiskCache.Evict(textureId);
+                    bitmap = SkBitmapToAvaloniaBitmap(skBitmap);
+                    if (bitmap != null)
+                        Cache.AddOrUpdate(textureId, bitmap);
                 }
-                finally
-                {
-                    Pending.TryRemove(textureId, out _);
-                }
-
-                Dispatcher.UIThread.Post(() => onComplete(bitmap));
-            });
-        }, true);
+            }
+            catch
+            {
+                TextureDiskCache.Evict(textureId);
+            }
+            finally
+            {
+                Pending.TryRemove(textureId, out _);
+            }
+            Dispatcher.UIThread.Post(() => onComplete(bitmap));
+        });
     }
 
     /// Converts an <see cref="SKBitmap"/> to an Avalonia <see cref="Bitmap"/> by copying
@@ -648,101 +601,44 @@ public static class GridTextureHelper
             return DecodeWithDeduplication(textureId, diskJ2k, progress, ct);
         }
 
-        // Keep the registration alive until the asset callback fires a terminal state.
-        // Using `using var` here would dispose it immediately when the method returns,
-        // before the async work is done — which would silently break cancellation.
         var reg = ct.Register(() => tcs.TrySetResult(null));
 
-        client.Assets.RequestImage(textureId, ImageType.Normal, priority, 0, 0, (state, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (state is TextureRequestState.Pending or TextureRequestState.Started)
-                return;
-
-            if (state == TextureRequestState.Progress)
-            {
-                if (progress == null) return;
-                var now = Environment.TickCount64;
-                var last = ProgressDecodeTime.GetOrAdd(textureId, 0L);
-                if (now - last < 250L) return;
-                ProgressDecodeTime[textureId] = now;
-
-                var partialData = asset?.AssetData;
-                if (partialData == null) return;
-
-                Task.Run(async () =>
-                {
-                    // Progress previews are low-priority; skip rather than queue if the gate
-                    // is fully occupied — a missed preview is invisible to the user.
-                    if (!await DecodeGate.WaitAsync(0, ct).ConfigureAwait(false))
-                        return;
-                    try
-                    {
-                        // Use ResolutionLevel=2 for partial codestreams: the SL packet ordering
-                        // delivers low-frequency subbands first, so low-res decodes succeed
-                        // reliably on truncated data and are ~10× cheaper than full-res.
-                        using var raw = J2kImage.FromBytes(partialData, PreviewDecoderCfg).As<SKBitmap>();
-                        if (raw != null)
-                        {
-                            var preview = raw.Copy(raw.ColorType);
-                            if (preview != null) progress.Report(preview);
-                        }
-                    }
-                    catch { }
-                    finally
-                    {
-                        DecodeGate.Release();
-                    }
-                }, ct);
-                return;
-            }
-
+            var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct).ConfigureAwait(false);
             ProgressDecodeTime.TryRemove(textureId, out _);
-            // Terminal state — clean up the cancellation registration.
             reg.Dispose();
 
-            if (state != TextureRequestState.Finished || asset?.AssetData == null)
+            if (asset?.AssetData == null)
             {
                 tcs.TrySetResult(null);
                 return;
             }
 
             var data = asset.AssetData;
-            // Do NOT pass ct here: ct may already be canceled (e.g. the 30-second timeout
-            // fired in the window between reg.Dispose() and Task.Run scheduling), which would
-            // cause Task.Run to return a canceled task without running the lambda, leaving tcs
-            // permanently unresolved and hanging Task.WhenAll.  The asset bytes are already
-            // in memory; the decode is fast CPU work that must always complete.
-            _ = Task.Run(async () =>
+            TextureDiskCache.PutAsync(textureId, data);
+
+            if (progress != null)
             {
-                // Persist the raw J2K bytes before decoding — no re-encode needed.
-                TextureDiskCache.PutAsync(textureId, data);
-
-                // Preview pass: emit a cheap low-res bitmap immediately.
-                if (progress != null)
+                await DecodeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
                 {
-                    await DecodeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-                    try
+                    using var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
+                    if (previewRaw != null)
                     {
-                        using var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
-                        if (previewRaw != null)
-                        {
-                            var previewBmp = previewRaw.Copy(previewRaw.ColorType);
-                            if (previewBmp != null) progress.Report(previewBmp);
-                        }
+                        var previewBmp = previewRaw.Copy(previewRaw.ColorType);
+                        if (previewBmp != null) progress.Report(previewBmp);
                     }
-                    catch { }
-                    finally { DecodeGate.Release(); }
                 }
+                catch { }
+                finally { DecodeGate.Release(); }
+            }
 
-                // Full-resolution decode — deduplicated so concurrent callers for the
-                // same UUID share one J2kImage.FromBytes instead of each running their own.
-                var bmp = await DecodeWithDeduplication(textureId, data, progress: null, ct: CancellationToken.None)
-                    .ConfigureAwait(false);
-                // If ct fired first, tcs is already set to null and nobody will own bmp — dispose it.
-                if (!tcs.TrySetResult(bmp))
-                    bmp?.Dispose();
-            });
-        }, true);
+            var bmp = await DecodeWithDeduplication(textureId, data, progress: null, ct: CancellationToken.None)
+                .ConfigureAwait(false);
+            if (!tcs.TrySetResult(bmp))
+                bmp?.Dispose();
+        });
 
         return tcs.Task;
     }
@@ -777,59 +673,41 @@ public static class GridTextureHelper
         var tcs = new TaskCompletionSource<SKBitmap?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var reg = ct.Register(() => tcs.TrySetResult(null));
 
-        client.Assets.RequestServerBakedImage(avatarId, textureId, bakeName, (state, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (state is TextureRequestState.Pending
-                      or TextureRequestState.Started
-                      or TextureRequestState.Progress)
-                return;
-
+            var asset = await client.Assets.RequestServerBakedImageAsync(avatarId, textureId, bakeName, ct).ConfigureAwait(false);
             reg.Dispose();
 
-            if (state != TextureRequestState.Finished || asset?.AssetData == null)
+            if (asset?.AssetData == null)
             {
                 tcs.TrySetResult(null);
                 return;
             }
 
             var data = asset.AssetData;
-            // Do NOT pass ct here for the same reason as DownloadSkBitmapAsync: ct may be
-            // canceled in the window between reg.Dispose() and Task.Run executing, which would
-            // silently discard the decode and leave tcs permanently unresolved.
-            Task.Run(() =>
+            try
             {
-                try
+                if (progress != null)
                 {
-                    // Do NOT cache SSB bytes in TextureDiskCache: SSB UUIDs are reused
-                    // across appearance changes.  LibreMetaverse's own asset cache (used
-                    // by RequestServerBakedImage) is the appropriate persistence layer.
-
-                    if (progress != null)
+                    try
                     {
-                        // Fire a quick quarter-resolution preview before the full decode.
-                        // SSB delivers the complete J2K codestream in one shot so we can
-                        // decode at a lower wavelet resolution level immediately.
-                        try
+                        using var rawPrev = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
+                        if (rawPrev != null)
                         {
-                            using var rawPrev = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
-                            if (rawPrev != null)
-                            {
-                                var prev = rawPrev.Copy(rawPrev.ColorType);
-                                if (prev != null) progress.Report(prev);
-                            }
+                            var prev = rawPrev.Copy(rawPrev.ColorType);
+                            if (prev != null) progress.Report(prev);
                         }
-                        catch { /* preview failure is non-fatal — full decode continues */ }
                     }
-
-                    using var raw = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
-                    var bmp = raw != null ? raw.Copy(raw.ColorType) : null;
-                    tcs.TrySetResult(bmp);
+                    catch { }
                 }
-                catch
-                {
-                    tcs.TrySetResult(null);
-                }
-            });
+                using var raw = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
+                var bmp = raw != null ? raw.Copy(raw.ColorType) : null;
+                tcs.TrySetResult(bmp);
+            }
+            catch
+            {
+                tcs.TrySetResult(null);
+            }
         });
 
         return tcs.Task;

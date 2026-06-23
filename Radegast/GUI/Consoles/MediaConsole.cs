@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -20,8 +20,8 @@
 
 using System;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.Media;
 
 namespace Radegast

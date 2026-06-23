@@ -1,7 +1,7 @@
 using System.Windows.Forms;
 using AIMLBot = AIMLbot.Bot;
 
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Plugin.Alice
 {

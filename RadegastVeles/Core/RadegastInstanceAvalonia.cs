@@ -18,14 +18,15 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Threading;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
-using OpenMetaverse.Messages.Linden;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse.Messages.Linden;
 using Radegast.Veles.Plugins;
 using Radegast.Veles.ViewModels;
 using Radegast.Veles.Views;
@@ -95,6 +96,11 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
 
     public ChatLogger ChatLog { get; } = new ChatLogger();
 
+    private readonly ConcurrentDictionary<UUID, string> _groupNameCache = new();
+
+    public bool TryGetCachedGroupName(UUID groupId, out string name)
+        => _groupNameCache.TryGetValue(groupId, out name!);
+
     /// <summary>Raised when any in-world notification should be shown to the user.</summary>
     public event EventHandler<NotificationViewModel>? NotificationReceived;
 
@@ -123,14 +129,14 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         // Honour a user-configured texture-cache path stored by Preferences.
         var customCacheDir = GlobalSettings["texture_cache_dir"]?.AsString();
         if (!string.IsNullOrWhiteSpace(customCacheDir))
-            Client.Settings.ASSET_CACHE_DIR = customCacheDir;
+            Client.Settings.AssetCache.Dir = customCacheDir;
 
         // Apply chat logging preferences
         var chatLogDir = GlobalSettings["chat_log_dir"]?.AsString();
         if (!string.IsNullOrWhiteSpace(chatLogDir))
             ChatLog.BaseDirectory = chatLogDir;
 
-        if (GlobalSettings["chat_logging_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown)
+        if (GlobalSettings["chat_logging_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
             ChatLog.IsEnabled = GlobalSettings["chat_logging_enabled"].AsBoolean();
 
         client.Self.ScriptDialog += Self_ScriptDialog;
@@ -141,6 +147,13 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         NetCom.InstantMessageReceived += NetCom_InstantMessageReceived;
         NetCom.AlertMessageReceived += NetCom_AlertMessageReceived;
         client.Friends.CallingCardOffered += Friends_CallingCardOffered;
+        client.Groups.GroupNamesReply += Groups_GroupNamesReply;
+    }
+
+    private void Groups_GroupNamesReply(object? sender, GroupNamesEventArgs e)
+    {
+        foreach (var kvp in e.GroupNames)
+            _groupNameCache[kvp.Key] = kvp.Value;
     }
 
     private void Network_EventQueueRunning(object? sender, EventQueueRunningEventArgs e)
@@ -223,8 +236,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     private void Self_ScriptDialog(object? sender, ScriptDialogEventArgs e)
     {
         // Check mute list
-        if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.Object && m.ID == e.ObjectID)) return;
-        if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.ByName && m.Name == e.ObjectName)) return;
+        if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.Object && m.ID == e.ObjectID)) return;
+        if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.ByName && m.Name == e.ObjectName)) return;
 
         var vm = NotificationViewModel.ForScriptDialog(
             Client, e.ObjectName, $"{e.FirstName} {e.LastName}",
@@ -236,8 +249,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     private void Self_ScriptQuestion(object? sender, ScriptQuestionEventArgs e)
     {
         // Check mute list by object name
-        if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.ByName && m.Name == e.ObjectName)) return;
-        if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.Object && m.ID == e.TaskID)) return;
+        if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.ByName && m.Name == e.ObjectName)) return;
+        if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.Object && m.ID == e.TaskID)) return;
 
         var vm = NotificationViewModel.ForPermissions(
             Client, e.Simulator, e.TaskID, e.ItemID,
@@ -247,7 +260,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
 
     private void Self_LoadURL(object? sender, LoadUrlEventArgs e)
     {
-        if (null != Client.Self.MuteList.Find(m =>
+        if (Client.Self.MuteList.Values.Any(m =>
                 (m.Type == MuteType.Object && m.ID == e.ObjectID) ||
                 (m.Type == MuteType.ByName && m.Name == e.ObjectName) ||
                 (m.Type == MuteType.Resident && m.ID == e.OwnerID))) return;
@@ -269,7 +282,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
                 break;
 
             case InstantMessageDialog.GroupNotice:
-                if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.Group && m.ID == msg.FromAgentID)) return;
+                if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.Group && m.ID == msg.FromAgentID)) return;
                 NotificationReceived?.Invoke(this, NotificationViewModel.ForGroupNotice(Client, msg));
                 MediaManager.PlayUISound(UISounds.Alert);
                 break;
@@ -285,7 +298,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
                 break;
 
             case InstantMessageDialog.TaskInventoryOffered:
-                if (null != Client.Self.MuteList.Find(m => m.Type == MuteType.ByName && m.Name == msg.FromAgentName)) return;
+                if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.ByName && m.Name == msg.FromAgentName)) return;
                 NotificationReceived?.Invoke(this, NotificationViewModel.ForInventoryOffer(Client, msg));
                 MediaManager.PlayUISound(UISounds.Alert);
                 break;
@@ -571,49 +584,49 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     public void CreateAndOpenNotecard()
     {
         var parentId = Client.Inventory.FindFolderForType(FolderType.Notecard);
-        Client.Inventory.RequestCreateItem(parentId, "New Notecard", string.Empty,
-            AssetType.Notecard, UUID.Random(), InventoryType.Notecard, PermissionMask.All,
-            (success, item) =>
+        _ = Task.Run(async () =>
+        {
+            var item = await Client.Inventory.CreateItemAsync(parentId, "New Notecard", string.Empty,
+                AssetType.Notecard, UUID.Random(), InventoryType.Notecard, PermissionMask.All);
+            if (item is not InventoryNotecard nc) return;
+            Dispatcher.UIThread.Post(() =>
             {
-                if (!success || item is not InventoryNotecard nc) return;
-                Dispatcher.UIThread.Post(() =>
+                var vm = new NotecardViewModel(this, nc);
+                var panel = new NotecardPanel { DataContext = vm };
+                var window = new ProfileWindow($"Notecard - {nc.Name}", panel);
+                vm.PropertyChanged += (_, e) =>
                 {
-                    var vm = new NotecardViewModel(this, nc);
-                    var panel = new NotecardPanel { DataContext = vm };
-                    var window = new ProfileWindow($"Notecard - {nc.Name}", panel);
-                    vm.PropertyChanged += (_, e) =>
-                    {
-                        if (e.PropertyName == nameof(NotecardViewModel.NotecardName))
-                            window.Title = $"Notecard - {vm.NotecardName}";
-                    };
-                    window.Closed += (_, _) => vm.Dispose();
-                    window.Show();
-                });
+                    if (e.PropertyName == nameof(NotecardViewModel.NotecardName))
+                        window.Title = $"Notecard - {vm.NotecardName}";
+                };
+                window.Closed += (_, _) => vm.Dispose();
+                window.Show();
             });
+        });
     }
 
     public void CreateAndOpenScript()
     {
         var parentId = Client.Inventory.FindFolderForType(FolderType.LSLText);
-        Client.Inventory.RequestCreateItem(parentId, "New Script", string.Empty,
-            AssetType.LSLText, UUID.Random(), InventoryType.LSL, PermissionMask.All,
-            (success, item) =>
+        _ = Task.Run(async () =>
+        {
+            var item = await Client.Inventory.CreateItemAsync(parentId, "New Script", string.Empty,
+                AssetType.LSLText, UUID.Random(), InventoryType.LSL, PermissionMask.All);
+            if (item is not InventoryLSL lsl) return;
+            Dispatcher.UIThread.Post(() =>
             {
-                if (!success || item is not InventoryLSL lsl) return;
-                Dispatcher.UIThread.Post(() =>
+                var vm = new ScriptEditorViewModel(this, lsl);
+                var panel = new ScriptEditorPanel { DataContext = vm };
+                var window = new ProfileWindow($"Script - {lsl.Name}", panel);
+                vm.PropertyChanged += (_, e) =>
                 {
-                    var vm = new ScriptEditorViewModel(this, lsl);
-                    var panel = new ScriptEditorPanel { DataContext = vm };
-                    var window = new ProfileWindow($"Script - {lsl.Name}", panel);
-                    vm.PropertyChanged += (_, e) =>
-                    {
-                        if (e.PropertyName == nameof(ScriptEditorViewModel.ScriptName))
-                            window.Title = $"Script - {vm.ScriptName}";
-                    };
-                    window.Closed += (_, _) => vm.Dispose();
-                    window.Show();
-                });
+                    if (e.PropertyName == nameof(ScriptEditorViewModel.ScriptName))
+                        window.Title = $"Script - {vm.ScriptName}";
+                };
+                window.Closed += (_, _) => vm.Dispose();
+                window.Show();
             });
+        });
     }
 
     public void CreateAndOpenLandmark()
@@ -625,44 +638,44 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         var parcelName = State.Parcel?.Name;
         var landmarkName = !string.IsNullOrWhiteSpace(parcelName) ? parcelName : simName;
         var parentId = Client.Inventory.FindFolderForType(FolderType.Landmark);
-        Client.Inventory.RequestCreateItem(parentId, landmarkName, string.Empty,
-            AssetType.Landmark, UUID.Random(), InventoryType.Landmark, PermissionMask.All,
-            (success, item) =>
+        _ = Task.Run(async () =>
+        {
+            var item = await Client.Inventory.CreateItemAsync(parentId, landmarkName, string.Empty,
+                AssetType.Landmark, UUID.Random(), InventoryType.Landmark, PermissionMask.All);
+            if (item is not InventoryLandmark lm) return;
+            Dispatcher.UIThread.Post(() =>
             {
-                if (!success || item is not InventoryLandmark lm) return;
-                Dispatcher.UIThread.Post(() =>
-                {
-                    var vm = new LandmarkViewModel(this, lm);
-                    var panel = new LandmarkPanel { DataContext = vm };
-                    var window = new ProfileWindow($"Landmark - {lm.Name}", panel);
-                    window.Closed += (_, _) => vm.Dispose();
-                    window.Show();
-                });
+                var vm = new LandmarkViewModel(this, lm);
+                var panel = new LandmarkPanel { DataContext = vm };
+                var window = new ProfileWindow($"Landmark - {lm.Name}", panel);
+                window.Closed += (_, _) => vm.Dispose();
+                window.Show();
             });
+        });
     }
 
     public void CreateAndOpenGesture()
     {
         var parentId = Client.Inventory.FindFolderForType(FolderType.Gesture);
-        Client.Inventory.RequestCreateItem(parentId, "New Gesture", string.Empty,
-            AssetType.Gesture, UUID.Random(), InventoryType.Gesture, PermissionMask.All,
-            (success, item) =>
+        _ = Task.Run(async () =>
+        {
+            var item = await Client.Inventory.CreateItemAsync(parentId, "New Gesture", string.Empty,
+                AssetType.Gesture, UUID.Random(), InventoryType.Gesture, PermissionMask.All);
+            if (item is not InventoryGesture gesture) return;
+            Dispatcher.UIThread.Post(() =>
             {
-                if (!success || item is not InventoryGesture gesture) return;
-                Dispatcher.UIThread.Post(() =>
+                var vm = new GestureViewModel(this, gesture);
+                var panel = new GesturePanel { DataContext = vm };
+                var window = new ProfileWindow($"Gesture - {gesture.Name}", panel);
+                vm.PropertyChanged += (_, e) =>
                 {
-                    var vm = new GestureViewModel(this, gesture);
-                    var panel = new GesturePanel { DataContext = vm };
-                    var window = new ProfileWindow($"Gesture - {gesture.Name}", panel);
-                    vm.PropertyChanged += (_, e) =>
-                    {
-                        if (e.PropertyName == nameof(GestureViewModel.GestureName))
-                            window.Title = $"Gesture - {vm.GestureName}";
-                    };
-                    window.Closed += (_, _) => vm.Dispose();
-                    window.Show();
-                });
+                    if (e.PropertyName == nameof(GestureViewModel.GestureName))
+                        window.Title = $"Gesture - {vm.GestureName}";
+                };
+                window.Closed += (_, _) => vm.Dispose();
+                window.Show();
             });
+        });
     }
 
     public override void CleanUp()

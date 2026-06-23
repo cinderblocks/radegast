@@ -28,7 +28,7 @@ using System.Windows.Forms;
 using System.Drawing.Text;
 using LibreMetaverse;
 using LibreMetaverse.RLV;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -307,7 +307,7 @@ namespace Radegast
                     {
                         lvwObjects.BeginUpdate();
 
-                        var agentPosition = e.Simulator.AvatarPositions.TryGetValue(client.Self.AgentID, out var position)
+                        var agentPosition = e.Positions.TryGetValue(client.Self.AgentID, out var position)
                             ? PositionHelper.ToGlobalPosition(e.Simulator.Handle, position)
                             : client.Self.GlobalPosition;
 
@@ -319,8 +319,8 @@ namespace Radegast
                         var existing = new HashSet<UUID>();
                         var removed = new List<UUID>(e.RemovedEntries);
 
-                        var globalPositions = new Dictionary<UUID, Vector3d>(e.Simulator.AvatarPositions.Count);
-                        foreach (var kv in e.Simulator.AvatarPositions)
+                        var globalPositions = new Dictionary<UUID, Vector3d>(e.Positions.Count);
+                        foreach (var kv in e.Positions)
                         {
                             globalPositions[kv.Key] = PositionHelper.ToGlobalPosition(e.Simulator.Handle, kv.Value);
                         }
@@ -335,7 +335,7 @@ namespace Radegast
                         }
 
                         // Add any new avatars
-                        foreach (var avatarPos in e.Simulator.AvatarPositions)
+                        foreach (var avatarPos in e.Positions)
                         {
                             existing.Add(avatarPos.Key);
                             if (lvwObjects.Items.ContainsKey(avatarPos.Key.ToString())) continue;
@@ -372,7 +372,7 @@ namespace Radegast
                                 continue;
                             }
 
-                            if (!existing.Contains(key) || !e.Simulator.AvatarPositions.TryGetValue(key, out var pos))
+                            if (!existing.Contains(key) || !e.Positions.TryGetValue(key, out var pos))
                             {
                                 removed.Add(key);
                                 continue;
@@ -878,7 +878,7 @@ namespace Radegast
             }
             else if (node.Tag is InventoryFolder folder)
             {
-                client.Inventory.GiveFolder(folder.UUID, folder.Name, (UUID)litem.Tag, true);
+                _ = System.Threading.Tasks.Task.Run(() => client.Inventory.GiveFolderAsync(folder.UUID, folder.Name, (UUID)litem.Tag, true));
                 instance.ShowNotificationInChat($"Offered folder {folder.Name} to {instance.Names.Get((UUID)litem.Tag)}.");
             }
         }
@@ -908,7 +908,7 @@ namespace Radegast
                 ctxPoint.Text = "Unpoint";
             }
 
-            bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == (UUID)lvwObjects.SelectedItems[0].Tag);
+            bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == (UUID)lvwObjects.SelectedItems[0].Tag);
             muteToolStripMenuItem.Text = isMuted ? "Unmute" : "Mute";
 
             instance.ContextActionManager.AddContributions(

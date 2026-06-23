@@ -19,9 +19,10 @@
  */
 
 using System;
+using System.Linq;
 using System.Windows.Forms;
 using System.Drawing;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -263,7 +264,7 @@ namespace Radegast
             Group g = (Group)listBox1.SelectedItem;
             if (g.ID == UUID.Zero) return;
 
-            if (null != client.Self.MuteList.Find(me => me.Type == MuteType.Group && me.ID == g.ID))
+            if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.Group && me.ID == g.ID))
             {
                 btnMute.Text = "Unmute";
             }
@@ -322,7 +323,7 @@ namespace Radegast
                         if (item is Group)
                         {
                             UUID gid = ((Group)item).ID;
-                            bool isMuted = client.Self.MuteList.Find(me => me.ID == gid && me.Type == MuteType.Group) != null;
+                            bool isMuted = client.Self.MuteList.Values.Any(me => me.ID == gid && me.Type == MuteType.Group);
                             if (isMuted)
                             {
                                 var tsize = e.Graphics.MeasureString(title, e.Font);

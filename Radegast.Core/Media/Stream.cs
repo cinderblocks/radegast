@@ -23,7 +23,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using FMOD;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Media
 {

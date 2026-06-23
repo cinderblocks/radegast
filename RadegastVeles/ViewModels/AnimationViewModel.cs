@@ -18,11 +18,12 @@
  */
 
 using System;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -54,26 +55,24 @@ public partial class AnimationViewModel : ObservableObject, IDisposable
         AnimationName = item.Name;
         Metadata = new ItemMetadataViewModel(instance, item);
 
-        Client.Assets.RequestAsset(item.AssetUUID, AssetType.Animation, true, OnAssetReceived);
-    }
-
-    private void OnAssetReceived(AssetDownload transfer, Asset? asset)
-    {
-        Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
-            IsLoading = false;
-            if (!transfer.Success || asset?.AssetData == null)
+            var asset = await Client.Assets.RequestAssetAsync(item.AssetUUID, AssetType.Animation, true);
+            Dispatcher.UIThread.Post(() =>
             {
-                StatusText = "Failed to download animation.";
-                return;
-            }
-
-            _animData = asset.AssetData;
-            CanSave = true;
-            var kb = _animData.Length / 1024.0;
-            DataSizeText = kb < 1 ? $"{_animData.Length} bytes" : $"{kb:F1} KB";
-            StatusText = "Ready.";
-            SaveCommand.NotifyCanExecuteChanged();
+                IsLoading = false;
+                if (asset?.AssetData == null)
+                {
+                    StatusText = "Failed to download animation.";
+                    return;
+                }
+                _animData = asset.AssetData;
+                CanSave = true;
+                var kb = _animData.Length / 1024.0;
+                DataSizeText = kb < 1 ? $"{_animData.Length} bytes" : $"{kb:F1} KB";
+                StatusText = "Ready.";
+                SaveCommand.NotifyCanExecuteChanged();
+            });
         });
     }
 

@@ -21,8 +21,8 @@
 using System;
 using OpenTK.Graphics.OpenGL;
 using System.Threading;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using SkiaSharp;
 
 namespace Radegast.Rendering

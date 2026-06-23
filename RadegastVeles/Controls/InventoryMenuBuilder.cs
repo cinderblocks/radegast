@@ -21,8 +21,8 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
-using OpenMetaverse;
-using OpenMetaverse.Marketplace;
+using LibreMetaverse;
+using LibreMetaverse.Marketplace;
 using Radegast.Veles.ViewModels;
 using InvClipboard = Radegast.Veles.Core.InventoryClipboard;
 

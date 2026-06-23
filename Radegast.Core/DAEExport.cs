@@ -27,8 +27,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreJ2K;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using Radegast.Rendering;
 using SkiaSharp;
 
@@ -256,38 +256,11 @@ namespace Radegast
 
                 try
                 {
-                    var tcs = new TaskCompletionSource<(byte[]? jpeg, SKBitmap? bmp)>();
-
-                    Client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
+                    var texAsset = await Client.Assets.RequestImageAsync(id, ImageType.Normal).ConfigureAwait(false);
+                    if (texAsset != null)
                     {
-                        try
-                        {
-                            if (state == TextureRequestState.Finished && asset != null)
-                            {
-                                var data = asset.AssetData;
-                                SKBitmap? bmp = null;
-                                try { bmp = J2kImage.DecodeToImage<SKBitmap>(data); } catch { bmp = null; }
-                                tcs.TrySetResult((data, bmp));
-                                return;
-                            }
-
-                            if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
-                            {
-                                tcs.TrySetResult((null, null));
-                            }
-                        }
-                        catch (Exception)
-                        {
-                            tcs.TrySetResult((null, null));
-                        }
-                    });
-
-                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(120))).ConfigureAwait(false);
-                    if (completed == tcs.Task)
-                    {
-                        var res = await tcs.Task.ConfigureAwait(false);
-                        jpegData = res.jpeg;
-                        bitmap = res.bmp;
+                        jpegData = texAsset.AssetData;
+                        try { bitmap = J2kImage.DecodeToImage<SKBitmap>(jpegData); } catch { bitmap = null; }
                     }
 
                     if (bitmap != null)
@@ -402,32 +375,10 @@ namespace Radegast
             }
             else
             {
-                var tcs = new TaskCompletionSource<FacetedMesh?>();
-
-                Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
+                var meshAsset = await Client.Assets.RequestMeshAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
+                if (meshAsset != null && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out var localMesh))
                 {
-                    try
-                    {
-                        FacetedMesh? localMesh = null;
-                        if (success && meshAsset != null && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out localMesh))
-                        {
-                            tcs.TrySetResult(localMesh);
-                        }
-                        else
-                        {
-                            tcs.TrySetResult(null);
-                        }
-                    }
-                    catch
-                    {
-                        tcs.TrySetResult(null);
-                    }
-                });
-
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(false);
-                if (completed == tcs.Task)
-                {
-                    mesh = await tcs.Task.ConfigureAwait(false);
+                    mesh = localMesh;
                 }
             }
             return mesh;
@@ -435,29 +386,11 @@ namespace Radegast
 
         private async Task<SKBitmap?> LoadTextureAsync(UUID textureID)
         {
-            var tcs = new TaskCompletionSource<SKBitmap?>();
-
             try
             {
-                Client.Assets.RequestImage(textureID, (state, assetTexture) =>
-                {
-                    try
-                    {
-                        if (state != TextureRequestState.Finished || assetTexture == null) { return; }
-                        SKBitmap? img = null;
-                        try { img = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData); } catch { img = null; }
-                        tcs.TrySetResult(img);
-                    }
-                    catch
-                    {
-                        tcs.TrySetResult(null);
-                    }
-                });
-
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
-                if (completed != tcs.Task) return null;
-
-                return await tcs.Task.ConfigureAwait(false);
+                var assetTexture = await Client.Assets.RequestImageAsync(textureID).ConfigureAwait(false);
+                if (assetTexture == null) return null;
+                try { return J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData); } catch { return null; }
             }
             catch (Exception ex)
             {

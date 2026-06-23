@@ -22,7 +22,7 @@ using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -59,7 +59,7 @@ namespace Radegast
 
             if (!client.Self.GroupChatSessions.ContainsKey(session))
             {
-                _ = client.Self.ChatterBoxAcceptInvite(session);
+                _ = client.Self.ChatterBoxAcceptInviteAsync(session);
             }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);

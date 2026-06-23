@@ -24,7 +24,7 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -275,7 +275,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
     public void NotifyTypingStarted()
     {
         if (SelectedSession?.SessionType != IMSessionType.Personal) return;
-        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
         NetCom.SendIMStartTyping(SelectedSession.TargetId, SelectedSession.SessionId);
     }
@@ -287,7 +287,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
     public void NotifyTypingStopped()
     {
         if (SelectedSession?.SessionType != IMSessionType.Personal) return;
-        if (_instance.GlobalSettings["send_typing_notifications"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
         NetCom.SendIMStopTyping(SelectedSession.TargetId, SelectedSession.SessionId);
     }

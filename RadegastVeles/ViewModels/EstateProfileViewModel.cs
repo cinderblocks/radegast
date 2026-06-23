@@ -22,8 +22,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -263,7 +263,7 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
         flags = SetRegionFlag(flags, RegionFlags.AllowVoice,         EditAllowVoice);
         flags = SetRegionFlag(flags, RegionFlags.SunFixed,           EditSunFixed);
         flags = SetRegionFlag(flags, RegionFlags.AllowDirectTeleport, EditDirectTeleport);
-        await Client.Estate.SendEstateChangeInfo(
+        await Client.Estate.SendEstateChangeInfoAsync(
             _estateName.Length > 0 ? _estateName : RegionName, 0, flags);
 
         IsEditingEstate = false;
@@ -302,8 +302,9 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Client.Estate.RequestCovenantNotecard(e.CovenantID, (transfer, asset) =>
+        _ = Task.Run(async () =>
         {
+            var asset = await Client.Estate.RequestCovenantNotecardAsync(e.CovenantID);
             string text;
             if (asset is AssetNotecard notecard)
             {
@@ -316,7 +317,6 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
             {
                 text = "Unable to load covenant.";
             }
-
             Dispatcher.UIThread.Post(() =>
             {
                 CovenantText = text;

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -54,7 +54,7 @@ namespace RadegastSpeech.Sound
         /// instead of hed-relative</param>
         internal override void Play(string filename,
             int sps,
-            OpenMetaverse.Vector3 worldPos,
+            LibreMetaverse.Vector3 worldPos,
             bool deleteAfter,
             bool global)
         {
@@ -81,7 +81,7 @@ namespace RadegastSpeech.Sound
         /// <summary>
         /// Async variant that waits for playback to finish and deletes the file afterwards.
         /// </summary>
-        internal override async Task PlayAndWaitAsync(string filename, bool global, OpenMetaverse.Vector3 pos)
+        internal override async Task PlayAndWaitAsync(string filename, bool global, LibreMetaverse.Vector3 pos)
         {
             if (speechPlayer != null)
             {

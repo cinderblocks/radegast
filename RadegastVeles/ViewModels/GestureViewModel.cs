@@ -25,8 +25,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -203,27 +203,24 @@ public partial class GestureViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Client.Assets.RequestAsset(item.AssetUUID, AssetType.Gesture, true, OnAssetReceived);
-    }
-
-    private void OnAssetReceived(AssetDownload transfer, Asset? asset)
-    {
-        Dispatcher.UIThread.Post(() =>
+        _ = Task.Run(async () =>
         {
-            IsLoading = false;
-            if (!transfer.Success || asset is not AssetGesture gestureAsset)
+            var asset = await Client.Assets.RequestAssetAsync(item.AssetUUID, AssetType.Gesture, true);
+            Dispatcher.UIThread.Post(() =>
             {
-                StatusText = "Failed to download gesture.";
-                return;
-            }
-
-            if (!gestureAsset.Decode())
-            {
-                StatusText = "Could not decode gesture sequence.";
-                return;
-            }
-
-            PopulateFromAsset(gestureAsset);
+                IsLoading = false;
+                if (asset is not AssetGesture gestureAsset)
+                {
+                    StatusText = "Failed to download gesture.";
+                    return;
+                }
+                if (!gestureAsset.Decode())
+                {
+                    StatusText = "Could not decode gesture sequence.";
+                    return;
+                }
+                PopulateFromAsset(gestureAsset);
+            });
         });
     }
 
@@ -317,7 +314,7 @@ public partial class GestureViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Play()
     {
-        Client.Self.PlayGesture(_item.AssetUUID);
+        _ = Client.Self.PlayGestureAsync(_item.AssetUUID);
         StatusText = "Playing...";
     }
 
@@ -418,24 +415,22 @@ public partial class GestureViewModel : ObservableObject, IDisposable
         asset.Sequence.Add(new GestureStepEOF());
         asset.Encode();
 
-        InventoryManager.InventoryUploadedAssetCallback handler = (success, status, _, _) =>
-            Dispatcher.UIThread.Post(() =>
+        var (success, status, _, _) = await Client.Inventory.RequestUploadGestureAssetAsync(asset.AssetData, _item.UUID);
+        Dispatcher.UIThread.Post(() =>
+        {
+            IsSaving = false;
+            if (success)
             {
-                IsSaving = false;
-                if (success)
-                {
-                    IsModified = false;
-                    var count = EditSteps.Count;
-                    StatusText = count == 1 ? "Saved - 1 step" : $"Saved - {count} steps";
-                }
-                else
-                {
-                    StatusText = $"Save failed: {status}";
-                }
-                SaveGestureCommand.NotifyCanExecuteChanged();
-            });
-
-        await Client.Inventory.RequestUploadGestureAssetAsync(asset.AssetData, _item.UUID, handler);
+                IsModified = false;
+                var count = EditSteps.Count;
+                StatusText = count == 1 ? "Saved - 1 step" : $"Saved - {count} steps";
+            }
+            else
+            {
+                StatusText = $"Save failed: {status}";
+            }
+            SaveGestureCommand.NotifyCanExecuteChanged();
+        });
     }
     private bool CanSave() => !IsLoading && !IsSaving;
 

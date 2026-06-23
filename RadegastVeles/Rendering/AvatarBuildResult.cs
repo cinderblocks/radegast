@@ -20,7 +20,7 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Numerics;
-using OpenMetaverse.Rendering;
+using LibreMetaverse.Rendering;
 
 namespace Radegast.Veles.Rendering;
 

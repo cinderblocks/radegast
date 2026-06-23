@@ -21,8 +21,8 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 
 namespace RadegastSpeech.Talk
 {

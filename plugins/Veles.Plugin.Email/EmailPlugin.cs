@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.PluginApi;
 
 namespace Veles.Plugin.Email;

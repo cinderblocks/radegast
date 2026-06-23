@@ -18,10 +18,11 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Reflection;
 using System.Text;
@@ -230,8 +231,8 @@ namespace Radegast
 
             // Check if the sender agent is muted
             if (e.SourceType == ChatSourceType.Agent
-                && instance.Client.Self.MuteList.Find(me => me.Type == MuteType.Resident
-                                                   && me.ID == e.SourceID) != null)
+                && instance.Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident
+                                                   && me.ID == e.SourceID))
             {
                 return;
             }
@@ -244,7 +245,7 @@ namespace Radegast
 
             // Check if sender object is muted
             if (e.SourceType == ChatSourceType.Object &&
-                null != instance.Client.Self.MuteList.Find(me =>
+                instance.Client.Self.MuteList.Values.Any(me =>
                         (me.Type == MuteType.Resident && me.ID == e.OwnerID) // Owner muted
                         || (me.Type == MuteType.Object && me.ID == e.SourceID) // Object muted by ID
                         || (me.Type == MuteType.ByName && me.Name == e.FromName) // Object muted by name

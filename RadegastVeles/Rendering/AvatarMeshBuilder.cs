@@ -26,11 +26,11 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
-// Alias System.IO.Path to avoid clash with OpenMetaverse.Rendering.Path.
+// Alias System.IO.Path to avoid clash with LibreMetaverse.Rendering.Path.
 using SysPath    = System.IO.Path;
 using Vector3    = System.Numerics.Vector3;
 using Vector4    = System.Numerics.Vector4;
@@ -155,7 +155,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         {
             progress?.Report(
                 $"Avatar definition error: {ex.Message} " +
-                $"(RESOURCE_DIR={OpenMetaverse.Settings.RESOURCE_DIR})");
+                $"(RESOURCE_DIR={LibreMetaverse.Settings.ResourceDir})");
         }
 
         if (avatarDef == null)
@@ -1118,7 +1118,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         var loadTasks = selectedDefs.Select((meshDef, idx) => Task.Run(() =>
         {
             var path = SysPath.Combine(
-                OpenMetaverse.Settings.RESOURCE_DIR ?? string.Empty,
+                LibreMetaverse.Settings.ResourceDir ?? string.Empty,
                 "character",
                 meshDef.FileName);
 
@@ -1181,8 +1181,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                             .Select(m => new DynamicMorphEntry(m.Name,
                                 m.Vertices.Select(mv => new FaceMorphVertex(
                                     mv.VertexIndex,
-                                    new OpenMetaverse.Vector3(mv.Coord.X,  mv.Coord.Y,  mv.Coord.Z),
-                                    new OpenMetaverse.Vector3(mv.Normal.X, mv.Normal.Y, mv.Normal.Z)))
+                                    new LibreMetaverse.Vector3(mv.Coord.X,  mv.Coord.Y,  mv.Coord.Z),
+                                    new LibreMetaverse.Vector3(mv.Normal.X, mv.Normal.Y, mv.Normal.Z)))
                                 .ToArray()))
                             .ToArray();
 
@@ -1673,7 +1673,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         try
         {
             var ladPath = SysPath.Combine(
-                OpenMetaverse.Settings.RESOURCE_DIR ?? string.Empty,
+                LibreMetaverse.Settings.ResourceDir ?? string.Empty,
                 "character",
                 "avatar_lad.xml");
             var doc    = XDocument.Load(ladPath);
@@ -1725,7 +1725,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         try
         {
             var ladPath = SysPath.Combine(
-                OpenMetaverse.Settings.RESOURCE_DIR ?? string.Empty,
+                LibreMetaverse.Settings.ResourceDir ?? string.Empty,
                 "character",
                 "avatar_lad.xml");
             var doc    = XDocument.Load(ladPath);
@@ -1773,7 +1773,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         try
         {
             var ladPath = SysPath.Combine(
-                OpenMetaverse.Settings.RESOURCE_DIR ?? string.Empty,
+                LibreMetaverse.Settings.ResourceDir ?? string.Empty,
                 "character",
                 "avatar_lad.xml");
             var doc    = XDocument.Load(ladPath);

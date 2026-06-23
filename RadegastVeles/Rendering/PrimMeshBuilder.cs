@@ -25,12 +25,12 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse.Materials;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
-using OmQuaternion = OpenMetaverse.Quaternion;
+using OmQuaternion = LibreMetaverse.Quaternion;
 using Quaternion   = System.Numerics.Quaternion;
 using Vector3      = System.Numerics.Vector3;
 using Vector4      = System.Numerics.Vector4;
@@ -258,19 +258,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct)
     {
-        var tcs = new TaskCompletionSource<FacetedMesh?>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        using var reg = ct.Register(() => tcs.TrySetResult(null));
-
-        client.Assets.RequestMesh(prim.Sculpt!.SculptTexture, (success, meshAsset) =>
-        {
-            if (success && meshAsset != null)
-                tcs.TrySetResult(_mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData));
-            else
-                tcs.TrySetResult(null);
-        });
-
-        return await tcs.Task;
+        var meshAsset = await client.Assets.RequestMeshAsync(prim.Sculpt!.SculptTexture, ct).ConfigureAwait(false);
+        if (meshAsset == null) return null;
+        return _mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData);
     }
 
     // ── Texture fetching ──────────────────────────────────────────────────────────
@@ -698,7 +688,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-            var fetched = await client.Objects.RequestMaterials(sim, needed, linked.Token)
+            var fetched = await client.Objects.RequestMaterialsAsync(sim, needed, linked.Token)
                                               .ConfigureAwait(false);
 
             var byId = new Dictionary<UUID, LegacyMaterial>();
@@ -760,22 +750,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
-                var tcs = new TaskCompletionSource<AssetMaterial?>(
-                    TaskCreationOptions.RunContinuationsAsynchronously);
-                using var reg = linked.Token.Register(() => tcs.TrySetResult(null));
-
-                client.Assets.RequestAsset(id, AssetType.Material, true, (transfer, asset) =>
-                {
-                    if (transfer.Success && asset is AssetMaterial am)
-                    {
-                        am.Decode();
-                        tcs.TrySetResult(am);
-                    }
-                    else
-                        tcs.TrySetResult(null);
-                });
-
-                var result = await tcs.Task;
+                var result = await client.Assets.RequestAssetAsync(id, AssetType.Material, true, linked.Token)
+                    .ConfigureAwait(false) as AssetMaterial;
+                result?.Decode();
                 lock (_pbrCacheLock) _pbrCache[id] = result;
             }, ct)).ToList();
 

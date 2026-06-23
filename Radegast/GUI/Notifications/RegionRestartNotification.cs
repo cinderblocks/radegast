@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2021-2025, Sjofn, LLC
  * All rights reserved.
@@ -104,7 +104,7 @@ namespace Radegast
 
         private void btnHome_Click(object sender, EventArgs e)
         {
-            instance.Client.Self.RequestTeleport(OpenMetaverse.UUID.Zero);
+            instance.Client.Self.RequestTeleport(LibreMetaverse.UUID.Zero);
             
             instance.MainForm.RemoveNotification(this);
         }
@@ -115,12 +115,12 @@ namespace Radegast
 
             if (prefs != null && prefs.Region.Trim() != string.Empty)
             {
-                instance.Client.Self.Teleport(prefs.Region, prefs.Position);
+                _ = instance.Client.Self.TeleportAsync(prefs.Region, prefs.Position);
             }
             else
             {
                 // idk, this is silly and Second Life specific.
-                instance.Client.Self.Teleport("Hippo Hollow", new OpenMetaverse.Vector3(180, 205, 44));
+                _ = instance.Client.Self.TeleportAsync("Hippo Hollow", new LibreMetaverse.Vector3(180, 205, 44));
             }
             instance.MainForm.RemoveNotification(this);
         }

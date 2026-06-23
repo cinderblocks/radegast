@@ -26,7 +26,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -148,6 +148,7 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         Client.Groups.GroupRoleDataReply += Groups_GroupRoleDataReply;
         Client.Groups.GroupRoleMembersReply += Groups_GroupRoleMembersReply;
         Client.Groups.GroupMemberEjected += Groups_GroupMemberEjected;
+        Client.Groups.BannedAgents += OnBannedAgentsReceived;
         Client.Self.IM += Self_IM;
         _instance.Names.NameUpdated += Names_NameUpdated;
 
@@ -174,6 +175,7 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
         Client.Groups.GroupRoleDataReply -= Groups_GroupRoleDataReply;
         Client.Groups.GroupRoleMembersReply -= Groups_GroupRoleMembersReply;
         Client.Groups.GroupMemberEjected -= Groups_GroupMemberEjected;
+        Client.Groups.BannedAgents -= OnBannedAgentsReceived;
         Client.Self.IM -= Self_IM;
         _instance.Names.NameUpdated -= Names_NameUpdated;
     }
@@ -768,7 +770,7 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
 
     private void LoadBannedMembers(UUID groupId)
     {
-        _ = Client.Groups.RequestBannedAgents(groupId, OnBannedAgentsReceived);
+        _ = Task.Run(() => Client.Groups.RequestBannedAgentsAsync(groupId));
     }
 
     private void OnBannedAgentsReceived(object? sender, BannedAgentsEventArgs e)
@@ -791,16 +793,22 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     [RelayCommand]
     private void UnbanMember(GroupBanEntry entry)
     {
-        _ = Client.Groups.RequestBanAction(GroupID, GroupBanAction.Unban, [entry.Id],
-            (_, _) => LoadBannedMembers(GroupID));
+        _ = Task.Run(async () =>
+        {
+            await Client.Groups.RequestBanActionAsync(GroupID, GroupBanAction.Unban, [entry.Id]);
+            LoadBannedMembers(GroupID);
+        });
     }
 
     [RelayCommand]
     private void BanGroupMember(GroupMemberEntry? member)
     {
         if (member == null) return;
-        _ = Client.Groups.RequestBanAction(GroupID, GroupBanAction.Ban, [member.AgentID],
-            (_, _) => LoadBannedMembers(GroupID));
+        _ = Task.Run(async () =>
+        {
+            await Client.Groups.RequestBanActionAsync(GroupID, GroupBanAction.Ban, [member.AgentID]);
+            LoadBannedMembers(GroupID);
+        });
     }
 
     [RelayCommand]

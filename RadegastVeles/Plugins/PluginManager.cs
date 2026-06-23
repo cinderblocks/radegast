@@ -24,7 +24,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.PluginApi;
 

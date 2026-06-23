@@ -25,9 +25,9 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using FMOD;
 using System.Threading;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
+using LibreMetaverse.Assets;
 using System.Threading.Tasks;
 using System.IO;
 
@@ -1785,9 +1785,10 @@ namespace Radegast.Media
             }
 
             // Request from asset system
-            instance.Client.Assets.RequestAsset(soundId, AssetType.Sound, false, (transfer, asset) =>
+            _ = Task.Run(async () =>
             {
-                if (transfer.Success && asset is AssetSound soundAsset)
+                var asset = await instance.Client.Assets.RequestAssetAsync(soundId, AssetType.Sound, false);
+                if (asset is AssetSound soundAsset)
                 {
                     Add(soundId, soundAsset.AssetData);
                     Logger.Debug($"Preloaded sound {soundId}");

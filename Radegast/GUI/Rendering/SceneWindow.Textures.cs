@@ -36,8 +36,8 @@ using System.Threading;
 using CoreJ2K;
 using OpenTK.Graphics;
 using OpenTK.Platform;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using SkiaSharp;
 
 namespace Radegast.Rendering
@@ -380,32 +380,26 @@ namespace Radegast.Rendering
                             }
                             else if (!item.Data.TextureInfo.FetchFailed)
                             {
-                                void handler(TextureRequestState state, AssetTexture asset)
+                                var capturedItem = item;
+                                _ = System.Threading.Tasks.Task.Run(async () =>
                                 {
-                                    switch (state)
+                                    AssetTexture asset;
+                                    if (capturedItem.ImageType == ImageType.ServerBaked && !string.IsNullOrEmpty(capturedItem.BakeName))
+                                        asset = await Client.Assets.RequestServerBakedImageAsync(capturedItem.AvatarID, capturedItem.TeFace.TextureID, capturedItem.BakeName);
+                                    else
+                                        asset = await Client.Assets.RequestImageAsync(capturedItem.TeFace.TextureID, capturedItem.ImageType);
+
+                                    if (asset?.AssetData != null)
                                     {
-                                        case TextureRequestState.Finished:
-                                            item.TextureData = asset.AssetData;
-                                            PendingTextures.Enqueue(item);
-                                            PendingTexturesAvailable.Release();
-                                            break;
-
-                                        case TextureRequestState.Aborted:
-                                        case TextureRequestState.NotFound:
-                                        case TextureRequestState.Timeout:
-                                            item.Data.TextureInfo.FetchFailed = true;
-                                            break;
+                                        capturedItem.TextureData = asset.AssetData;
+                                        PendingTextures.Enqueue(capturedItem);
+                                        PendingTexturesAvailable.Release();
                                     }
-                                }
-
-                                if (item.ImageType == ImageType.ServerBaked && !string.IsNullOrEmpty(item.BakeName))
-                                { // Server side bake
-                                    Client.Assets.RequestServerBakedImage(item.AvatarID, item.TeFace.TextureID, item.BakeName, handler);
-                                }
-                                else
-                                { // Regular texture 
-                                    Client.Assets.RequestImage(item.TeFace.TextureID, item.ImageType, handler);
-                                }
+                                    else
+                                    {
+                                        capturedItem.Data.TextureInfo.FetchFailed = true;
+                                    }
+                                });
 
                                 texturesRequestedThisFrame++;
                             }
@@ -435,18 +429,12 @@ namespace Radegast.Rendering
                 }
                 else
                 {
-                    instance.Client.Assets.RequestImage(textureID, (state, assetTexture) =>
-                        {
-                            if (state == TextureRequestState.Finished)
-                            {
-                                RHelp.SaveCachedImage(assetTexture.AssetData, textureID,
-                                    true, false, false);
-                            }
-
-                            gotImage.Set();
-                        }
-                    );
-                    gotImage.WaitOne(TimeSpan.FromMinutes(1), false);
+                    var assetTexture = System.Threading.Tasks.Task.Run(
+                        () => instance.Client.Assets.RequestImageAsync(textureID)).GetAwaiter().GetResult();
+                    if (assetTexture?.AssetData != null)
+                    {
+                        RHelp.SaveCachedImage(assetTexture.AssetData, textureID, true, false, false);
+                    }
                 }
 
                 if (img == null) { return false; }

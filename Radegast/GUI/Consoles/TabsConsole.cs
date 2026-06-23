@@ -22,8 +22,9 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -136,7 +137,7 @@ namespace Radegast
             client.Self.SetDisplayNameReply += Self_SetDisplayNameReply;
             client.Avatars.DisplayNameUpdate += Avatars_DisplayNameUpdate;
             client.Network.EventQueueRunning += Network_EventQueueRunning;
-            client.Network.RegisterCallback(OpenMetaverse.Packets.PacketType.ScriptTeleportRequest, ScriptTeleportRequestHandler);
+            client.Network.RegisterCallback(LibreMetaverse.Packets.PacketType.ScriptTeleportRequest, ScriptTeleportRequestHandler);
         }
 
         private void UnregisterClientEvents(GridClient client)
@@ -147,7 +148,7 @@ namespace Radegast
             client.Self.SetDisplayNameReply -= Self_SetDisplayNameReply;
             client.Avatars.DisplayNameUpdate -= Avatars_DisplayNameUpdate;
             client.Network.EventQueueRunning -= Network_EventQueueRunning;
-            client.Network.UnregisterCallback(OpenMetaverse.Packets.PacketType.ScriptTeleportRequest, ScriptTeleportRequestHandler);
+            client.Network.UnregisterCallback(LibreMetaverse.Packets.PacketType.ScriptTeleportRequest, ScriptTeleportRequestHandler);
         }
 
         private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
@@ -191,7 +192,7 @@ namespace Radegast
                 return;
             }
 
-            var msg = (OpenMetaverse.Packets.ScriptTeleportRequestPacket)e.Packet;
+            var msg = (LibreMetaverse.Packets.ScriptTeleportRequestPacket)e.Packet;
 
             if (TabExists("map"))
             {
@@ -266,7 +267,7 @@ namespace Radegast
             }
 
             // Is this object muted
-            if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.ObjectID) // muted object by id
+            if (client.Self.MuteList.Values.Any(m => (m.Type == MuteType.Object && m.ID == e.ObjectID) // muted object by id
                 || (m.Type == MuteType.ByName && m.Name == e.ObjectName) // object muted by name
                 )) return;
 
@@ -276,7 +277,7 @@ namespace Radegast
         private void Self_ScriptQuestion(object sender, ScriptQuestionEventArgs e)
         {
             // Is this object muted
-            if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.TaskID) // muted object by id
+            if (client.Self.MuteList.Values.Any(m => (m.Type == MuteType.Object && m.ID == e.TaskID) // muted object by id
                 || (m.Type == MuteType.ByName && m.Name == e.ObjectName) // object muted by name
                 )) return;
 
@@ -314,7 +315,7 @@ namespace Radegast
                     ForceCloseTab("login");
                 }
 
-                _ = client.Self.RetrieveInstantMessages();
+                _ = client.Self.RetrieveInstantMessagesAsync();
             }
         }
 
@@ -379,7 +380,7 @@ namespace Radegast
         private void Self_LoadURL(object sender, LoadUrlEventArgs e)
         {
             // Is the object or the owner muted?
-            if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.ObjectID) // muted object by id 
+            if (client.Self.MuteList.Values.Any(m => (m.Type == MuteType.Object && m.ID == e.ObjectID) // muted object by id
                 || (m.Type == MuteType.ByName && m.Name == e.ObjectName) // object muted by name
                 || (m.Type == MuteType.Resident && m.ID == e.OwnerID) // object's owner muted
                 )) return;
@@ -390,7 +391,7 @@ namespace Radegast
         private void NetComInstantMessageReceived(object sender, InstantMessageEventArgs e)
         {
             // Messaage from someone we muted?
-            if (null != client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID)) return;
+            if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID)) return;
 
             try
             {
@@ -513,7 +514,7 @@ namespace Radegast
 
                 case InstantMessageDialog.GroupNotice:
                     // Is this group muted?
-                    if (null != client.Self.MuteList.Find(me => me.Type == MuteType.Group && me.ID == e.IM.FromAgentID)) break;
+                    if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.Group && me.ID == e.IM.FromAgentID)) break;
 
                     instance.MainForm.AddNotification(new ntfGroupNotice(instance, e.IM));
                     break;
@@ -533,7 +534,7 @@ namespace Radegast
 
                 case InstantMessageDialog.TaskInventoryOffered:
                     // Is the object muted by name?
-                    if (null != client.Self.MuteList.Find(me => me.Type == MuteType.ByName && me.Name == e.IM.FromAgentName)) break;
+                    if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.ByName && me.Name == e.IM.FromAgentName)) break;
 
                     var iont = new ntfInventoryOffer(instance, e.IM);
                     instance.MainForm.AddNotification(iont);
@@ -623,7 +624,7 @@ namespace Radegast
         private void HandleIMFromObject(InstantMessageEventArgs e)
         {
             // Is the object or the owner muted?
-            if (null != client.Self.MuteList.Find(m => (m.Type == MuteType.Object && m.ID == e.IM.IMSessionID) // muted object by id 
+            if (client.Self.MuteList.Values.Any(m => (m.Type == MuteType.Object && m.ID == e.IM.IMSessionID) // muted object by id
                 || (m.Type == MuteType.ByName && m.Name == e.IM.FromAgentName) // object muted by name
                 || (m.Type == MuteType.Resident && m.ID == e.IM.FromAgentID) // object's owner muted
                 )) return;
@@ -750,7 +751,7 @@ namespace Radegast
         private void HandleGroupIM(InstantMessageEventArgs e)
         {
             // Ignore group IM from a muted group
-            if (null != client.Self.MuteList.Find(me => me.Type == MuteType.Group && (me.ID == e.IM.IMSessionID || me.ID == e.IM.FromAgentID))) return;
+            if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.Group && (me.ID == e.IM.IMSessionID || me.ID == e.IM.FromAgentID))) return;
 
             if (TabExists(e.IM.IMSessionID.ToString()))
             {

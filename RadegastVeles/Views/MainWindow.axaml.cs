@@ -27,7 +27,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Veles.Core;
 using Radegast.Veles.Plugins;
@@ -479,7 +479,7 @@ public partial class MainWindow : Window
 
     private void TeleportHome()
     {
-        _session.Instance.Client.Self.RequestTeleport(OpenMetaverse.UUID.Zero);
+        _session.Instance.Client.Self.RequestTeleport(LibreMetaverse.UUID.Zero);
     }
 
     private void OnAboutClick(object? sender, RoutedEventArgs e)

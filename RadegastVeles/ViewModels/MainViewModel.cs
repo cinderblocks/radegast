@@ -20,7 +20,7 @@
 using System;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -200,7 +200,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
-    private void Instance_ShowOnMapRequested(object? sender, OpenMetaverse.UUID agentId)
+    private void Instance_ShowOnMapRequested(object? sender, LibreMetaverse.UUID agentId)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {

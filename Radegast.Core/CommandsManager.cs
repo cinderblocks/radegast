@@ -23,7 +23,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core.Commands;
 using LibreMetaverse;
 

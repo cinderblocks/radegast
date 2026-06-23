@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -21,7 +21,7 @@
 using System;
 using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -83,10 +83,8 @@ namespace Radegast
             var toBan = picker.SelectedAvatars.Keys.ToList();
             if (toBan.Count > 0)
             {
-                _ = Client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
-                {
-                    parent.RefreshBans();
-                });
+                _ = Client.Groups.RequestBanActionAsync(group.ID, GroupBanAction.Ban, toBan.ToArray())
+                    .ContinueWith(_ => parent.RefreshBans());
             }
             Close();
         }

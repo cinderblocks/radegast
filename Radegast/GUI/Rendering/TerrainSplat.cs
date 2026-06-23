@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -22,7 +22,7 @@ using System;
 using System.Diagnostics;
 using System.Threading;
 using CoreJ2K;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 
 namespace Radegast.Rendering
@@ -87,12 +87,11 @@ namespace Radegast.Rendering
             #region Texture Fetching
             for (int i = 0; i < 4; i++)
             {
-                AutoResetEvent textureDone = new AutoResetEvent(false);
                 UUID textureID = textureIDs[i];
-
-                instance.Client.Assets.RequestImage(textureID, TextureDownloadCallback(detailTexture, i, textureDone));
-
-                textureDone.WaitOne(60 * 1000, false);
+                var assetTexture = System.Threading.Tasks.Task.Run(
+                    () => instance.Client.Assets.RequestImageAsync(textureID)).GetAwaiter().GetResult();
+                if (assetTexture?.AssetData != null)
+                    detailTexture[i] = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData);
             }
 
             #endregion Texture Fetching
@@ -301,18 +300,6 @@ namespace Radegast.Rendering
             #endregion Texture Compositing
 
             return rotated;
-        }
-
-        private static TextureDownloadCallback TextureDownloadCallback(SKBitmap[] detailTexture, int i, AutoResetEvent textureDone)
-        {
-            return (state, assetTexture) =>
-            {
-                if (state == TextureRequestState.Finished && assetTexture?.AssetData != null)
-                {
-                    detailTexture[i] = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData);
-                }
-                textureDone.Set();
-            };
         }
 
         public static SKBitmap ResizeBitmap(SKBitmap b, int nWidth, int nHeight)

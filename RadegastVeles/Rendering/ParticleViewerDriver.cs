@@ -24,11 +24,11 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 using Radegast.Veles.Core;
-using OmVector3    = OpenMetaverse.Vector3;
-using OmQuaternion = OpenMetaverse.Quaternion;
+using OmVector3    = LibreMetaverse.Vector3;
+using OmQuaternion = LibreMetaverse.Quaternion;
 using Vector3      = System.Numerics.Vector3;
 using Vector4      = System.Numerics.Vector4;
 

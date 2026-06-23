@@ -24,9 +24,9 @@ using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
-using OmVector3  = OpenMetaverse.Vector3;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
+using OmVector3  = LibreMetaverse.Vector3;
 using Quaternion = System.Numerics.Quaternion;
 using Vector3    = System.Numerics.Vector3;
 

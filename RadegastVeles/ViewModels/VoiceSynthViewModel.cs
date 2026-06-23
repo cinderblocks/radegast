@@ -23,7 +23,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 using Radegast.Veles.Core;
 using Radegast.Veles.Voice;
 

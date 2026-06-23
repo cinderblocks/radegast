@@ -26,8 +26,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -225,9 +225,9 @@ public partial class MapViewModel : ClientAwareViewModelBase
         var region = RegionSearch.Trim();
         var destination = new Vector3(CoordX, CoordY, CoordZ);
 
-        Task.Run(() =>
+        _ = Task.Run(async () =>
         {
-            if (!Client.Self.Teleport(region, destination))
+            if (!await Client.Self.TeleportAsync(region, destination))
             {
                 Dispatcher.UIThread.Post(() =>
                 {
@@ -420,9 +420,10 @@ public partial class MapViewModel : ClientAwareViewModelBase
         // Decode the landmark asset to find the region
         StatusText = $"Locating {value.Name}...";
         var capturedEntry = value;
-        Client.Assets.RequestAsset(value.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+        _ = Task.Run(async () =>
         {
-            if (!transfer.Success || asset is not AssetLandmark la || !la.Decode()) return;
+            var asset = await Client.Assets.RequestAssetAsync(value.AssetUUID, AssetType.Landmark, true);
+            if (asset is not AssetLandmark la || !la.Decode()) return;
             var localPos = la.Position;
             lock (_navPendingByRegionId)
                 _navPendingByRegionId[la.RegionID] = ((int)localPos.X, (int)localPos.Y, (int)localPos.Z);
@@ -443,7 +444,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
             List<InventoryBase> contents;
             try
             {
-                contents = await Client.Inventory.RequestFolderContents(
+                contents = await Client.Inventory.RequestFolderContentsAsync(
                     favFolderId, Client.Self.AgentID, false, true, InventorySortOrder.ByName);
             }
             catch { return; }
@@ -481,9 +482,10 @@ public partial class MapViewModel : ClientAwareViewModelBase
             {
                 var capturedName = lm.Name;
                 var capturedUUID = lm.AssetUUID;
-                Client.Assets.RequestAsset(lm.AssetUUID, AssetType.Landmark, true, (transfer, asset) =>
+                _ = Task.Run(async () =>
                 {
-                    if (transfer.Success && asset is AssetLandmark la && la.Decode())
+                    var asset = await Client.Assets.RequestAssetAsync(capturedUUID, AssetType.Landmark, true);
+                    if (asset is AssetLandmark la && la.Decode())
                     {
                         lock (_pendingFavByRegionId)
                         {

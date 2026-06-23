@@ -28,9 +28,9 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using OpenMetaverse;
-using OpenMetaverse.Messages.Linden;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.Messages.Linden;
+using LibreMetaverse.StructuredData;
 using Radegast;
 using Radegast.Media;
 using Radegast.Veles.Core;
@@ -571,8 +571,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
 
         // Apply immediately
-        _instance.Client.Settings.USE_ASSET_CACHE = AssetCacheEnabled;
-        _instance.Client.Settings.ASSET_CACHE_MAX_SIZE = (long)AssetCacheMaxSizeMb * 1024 * 1024;
+        _instance.Client.Settings.AssetCache.Enabled = AssetCacheEnabled;
+        _instance.Client.Settings.AssetCache.MaxSize = (long)AssetCacheMaxSizeMb * 1024 * 1024;
 
         // Texture disk cache
         TextureDiskCacheEnabled = s["texture_disk_cache_enabled"].Type != OSDType.Unknown
@@ -609,7 +609,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["chat_logging_enabled"].AsBoolean() : true;
         AssetCacheDir = s["asset_cache_dir"].Type != OSDType.Unknown
             ? s["asset_cache_dir"].AsString()
-            : _instance.Client.Settings.ASSET_CACHE_DIR;
+            : _instance.Client.Settings.AssetCache.Dir;
 
         // Grids — apply persisted user grids to the manager, then populate the display list
         if (s["user_grids"] is OSDArray savedUserGrids)
@@ -701,8 +701,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["decode_per_decode_mb"]      = OSD.FromReal(DecodePerDecodeMb);
         s["sk_bitmap_cache_cap"]       = OSD.FromInteger(SkBitmapCacheCap);
         GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
-        _instance.Client.Settings.USE_ASSET_CACHE      = AssetCacheEnabled;
-        _instance.Client.Settings.ASSET_CACHE_MAX_SIZE = (long)AssetCacheMaxSizeMb * 1024 * 1024;
+        _instance.Client.Settings.AssetCache.Enabled      = AssetCacheEnabled;
+        _instance.Client.Settings.AssetCache.MaxSize = (long)AssetCacheMaxSizeMb * 1024 * 1024;
 
         // Re-tune
         GridTextureHelper.TuneDecodeGateForAvailableRam(DecodeReservedRamMb, DecodePerDecodeMb);
@@ -756,7 +756,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         var defaultCacheDir = Path.Combine(_instance.UserDir, "cache");
         if (!string.IsNullOrWhiteSpace(AssetCacheDir))
         {
-            _instance.Client.Settings.ASSET_CACHE_DIR = AssetCacheDir;
+            _instance.Client.Settings.AssetCache.Dir = AssetCacheDir;
             if (string.Equals(AssetCacheDir, defaultCacheDir, StringComparison.OrdinalIgnoreCase))
                 s.Remove("asset_cache_dir");
             else

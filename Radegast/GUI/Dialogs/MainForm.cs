@@ -30,7 +30,7 @@ using System.Windows.Forms;
 using System.Resources;
 using System.IO;
 using System.Linq;
-using OpenMetaverse;
+using LibreMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
 using System.Runtime.InteropServices;
 
@@ -1159,7 +1159,7 @@ namespace Radegast
             {
                 try
                 {
-                    deleteFolder(new DirectoryInfo(client.Settings.ASSET_CACHE_DIR));
+                    deleteFolder(new DirectoryInfo(client.Settings.AssetCache.Dir));
                     Logger.DebugLog($"Cleaned the cache directory.");
                 }
                 catch (Exception ex)
@@ -1242,28 +1242,27 @@ namespace Radegast
 
             name += location;
 
-            client.Inventory.RequestCreateItem(
-                client.Inventory.FindFolderForType(AssetType.Landmark),
-                name,
-                tlblParcel.ToolTipText,
-                AssetType.Landmark,
-                UUID.Random(),
-                InventoryType.Landmark,
-                PermissionMask.All,
-                (success, item) =>
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var item = await client.Inventory.CreateItemAsync(
+                    client.Inventory.FindFolderForType(AssetType.Landmark),
+                    name,
+                    tlblParcel.ToolTipText,
+                    AssetType.Landmark,
+                    UUID.Random(),
+                    InventoryType.Landmark,
+                    PermissionMask.All);
+                if (item != null)
                 {
-                    if (success)
-                    {
-                        ThreadingHelper.SafeInvoke(this, new Action(() =>
+                    ThreadingHelper.SafeInvoke(this, new Action(() =>
+                        {
+                            Landmark ln = new Landmark(instance, (InventoryLandmark)item)
                             {
-                                Landmark ln = new Landmark(instance, (InventoryLandmark) item)
-                                {
-                                    Dock = DockStyle.Fill, Detached = true
-                                };
-                            }), instance.MonoRuntime);
-                    }
+                                Dock = DockStyle.Fill, Detached = true
+                            };
+                        }), instance.MonoRuntime);
                 }
-            );
+            });
         }
 
 
@@ -1678,8 +1677,9 @@ namespace Radegast
 
         private void setMaturityLevel(string level)
         { 
-            _ = client.Self.SetAgentAccessAsync(level, res =>
+            _ = System.Threading.Tasks.Task.Run(async () =>
             {
+                var res = await client.Self.SetAgentAccessAsync(level);
                 if (res.Success)
                 {
                     TabConsole.DisplayNotificationInChat($"Successfully changed maturity access level to {res.NewLevel}");

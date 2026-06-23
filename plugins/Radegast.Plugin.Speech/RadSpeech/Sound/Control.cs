@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -41,7 +41,7 @@ namespace RadegastSpeech.Sound
         internal abstract void Play(
             string filename,
             int sps,
-            OpenMetaverse.Vector3 pos,
+            LibreMetaverse.Vector3 pos,
             bool deleteAfter,
             bool spatialized);
 
@@ -53,7 +53,7 @@ namespace RadegastSpeech.Sound
         internal virtual Task PlayAsync(
             string filename,
             int sps,
-            OpenMetaverse.Vector3 pos,
+            LibreMetaverse.Vector3 pos,
             bool deleteAfter,
             bool spatialized)
         {
@@ -69,7 +69,7 @@ namespace RadegastSpeech.Sound
         internal virtual Task PlayAndWaitAsync(
             string filename,
             bool global,
-            OpenMetaverse.Vector3 pos)
+            LibreMetaverse.Vector3 pos)
         {
             // Default: call PlayAsync and return its Task
             return PlayAsync(filename, 16000, pos, true, true);

@@ -28,7 +28,7 @@ using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Controls;

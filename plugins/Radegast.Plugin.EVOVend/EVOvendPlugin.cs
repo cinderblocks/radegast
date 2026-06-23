@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
@@ -6,8 +6,8 @@ using System.Data;
 using System.Linq;
 using System.Text;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using System.Threading;
 using System.IO;
 using System.Net;
@@ -45,7 +45,7 @@ namespace Radegast.Plugin.EVOVend
 
         public static System.Threading.Timer timer;
         private InventoryManager Manager;
-        private OpenMetaverse.Inventory Inventory;
+        private LibreMetaverse.Inventory Inventory;
 
         private string vendURL = @"http://evosl.org/TREK/SL/SLvendor.php";
 	private string loginURL = @"http://evosl.org/TREK/SL/vendor.php";
@@ -413,7 +413,7 @@ namespace Radegast.Plugin.EVOVend
             client.Inventory.RequestUpdateItem(inv);
             client.Inventory.RequestFetchInventory(inv.UUID, inv.OwnerID);
 
-            Manager.GiveItem(inv.UUID, inv.Name, inv.AssetType, OpenMetaverse.UUID.Parse(p.userUUID), false);
+            Manager.GiveItem(inv.UUID, inv.Name, inv.AssetType, LibreMetaverse.UUID.Parse(p.userUUID), false);
             instance.MainForm.TabConsole.DisplayNotificationInChat(pluginName + ": PRODUCT '" + searchRes[0].Name + "' SENT TO " + p.userUUID, ChatBufferTextStyle.StatusBlue);
 
             return true;

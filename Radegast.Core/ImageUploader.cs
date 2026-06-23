@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -22,7 +22,7 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -53,39 +53,22 @@ namespace Radegast
             byte[] data = File.ReadAllBytes(filename);
             start = DateTime.Now;
 
-            var tcs = new TaskCompletionSource<bool>();
-
-            // Register the callback to complete the task source
-            Client.Inventory.RequestCreateItemFromAsset(data, inventoryName, desc, AssetType.Texture, InventoryType.Texture, folder,
-                (success, status, itemID, assetID) =>
-                {
-                    TextureID = assetID;
-                    Success = success;
-                    Status = status;
-                    Duration = DateTime.Now - start;
-                    tcs.TrySetResult(success);
-                });
-
             try
             {
-                Task delayTask = (timeout.HasValue) ? Task.Delay(timeout.Value, cancellationToken) : Task.Delay(Timeout.Infinite, cancellationToken);
+                using var cts = timeout.HasValue
+                    ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                    : null;
+                if (cts != null && timeout.HasValue) cts.CancelAfter(timeout.Value);
+                var ct = cts?.Token ?? cancellationToken;
 
-                var completed = await Task.WhenAny(tcs.Task, delayTask).ConfigureAwait(false);
-
-                if (completed == tcs.Task)
-                {
-                    return await tcs.Task.ConfigureAwait(false);
-                }
-
-                // If we get here, either timeout or cancellation occurred
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    Status = "Texture upload cancelled";
-                    throw new OperationCanceledException(cancellationToken);
-                }
-
-                Status = "Texture upload timed out";
-                return false;
+                var (success, status, itemID, assetID) = await Client.Inventory.RequestCreateItemFromAssetAsync(
+                    data, inventoryName, desc, AssetType.Texture, InventoryType.Texture, folder,
+                    Permissions.FullPermissions, ct).ConfigureAwait(false);
+                TextureID = assetID;
+                Success = success;
+                Status = status;
+                Duration = DateTime.Now - start;
+                return success;
             }
             catch (OperationCanceledException)
             {

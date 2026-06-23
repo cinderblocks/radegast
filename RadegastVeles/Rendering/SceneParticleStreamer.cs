@@ -22,7 +22,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
@@ -239,7 +239,7 @@ internal sealed class SceneParticleStreamer : IDisposable
         return false;
     }
 
-    private static bool IsWithinRadius(OpenMetaverse.Vector3 primPos, OpenMetaverse.Vector3 avatarPos)
+    private static bool IsWithinRadius(LibreMetaverse.Vector3 primPos, LibreMetaverse.Vector3 avatarPos)
     {
         float dx = primPos.X - avatarPos.X;
         float dy = primPos.Y - avatarPos.Y;

@@ -28,7 +28,7 @@ using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast.Commands;
 using Radegast.Media;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core.RLV;
 
 namespace Radegast
@@ -302,7 +302,7 @@ namespace Radegast
                                     GridManger.LoadGrids();
 
                                     Names = new NameManager(this);
-                                    GestureManager = new LibreMetaverse.GestureManager(Client);
+                                    GestureManager = new GestureManager(Client);
                                     LslSyntax = new LslSyntax(Client);
 
                                     IMSessions = new IMSessionManager(this);
@@ -359,27 +359,27 @@ namespace Radegast
 
         private void InitializeClient(GridClient client)
         {
-            client.Settings.MULTIPLE_SIMS = true;
+            client.Settings.Agent.MultipleSims = true;
 
-            client.Settings.USE_INTERPOLATION_TIMER = false;
-            client.Settings.ALWAYS_REQUEST_OBJECTS = true;
-            client.Settings.ALWAYS_DECODE_OBJECTS = true;
-            client.Settings.OBJECT_TRACKING = true;
-            client.Settings.ENABLE_SIMSTATS = true;
-            client.Settings.SEND_AGENT_THROTTLE = true;
-            client.Settings.SEND_AGENT_UPDATES = true;
-            client.Settings.STORE_LAND_PATCHES = true;
+            client.Settings.World.UseInterpolationTimer = false;
+            client.Settings.World.AlwaysRequestObjects = true;
+            client.Settings.World.AlwaysDecodeObjects = true;
+            client.Settings.World.TrackObjects = true;
+            client.Settings.Packets.EnableSimStats = true;
+            client.Settings.Agent.SendThrottle = true;
+            client.Settings.Agent.SendUpdates = true;
+            client.Settings.World.StoreLandPatches = true;
 
-            client.Settings.USE_ASSET_CACHE = true;
-            client.Settings.ASSET_CACHE_DIR = Path.Combine(UserDir, "cache");
+            client.Settings.AssetCache.Enabled = true;
+            client.Settings.AssetCache.Dir = Path.Combine(UserDir, "cache");
             client.Assets.Cache.AutoPruneEnabled = false;
             client.Assets.Cache.ComputeAssetCacheFilename = ComputeCacheName;
 
             client.Throttle.Total = 5000000f;
-            client.Settings.THROTTLE_OUTGOING_PACKETS = false;
-            client.Settings.LOGIN_TIMEOUT = 120 * 1000;
-            client.Settings.SIMULATOR_TIMEOUT = 180 * 1000;
-            client.Settings.MAX_CONCURRENT_TEXTURE_DOWNLOADS = 20;
+            client.Settings.Packets.ThrottleOutgoing = false;
+            client.Settings.Timing.LoginTimeout = 120 * 1000;
+            client.Settings.Timing.SimulatorTimeout = 180 * 1000;
+            client.Settings.TexturePipeline.MaxConcurrentDownloads = 20;
 
             client.Self.Movement.AutoResetControls = false;
             client.Self.Movement.UpdateInterval = 250;

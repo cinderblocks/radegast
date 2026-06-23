@@ -19,7 +19,7 @@
 
 using System.Collections.Generic;
 using NUnit.Framework;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast.Tests
 {

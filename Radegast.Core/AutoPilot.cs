@@ -19,7 +19,7 @@
  */
 
 using System.Collections.Generic;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading;
 using System.Threading.Tasks;
 

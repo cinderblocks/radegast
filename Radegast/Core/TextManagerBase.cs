@@ -1,6 +1,6 @@
-﻿using Newtonsoft.Json;
-using OpenMetaverse.StructuredData;
-using OpenMetaverse;
+using Newtonsoft.Json;
+using LibreMetaverse.StructuredData;
+using LibreMetaverse;
 using System;
 using System.Collections.Generic;
 using SkiaSharp;

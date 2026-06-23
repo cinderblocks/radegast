@@ -20,7 +20,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using OpenMetaverse;
+using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
@@ -377,7 +377,7 @@ internal sealed class AvatarPhysicsSimulator
     /// </summary>
     private float GetDriverPositionLocal(PhysicsChannel ch)
     {
-        if (!OpenMetaverse.VisualParams.Params.TryGetValue(ch.DriverParamId, out var vpDef))
+        if (!LibreMetaverse.VisualParams.Params.TryGetValue(ch.DriverParamId, out var vpDef))
             return 0.5f;
         float range = vpDef.MaxValue - vpDef.MinValue;
         if (range < 1e-6f) return 0f;
@@ -389,7 +389,7 @@ internal sealed class AvatarPhysicsSimulator
     private float GetParam(int paramId, float fallback)
     {
         if (_vpWeights.TryGetValue(paramId, out var v)) return v;
-        if (OpenMetaverse.VisualParams.Params.TryGetValue(paramId, out var vp)) return vp.DefaultValue;
+        if (LibreMetaverse.VisualParams.Params.TryGetValue(paramId, out var vp)) return vp.DefaultValue;
         return fallback;
     }
 
@@ -480,47 +480,47 @@ internal static class PhysicsVolumeMorphs
     //   offset = volumeMorphPos * new_value_local
     // where new_value_local is in [min..max].
 
-    public readonly record struct VolumeMorph(string BoneName, OpenMetaverse.Vector3 PosDelta);
+    public readonly record struct VolumeMorph(string BoneName, LibreMetaverse.Vector3 PosDelta);
 
     private static readonly Dictionary<int, VolumeMorph[]> s_morphs = new()
     {
         // Breast_Physics_UpDown_Driven (1200): min=-3, max=3
         // LEFT_PEC  pos=(0,0,-0.01), RIGHT_PEC pos=(0,0,-0.01)
         [1200] = [
-            new VolumeMorph("LEFT_PEC",  new OpenMetaverse.Vector3(0f,  0f,   -0.01f)),
-            new VolumeMorph("RIGHT_PEC", new OpenMetaverse.Vector3(0f,  0f,   -0.01f)),
+            new VolumeMorph("LEFT_PEC",  new LibreMetaverse.Vector3(0f,  0f,   -0.01f)),
+            new VolumeMorph("RIGHT_PEC", new LibreMetaverse.Vector3(0f,  0f,   -0.01f)),
         ],
 
         // Breast_Physics_InOut_Driven (1201): min=-1.25, max=1.25
         // LEFT_PEC  pos=(0,-0.026,0), RIGHT_PEC pos=(0,0.026,0)
         [1201] = [
-            new VolumeMorph("LEFT_PEC",  new OpenMetaverse.Vector3(0f, -0.026f, 0f)),
-            new VolumeMorph("RIGHT_PEC", new OpenMetaverse.Vector3(0f,  0.026f, 0f)),
+            new VolumeMorph("LEFT_PEC",  new LibreMetaverse.Vector3(0f, -0.026f, 0f)),
+            new VolumeMorph("RIGHT_PEC", new LibreMetaverse.Vector3(0f,  0.026f, 0f)),
         ],
 
         // Belly_Physics_Torso_UpDown_Driven (1204): min=-1, max=1
         // BELLY pos=(0,0,0.05)
         [1204] = [
-            new VolumeMorph("BELLY", new OpenMetaverse.Vector3(0f, 0f, 0.05f)),
+            new VolumeMorph("BELLY", new LibreMetaverse.Vector3(0f, 0f, 0.05f)),
         ],
 
         // Butt_Physics_UpDown_Driven (1205): min=-1, max=1
         // BUTT pos=(0,0,0.05)
         [1205] = [
-            new VolumeMorph("BUTT", new OpenMetaverse.Vector3(0f, 0f, 0.05f)),
+            new VolumeMorph("BUTT", new LibreMetaverse.Vector3(0f, 0f, 0.05f)),
         ],
 
         // Butt_Physics_LeftRight_Driven (1206): min=-1, max=1
         // BUTT pos=(0,0.05,0)
         [1206] = [
-            new VolumeMorph("BUTT", new OpenMetaverse.Vector3(0f, 0.05f, 0f)),
+            new VolumeMorph("BUTT", new LibreMetaverse.Vector3(0f, 0.05f, 0f)),
         ],
 
         // Breast_Physics_LeftRight_Driven (1207): min=-2, max=2
         // LEFT_PEC  pos=(0,0.03,0), RIGHT_PEC pos=(0,0.03,0)
         [1207] = [
-            new VolumeMorph("LEFT_PEC",  new OpenMetaverse.Vector3(0f, 0.03f, 0f)),
-            new VolumeMorph("RIGHT_PEC", new OpenMetaverse.Vector3(0f, 0.03f, 0f)),
+            new VolumeMorph("LEFT_PEC",  new LibreMetaverse.Vector3(0f, 0.03f, 0f)),
+            new VolumeMorph("RIGHT_PEC", new LibreMetaverse.Vector3(0f, 0.03f, 0f)),
         ],
 
         // 1202 (Belly_Physics_Legs_UpDown_Driven) and 1203 (Belly_Physics_Skirt_UpDown_Driven)
@@ -537,16 +537,16 @@ internal static class PhysicsVolumeMorphs
     /// <returns>
     /// Accumulated position offsets per collision-volume bone name.
     /// </returns>
-    public static Dictionary<string, OpenMetaverse.Vector3> ComputeBoneOffsets(
+    public static Dictionary<string, LibreMetaverse.Vector3> ComputeBoneOffsets(
         Dictionary<int, float> drivenWeights,
         IReadOnlyDictionary<int, float> vpWeights)
     {
-        var offsets = new Dictionary<string, OpenMetaverse.Vector3>(StringComparer.Ordinal);
+        var offsets = new Dictionary<string, LibreMetaverse.Vector3>(StringComparer.Ordinal);
 
         foreach (var (paramId, normalised) in drivenWeights)
         {
             if (!s_morphs.TryGetValue(paramId, out var morphs)) continue;
-            if (!OpenMetaverse.VisualParams.Params.TryGetValue(paramId, out var vpDef)) continue;
+            if (!LibreMetaverse.VisualParams.Params.TryGetValue(paramId, out var vpDef)) continue;
 
             // Read MaxEffect from the corresponding channel's maxEffect param.
             // The MaxEffect param for a given driven param is stored on the channel object.

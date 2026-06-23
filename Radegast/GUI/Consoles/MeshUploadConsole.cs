@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -24,7 +24,7 @@ using System.Globalization;
 using System.Windows.Forms;
 using System.IO;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading.Tasks;
 using LibreMetaverse;
 
@@ -187,7 +187,7 @@ namespace Radegast
                     }
                     Msg($"Processing: {filename}");
 
-                    var parser = new OpenMetaverse.ImportExport.ColladaLoader();
+                    var parser = new LibreMetaverse.ImportExport.ColladaLoader();
                     var prims = parser.Load(filename, UploadImages);
                     if (prims == null || prims.Count == 0)
                     {
@@ -200,18 +200,15 @@ namespace Radegast
 
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    var uploader = new OpenMetaverse.ImportExport.ModelUploader(client, prims,
+                    var uploader = new LibreMetaverse.ImportExport.ModelUploader(client, prims,
                         Path.GetFileNameWithoutExtension(filename), "Radegast " + DateTime.Now.ToString(CultureInfo.InvariantCulture))
                     {
                         IncludePhysicsStub = true,
                         UseModelAsPhysics = false
                     };
 
-                    await uploader.Upload((res =>
-                    {
-                        Msg(res == null ? "Upload failed." : "Upload success.");
-
-                    }), cancellationToken);
+                    var uploadRes = await uploader.UploadAsync(cancellationToken);
+                    Msg(uploadRes == null ? "Upload failed." : "Upload success.");
                 }
             }
             catch (OperationCanceledException)

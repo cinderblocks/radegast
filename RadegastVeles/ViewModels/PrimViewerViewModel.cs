@@ -26,7 +26,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Numerics;
-using OpenMetaverse;
+using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
@@ -79,7 +79,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
     {
         _instance    = instance;
         _rootLocalId = rootLocalId;
-        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != OpenMetaverse.StructuredData.OSDType.Unknown
+        _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
         _builder     = new PrimMeshBuilder(Client);
 
@@ -235,7 +235,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        static OpenMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
+        static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
         {

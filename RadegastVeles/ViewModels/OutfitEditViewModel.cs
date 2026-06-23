@@ -26,7 +26,7 @@ using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -105,7 +105,7 @@ public partial class OutfitEditViewModel : ClientAwareViewModelBase
 
         try
         {
-            var links = await cof.GetCurrentOutfitLinks().ConfigureAwait(false);
+            var links = await cof.GetCurrentOutfitLinksAsync().ConfigureAwait(false);
             var items = new List<OutfitWornItem>(links.Count);
 
             foreach (var link in links)
@@ -165,7 +165,7 @@ public partial class OutfitEditViewModel : ClientAwareViewModelBase
     {
         var cof = _instance.COF;
         if (cof == null || actual is not InventoryItem invItem) return;
-        await cof.RemoveFromOutfit(invItem, CancellationToken.None).ConfigureAwait(false);
+        await cof.RemoveFromOutfitAsync(invItem, CancellationToken.None).ConfigureAwait(false);
         await RefreshAsync().ConfigureAwait(false);
     }
 
@@ -196,7 +196,7 @@ public partial class OutfitEditViewModel : ClientAwareViewModelBase
         }
         // Brief delay for server to acknowledge the new folder
         await Task.Delay(500).ConfigureAwait(false);
-        var links = await cof.GetCurrentOutfitLinks().ConfigureAwait(false);
+        var links = await cof.GetCurrentOutfitLinksAsync().ConfigureAwait(false);
         foreach (var link in links)
         {
             var actual = cof.ResolveInventoryLink(link);
@@ -204,7 +204,6 @@ public partial class OutfitEditViewModel : ClientAwareViewModelBase
             await Client.Inventory.CreateLinkAsync(
                 newFolderId, actual.UUID, actual.Name,
                 string.Empty, actual.InventoryType, UUID.Random(),
-                (_, _) => { },
                 CancellationToken.None
             ).ConfigureAwait(false);
         }
