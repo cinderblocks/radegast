@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -24,7 +24,6 @@ using System.Text;
 using System.Xml;
 using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using CoreJ2K;
 using LibreMetaverse;
@@ -51,7 +50,7 @@ namespace Radegast
 
         public static readonly List<UUID> BuiltInTextures = new List<UUID>() {
             new UUID("89556747-24cb-43ed-920b-47caed15465f"), // default
-            new UUID("be293869-d0d9-0a69-5989-ad27f1946fd4"), // default sculpt 
+            new UUID("be293869-d0d9-0a69-5989-ad27f1946fd4"), // default sculpt
             new UUID("5748decc-f629-461c-9a36-a35a221fe21f"), // blank
             new UUID("38b86f85-2575-52a9-a531-23108d8da837"), // invisible
             new UUID("8dcd4a48-2d37-4909-9f78-f7a9eb4ef903"), // tranparent
@@ -226,8 +225,8 @@ namespace Radegast
                     MeshedPrims.Add(mesh);
                 }
 
-                string msg = MeshedPrims.Count == 0 
-                    ? string.Format("Can export 0 out of {0} prims.{1}{1}Skipping.", Prims.Count, Environment.NewLine) 
+                string msg = MeshedPrims.Count == 0
+                    ? string.Format("Can export 0 out of {0} prims.{1}{1}Skipping.", Prims.Count, Environment.NewLine)
                     : string.Format("Exported {0} out of {1} objects to{2}{2}{3}", MeshedPrims.Count, Prims.Count, Environment.NewLine, FileName);
                 GenerateCollada();
                 File.WriteAllText(FileName, DocToString(Doc));
@@ -270,7 +269,7 @@ namespace Radegast
                         {
                             case "PNG":
                             {
-                                using (var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100)) 
+                                using (var encoded = bitmap.Encode(SKEncodedImageFormat.Png, 100))
                                     File.WriteAllBytes(fullFileName, encoded.ToArray());
                                 break;
                             }
@@ -556,7 +555,7 @@ namespace Radegast
                     image.Attributes.Append(Doc.CreateAttribute("name")).InnerText = colladaName;
                 }
 
-                image.AppendChild(Doc.CreateElement("init_from"))!.InnerText = System.Web.HttpUtility.UrlEncode(name + "." + ImageFormat.ToLower());
+                image.AppendChild(Doc.CreateElement("init_from"))!.InnerText = System.Net.WebUtility.UrlEncode(name + "." + ImageFormat.ToLower());
             }
         }
 

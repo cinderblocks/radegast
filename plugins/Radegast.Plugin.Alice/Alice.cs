@@ -28,7 +28,6 @@ using LibreMetaverse;
 using LibreMetaverse.StructuredData;
 using AIMLbot;
 using System.Threading.Tasks;
-using Radegast.Core;
 
 namespace Radegast.Plugin.Alice
 {

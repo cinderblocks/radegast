@@ -18,7 +18,6 @@
  */
 
 using LibreMetaverse;
-using LibreMetaverse;
 using Radegast.Commands;
 using Radegast.Core.RLV;
 using Radegast.Media;

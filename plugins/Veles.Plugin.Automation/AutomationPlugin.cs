@@ -19,12 +19,10 @@
 
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using Avalonia.Platform.Storage;
 using LibreMetaverse;
 using Radegast.Veles.PluginApi;
-using Veles.Plugin.Automation.UI;
 
 namespace Veles.Plugin.Automation;
 

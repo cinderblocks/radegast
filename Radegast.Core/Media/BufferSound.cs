@@ -26,7 +26,6 @@ using System.Collections.Generic;
 using FMOD;
 using LibreMetaverse;
 using LibreMetaverse.Assets;
-using System.Threading;
 
 namespace Radegast.Media
 {

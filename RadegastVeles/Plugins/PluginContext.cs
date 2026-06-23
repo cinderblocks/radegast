@@ -27,7 +27,6 @@ using Avalonia.Platform.Storage;
 using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.PluginApi;
-using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Plugins;
 

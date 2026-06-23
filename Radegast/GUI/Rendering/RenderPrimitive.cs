@@ -23,7 +23,6 @@ using System.Collections.Generic;
 using OpenTK.Graphics.OpenGL;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
-using SkiaSharp;
 
 namespace Radegast.Rendering
 {

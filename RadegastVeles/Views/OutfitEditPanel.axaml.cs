@@ -17,7 +17,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Radegast.Veles.ViewModels;

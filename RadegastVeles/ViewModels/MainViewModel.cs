@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using LibreMetaverse;
 using Radegast.Veles.Core;

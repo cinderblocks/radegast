@@ -3,28 +3,26 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
-using LibreMetaverse;
 using LibreMetaverse;
 
 namespace Radegast
@@ -134,7 +132,7 @@ namespace Radegast
 
             mapLinkInfo = new MapLinkInfo()
             {
-                RegionName = HttpUtility.UrlDecode(region),
+                RegionName = WebUtility.UrlDecode(region),
                 X = x,
                 Y = y,
                 Z = z
@@ -152,7 +150,7 @@ namespace Radegast
                     @"(?<appcommand>agent)/(?<agent_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/(?<action>[a-z]+)|" +
                     @"(?<appcommand>apperance)/show|" +
                     @"(?<appcommand>balance)/request|" +
-                    @"(?<appcommand>chat)/(?<channel>\d+)/(?<text>[^\] ]+)|" + 
+                    @"(?<appcommand>chat)/(?<channel>\d+)/(?<text>[^\] ]+)|" +
                     @"(?<appcommand>classified)/(?<classified_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/about|" +
                     @"(?<appcommand>event)/(?<event_id>[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/about|" +
                     @"(?<appcommand>group)/(" +
@@ -226,7 +224,7 @@ namespace Radegast
             {
                 return new ParsedUriInfo()
                 {
-                    DisplayText = HttpUtility.UrlDecode(match.Groups["endingbrace"].Value)
+                    DisplayText = WebUtility.UrlDecode(match.Groups["endingbrace"].Value)
                 };
             }
 
@@ -614,8 +612,8 @@ namespace Radegast
 
         private string GetLinkNameRegionUri(Match match)
         {
-            string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
-            
+            string name = WebUtility.UrlDecode(match.Groups["region_name"].Value);
+
             int? x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : (int?)null;
             int? y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : (int?)null;
             int? z = match.Groups["local_z"].Success ? int.Parse(match.Groups["local_z"].Value) : (int?)null;
@@ -742,7 +740,7 @@ namespace Radegast
 
             if (action == "select" && match.Groups["name"].Success)
             {
-                return HttpUtility.UrlDecode(match.Groups["name"].Value);
+                return WebUtility.UrlDecode(match.Groups["name"].Value);
             }
 
             return match.ToString();
@@ -758,7 +756,7 @@ namespace Radegast
         private string GetLinkNameObjectIm(Match match)
         {
             //UUID objectID = new UUID(match.Groups["object_id"].Value);
-            string name = HttpUtility.UrlDecode(match.Groups["name"].Value);
+            string name = WebUtility.UrlDecode(match.Groups["name"].Value);
             //UUID ownerID = new UUID(match.Groups["owner"].Value);
             //string groupowned = match.Groups["groupowned"].Value;
             //string slurl = match.Groups["slurl"].Value;
@@ -794,7 +792,7 @@ namespace Radegast
 
         private string GetLinkNameTeleport(Match match)
         {
-            string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
+            string name = WebUtility.UrlDecode(match.Groups["region_name"].Value);
 
             string coordinateString = "";
             if (match.Groups["local_x"].Success)
@@ -833,7 +831,7 @@ namespace Radegast
 
         private string GetLinkNameWorldMap(Match match)
         {
-            string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
+            string name = WebUtility.UrlDecode(match.Groups["region_name"].Value);
             string x = match.Groups["local_x"].Success ? match.Groups["local_x"].Value : "128";
             string y = match.Groups["local_y"].Success ? match.Groups["local_y"].Value : "128";
             string z = match.Groups["local_z"].Success ? match.Groups["local_z"].Value : "0";
@@ -845,7 +843,7 @@ namespace Radegast
         #region Link Execution
         private void ExecuteLinkRegionUri(Match match)
         {
-            string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
+            string name = WebUtility.UrlDecode(match.Groups["region_name"].Value);
             int x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : 128;
             int y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : 128;
             int z = match.Groups["local_z"].Success ? int.Parse(match.Groups["local_z"].Value) : 0;
@@ -968,7 +966,7 @@ namespace Radegast
 
         private void ExecuteLinkWorldMap(Match match)
         {
-            string name = HttpUtility.UrlDecode(match.Groups["region_name"].Value);
+            string name = WebUtility.UrlDecode(match.Groups["region_name"].Value);
             int x = match.Groups["local_x"].Success ? int.Parse(match.Groups["local_x"].Value) : 128;
             int y = match.Groups["local_y"].Success ? int.Parse(match.Groups["local_y"].Value) : 128;
             int z = match.Groups["local_z"].Success ? int.Parse(match.Groups["local_z"].Value) : 0;

@@ -19,12 +19,10 @@
 
 using System;
 using System.Collections.Concurrent;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform;
 using Avalonia.Skia;
 using Avalonia.Threading;
 using CoreJ2K;

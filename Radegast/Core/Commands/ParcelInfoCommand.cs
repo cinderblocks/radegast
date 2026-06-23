@@ -19,7 +19,6 @@
  */
 
 using System;
-using System.Linq;
 using System.Text;
 using LibreMetaverse;
 using System.Threading.Tasks;

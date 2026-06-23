@@ -29,7 +29,6 @@ using System.Drawing;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 namespace Radegast.Rendering
 {

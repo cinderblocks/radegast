@@ -39,10 +39,8 @@ using System.Text;
 using System.Windows.Forms;
 using Radegast;
 using LibreMetaverse;
-using Radegast.Core;
-using System.Threading;
 using System.Threading.Tasks;
-using LibreMetaverse;
+
 #endregion
 
 namespace SimpleBuilderNamespace

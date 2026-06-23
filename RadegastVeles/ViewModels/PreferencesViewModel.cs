@@ -31,7 +31,6 @@ using Microsoft.Extensions.Logging;
 using LibreMetaverse;
 using LibreMetaverse.Messages.Linden;
 using LibreMetaverse.StructuredData;
-using Radegast;
 using Radegast.Media;
 using Radegast.Veles.Core;
 

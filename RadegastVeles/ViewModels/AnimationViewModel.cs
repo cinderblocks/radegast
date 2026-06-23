@@ -23,7 +23,6 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
-using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;

@@ -30,7 +30,6 @@ using LibreMetaverse.Assets;
 using LibreMetaverse.Rendering;
 using Radegast.Veles.Core;
 using SkiaSharp;
-using OmQuaternion = LibreMetaverse.Quaternion;
 using Quaternion   = System.Numerics.Quaternion;
 using Vector3      = System.Numerics.Vector3;
 using Vector4      = System.Numerics.Vector4;
