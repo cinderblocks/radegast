@@ -28,7 +28,6 @@ using System.Windows.Forms;
 using System.Drawing.Text;
 using LibreMetaverse;
 using LibreMetaverse.RLV;
-using LibreMetaverse;
 
 namespace Radegast
 {

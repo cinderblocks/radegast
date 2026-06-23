@@ -25,7 +25,6 @@ using System.IO;
 using System.Runtime.InteropServices;
 using CoreJ2K;
 using LibreMetaverse;
-using LibreMetaverse.Imaging;
 using Pfim;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
@@ -34,7 +33,6 @@ using PixelFormat = System.Drawing.Imaging.PixelFormat;
 using Targa = LibreMetaverse.Imaging.Targa;
 using System.Threading;
 using CoreJ2K.Configuration;
-using LibreMetaverse;
 
 namespace Radegast
 {

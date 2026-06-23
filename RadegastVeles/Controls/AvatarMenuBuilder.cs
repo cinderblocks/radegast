@@ -24,7 +24,6 @@ using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
 using Radegast.Veles.Core;
-using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Controls;
 

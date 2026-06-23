@@ -28,7 +28,6 @@ using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast.Commands;
 using Radegast.Media;
-using LibreMetaverse;
 using Radegast.Core.RLV;
 
 namespace Radegast

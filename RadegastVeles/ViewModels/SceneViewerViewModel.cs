@@ -26,7 +26,6 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.Numerics;
 using LibreMetaverse;
 using OmVector3 = LibreMetaverse.Vector3;
 using Vector3   = System.Numerics.Vector3;

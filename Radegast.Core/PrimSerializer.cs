@@ -20,8 +20,6 @@
 
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
-using LibreMetaverse;
 using LibreMetaverse;
 using LibreMetaverse.StructuredData;
 using ClientHelpers = LibreMetaverse.Helpers;

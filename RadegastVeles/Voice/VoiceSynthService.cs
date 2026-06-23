@@ -23,7 +23,6 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using LibreMetaverse.Voice.WebRTC;
 using Microsoft.Extensions.Logging;
 using Radegast.Veles.PluginApi;
 using SherpaOnnx;

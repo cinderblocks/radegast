@@ -30,7 +30,6 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using CoreJ2K;
-using LibreMetaverse.Assets;
 using LibreMetaverse;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;

@@ -25,7 +25,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using LibreMetaverse;
-using LibreMetaverse.Assets;
 using LibreMetaverse.Messages.Linden;
 using Radegast.Veles.Plugins;
 using Radegast.Veles.ViewModels;

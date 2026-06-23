@@ -26,7 +26,6 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using AvaloniaEdit;
 using AvaloniaEdit.CodeCompletion;
-using AvaloniaEdit.Document;
 using Radegast.Veles.Controls;
 using Radegast.Veles.ViewModels;
 

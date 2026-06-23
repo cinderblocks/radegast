@@ -28,7 +28,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using LibreMetaverse;
-using Radegast.Commands;
 using Radegast.Veles.Core;
 using Radegast.Veles.Plugins;
 using Radegast.Veles.PluginApi;

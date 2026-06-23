@@ -26,7 +26,6 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse.Appearance;
-using System.Numerics;
 using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;

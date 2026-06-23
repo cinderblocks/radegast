@@ -21,8 +21,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Threading;
-using LibreMetaverse;
 using LibreMetaverse;
 
 namespace Radegast.Commands

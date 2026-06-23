@@ -24,7 +24,6 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using LibreMetaverse;
 using SkiaSharp;
 using Radegast.Veles.Core;
 using OmVector3    = LibreMetaverse.Vector3;

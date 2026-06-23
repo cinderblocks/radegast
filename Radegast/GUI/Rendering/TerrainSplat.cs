@@ -20,7 +20,6 @@
 
 using System;
 using System.Diagnostics;
-using System.Threading;
 using CoreJ2K;
 using LibreMetaverse;
 using SkiaSharp;

@@ -18,14 +18,12 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using System.Numerics;
 using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;

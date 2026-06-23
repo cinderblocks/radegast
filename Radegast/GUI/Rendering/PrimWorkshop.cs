@@ -43,7 +43,6 @@ using OpenTK.Graphics.OpenGL;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
 using SkiaSharp;
-using SkiaSharp.Views.Desktop;
 
 #endregion Usings
 

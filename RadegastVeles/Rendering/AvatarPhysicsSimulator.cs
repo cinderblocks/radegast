@@ -19,8 +19,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Numerics;
-using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;

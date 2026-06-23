@@ -20,7 +20,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Numerics;
 using System.Threading;
 using LibreMetaverse;
 using Vector3 = System.Numerics.Vector3;
