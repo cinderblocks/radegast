@@ -18,6 +18,8 @@
  */
 
 using System;
+using Microsoft.Extensions.DependencyInjection;
+using Radegast.Veles.Plugins;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Core;
@@ -27,6 +29,16 @@ public sealed class AgentSession : IDisposable
     public Guid Id { get; } = Guid.NewGuid();
     public RadegastInstanceAvalonia Instance { get; }
     public MainViewModel ViewModel { get; }
+    public PluginManager PluginManager => Instance.PluginManager;
+
+    /// <summary>
+    /// Session-scoped DI container. Holds all session services and ViewModels
+    /// so tests can swap implementations without touching call sites.
+    ///
+    /// Registered singletons: RadegastInstanceAvalonia, INetCom, ChatLogger,
+    /// PluginManager, all 11 tab ViewModels, and MainViewModel.
+    /// </summary>
+    public IServiceProvider Services { get; }
 
     public string AgentName => Instance.Client.Self.Name;
     public bool IsConnected => Instance.Client.Network.Connected;
@@ -34,7 +46,36 @@ public sealed class AgentSession : IDisposable
     public AgentSession(RadegastInstanceAvalonia instance)
     {
         Instance = instance;
-        ViewModel = new MainViewModel(instance);
+
+        // Plugin manager must exist before we register it in the container.
+        instance.InitPluginManager();
+
+        var sc = new ServiceCollection();
+        sc.AddSingleton(instance);
+        sc.AddSingleton<INetCom>(instance.NetCom);
+        sc.AddSingleton(instance.ChatLog);
+        sc.AddSingleton(instance.PluginManager);
+
+        // Session-scoped ViewModels — each resolved automatically because
+        // RadegastInstanceAvalonia is registered above.
+        sc.AddSingleton<NearbyViewModel>();
+        sc.AddSingleton<IMViewModel>();
+        sc.AddSingleton<MapViewModel>();
+        sc.AddSingleton<ObjectsViewModel>();
+        sc.AddSingleton<InventoryViewModel>();
+        sc.AddSingleton<FriendsViewModel>();
+        sc.AddSingleton<GroupsViewModel>();
+        sc.AddSingleton<MediaViewModel>();
+        sc.AddSingleton<NotificationQueueViewModel>();
+        sc.AddSingleton<VoiceViewModel>();
+        sc.AddSingleton<MarketplaceViewModel>();
+        sc.AddSingleton<MainViewModel>();
+        Services = sc.BuildServiceProvider();
+
+        ViewModel = Services.GetRequiredService<MainViewModel>();
+
+        instance.PluginManager.LoadPluginsFromDirectory();
+        instance.PluginManager.StartAll();
     }
 
     public void Dispose()
@@ -44,6 +85,6 @@ public sealed class AgentSession : IDisposable
         {
             Instance.NetCom.Logout();
         }
-        Instance.NetCom.Dispose();
+        Instance.CleanUp();
     }
 }

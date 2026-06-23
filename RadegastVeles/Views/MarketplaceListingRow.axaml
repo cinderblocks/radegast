@@ -1,0 +1,30 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.MarketplaceListingRow"
+             x:DataType="vm:MarketplaceListingRecord">
+    <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="2">
+        <!-- Status badge -->
+        <TextBlock Grid.Column="0" Text="{Binding StatusBadgeText}" FontSize="10"
+                   VerticalAlignment="Center" Margin="0,0,4,0"
+                   AutomationProperties.Name="Status badge" />
+        <!-- Folder name -->
+        <TextBlock Grid.Column="1" Text="{Binding FolderName}" TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center" AutomationProperties.Name="{Binding FolderName}" />
+        <!-- Validation warning dot -->
+        <TextBlock Grid.Column="2" Text="&#x26A0;" FontSize="10" Foreground="DarkOrange"
+                   VerticalAlignment="Center" Margin="4,0"
+                   IsVisible="{Binding HasValidationWarnings}"
+                   ToolTip.Tip="{Binding ValidationSummary}"
+                   AutomationProperties.Name="Has validation warnings" />
+        <!-- Stock count -->
+        <TextBlock Grid.Column="3" Text="{Binding LocalStockCount, StringFormat='&#xD7;{0}'}"
+                   FontSize="10" Foreground="{DynamicResource VelesMutedForeground}" VerticalAlignment="Center"
+                   AutomationProperties.Name="Stock count" />
+    </Grid>
+</UserControl>

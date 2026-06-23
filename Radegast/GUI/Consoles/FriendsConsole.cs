@@ -23,9 +23,9 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Reflection;
 using System.Threading.Tasks;
 
@@ -416,7 +416,7 @@ namespace Radegast
                 instance.ShowNotificationInChat(lblFriendName.Text, ChatBufferTextStyle.Invisible);
                 btnIM.Enabled = false;
 
-                ThreadPool.QueueUserWorkItem(sync =>
+                _ = Task.Run(async () =>
                     {
                         using (ManualResetEvent started = new ManualResetEvent(false))
                         {
@@ -434,7 +434,7 @@ namespace Radegast
                                 };
 
                             client.Self.GroupChatJoined += handler;
-                            client.Self.StartIMConference(participants, tmpID);
+                            await client.Self.StartIMConferenceAsync(participants, tmpID);
                             if (started.WaitOne(30 * 1000, false))
                             {
                                 instance.TabConsole.BeginInvoke(new MethodInvoker(() =>
@@ -445,11 +445,10 @@ namespace Radegast
                                 ));
                             }
                             client.Self.GroupChatJoined -= handler;
-                            
+
                             ThreadingHelper.SafeInvoke(this, QueueRefresh, instance.MonoRuntime);
                         }
-                    }
-                );
+                    });
             }
         }
 

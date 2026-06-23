@@ -23,7 +23,7 @@ using System.Linq;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -92,6 +92,13 @@ public partial class MuteListViewModel : ObservableObject, IDisposable
         if (string.IsNullOrWhiteSpace(MuteByNameInput)) return;
         Client.Self.UpdateMuteListEntry(MuteType.ByName, UUID.Zero, MuteByNameInput.Trim());
         MuteByNameInput = string.Empty;
+    }
+
+    [RelayCommand]
+    private void MuteResident()
+    {
+        _instance.ShowAvatarPicker("Mute Resident", entry =>
+            Client.Self.UpdateMuteListEntry(MuteType.Resident, entry.Id, entry.Name));
     }
 
     [RelayCommand]

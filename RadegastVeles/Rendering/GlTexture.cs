@@ -18,8 +18,9 @@
  */
 
 using System;
+using System.Runtime.InteropServices;
 using SkiaSharp;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 
 namespace Radegast.Veles.Rendering;
 
@@ -32,62 +33,98 @@ public sealed class GlTexture : IDisposable
     public int  TextureId { get; private set; }
     private bool _disposed;
 
-    public GlTexture(SKBitmap bitmap)
+    /// <summary>
+    /// Prepares an <see cref="SKBitmap"/> for GL upload by converting it to
+    /// <see cref="SKColorType.Rgba8888"/> and flipping it vertically.
+    /// Safe to call from any background thread — does no GL work.
+    /// The returned bitmap is a new allocation owned by the caller.
+    /// <paramref name="source"/> is disposed if a conversion copy was required.
+    /// </summary>
+    public static SKBitmap Preprocess(SKBitmap source)
     {
-        bool ownBitmap = false;
-        if (bitmap.ColorType != SKColorType.Rgba8888)
+        // Step 1: ensure RGBA8888 (required format for GL upload).
+        SKBitmap rgba;
+        bool ownRgba;
+        if (source.ColorType == SKColorType.Rgba8888)
         {
-            bitmap    = bitmap.Copy(SKColorType.Rgba8888)
-                     ?? throw new ArgumentException("Cannot convert bitmap to RGBA8888.");
-            ownBitmap = true;
+            rgba    = source;
+            ownRgba = false;
+        }
+        else
+        {
+            rgba    = source.Copy(SKColorType.Rgba8888)
+                   ?? throw new ArgumentException("Cannot convert bitmap to RGBA8888.");
+            source.Dispose();
+            ownRgba = true;
         }
 
-        // OpenGL places (0,0) at the bottom-left of the texture, but bitmap row 0
-        // is the top row.  Flip vertically so the image appears the right way up —
-        // the same fix the legacy renderer applies before glTexImage2D.
-        var flipped = new SKBitmap(bitmap.Width, bitmap.Height,
-                                   bitmap.ColorType, bitmap.AlphaType);
-        using (var canvas = new SKCanvas(flipped))
+        // Step 2: vertical flip — GL (0,0) is bottom-left; bitmap row 0 is top.
+        // Copy rows from source in reverse order directly into the destination
+        // pixel buffer. This bypasses the Skia rasterizer entirely (no canvas,
+        // no paint, no blend) which is safe here because RGBA8888 pixels are
+        // copied verbatim — alpha channels are preserved exactly.
+        var flipped = new SKBitmap(rgba.Width, rgba.Height, rgba.ColorType, rgba.AlphaType);
+        int rowBytes = rgba.RowBytes;
+        int height   = rgba.Height;
+        var src = MemoryMarshal.Cast<byte, byte>(rgba.GetPixelSpan());
+        var dst = MemoryMarshal.Cast<byte, byte>(flipped.GetPixelSpan());
+        for (int y = 0; y < height; y++)
         {
-            canvas.Scale(1f, -1f, 0f, bitmap.Height / 2f);
-            canvas.DrawBitmap(bitmap, 0f, 0f);
+            src.Slice((height - 1 - y) * rowBytes, rowBytes)
+               .CopyTo(dst.Slice(y * rowBytes, rowBytes));
         }
-        if (ownBitmap) bitmap.Dispose();
-        bitmap    = flipped;
-        ownBitmap = true;
-
-        TextureId = GL.GenTexture();
-        GL.BindTexture(TextureTarget.Texture2D, TextureId);
-
-        GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba,
-            bitmap.Width, bitmap.Height, 0,
-            PixelFormat.Rgba, PixelType.UnsignedByte, bitmap.GetPixels());
-
-        GL.TexParameter(TextureTarget.Texture2D,
-            TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
-        GL.TexParameter(TextureTarget.Texture2D,
-            TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
-        GL.TexParameter(TextureTarget.Texture2D,
-            TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
-        GL.TexParameter(TextureTarget.Texture2D,
-            TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
-
-        GL.GenerateMipmap(GenerateMipmapTarget.Texture2D);
-        GL.BindTexture(TextureTarget.Texture2D, 0);
-
-        if (ownBitmap) bitmap.Dispose();
+        if (ownRgba) rgba.Dispose();
+        return flipped;
     }
 
-    public void Bind(TextureUnit unit = TextureUnit.Texture0)
+    /// <summary>
+    /// Creates a GL texture from a <em>pre-processed</em> bitmap (RGBA8888, vertically
+    /// flipped) produced by <see cref="Preprocess"/>.  Only GL calls are made here —
+    /// no Skia work — so this is safe to call frequently on the GL render thread.
+    /// Ownership of <paramref name="bitmap"/> transfers to this constructor; it is
+    /// disposed before the constructor returns.
+    /// </summary>
+    public unsafe GlTexture(SKBitmap bitmap)
     {
-        GL.ActiveTexture(unit);
-        GL.BindTexture(TextureTarget.Texture2D, TextureId);
+        var gl = GlApi.Gl;
+        TextureId = (int)gl.GenTexture();
+        gl.BindTexture(TextureTarget.Texture2D, (uint)TextureId);
+
+        gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.Rgba,
+            (uint)bitmap.Width, (uint)bitmap.Height, 0,
+            PixelFormat.Rgba, PixelType.UnsignedByte, (void*)bitmap.GetPixels());
+
+        gl.TexParameter(TextureTarget.Texture2D,
+            TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        gl.TexParameter(TextureTarget.Texture2D,
+            TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        gl.TexParameter(TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        gl.TexParameter(TextureTarget.Texture2D,
+            TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+
+        gl.GenerateMipmap(TextureTarget.Texture2D);
+        gl.BindTexture(TextureTarget.Texture2D, 0);
+
+        bitmap.Dispose();
+    }
+
+    /// <summary>
+    /// Binds this texture to a texture unit. <paramref name="unit"/> is the zero-based unit
+    /// index (0 = GL_TEXTURE0, 1 = GL_TEXTURE1, …) so callers don't depend on any GL binding
+    /// library's enum during the OpenTK→Silk.NET migration.
+    /// </summary>
+    public void Bind(int unit = 0)
+    {
+        var gl = GlApi.Gl;
+        gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + unit));
+        gl.BindTexture(TextureTarget.Texture2D, (uint)TextureId);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        GL.DeleteTexture(TextureId);
+        GlApi.Gl.DeleteTexture((uint)TextureId);
     }
 }

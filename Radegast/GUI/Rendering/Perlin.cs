@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright (c) Contributors, http://aurora-sim.org/, http://opensimulator.org/
  * Copyright(c) 2009-2014, Radegast Development Team
@@ -20,7 +20,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {
@@ -223,13 +223,10 @@ namespace Radegast.Rendering
         public static float turbulence3(float x, float y, float z, float freq)
         {
             float t;
-            Vector3 vec;
 
             for (t = 0f; freq >= 1f; freq *= 0.5f)
             {
-                vec.X = freq * x;
-                vec.Y = freq * y;
-                vec.Z = freq * z;
+                var vec = new Vector3(freq * x, freq * y, freq * z);
                 t += noise3(vec.X, vec.Y, vec.Z) / freq;
             }
             return t;

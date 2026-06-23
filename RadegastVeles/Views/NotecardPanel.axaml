@@ -10,7 +10,7 @@
              x:Class="Radegast.Veles.Views.NotecardPanel"
              x:DataType="vm:NotecardViewModel"
              AutomationProperties.Name="Notecard editor">
-    <DockPanel>
+    <DockPanel DragDrop.AllowDrop="True">
         <Border DockPanel.Dock="Top" BorderThickness="0,0,0,1" Padding="4,2">
             <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <TextBlock Text="{Binding NotecardName}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0" AutomationProperties.Name="Notecard name" />
@@ -31,6 +31,36 @@
                 </DataTemplate>
             </ContentControl.ContentTemplate>
         </ContentControl>
+        <Border DockPanel.Dock="Bottom"
+                IsVisible="{Binding HasEmbeddedItems}"
+                Background="#14FFFFFF" BorderThickness="0,1,0,0" Padding="6,4"
+                AutomationProperties.Name="Embedded items">
+            <StackPanel Spacing="4">
+                <TextBlock Text="Embedded Items" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" FontWeight="SemiBold" />
+                <ItemsControl ItemsSource="{Binding EmbeddedItems}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:EmbeddedNotecardItem">
+                            <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,2">
+                                <TextBlock Text="{Binding TypeLabel}" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                                           VerticalAlignment="Center" MinWidth="60" />
+                                <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" />
+                                <Button Content="Copy to Inventory"
+                                        Command="{Binding $parent[UserControl].((vm:NotecardViewModel)DataContext).CopyEmbeddedItemToInventoryCommand}"
+                                        CommandParameter="{Binding}"
+                                        FontSize="11"
+                                        AutomationProperties.Name="Copy this embedded item to your inventory" />
+                                <Button Content="&#x2715;"
+                                        Command="{Binding $parent[UserControl].((vm:NotecardViewModel)DataContext).RemoveEmbeddedItemCommand}"
+                                        CommandParameter="{Binding}"
+                                        FontSize="11"
+                                        AutomationProperties.Name="Remove this embedded item" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
         <TextBox AcceptsReturn="True"
                  AcceptsTab="True"
                  Text="{Binding Content, Mode=TwoWay}"

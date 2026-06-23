@@ -23,17 +23,15 @@ using System.Threading;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.Media;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class MediaViewModel : ObservableObject, IDisposable
+public partial class MediaViewModel : InstanceViewModelBase, IDisposable
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
     private MediaManager Manager => _instance.MediaManager;
     private Settings Settings => _instance.GlobalSettings;
 
@@ -87,6 +85,9 @@ public partial class MediaViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _isMuted;
 
+    [ObservableProperty]
+    private bool _mediaMetadataNotificationsEnabled;
+
     // --- Sound system status ---
 
     [ObservableProperty]
@@ -109,10 +110,8 @@ public partial class MediaViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private AudioProfile? _selectedProfile;
 
-    public MediaViewModel(RadegastInstanceAvalonia instance)
+    public MediaViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
-
         RestoreSettings();
 
         _configTimer = new Timer(SaveConfig, null, Timeout.Infinite, Timeout.Infinite);
@@ -168,6 +167,8 @@ public partial class MediaViewModel : ObservableObject, IDisposable
         {
             Manager.PreferredDriver = s["audio_driver_index"].AsInteger();
         }
+        if (s["media_metadata_notifications"].Type != OSDType.Unknown)
+            MediaMetadataNotificationsEnabled = s["media_metadata_notifications"].AsBoolean();
 
         Manager.ObjectEnable = ObjectSoundsEnabled;
     }
@@ -190,6 +191,8 @@ public partial class MediaViewModel : ObservableObject, IDisposable
             s["object_audio_enable"] = OSD.FromBoolean(ObjectSoundsEnabled);
             s["ui_audio_vol"] = OSD.FromReal(UiVolume / 100.0);
             s["master_volume"] = OSD.FromReal(MasterVolume / 100.0);
+
+            s["media_metadata_notifications"] = OSD.FromBoolean(MediaMetadataNotificationsEnabled);
 
             if (SelectedAudioDevice != null && SoundSystemAvailable)
             {
@@ -244,6 +247,11 @@ public partial class MediaViewModel : ObservableObject, IDisposable
     }
 
     partial void OnKeepUrlChanged(bool value)
+    {
+        ScheduleConfigSave();
+    }
+
+    partial void OnMediaMetadataNotificationsEnabledChanged(bool value)
     {
         ScheduleConfigSave();
     }
@@ -322,6 +330,18 @@ public partial class MediaViewModel : ObservableObject, IDisposable
 
     // --- Streaming audio playback ---
 
+    /// <summary>Stops any current stream and immediately starts playing <paramref name="url"/>.
+    /// Called externally, e.g. from the Land Profile panel.</summary>
+    public void PlayUrl(string url)
+    {
+        lock (_parcelMusicLock)
+        {
+            StreamUrl = url;
+            _currentURL = url;
+            Play();
+        }
+    }
+
     private void Play()
     {
         Stop();
@@ -342,7 +362,7 @@ public partial class MediaViewModel : ObservableObject, IDisposable
         SongTitle = string.Empty;
     }
 
-    private void OnStreamInfo(object sender, StreamInfoArgs e)
+    private void OnStreamInfo(object? sender, StreamInfoArgs e)
     {
         Dispatcher.UIThread.Post(() =>
         {
@@ -356,6 +376,8 @@ public partial class MediaViewModel : ObservableObject, IDisposable
                         SongTitle += " - " + e.Value;
                     else
                         SongTitle = e.Value;
+                    if (MediaMetadataNotificationsEnabled && !string.IsNullOrEmpty(SongTitle))
+                        VelesNotificationService.Show("Now Playing", SongTitle);
                     break;
                 case "icy-name":
                     StationName = e.Value;

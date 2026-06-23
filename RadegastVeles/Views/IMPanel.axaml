@@ -55,15 +55,15 @@
                                         Click="OnSessionNameClick"
                                         Tag="{Binding}"
                                         IsVisible="{Binding HasProfileLink}"
-                                        AutomationProperties.Name="{Binding Label, StringFormat=Open profile for {0}}">
+                                        AutomationProperties.Name="{Binding AccessibleLabel, StringFormat=Open profile for {0}}">
                                     <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
                                 </Button>
                                 <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis"
-                                           AutomationProperties.Name="{Binding DisplayText}"
+                                           AutomationProperties.Name="{Binding AccessibleLabel}"
                                            IsVisible="{Binding !HasProfileLink}" />
                                 <TextBlock Text="typing…" FontStyle="Italic" FontSize="11" Opacity="0.65"
                                            IsVisible="{Binding IsPartnerTyping}"
-                                           AutomationProperties.Name="" />
+                                           AutomationProperties.Name="{Binding Label, StringFormat={}{0} is typing}" />
                             </StackPanel>
                         </StackPanel>
                     </DataTemplate>
@@ -81,12 +81,18 @@
             <!-- Conversation area -->
             <DockPanel Grid.Column="0">
                 <!-- Header -->
-                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="4">
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" Margin="4">
                     <TextBlock Grid.Column="0"
                                Text="{Binding SelectedSession.Label, FallbackValue='Select a conversation'}"
                                FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"
                                AutomationProperties.Name="Active conversation name" />
-                    <Button Grid.Column="1" Content="Close" Command="{Binding CloseSessionCommand}"
+                    <Button Grid.Column="1"
+                            Content="{Binding SelectedSession.VoiceButtonLabel, FallbackValue='🎙 Join Voice'}"
+                            Command="{Binding ToggleSessionVoiceCommand}"
+                            Margin="0,0,4,0" MinWidth="110"
+                            IsVisible="{Binding SelectedSession.SupportsVoice, FallbackValue=False}"
+                            AutomationProperties.Name="Toggle voice for this session" />
+                    <Button Grid.Column="2" Content="Close" Command="{Binding CloseSessionCommand}"
                             MinWidth="60" AutomationProperties.Name="Close conversation" />
                 </Grid>
 
@@ -94,9 +100,10 @@
                 <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto" Margin="4" AutomationProperties.Name="IM input area">
                     <TextBox Grid.Column="0" x:Name="IMInputBox"
                              Text="{Binding MessageInput, Mode=TwoWay}"
-                             Watermark="Type a message..."
+                             PlaceholderText="Type a message..."
                              IsEnabled="{Binding SelectedSession, Converter={x:Static ObjectConverters.IsNotNull}}"
-                             AutomationProperties.Name="IM message input" />
+                             AutomationProperties.Name="IM message input"
+                             AutomationProperties.HelpText="Type a message and press Enter to send" />
                     <Button Grid.Column="1" Content="Send" Command="{Binding SendMessageCommand}"
                             Margin="4,0,0,0" MinWidth="60"
                             AutomationProperties.Name="Send IM" />
@@ -108,14 +115,17 @@
                            FontStyle="Italic" FontSize="11" Opacity="0.65"
                            Margin="8,0,4,2"
                            IsVisible="{Binding SelectedSession.IsPartnerTyping, FallbackValue=False}"
-                           AutomationProperties.Name="Partner typing indicator" />
+                           AutomationProperties.Name="Partner typing indicator"
+                           AutomationProperties.LiveSetting="Polite" />
 
                 <!-- Message log with clickable sender names -->
                 <ListBox x:Name="IMLog"
                          ItemsSource="{Binding SelectedSession.Messages}"
                          Margin="4,0"
                          AutomationProperties.Name="IM message history"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                         AutomationProperties.LiveSetting="Polite"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         SelectionMode="Multiple,Toggle">
                     <ListBox.Styles>
                         <Style Selector="Button.imName">
                             <Setter Property="Background" Value="Transparent" />
@@ -134,18 +144,48 @@
                     </ListBox.Styles>
                     <ListBox.ItemTemplate>
                         <DataTemplate x:DataType="vm:ChatLine">
-                            <WrapPanel AutomationProperties.Name="{Binding AutomationText}"
-                                       Opacity="{Binding HistoryOpacity}">
-                                <TextBlock Text="{Binding FormattedTime}" Opacity="0.6" Margin="0,0,4,0" />
-                                <Button Classes="imName" Click="OnIMNameClick" ContextRequested="OnIMNameContextRequested" Tag="{Binding}"
-                                        IsVisible="{Binding HasAgentLink}"
-                                        AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
-                                    <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
-                                </Button>
-                                <TextBlock Text="{Binding From}" FontWeight="SemiBold"
-                                           IsVisible="{Binding !HasAgentLink}" />
-                                <controls:RichChatText Text="{Binding Text}" />
-                            </WrapPanel>
+                            <Grid AutomationProperties.Name="{Binding AutomationText}">
+                                <!-- Date-change separator -->
+                                <Grid IsVisible="{Binding IsDateSeparator}"
+                                      ColumnDefinitions="*,Auto,*"
+                                      Margin="4,6,4,4"
+                                      AutomationProperties.Name="{Binding DateLabel}">
+                                    <Border Grid.Column="0" Height="1" VerticalAlignment="Center"
+                                            Background="Gray" Opacity="0.3" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="1" Text="{Binding DateLabel}"
+                                               FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                    <Border Grid.Column="2" Height="1" VerticalAlignment="Center"
+                                            Background="Gray" Opacity="0.3" Margin="8,0,0,0" />
+                                </Grid>
+
+                                <!-- Normal message row -->
+                                <WrapPanel IsVisible="{Binding !IsDateSeparator}"
+                                           AutomationProperties.Name="{Binding AutomationText}"
+                                           Opacity="{Binding HistoryOpacity}"
+                                           ContextRequested="OnIMLineContextRequested">
+                                    <TextBlock Text="{Binding FormattedTime}" Opacity="0.6" Margin="0,0,4,0" />
+
+                                    <!-- Emote: * Name action text * in italic -->
+                                    <Button Classes="imName" Click="OnIMNameClick" ContextRequested="OnIMNameContextRequested" Tag="{Binding}"
+                                            IsVisible="{Binding IsEmote}"
+                                            AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
+                                        <TextBlock Text="{Binding EmoteDisplayText}"
+                                                   FontStyle="Italic"
+                                                   Foreground="#AA88CC" />
+                                    </Button>
+
+                                    <!-- Normal / Self rows -->
+                                    <Button Classes="imName" Click="OnIMNameClick" ContextRequested="OnIMNameContextRequested" Tag="{Binding}"
+                                            IsVisible="{Binding HasNonEmoteAgentLink}"
+                                            AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
+                                        <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
+                                    </Button>
+                                    <TextBlock Text="{Binding From}" FontWeight="SemiBold"
+                                               IsVisible="{Binding ShowStaticName}" />
+                                    <controls:RichChatText Text="{Binding Text}"
+                                                           IsVisible="{Binding ShowNamePrefix}" />
+                                </WrapPanel>
+                            </Grid>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>

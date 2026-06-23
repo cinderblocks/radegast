@@ -26,7 +26,7 @@ using System.Text;
 using System.Timers;
 using System.Windows.Forms;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading.Tasks;
 using LibreMetaverse;
 
@@ -834,6 +834,11 @@ namespace Radegast
                 select p.Value).ToList();
             txtPrims.Text = prims.Count.ToString();
 
+            bool isAttachment = CurrentPrim.ParentID == client.Self.LocalID;
+            btnSitOn.Enabled = !isAttachment;
+            btnTurnTo.Enabled = !isAttachment;
+            btnWalkTo.Enabled = !isAttachment;
+
             btnPay.Enabled = (CurrentPrim.Flags & PrimFlags.Money) != 0;
 
             if (CurrentPrim.Properties.SaleType != SaleType.Not)
@@ -1196,7 +1201,7 @@ namespace Radegast
                 {
                     using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)))
                     {
-                        await instance.COF.Detach(itemToDetach, cts.Token);
+                        await instance.COF.DetachAsync(itemToDetach, cts.Token);
                     }
                 }
                 catch (TaskCanceledException ex)
@@ -1339,9 +1344,12 @@ namespace Radegast
             else
                 ctxMenuObjects.Items.Add("Hide Contents", null, btnCloseContents_Click);
 
-            ctxMenuObjects.Items.Add(instance.State.IsSitting ? "Stand Up" : "Sit On", null, btnSitOn_Click);
-            ctxMenuObjects.Items.Add("Turn To", null, btnTurnTo_Click);
-            ctxMenuObjects.Items.Add("Walk To", null, btnWalkTo_Click);
+            if (CurrentPrim.ParentID != client.Self.LocalID)
+            {
+                ctxMenuObjects.Items.Add(instance.State.IsSitting ? "Stand Up" : "Sit On", null, btnSitOn_Click);
+                ctxMenuObjects.Items.Add("Turn To", null, btnTurnTo_Click);
+                ctxMenuObjects.Items.Add("Walk To", null, btnWalkTo_Click);
+            }
             ctxMenuObjects.Items.Add(instance.State.IsPointing ? "Unpoint" : "Point At", null, btnPointAt_Click);
             ctxMenuObjects.Items.Add("3D View", null, btnView_Click);
             ctxMenuObjects.Items.Add("Take", null, btnTake_Click);
@@ -1359,7 +1367,7 @@ namespace Radegast
 
             if (CurrentPrim.Properties != null)
             {
-                bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
+                bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
 
                 if (isMuted)
                 {
@@ -1477,7 +1485,7 @@ namespace Radegast
 
         private void UpdateMuteButton()
         {
-            bool isMuted = null != client.Self.MuteList.Find(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
+            bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Object && me.ID == CurrentPrim.ID);
 
             btnMute.Text = isMuted ? "Unmute" : "Mute";
         }

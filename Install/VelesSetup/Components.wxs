@@ -1,0 +1,231 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <?include ..\VelesBuildProperties.wxi?>
+  <Fragment>
+    <ComponentGroup Id="Veles.Components" Directory="INSTALLFOLDER">
+      <Files Include="$(var.RadegastVeles.TargetDir)**">
+        <!-- Exclude debug symbols -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.pdb"/>
+        <!-- Exclude main executable (handled separately below) -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)RadegastVeles.exe"/>
+        <!-- Exclude build artifacts -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)obj\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.xml"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)**\.git*"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.csproj"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.sln"/>
+        <!-- Exclude all plugin files — each plugin is its own optional Feature -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.*"/>
+      </Files>
+      <Component>
+        <File Id="RadegastVeles.Executable" Source="$(var.RadegastVeles.TargetDir)RadegastVeles.exe" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Per-plugin optional component groups -->
+  <Fragment>
+    <ComponentGroup Id="Plugin.Automation" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Automation.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Automation.pdb"/>
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Plugin.Discord" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Discord.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Discord.pdb"/>
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Plugin.Email" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Email.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.Email.pdb"/>
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Plugin.ImportExport" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.ImportExport.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.ImportExport.pdb"/>
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Plugin.IRC" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.IRC.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.IRC.pdb"/>
+      </Files>
+    </ComponentGroup>
+
+    <ComponentGroup Id="Plugin.OllamaChat" Directory="VelesPluginsFolder">
+      <Files Include="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.OllamaChat.*">
+        <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.OllamaChat.pdb"/>
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <!-- Desktop shortcut (optional, controlled by DESKTOPSHORTCUT property) -->
+  <Fragment>
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="VelesDesktopShortcut" Condition="DESKTOPSHORTCUT = 1">
+        <Shortcut Id="VelesApplicationDesktopShortcut"
+                  Name="$(var.productName)"
+                  Description="$(var.productDesc)"
+                  Target="[INSTALLFOLDER]RadegastVeles.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="Veles.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="desktop_shortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Fragment>
+
+  <Fragment>
+    <!-- SLURL Protocol Handlers (optional, controlled by REGISTERPROTOCOLS property) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="VelesSLURLProtocolHandler" Condition="REGISTERPROTOCOLS = 1">
+        <!-- secondlife:// protocol handler -->
+        <RegistryKey Root="HKCR" Key="secondlife">
+          <RegistryValue Type="string" Value="URL:Second Life Protocol" />
+          <RegistryValue Type="string" Name="URL Protocol" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <!-- hop:// protocol handler for HyperGrid -->
+        <RegistryKey Root="HKCR" Key="hop">
+          <RegistryValue Type="string" Value="URL:HyperGrid Protocol" />
+          <RegistryValue Type="string" Name="URL Protocol" Value="" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="protocol_handler"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start menu (controlled by STARTMENUSHORTCUT property) -->
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="VelesApplicationShortcut" Condition="STARTMENUSHORTCUT = 1">
+        <Shortcut Id="VelesApplicationStartMenuShortcut"
+                  Name="$(var.productName)"
+                  Description="$(var.productDesc)"
+                  Icon="Veles.ico"
+                  Target="[INSTALLFOLDER]RadegastVeles.exe"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <Shortcut Id="VelesUninstallShortcut"
+                  Name="Uninstall $(var.productName)"
+                  Description="Uninstall $(var.productName)"
+                  Target="[System64Folder]msiexec.exe"
+                  Arguments="/x [ProductCode]"
+                  Icon="Veles.ico" />
+        <RemoveFolder Id="VelesApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+
+      <Component Id="VelesWebsiteShortcut">
+        <util:InternetShortcut Id="VelesWebsiteLink"
+                               Name="$(var.productName) Website"
+                               Target="$(var.aboutUrl)" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="website_shortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Uninstall cleanup (optional user data removal) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="VelesUninstallCleanup" Condition="REMOVE=&quot;ALL&quot; AND CLEAN_USERDATA=&quot;1&quot;">
+        <RegistryValue Root="HKCU"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="cleanup"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+        <RemoveFile Id="VelesRemoveAppDataFiles"
+                    On="uninstall"
+                    Name="*.*"
+                    Directory="APPLICATIONDATAFOLDER" />
+        <RemoveFolder Id="VelesRemoveAppDataFolder"
+                      On="uninstall"
+                      Directory="APPLICATIONDATAFOLDER" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Application tracking registry entries -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="VelesRegistryEntries">
+        <RegistryKey Root="HKLM" Key="Software\$(var.companyName)\$(var.productName)">
+          <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="Version" Value="[ProductVersion]" />
+          <RegistryValue Type="string" Name="DisplayName" Value="$(var.productName)" />
+          <RegistryValue Type="string" Name="Publisher" Value="$(var.companyName)" />
+          <RegistryValue Type="string" Name="HelpLink" Value="$(var.aboutUrl)" />
+        </RegistryKey>
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- File type associations (optional) -->
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="VelesFileAssociations" Condition="REGISTERFILEASSOC = 1">
+        <RegistryKey Root="HKCR" Key=".oar">
+          <RegistryValue Type="string" Value="Veles.OAR" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Veles.OAR">
+          <RegistryValue Type="string" Value="OpenSimulator Archive" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key=".iar">
+          <RegistryValue Type="string" Value="Veles.IAR" />
+        </RegistryKey>
+        <RegistryKey Root="HKCR" Key="Veles.IAR">
+          <RegistryValue Type="string" Value="OpenSimulator Inventory Archive" />
+          <RegistryKey Key="DefaultIcon">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+          </RegistryKey>
+          <RegistryKey Key="shell\open\command">
+            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+          </RegistryKey>
+        </RegistryKey>
+        <RegistryValue Root="HKLM"
+                       Key="Software\$(var.companyName)\$(var.productName)"
+                       Name="file_associations"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

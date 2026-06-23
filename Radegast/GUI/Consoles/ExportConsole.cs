@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -24,7 +24,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.IO;
 using System.Linq;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -88,7 +88,7 @@ namespace Radegast
                     continue;
 
                 }
-                var texture = new UUID(prim.Textures.DefaultTexture.TextureID);
+                var texture = prim.Textures.DefaultTexture.TextureID;
                 Textures.Add(texture);
 					
                 foreach (var face in prim.Textures.FaceTextures)
@@ -97,14 +97,14 @@ namespace Radegast
                         face.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
                         !Textures.Contains(face.TextureID))
                     {
-                        texture = new UUID(face.TextureID);
+                        texture = face.TextureID;
                         Textures.Add(texture);
                     }
                 }
 					
                 if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
                 {
-                    texture = new UUID(prim.Sculpt.SculptTexture);
+                    texture = prim.Sculpt.SculptTexture;
                     Textures.Add(texture);
                 }
             }

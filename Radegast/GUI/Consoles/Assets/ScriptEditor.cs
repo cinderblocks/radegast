@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -26,8 +26,8 @@ using System.IO;
 using System.Windows.Forms;
 using System.Threading;
 using System.Threading.Tasks;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -79,14 +79,24 @@ namespace Radegast
                 var transferID = UUID.Random();
                 if (prim != null)
                 {
-                    client.Assets.RequestInventoryAsset(script.AssetUUID, script.UUID, prim.ID, prim.OwnerID, script.AssetType, 
-                        true, transferID, Assets_OnAssetReceived);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var asset = await client.Assets.RequestInventoryAssetAsync(
+                            script.AssetUUID, script.UUID, prim.ID, prim.OwnerID, script.AssetType, true, transferID);
+                        var xfer = new AssetDownload { Success = asset != null };
+                        Assets_OnAssetReceived(xfer, asset);
+                    });
                     client.Inventory.RequestGetScriptRunning(prim.ID, script.UUID);
                     client.Inventory.ScriptRunningReply += OnScriptRunningReplyReceived;
                 }
                 else
                 {
-                    client.Assets.RequestInventoryAsset(script, true, transferID, Assets_OnAssetReceived);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var asset = await client.Assets.RequestInventoryAssetAsync(script, true, transferID);
+                        var xfer = new AssetDownload { Success = asset != null };
+                        Assets_OnAssetReceived(xfer, asset);
+                    });
                 }
                 rtb.Text = lblScripStatus.Text = "Loading script...";
             }
@@ -762,53 +772,34 @@ namespace Radegast
             public UUID AssetID { get; set; }
         }
 
-        private Task<ScriptUpdateResult> UpdateScriptAsync(byte[] data, UUID itemID, bool mono, UUID? taskID, bool running, CancellationToken cancellationToken = default)
+        private async Task<ScriptUpdateResult> UpdateScriptAsync(byte[] data, UUID itemID, bool mono, UUID? taskID, bool running, CancellationToken cancellationToken = default)
         {
-            var tcs = new TaskCompletionSource<ScriptUpdateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            bool uploadSuccess;
+            string uploadStatus;
+            bool compileSuccess;
+            List<string>? compileMessages;
+            UUID returnedItemID, assetID;
 
-            InventoryManager.ScriptUpdatedCallback cb = (uploadSuccess, uploadStatus, compileSuccess, compileMessages, returnedItemID, assetID) =>
+            if (taskID.HasValue)
             {
-                var res = new ScriptUpdateResult
-                {
-                    UploadSuccess = uploadSuccess,
-                    UploadStatus = uploadStatus,
-                    CompileSuccess = compileSuccess,
-                    CompileMessages = compileMessages,
-                    ItemID = returnedItemID,
-                    AssetID = assetID
-                };
-
-                tcs.TrySetResult(res);
-            };
-
-            // Register cancellation to cancel the task
-            if (cancellationToken.CanBeCanceled)
+                (uploadSuccess, uploadStatus, compileSuccess, compileMessages, returnedItemID, assetID) =
+                    await client.Inventory.RequestUpdateScriptTaskAsync(data, itemID, taskID.Value, mono, running, cancellationToken).ConfigureAwait(false);
+            }
+            else
             {
-                cancellationToken.Register(() => tcs.TrySetCanceled(), useSynchronizationContext: false);
+                (uploadSuccess, uploadStatus, compileSuccess, compileMessages, returnedItemID, assetID) =
+                    await client.Inventory.RequestUpdateScriptAgentInventoryAsync(data, itemID, mono, cancellationToken).ConfigureAwait(false);
             }
 
-            // Fire the async request which will invoke our callback when done
-            Task.Run(async () =>
+            return new ScriptUpdateResult
             {
-                try
-                {
-                    if (taskID.HasValue)
-                    {
-                        await client.Inventory.RequestUpdateScriptTaskAsync(data, itemID, taskID.Value, mono, running, cb, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await client.Inventory.RequestUpdateScriptAgentInventoryAsync(data, itemID, mono, cb, cancellationToken).ConfigureAwait(false);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Surface exception to awaiting code
-                    tcs.TrySetException(ex);
-                }
-            }, cancellationToken);
-
-            return tcs.Task;
+                UploadSuccess = uploadSuccess,
+                UploadStatus = uploadStatus,
+                CompileSuccess = compileSuccess,
+                CompileMessages = compileMessages,
+                ItemID = returnedItemID,
+                AssetID = assetID
+            };
         }
     }
 }

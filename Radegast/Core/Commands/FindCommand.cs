@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -25,7 +25,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Commands
 {
@@ -172,7 +172,7 @@ namespace Radegast.Commands
                     }
                     else
                     {
-                        if (Client.Network.CurrentSim.AvatarPositions.TryGetValue(person, out var pos))
+                        if (Instance.State.TryGetCoarsePosition(Client.Network.CurrentSim, person, out var pos))
                         {
                             targetPos = pos;
                         }

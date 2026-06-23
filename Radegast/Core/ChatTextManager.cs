@@ -18,10 +18,11 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Drawing;
 using System.Reflection;
 using System.Text;
@@ -36,8 +37,12 @@ namespace Radegast
     {
         public event EventHandler<ChatLineAddedArgs> ChatLineAdded;
 
+        private const int ChatPageSize = 100;
+        internal const string LoadMoreChatUri = "radegast://loadmorechat";
+
         private bool showTimestamps;
         private readonly List<ChatBufferItem> textBuffer;
+        private int _historyDisplayStart;
 
         public ChatTextManager(RadegastInstanceForms instance, ITextPrinter textPrinter)
             : base(instance, textPrinter)
@@ -226,8 +231,8 @@ namespace Radegast
 
             // Check if the sender agent is muted
             if (e.SourceType == ChatSourceType.Agent
-                && instance.Client.Self.MuteList.Find(me => me.Type == MuteType.Resident
-                                                   && me.ID == e.SourceID) != null)
+                && instance.Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident
+                                                   && me.ID == e.SourceID))
             {
                 return;
             }
@@ -240,7 +245,7 @@ namespace Radegast
 
             // Check if sender object is muted
             if (e.SourceType == ChatSourceType.Object &&
-                null != instance.Client.Self.MuteList.Find(me =>
+                instance.Client.Self.MuteList.Values.Any(me =>
                         (me.Type == MuteType.Resident && me.ID == e.OwnerID) // Owner muted
                         || (me.Type == MuteType.Object && me.ID == e.SourceID) // Object muted by ID
                         || (me.Type == MuteType.ByName && me.Name == e.FromName) // Object muted by name
@@ -375,12 +380,56 @@ namespace Radegast
 
         public override void ReprintAllText()
         {
-            TextPrinter.ClearText();
+            // Reset to most-recent page when settings change
+            ReprintFromOffset(Math.Max(0, textBuffer.Count - ChatPageSize));
+        }
 
-            foreach (ChatBufferItem item in textBuffer)
+        public void LoadMoreHistory()
+        {
+            int newStart;
+            lock (SyncChat)
             {
-                ProcessBufferItem(item, false);
+                newStart = Math.Max(0, _historyDisplayStart - ChatPageSize);
             }
+            ReprintFromOffset(newStart);
+        }
+
+        private void ReprintFromOffset(int startIndex)
+        {
+            lock (SyncChat)
+            {
+                _historyDisplayStart = startIndex;
+                TextPrinter.ClearText();
+
+                if (_historyDisplayStart > 0)
+                {
+                    PrintLoadMoreLink();
+                }
+
+                for (int i = _historyDisplayStart; i < textBuffer.Count; i++)
+                {
+                    ProcessBufferItem(textBuffer[i], false);
+                }
+            }
+        }
+
+        private void PrintLoadMoreLink()
+        {
+            if (FontSettings.ContainsKey("History"))
+            {
+                var fontSetting = FontSettings["History"];
+                TextPrinter.ForeColor = fontSetting.ForeColor;
+                TextPrinter.BackColor = fontSetting.BackColor;
+                TextPrinter.Font = fontSetting.Font;
+            }
+            else
+            {
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
+            }
+            TextPrinter.InsertLink($"[ Load {Math.Min(_historyDisplayStart, ChatPageSize)} more messages... ]", LoadMoreChatUri);
+            TextPrinter.PrintTextLine(string.Empty);
         }
     }
 

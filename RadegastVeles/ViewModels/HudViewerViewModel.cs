@@ -26,7 +26,9 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse.Appearance;
-using OpenMetaverse;
+using System.Numerics;
+using LibreMetaverse;
+using Vector3 = System.Numerics.Vector3;
 using Radegast.Veles.Core;
 using Radegast.Veles.Rendering;
 
@@ -62,6 +64,8 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool      _hasError;
     [ObservableProperty] private string    _errorText    = string.Empty;
     [ObservableProperty] private bool      _isHudListVisible = true;
+    /// <summary>Briefly true after a touch event is sent; drives a visual flash on the Touch button.</summary>
+    [ObservableProperty] private bool      _isTouching;
 
     partial void OnSelectedHudChanged(HudEntry? value)
     {
@@ -138,29 +142,66 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     private void Touch()
     {
         if (SelectedHud == null) return;
+        StatusText = $"Touching \"{SelectedHud.Name}\"…";
         _ = GrabFaceAsync(SelectedHud.LocalId, 0);
+        _ = FlashTouchingAsync();
     }
 
     private bool CanTouch() => SelectedHud != null;
 
-    private void OnFaceClicked(uint primLocalId, int faceIndex)
+    private void OnFaceClicked(uint primLocalId, int faceIndex, FaceHitInfo hit)
     {
         if (SelectedHud == null) return;
-        _ = GrabFaceAsync(primLocalId, faceIndex);
-        StatusText = $"Touched face {faceIndex} of prim {primLocalId}.";
+        var sim = Client.Network.CurrentSim;
+        string primLabel;
+        if (sim != null && sim.ObjectsPrimitives.TryGetValue(primLocalId, out var clickedPrim))
+        {
+            var name = clickedPrim.Properties?.Name;
+            var isRoot = primLocalId == SelectedHud.LocalId;
+            var nameStr = string.IsNullOrWhiteSpace(name)
+                ? (isRoot ? "root" : "child prim")
+                : $"\"{name}\"";
+            primLabel = nameStr;
+        }
+        else
+        {
+            primLabel = $"prim {primLocalId}";
+        }
+        StatusText = $"Touched face {faceIndex} of {primLabel}.";
+        _ = GrabFaceAsync(primLocalId, faceIndex, hit);
+        _ = FlashTouchingAsync();
     }
 
-    private async Task GrabFaceAsync(uint localId, int faceIndex)
+    /// <summary>
+    /// Sets <see cref="IsTouching"/> to <see langword="true"/> for a short period so
+    /// the Touch button can show a visual acknowledgement, then clears it.
+    /// </summary>
+    private async Task FlashTouchingAsync()
+    {
+        IsTouching = true;
+        await Task.Delay(800).ConfigureAwait(false);
+        Dispatcher.UIThread.Post(() => IsTouching = false);
+    }
+
+    private async Task GrabFaceAsync(uint localId, int faceIndex, FaceHitInfo hit = default)
     {
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
+
+        // Convert System.Numerics Vector3 → OpenMetaverse Vector3.
+        static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
+
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             await Client.Objects.ClickObjectAsync(
                 sim, localId,
-                Vector3.Zero, Vector3.Zero, faceIndex,
-                Vector3.Zero, Vector3.Zero, Vector3.Zero,
+                ToOmv(hit.UvCoord),
+                ToOmv(hit.StCoord),
+                faceIndex,
+                ToOmv(hit.Position),
+                ToOmv(hit.Normal),
+                ToOmv(hit.Binormal),
                 cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
@@ -178,12 +219,14 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         var itemId = CurrentOutfitFolder.GetAttachmentItemID(prim);
         if (itemId == UUID.Zero) return;
 
-        if (!Client.Inventory.Store.TryGetValue<InventoryItem>(itemId, out var item)) return;
+        var store = Client.Inventory.Store;
+        if (store == null) return;
+        if (!store.TryGetValue<InventoryItem>(itemId, out var item)) return;
 
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-            await _instance.COF.Detach(item, cts.Token).ConfigureAwait(false);
+            await _instance.COF.DetachAsync(item, cts.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -219,9 +262,16 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
             if (!sim.ObjectsPrimitives.TryGetValue(hud.LocalId, out var root))
                 throw new InvalidOperationException($"HUD prim {hud.LocalId} not found in simulator.");
 
-            // Root prim + all linkset children.
+            // Root prim + all linkset children. Root must come first so TessellateAsync
+            // picks up the correct rootRot from prims[0]. Children are sorted by LocalID
+            // for a deterministic tessellation order. ObjectsPrimitives is a
+            // ConcurrentDictionary whose iteration order is undefined.
+            // Note: for attachment linksets the SL server puts the attachment point in
+            // Primitive.PrimData.State for ALL prims (root and children), so State cannot
+            // be used to recover SL link numbers for attachments.
             var prims = sim.ObjectsPrimitives.Values
                 .Where(p => p.LocalID == hud.LocalId || p.ParentID == hud.LocalId)
+                .OrderBy(p => p.LocalID == hud.LocalId ? 0u : p.LocalID)
                 .ToList();
 
             // Snapshot hover text from the root prim immediately.
@@ -235,7 +285,8 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
             var progress = new Progress<string>(msg =>
                 Dispatcher.UIThread.Post(() => StatusText = msg));
 
-            var submission = await _builder.BuildAsync(prims, hud.LocalId, hud.Name, progress, ct)
+            var submission = await _builder.BuildAsync(prims, hud.LocalId, hud.Name, progress, ct,
+                                                        isHud: true)
                                            .ConfigureAwait(false);
 
             Dispatcher.UIThread.Post(() =>
@@ -340,14 +391,19 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Debounce rapid prim updates — waits 250 ms of silence before
     /// re-tessellating so we don't spam the builder on every terse update.
+    /// Called from network threads, so all CTS mutation is marshalled to
+    /// the UI thread to avoid races with OnSelectedHudChanged and Dispose.
     /// </summary>
     private void ScheduleRetessellation()
     {
-        _retessCts?.Cancel();
-        _retessCts?.Dispose();
-        _retessCts = new CancellationTokenSource();
-        var token = _retessCts.Token;
-        _ = RetessellateAfterDelayAsync(token);
+        Dispatcher.UIThread.Post(() =>
+        {
+            _retessCts?.Cancel();
+            _retessCts?.Dispose();
+            _retessCts = new CancellationTokenSource();
+            var token = _retessCts.Token;
+            _ = RetessellateAfterDelayAsync(token);
+        });
     }
 
     private async Task RetessellateAfterDelayAsync(CancellationToken ct)
@@ -358,14 +414,23 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         }
         catch (OperationCanceledException) { return; }
 
-        var hud = SelectedHud;
-        if (hud == null || ct.IsCancellationRequested) return;
+        if (ct.IsCancellationRequested) return;
 
-        // Cancel any existing full load and start a fresh build.
-        _cts?.Cancel();
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-        await LoadHudAsync(hud, _cts.Token).ConfigureAwait(false);
+        // Marshal back to the UI thread so that _cts is only ever mutated
+        // from one thread, preventing ObjectDisposedException races where
+        // OnSelectedHudChanged or another retessellation task disposes _cts
+        // between our null-check and our Cancel()/Dispose() calls.
+        await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var hud = SelectedHud;
+            if (hud == null || ct.IsCancellationRequested) return;
+
+            // Cancel any existing full load and start a fresh build.
+            _cts?.Cancel();
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+            await LoadHudAsync(hud, _cts.Token).ConfigureAwait(false);
+        });
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────────

@@ -18,28 +18,28 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class ObjectsViewModel : ObservableObject, IDisposable
+public partial class ObjectsViewModel : ClientAwareViewModelBase
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
-
     private CancellationTokenSource? _refreshCts;
     private readonly object _refreshLock = new();
     private Timer? _objectUpdateTimer;
     private readonly object _timerLock = new();
+    private readonly ConcurrentDictionary<UUID, string> _groupNameCache = new();
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -58,6 +58,10 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         : $"Tracking {_objectCount} objects.";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SelectedObjectMapId))]
+    [NotifyPropertyChangedFor(nameof(IsRezzedObject))]
+    [NotifyCanExecuteChangedFor(nameof(WalkToCommand))]
+    [NotifyCanExecuteChangedFor(nameof(PointAtCommand))]
     private ObjectEntry? _selectedObject;
 
     [ObservableProperty]
@@ -170,24 +174,35 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
     public ObservableCollection<ObjectEntry> Objects { get; } = [];
     public string[] FilterOptions { get; } = ["Rezzed", "Attached", "Both"];
     public string[] SortOptions { get; } = ["By Distance", "By Name"];
-    public RadegastInstanceAvalonia Instance => _instance;
 
-    public ObjectsViewModel(RadegastInstanceAvalonia instance)
+    // ── Object minimap ───────────────────────────────────────────────────────
+    [ObservableProperty] private Bitmap? _objectMapTile;
+    [ObservableProperty] private float _selfX;
+    [ObservableProperty] private float _selfY;
+    public ObservableCollection<ObjectMapEntry> MapEntries { get; } = [];
+    /// <summary>ID of the currently selected object, forwarded to the object minimap control.</summary>
+    public UUID SelectedObjectMapId => SelectedObject?.Id ?? UUID.Zero;
+
+    /// <summary>True when the selected object is rezzed in-world (not an attachment or HUD).</summary>
+    public bool IsRezzedObject => SelectedObject is { IsAttachment: false };
+
+    public ObjectsViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
         _isSitting = _instance.State.IsSitting;
 
         RegisterClientEvents(Client);
-        _instance.ClientChanged += Instance_ClientChanged;
         _instance.State.SitStateChanged += State_SitStateChanged;
 
+        var selfPos = Client.Self.SimPosition;
+        _selfX = selfPos.X;
+        _selfY = selfPos.Y;
+        FetchMapTile();
         QueueRefresh();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
-        UnregisterClientEvents(Client);
-        _instance.ClientChanged -= Instance_ClientChanged;
+        base.Dispose();
         _instance.State.SitStateChanged -= State_SitStateChanged;
 
         lock (_timerLock)
@@ -204,7 +219,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void RegisterClientEvents(GridClient client)
+    protected override void RegisterClientEvents(GridClient client)
     {
         client.Objects.ObjectUpdate += Objects_ObjectUpdate;
         client.Objects.KillObjects += Objects_KillObjects;
@@ -214,7 +229,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         client.Groups.GroupNamesReply += Groups_GroupNamesReply;
     }
 
-    private void UnregisterClientEvents(GridClient client)
+    protected override void UnregisterClientEvents(GridClient client)
     {
         client.Objects.ObjectUpdate -= Objects_ObjectUpdate;
         client.Objects.KillObjects -= Objects_KillObjects;
@@ -224,13 +239,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         client.Groups.GroupNamesReply -= Groups_GroupNamesReply;
     }
 
-    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
-    {
-        UnregisterClientEvents(e.OldClient);
-        RegisterClientEvents(e.Client);
-    }
-
-    private void State_SitStateChanged(object? sender, SitEventArgs e)
+    private void State_SitStateChanged(object? sender, EventArgs e)
     {
         Dispatcher.UIThread.Post(() => IsSitting = _instance.State.IsSitting);
     }
@@ -245,6 +254,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
     partial void OnIsPointingChanged(bool value)
     {
         OnPropertyChanged(nameof(PointButtonText));
+        PointAtCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnIsMutedChanged(bool value)
@@ -323,7 +333,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         ObjectGroupID = value.GroupID;
         if (value.IsGroupOwned && value.GroupID != UUID.Zero)
         {
-            if (Client.Groups.GroupName2KeyCache.TryGetValue(value.GroupID, out var cachedName))
+            if (_groupNameCache.TryGetValue(value.GroupID, out var cachedName))
                 ObjectGroupName = cachedName;
             else
             {
@@ -481,7 +491,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(IsRezzedObject))]
     private void WalkTo()
     {
         if (SelectedObject == null || Client.Network.CurrentSim == null) return;
@@ -491,7 +501,9 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
         }
     }
 
-    [RelayCommand]
+    private bool CanPointAt() => IsPointing || IsRezzedObject;
+
+    [RelayCommand(CanExecute = nameof(CanPointAt))]
     private void PointAt()
     {
         if (SelectedObject == null || Client.Network.CurrentSim == null) return;
@@ -707,24 +719,24 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
                 // is never auto-nulled by the ListBox binding.
                 var selectedId = SelectedObject?.Id;
 
-                var newById = results.ToDictionary(e => e.Id);
+                var newByLocalId = results.ToDictionary(e => e.LocalId);
 
                 // Remove items no longer in results (iterate backwards to keep indices valid)
                 for (int i = Objects.Count - 1; i >= 0; i--)
                 {
-                    if (!newById.ContainsKey(Objects[i].Id))
+                    if (!newByLocalId.ContainsKey(Objects[i].LocalId))
                         Objects.RemoveAt(i);
                 }
 
                 // Build current index lookup
-                var existingIndex = new Dictionary<UUID, int>(Objects.Count);
+                var existingIndex = new Dictionary<uint, int>(Objects.Count);
                 for (int i = 0; i < Objects.Count; i++)
-                    existingIndex[Objects[i].Id] = i;
+                    existingIndex[Objects[i].LocalId] = i;
 
                 // Update existing items and add new ones
                 foreach (var newItem in results)
                 {
-                    if (existingIndex.TryGetValue(newItem.Id, out int idx))
+                    if (existingIndex.TryGetValue(newItem.LocalId, out int idx))
                     {
                         var existing = Objects[idx];
                         if (existing.Distance != newItem.Distance || existing.Name != newItem.Name)
@@ -755,6 +767,11 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
 
                 _objectCount = Objects.Count;
                 OnPropertyChanged(nameof(StatusText));
+
+                var selfPos = Client.Self.SimPosition;
+                SelfX = selfPos.X;
+                SelfY = selfPos.Y;
+                RebuildMapEntries();
             });
         }
         catch (OperationCanceledException) { }
@@ -812,6 +829,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
             }
             _objectCount = Objects.Count;
             OnPropertyChanged(nameof(StatusText));
+            RebuildMapEntries();
         });
     }
 
@@ -839,7 +857,7 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
                     var groupId = isGroupOwned ? e.Properties.GroupID : UUID.Zero;
 
                     // Kick off async group name resolution if needed
-                    if (isGroupOwned && !Client.Groups.GroupName2KeyCache.TryGetValue(groupId, out _))
+                    if (isGroupOwned && !_groupNameCache.TryGetValue(groupId, out _))
                         Client.Groups.RequestGroupName(groupId);
 
                     Objects[i] = old with
@@ -870,7 +888,13 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
 
     private void Network_SimChanged(object? sender, SimChangedEventArgs e)
     {
-        Dispatcher.UIThread.Post(QueueRefresh);
+        Dispatcher.UIThread.Post(() =>
+        {
+            MapEntries.Clear();
+            ObjectMapTile = null;
+            FetchMapTile();
+            QueueRefresh();
+        });
     }
 
     private void Self_MuteListUpdated(object? sender, EventArgs e)
@@ -885,6 +909,9 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
 
     private void Groups_GroupNamesReply(object? sender, GroupNamesEventArgs e)
     {
+        foreach (var kvp in e.GroupNames)
+            _groupNameCache[kvp.Key] = kvp.Value;
+
         Dispatcher.UIThread.Post(() =>
         {
             // Update any entries whose GroupID was resolved
@@ -902,6 +929,39 @@ public partial class ObjectsViewModel : ObservableObject, IDisposable
                 }
             }
         });
+    }
+
+    #endregion
+
+    #region Object Map Helpers
+
+    private void FetchMapTile()
+    {
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+        Utils.LongToUInts(sim.Handle, out var gridX, out var gridY);
+        gridX /= 256;
+        gridY /= 256;
+        var cached = MapTileCache.GetTile(gridX, gridY);
+        if (cached != null) { ObjectMapTile = cached; return; }
+        MapTileCache.RequestTile(gridX, gridY, () => ObjectMapTile = MapTileCache.GetTile(gridX, gridY));
+    }
+
+    private void RebuildMapEntries()
+    {
+        var sim = Client.Network.CurrentSim;
+        MapEntries.Clear();
+        if (sim == null) return;
+        foreach (var entry in Objects)
+        {
+            if (sim.ObjectsPrimitives.TryGetValue(entry.LocalId, out var prim))
+            {
+                MapEntries.Add(new ObjectMapEntry(
+                    entry.Id, entry.Name,
+                    prim.Position.X, prim.Position.Y, prim.Position.Z,
+                    prim.Scale.X * 0.5f, prim.Scale.Y * 0.5f));
+            }
+        }
     }
 
     #endregion
@@ -968,4 +1028,11 @@ public record ObjectEntry(
     public string DisplayText => IsAttachment
         ? $"{Name} ({FormatAttachPoint(AttachmentPoint)})"
         : $"{Name} ({Distance}m)";
+}
+
+/// <summary>An object entry for the objects minimap — position and bounding-box half-extents.</summary>
+public record ObjectMapEntry(UUID Id, string Name, float X, float Y, float Z, float HalfW, float HalfD)
+{
+    /// <summary>True when the object position falls within the current sim (0–256 on both axes).</summary>
+    public bool IsInSim => X is >= 0 and <= 256 && Y is >= 0 and <= 256;
 }

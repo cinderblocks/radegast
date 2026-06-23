@@ -23,18 +23,13 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class GroupsViewModel : ObservableObject, IDisposable
+public partial class GroupsViewModel : InstanceViewModelBase, IDisposable
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
-
-    public RadegastInstanceAvalonia Instance => _instance;
-
     public ObservableCollection<GroupEntry> Groups { get; } = [];
 
     [ObservableProperty]
@@ -46,9 +41,8 @@ public partial class GroupsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _groupCountText = string.Empty;
 
-    public GroupsViewModel(RadegastInstanceAvalonia instance)
+    public GroupsViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
 
         Client.Groups.CurrentGroups += Groups_CurrentGroups;
         Client.Groups.RequestCurrentGroups();
@@ -145,6 +139,19 @@ public partial class GroupsViewModel : ObservableObject, IDisposable
     {
         if (SelectedGroup == null || SelectedGroup.Id == UUID.Zero) return;
         _instance.ShowGroupProfile(SelectedGroup.Id);
+    }
+
+    [RelayCommand]
+    private void InviteMember()
+    {
+        if (SelectedGroup == null || SelectedGroup.Id == UUID.Zero) return;
+        var groupId = SelectedGroup.Id;
+        var groupName = SelectedGroup.Name;
+        _instance.ShowAvatarPicker($"Invite to {groupName}", entry =>
+        {
+            Client.Groups.Invite(groupId, new System.Collections.Generic.List<UUID> { UUID.Zero }, entry.Id);
+            _instance.ShowNotificationInChat($"Invited {entry.Name} to {groupName}.");
+        });
     }
 }
 

@@ -1,0 +1,67 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx">
+  <?include ..\VelesBuildProperties.wxi?>
+  <?define productVersion="!(bind.packageVersion.VelesSetup)"?>
+  <?define UpgradeCode="{D9F8E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
+
+  <Bundle Name="$(var.productName)"
+          Version="$(var.productVersion)"
+          Manufacturer="$(var.companyName)"
+          AboutUrl="$(var.aboutUrl)"
+          HelpUrl="$(var.aboutUrl)"
+          UpdateUrl="$(var.aboutUrl)"
+          Copyright="$(var.copyright)"
+          IconSourceFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico"
+          UpgradeCode="$(var.UpgradeCode)"
+          DisableModify="yes">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        LicenseUrl="https://github.com/cinderblocks/Radegast/blob/master/LICENSE"
+        ShowVersion="yes"
+        SuppressOptionsUI="no"
+        Theme="hyperlinkSidebarLicense"
+        LogoFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico"
+        LogoSideFile="$(var.VelesSetup.ProjectDir)assets\dialog.png" />
+    </BootstrapperApplication>
+
+    <!-- .NET 8 Desktop Runtime detection.
+         If the runtime is absent the bundle will install it automatically. -->
+    <netfx:DotNetCoreSearch RuntimeType="desktop"
+                            Platform="x64"
+                            MajorVersion="10"
+                            Variable="DotNet10DesktopFound" />
+
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]$(var.productName)" Persisted="yes" />
+    <Variable Name="LaunchAfterInstall" Type="numeric" Value="1" Persisted="yes" />
+
+    <Chain>
+      <!-- .NET 10 Desktop Runtime prerequisite.
+           Downloads the latest 10.0.x runtime when not already installed. -->
+      <ExePackage Id="DotNet100DesktopRuntime_x64"
+                  SourceFile="$(var.DotNet10RuntimeLocalPath)"
+                  DownloadUrl="https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
+                  DetectCondition="DotNet10DesktopFound"
+                  InstallCondition="NOT DotNet10DesktopFound"
+                  InstallArguments="/install /quiet /norestart"
+                  RepairArguments="/repair /quiet /norestart"
+                  Permanent="yes"
+                  Vital="yes"
+                  Compressed="no" />
+
+      <!-- Main application installer -->
+      <MsiPackage Id="VelesSetup"
+                  SourceFile="$(var.VelesSetup.TargetPath)"
+                  DisplayName="$(var.productName)"
+                  Description="$(var.productDesc)"
+                  Vital="yes"
+                  ForcePerMachine="yes"
+                  EnableFeatureSelection="yes"
+                  After="DotNet100DesktopRuntime_x64">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

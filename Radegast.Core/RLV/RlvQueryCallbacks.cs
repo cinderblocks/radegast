@@ -19,7 +19,7 @@
  */
 
 using LibreMetaverse.RLV;
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -74,7 +74,7 @@ namespace Radegast.Core.RLV
             string? groupName = null;
 
             var tcs = new TaskCompletionSource<bool>();
-            void groupNameReply(object sender, GroupNamesEventArgs e)
+            void groupNameReply(object? sender, GroupNamesEventArgs e)
             {
                 if (e.GroupNames.TryGetValue(activeGroupId, out var groupNameTemp))
                 {
@@ -143,7 +143,7 @@ namespace Radegast.Core.RLV
                             continue;
                         }
 
-                        if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                        if (!UUID.TryParse(attachItemID.ToString()!, out var attachmentId))
                         {
                             continue;
                         }
@@ -309,7 +309,7 @@ namespace Radegast.Core.RLV
         public async Task<(bool Success, InventoryMap? InventoryMap)> TryGetInventoryMapAsync(CancellationToken cancellationToken)
         {
             // Get current attached items <InventoryItem>
-            var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinks(cancellationToken);
+            var currentOutfitLinks = await instance.COF.GetCurrentOutfitLinksAsync(cancellationToken);
             var attachmentIdToInventoryIdMap = GetAttachedItemIdToPrimitiveIdMap();
 
             // Build shared folder

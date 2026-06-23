@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -25,7 +25,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 //using OpenTK.Graphics.OpenGL;
 //using OpenTK;
 
@@ -191,18 +191,22 @@ namespace Radegast.Rendering
             ScaledR = dist.Length();
         }
 
-        public void CreateBoundingVolume(OpenMetaverse.Rendering.Face mesh, Vector3 scale)
+        public void CreateBoundingVolume(LibreMetaverse.Rendering.Face mesh, Vector3 scale)
         {
+            float minX = Min.X, minY = Min.Y, minZ = Min.Z;
+            float maxX = Max.X, maxY = Max.Y, maxZ = Max.Z;
             for (int q = 0; q < mesh.Vertices.Count; q++)
             {
-                if (mesh.Vertices[q].Position.X < Min.X) Min.X = mesh.Vertices[q].Position.X;
-                if (mesh.Vertices[q].Position.Y < Min.Y) Min.Y = mesh.Vertices[q].Position.Y;
-                if (mesh.Vertices[q].Position.Z < Min.Z) Min.Z = mesh.Vertices[q].Position.Z;
-
-                if (mesh.Vertices[q].Position.X > Max.X) Max.X = mesh.Vertices[q].Position.X;
-                if (mesh.Vertices[q].Position.Y > Max.Y) Max.Y = mesh.Vertices[q].Position.Y;
-                if (mesh.Vertices[q].Position.Z > Max.Z) Max.Z = mesh.Vertices[q].Position.Z;
+                var pos = mesh.Vertices[q].Position;
+                if (pos.X < minX) minX = pos.X;
+                if (pos.Y < minY) minY = pos.Y;
+                if (pos.Z < minZ) minZ = pos.Z;
+                if (pos.X > maxX) maxX = pos.X;
+                if (pos.Y > maxY) maxY = pos.Y;
+                if (pos.Z > maxZ) maxZ = pos.Z;
             }
+            Min = new Vector3(minX, minY, minZ);
+            Max = new Vector3(maxX, maxY, maxZ);
 
             Vector3 dist = Max - Min;
             mesh.Center = Min + (dist / 2);
@@ -219,14 +223,16 @@ namespace Radegast.Rendering
 
         public void AddVolume(BoundingVolume vol, Vector3 scale)
         {
-            if (vol.Min.X < Min.X) Min.X = vol.Min.X;
-            if (vol.Min.Y < Min.Y) Min.Y = vol.Min.Y;
-            if (vol.Min.Z < Min.Z) Min.Z = vol.Min.Z;
-
-            if (vol.Max.X > Max.X) Max.X = vol.Max.X;
-            if (vol.Max.Y > Max.Y) Max.Y = vol.Max.Y;
-            if (vol.Max.Z > Max.Z) Max.Z = vol.Max.Z;
-            Vector3 dist = Max - Min;
+            float minX = Min.X, minY = Min.Y, minZ = Min.Z;
+            float maxX = Max.X, maxY = Max.Y, maxZ = Max.Z;
+            if (vol.Min.X < minX) minX = vol.Min.X;
+            if (vol.Min.Y < minY) minY = vol.Min.Y;
+            if (vol.Min.Z < minZ) minZ = vol.Min.Z;
+            if (vol.Max.X > maxX) maxX = vol.Max.X;
+            if (vol.Max.Y > maxY) maxY = vol.Max.Y;
+            if (vol.Max.Z > maxZ) maxZ = vol.Max.Z;
+            Min = new Vector3(minX, minY, minZ);
+            Max = new Vector3(maxX, maxY, maxZ);
             CalcScaled(scale);
         }
 

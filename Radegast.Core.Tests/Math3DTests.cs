@@ -18,7 +18,7 @@
  */
 
 using NUnit.Framework;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Rendering;
 
 namespace Radegast.Tests

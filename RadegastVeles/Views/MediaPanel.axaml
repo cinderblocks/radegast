@@ -31,7 +31,7 @@
             <TextBlock Text="Parcel Audio Stream" FontWeight="SemiBold" FontSize="14" />
             <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,0,0,4">
                 <TextBlock Grid.Column="0" Text="URL:" VerticalAlignment="Center" Margin="0,0,6,0" />
-                <TextBox Grid.Column="1" Text="{Binding StreamUrl}" Watermark="Stream URL"
+                <TextBox Grid.Column="1" Text="{Binding StreamUrl}" PlaceholderText="Stream URL"
                          IsEnabled="{Binding SoundSystemAvailable}"
                          AutomationProperties.Name="Stream URL" />
                 <Button Grid.Column="2" Content="Play" Margin="4,0,0,0"

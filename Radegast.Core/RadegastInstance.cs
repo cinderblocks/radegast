@@ -28,7 +28,7 @@ using LibreMetaverse;
 using LibreMetaverse.Appearance;
 using Radegast.Commands;
 using Radegast.Media;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core.RLV;
 
 namespace Radegast
@@ -302,7 +302,7 @@ namespace Radegast
                                     GridManger.LoadGrids();
 
                                     Names = new NameManager(this);
-                                    GestureManager = new LibreMetaverse.GestureManager(Client);
+                                    GestureManager = new GestureManager(Client);
                                     LslSyntax = new LslSyntax(Client);
 
                                     IMSessions = new IMSessionManager(this);
@@ -337,49 +337,49 @@ namespace Radegast
             }, token);
         }
 
-        private void IMSessions_SessionOpened(object sender, IMSessionEventArgs e)
+        private void IMSessions_SessionOpened(object? sender, IMSessionEventArgs e)
         {
             // default: no-op; UI can subscribe to instance.IMSessions.SessionOpened
         }
 
-        private void IMSessions_SessionClosed(object sender, IMSessionEventArgs e)
+        private void IMSessions_SessionClosed(object? sender, IMSessionEventArgs e)
         {
             // default: no-op
         }
 
-        private void IMSessions_TypingStarted(object sender, IMTypingEventArgs e)
+        private void IMSessions_TypingStarted(object? sender, IMTypingEventArgs e)
         {
             // could be used to show typing indicators at UI level
         }
 
-        private void IMSessions_TypingStopped(object sender, IMTypingEventArgs e)
+        private void IMSessions_TypingStopped(object? sender, IMTypingEventArgs e)
         {
             // could be used to clear typing indicators
         }
 
         private void InitializeClient(GridClient client)
         {
-            client.Settings.MULTIPLE_SIMS = true;
+            client.Settings.Agent.MultipleSims = true;
 
-            client.Settings.USE_INTERPOLATION_TIMER = false;
-            client.Settings.ALWAYS_REQUEST_OBJECTS = true;
-            client.Settings.ALWAYS_DECODE_OBJECTS = true;
-            client.Settings.OBJECT_TRACKING = true;
-            client.Settings.ENABLE_SIMSTATS = true;
-            client.Settings.SEND_AGENT_THROTTLE = true;
-            client.Settings.SEND_AGENT_UPDATES = true;
-            client.Settings.STORE_LAND_PATCHES = true;
+            client.Settings.World.UseInterpolationTimer = false;
+            client.Settings.World.AlwaysRequestObjects = true;
+            client.Settings.World.AlwaysDecodeObjects = true;
+            client.Settings.World.TrackObjects = true;
+            client.Settings.Packets.EnableSimStats = true;
+            client.Settings.Agent.SendThrottle = true;
+            client.Settings.Agent.SendUpdates = true;
+            client.Settings.World.StoreLandPatches = true;
 
-            client.Settings.USE_ASSET_CACHE = true;
-            client.Settings.ASSET_CACHE_DIR = Path.Combine(UserDir, "cache");
+            client.Settings.AssetCache.Enabled = true;
+            client.Settings.AssetCache.Dir = Path.Combine(UserDir, "cache");
             client.Assets.Cache.AutoPruneEnabled = false;
             client.Assets.Cache.ComputeAssetCacheFilename = ComputeCacheName;
 
             client.Throttle.Total = 5000000f;
-            client.Settings.THROTTLE_OUTGOING_PACKETS = false;
-            client.Settings.LOGIN_TIMEOUT = 120 * 1000;
-            client.Settings.SIMULATOR_TIMEOUT = 180 * 1000;
-            client.Settings.MAX_CONCURRENT_TEXTURE_DOWNLOADS = 20;
+            client.Settings.Packets.ThrottleOutgoing = false;
+            client.Settings.Timing.LoginTimeout = 120 * 1000;
+            client.Settings.Timing.SimulatorTimeout = 180 * 1000;
+            client.Settings.TexturePipeline.MaxConcurrentDownloads = 20;
 
             client.Self.Movement.AutoResetControls = false;
             client.Self.Movement.UpdateInterval = 250;
@@ -534,7 +534,7 @@ namespace Radegast
             Logger.Debug("RadegastInstance finished cleaning up.");
         }
 
-        private void NetCom_ClientConnected(object sender, EventArgs e)
+        private void NetCom_ClientConnected(object? sender, EventArgs e)
         {
             Client.Self.RequestMuteList();
 
@@ -549,7 +549,7 @@ namespace Radegast
             }
         }
 
-        private void Network_LoginProgress(object sender, LoginProgressEventArgs e)
+        private void Network_LoginProgress(object? sender, LoginProgressEventArgs e)
         {
             if (e.Status != LoginStatus.ConnectingToSim) return;
             try
@@ -566,12 +566,12 @@ namespace Radegast
             }
         }
 
-        private void Groups_GroupsChanged(object sender, EventArgs e)
+        private void Groups_GroupsChanged(object? sender, EventArgs e)
         {
             Client.Groups.RequestCurrentGroups();
         }
 
-        private void Groups_GroupLeaveReply(object sender, GroupOperationEventArgs e)
+        private void Groups_GroupLeaveReply(object? sender, GroupOperationEventArgs e)
         {
             if (e.Success)
             {
@@ -580,13 +580,13 @@ namespace Radegast
             Client.Groups.RequestCurrentGroups();
         }
 
-        private void Groups_GroupDropped(object sender, GroupDroppedEventArgs e)
+        private void Groups_GroupDropped(object? sender, GroupDroppedEventArgs e)
         {
             lock (_groupsLock) { Groups.Remove(e.GroupID); }
             Client.Groups.RequestCurrentGroups();
         }
 
-        private void Groups_CurrentGroups(object sender, CurrentGroupsEventArgs e)
+        private void Groups_CurrentGroups(object? sender, CurrentGroupsEventArgs e)
         {
             // Merge incoming groups into the existing dictionary rather than replacing
             // it. The server may deliver the complete membership set across multiple
@@ -705,7 +705,7 @@ namespace Radegast
         public abstract void RegisterContextAction(Type omvType, string label, EventHandler handler);
         public abstract void DeregisterContextAction(Type omvType, string label);
 
-        public static void ThreadExceptionHandler(object sender, UnhandledExceptionEventArgs args)
+        public static void ThreadExceptionHandler(object? sender, UnhandledExceptionEventArgs args)
         {
             Exception e = (Exception)args.ExceptionObject;
             Logger.Critical("Unhandled thread exception: "

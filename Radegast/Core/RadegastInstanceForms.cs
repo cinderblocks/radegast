@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.IO;
 using System.Reflection;

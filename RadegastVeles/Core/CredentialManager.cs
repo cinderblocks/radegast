@@ -206,8 +206,34 @@ public sealed class CredentialManager : IDisposable
         SaveAllSecrets(secrets);
     }
 
+    public string? GetMfaHash(string username, string gridId)
+    {
+        try
+        {
+            var secrets = LoadAllSecrets();
+            if (secrets.TryGetValue(MfaHashKey(username, gridId), out var hash))
+                return string.IsNullOrEmpty(hash) ? null : hash;
+        }
+        catch { }
+        return null;
+    }
+
+    public void SaveMfaHash(string username, string gridId, string mfaHash)
+    {
+        try
+        {
+            var secrets = LoadAllSecrets();
+            secrets[MfaHashKey(username, gridId)] = mfaHash;
+            SaveAllSecrets(secrets);
+        }
+        catch { }
+    }
+
     private static string PasswordKey(string username, string gridId)
         => $"pwd:{username.ToLowerInvariant()}:{gridId}";
+
+    private static string MfaHashKey(string username, string gridId)
+        => $"mfa:{username.ToLowerInvariant()}:{gridId}";
 
     public void SaveLoginPreferences(int locationIndex, string customLocation)
     {
@@ -233,9 +259,42 @@ public sealed class CredentialManager : IDisposable
         catch { return (0, string.Empty); }
     }
 
+    public void SaveFavoriteLocations(string accountKey, List<(string Name, string Location)> locations)
+    {
+        try
+        {
+            var secrets = LoadAllSecrets();
+            secrets[$"favlocs:{accountKey}"] = JsonSerializer.Serialize(
+                locations.ConvertAll(l => new FavoriteLocationEntry { Name = l.Name, Location = l.Location }));
+            SaveAllSecrets(secrets);
+        }
+        catch { }
+    }
+
+    public List<(string Name, string Location)> GetFavoriteLocations(string accountKey)
+    {
+        try
+        {
+            var secrets = LoadAllSecrets();
+            if (secrets.TryGetValue($"favlocs:{accountKey}", out var json))
+            {
+                var entries = JsonSerializer.Deserialize<List<FavoriteLocationEntry>>(json) ?? [];
+                return entries.ConvertAll(e => (e.Name, e.Location));
+            }
+        }
+        catch { }
+        return [];
+    }
+
     public void Dispose()
     {
         CryptographicOperations.ZeroMemory(_key);
+    }
+
+    private sealed class FavoriteLocationEntry
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Location { get; set; } = string.Empty;
     }
 
     private sealed class StoreEnvelope

@@ -40,8 +40,8 @@ using System.Windows.Forms;
 using System.Threading;
 using CoreJ2K;
 using OpenTK.Graphics.OpenGL;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -172,7 +172,7 @@ namespace Radegast.Rendering
 
         private readonly ConcurrentDictionary<UUID, TextureInfo> TexturesPtrMap = new ConcurrentDictionary<UUID, TextureInfo>();
         private readonly RadegastInstance instance;
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
         private OpenTK.Graphics.GraphicsMode GLMode = null;
         private readonly ConcurrentQueue<TextureLoadItem> PendingTextures = new ConcurrentQueue<TextureLoadItem>();
         private readonly float[] lightPos = new float[] { 0f, 0f, 1f, 0f };
@@ -225,7 +225,7 @@ namespace Radegast.Rendering
 
             this.instance = instance;
 
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
             textRendering = new TextRendering(instance);
 
             Client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
@@ -623,13 +623,12 @@ namespace Radegast.Rendering
                 {
                     if (ModifierKeys == Keys.Control || ModifierKeys == (Keys.Alt | Keys.Control | Keys.Shift))
                     {
-                        Center.X -= deltaX / PAN_SENSITIVITY_X;
-                        Center.Z += deltaY / PAN_SENSITIVITY_Z;
+                        Center = new Vector3(Center.X - deltaX / PAN_SENSITIVITY_X, Center.Y, Center.Z + deltaY / PAN_SENSITIVITY_Z);
                     }
 
                     if (ModifierKeys == Keys.Alt)
                     {
-                        Center.Y -= deltaY / PAN_SENSITIVITY_Y;
+                        Center = new Vector3(Center.X, Center.Y - deltaY / PAN_SENSITIVITY_Y, Center.Z);
 
                         int newYaw = scrollYaw.Value + deltaX;
                         if (newYaw < 0) newYaw += ROTATION_ANGLE_MAX;
@@ -658,9 +657,7 @@ namespace Radegast.Rendering
                 }
                 else if (e.Button == MouseButtons.Middle)
                 {
-                    Center.X -= deltaX / PAN_SENSITIVITY_X;
-                    Center.Z += deltaY / PAN_SENSITIVITY_Z;
-
+                    Center = new Vector3(Center.X - deltaX / PAN_SENSITIVITY_X, Center.Y, Center.Z + deltaY / PAN_SENSITIVITY_Z);
                 }
 
                 dragX = e.X;
@@ -1099,23 +1096,17 @@ namespace Radegast.Rendering
                     }
                     else
                     { // Mesh
-                        AutoResetEvent gotMesh = new AutoResetEvent(false);
                         bool meshSuccess = false;
-
-                        Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
-                            {
-                                if (!success || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out mesh))
-                                {
-                                    Logger.Warn("Failed to fetch or decode the mesh asset", Client);
-                                }
-                                else
-                                {
-                                    meshSuccess = true;
-                                }
-                                gotMesh.Set();
-                            });
-
-                        if (!gotMesh.WaitOne(MESH_REQUEST_TIMEOUT_MS, false)) return;
+                        var meshAsset = System.Threading.Tasks.Task.Run(
+                            () => Client.Assets.RequestMeshAsync(prim.Sculpt.SculptTexture)).GetAwaiter().GetResult();
+                        if (meshAsset == null || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out mesh))
+                        {
+                            Logger.Warn("Failed to fetch or decode the mesh asset", Client);
+                        }
+                        else
+                        {
+                            meshSuccess = true;
+                        }
                         if (!meshSuccess) return;
                     }
                 }
@@ -1207,29 +1198,14 @@ namespace Radegast.Rendering
         {
             if (textureID == UUID.Zero) return false;
 
-            ManualResetEvent gotImage = new ManualResetEvent(false);
             SKBitmap img = null;
 
             try
             {
-                gotImage.Reset();
-                instance.Client.Assets.RequestImage(textureID, (state, assetTexture) =>
-                    {
-                        try
-                        {
-                            if (state == TextureRequestState.Finished)
-                            {
-                                img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>();
-                            }
-                        }
-                        finally
-                        {
-                            gotImage.Set();                            
-
-                        }
-                    }
-                );
-                gotImage.WaitOne(TEXTURE_REQUEST_TIMEOUT_MS, false);
+                var assetTexture = System.Threading.Tasks.Task.Run(
+                    () => instance.Client.Assets.RequestImageAsync(textureID)).GetAwaiter().GetResult();
+                if (assetTexture?.AssetData != null)
+                    img = J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData);
                 if (img != null)
                 {
                     texture = img;

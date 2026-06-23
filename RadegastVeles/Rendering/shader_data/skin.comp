@@ -1,0 +1,88 @@
+/*
+ * Radegast Metaverse Client
+ * Copyright (c) 2026, Sjofn LLC
+ * All rights reserved.
+ *
+ * Radegast is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#version 310 es
+layout(local_size_x = 64) in;
+
+// Binding 0: T-pose vertex data (8 floats per vertex: X,Y,Z, NX,NY,NZ, U,V).
+layout(std430, binding = 0) readonly buffer BindVerts { highp float bv[]; };
+
+// Binding 1: Joint indices (4 ints per vertex, matching Joints[] in AvatarFaceSkinData).
+layout(std430, binding = 1) readonly buffer Joints    { int ji[]; };
+
+// Binding 2: Blend weights (4 floats per vertex, matching Weights[] in AvatarFaceSkinData).
+layout(std430, binding = 2) readonly buffer Weights   { highp float wt[]; };
+
+// Binding 3: Skin matrices — one mat4 per joint.
+// Stored as raw OpenTK Matrix4 bytes (row-major); reading as mat4() gives M_r^T so
+// M_gl * v = M_r^T * v_col = TransformRow(v, M_r).  No pre-transpose needed.
+layout(std430, binding = 3) readonly buffer SkinMats  { highp float sm[]; };
+
+// Binding 4: Output vertex buffer — this IS the mesh VBO read by the vertex shader.
+layout(std430, binding = 4) buffer OutVerts           { highp float ov[]; };
+
+uniform int uVertexCount;
+
+highp mat4 readSkinMat(int idx)
+{
+    int b = idx * 16;
+    return mat4(
+        sm[b +  0], sm[b +  1], sm[b +  2], sm[b +  3],
+        sm[b +  4], sm[b +  5], sm[b +  6], sm[b +  7],
+        sm[b +  8], sm[b +  9], sm[b + 10], sm[b + 11],
+        sm[b + 12], sm[b + 13], sm[b + 14], sm[b + 15]
+    );
+}
+
+void main()
+{
+    uint vi = gl_GlobalInvocationID.x;
+    if (vi >= uint(uVertexCount)) return;
+
+    int b = int(vi) * 8;
+    highp vec4 bp = vec4(bv[b],     bv[b + 1], bv[b + 2], 1.0);
+    highp vec4 bn = vec4(bv[b + 3], bv[b + 4], bv[b + 5], 0.0);
+
+    highp vec4  ap     = vec4(0.0);
+    highp vec4  an     = vec4(0.0);
+    highp float totalW = 0.0;
+
+    for (int k = 0; k < 4; k++)
+    {
+        int         j = ji[int(vi) * 4 + k];
+        highp float w = wt[int(vi) * 4 + k];
+        if (w <= 1e-4) continue;
+
+        highp mat4 m = readSkinMat(j);
+        ap     += w * (m * bp);
+        an     += w * (m * bn);
+        totalW += w;
+    }
+
+    if (totalW <= 1e-4) { ap = bp; an = bn; }
+
+    ov[b]     = ap.x;
+    ov[b + 1] = ap.y;
+    ov[b + 2] = ap.z;
+    ov[b + 3] = an.x;
+    ov[b + 4] = an.y;
+    ov[b + 5] = an.z;
+    ov[b + 6] = bv[b + 6];
+    ov[b + 7] = bv[b + 7];
+}

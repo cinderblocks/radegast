@@ -25,7 +25,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
 using LibreMetaverse;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

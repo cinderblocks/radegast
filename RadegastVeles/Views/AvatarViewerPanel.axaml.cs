@@ -17,7 +17,6 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
 using Avalonia.Controls;
 using Radegast.Veles.ViewModels;
 
@@ -25,10 +24,6 @@ namespace Radegast.Veles.Views;
 
 public partial class AvatarViewerPanel : UserControl
 {
-    // Stored so it can be unsubscribed when the DataContext changes, preventing
-    // the lambda (which captures vm) from keeping vm alive via the event chain.
-    private Action<string>? _initFailedHandler;
-
     public AvatarViewerPanel()
     {
         InitializeComponent();
@@ -37,24 +32,16 @@ public partial class AvatarViewerPanel : UserControl
     protected override void OnDataContextChanged(System.EventArgs e)
     {
         base.OnDataContextChanged(e);
-
-        if (_initFailedHandler != null)
-        {
-            Viewport.InitFailed -= _initFailedHandler;
-            _initFailedHandler = null;
-        }
-
         if (DataContext is AvatarViewerViewModel vm)
         {
             vm.SetViewport(Viewport);
-            _initFailedHandler = msg =>
+            Viewport.InitFailed += msg =>
             {
                 vm.HasError   = true;
                 vm.ErrorText  = $"GL init failed: {msg}";
                 vm.StatusText = vm.ErrorText;
                 vm.IsLoading  = false;
             };
-            Viewport.InitFailed += _initFailedHandler;
         }
     }
 }

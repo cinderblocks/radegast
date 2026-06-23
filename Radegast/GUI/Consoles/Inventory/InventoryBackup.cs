@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -24,8 +24,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -186,7 +186,7 @@ namespace Radegast
                         switch (item.AssetType)
                         {
                             case AssetType.LSLText:
-                                client.Settings.USE_ASSET_CACHE = false;
+                                client.Settings.AssetCache.Enabled = false;
                                 fullName += ".lsl";
                                 break;
                             case AssetType.Notecard: fullName += ".txt"; break;
@@ -225,63 +225,24 @@ namespace Radegast
 
                             Asset receivedAsset = null;
 
-                            // Use TaskCompletionSource to await the asset callback instead of blocking AutoResetEvent
-                            var tcs = new TaskCompletionSource<Asset>();
-
-                            if (item.AssetType == AssetType.Texture)
+                            using var assetCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                            assetCts.CancelAfter(TimeSpan.FromSeconds(30));
+                            try
                             {
-                                client.Assets.RequestImage(item.AssetUUID, (state, asset) =>
+                                if (item.AssetType == AssetType.Texture)
                                 {
-                                    try
-                                    {
-                                        if (state == TextureRequestState.Finished && asset != null && asset.Decode())
-                                        {
-                                            tcs.TrySetResult(asset);
-                                            return;
-                                        }
-
-                                        if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
-                                        {
-                                            tcs.TrySetResult(null);
-                                        }
-                                    }
-                                    catch (Exception)
-                                    {
-                                        tcs.TrySetResult(null);
-                                    }
-                                });
-                            }
-                            else
-                            {
-                                var transferID = UUID.Random();
-                                client.Assets.RequestInventoryAsset(item, true, transferID, (transfer, asset) =>
+                                    var assetTexture = await client.Assets.RequestImageAsync(item.AssetUUID, ImageType.Normal, assetCts.Token).ConfigureAwait(false);
+                                    if (assetTexture != null && assetTexture.Decode())
+                                        receivedAsset = assetTexture;
+                                }
+                                else
                                 {
-                                    try
-                                    {
-                                        if (transfer.Success && transfer.ID == transferID)
-                                        {
-                                            tcs.TrySetResult(asset);
-                                        }
-                                        else
-                                        {
-                                            tcs.TrySetResult(null);
-                                        }
-                                    }
-                                    catch (Exception)
-                                    {
-                                        tcs.TrySetResult(null);
-                                    }
-                                });
+                                    receivedAsset = await client.Assets.RequestInventoryAssetAsync(item, true, UUID.Random(), assetCts.Token).ConfigureAwait(false);
+                                }
                             }
+                            catch (OperationCanceledException) { }
 
-                            // Wait for asset or timeout
-                            var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30), ct)).ConfigureAwait(false);
-                            if (completed == tcs.Task)
-                            {
-                                receivedAsset = await tcs.Task.ConfigureAwait(false);
-                            }
-
-                            client.Settings.USE_ASSET_CACHE = true;
+                            client.Settings.AssetCache.Enabled = true;
 
                             ct.ThrowIfCancellationRequested();
                             if (receivedAsset == null)

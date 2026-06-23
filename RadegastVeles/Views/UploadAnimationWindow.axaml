@@ -48,13 +48,13 @@
             <!-- Name -->
             <TextBlock Text="Name:" FontSize="12" AutomationProperties.Name="Name label" />
             <TextBox Text="{Binding AnimationName, Mode=TwoWay}"
-                     Watermark="Animation name"
+                     PlaceholderText="Animation name"
                      AutomationProperties.Name="Animation name" />
 
             <!-- File info -->
             <TextBlock Text="{Binding FileInfo}"
                        FontSize="11"
-                       Opacity="0.75"
+                       Foreground="{DynamicResource VelesMutedForeground}"
                        AutomationProperties.Name="File info" />
             <ProgressBar IsIndeterminate="{Binding IsLoading}"
                          IsVisible="{Binding IsLoading}"

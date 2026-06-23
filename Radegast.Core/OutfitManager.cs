@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -48,7 +48,7 @@ namespace Radegast
             base.Dispose(disposing);
         }
 
-        private void instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             // Atomically update the underlying GridClient in the base class
             UpdateClient(e.Client);
@@ -61,7 +61,7 @@ namespace Radegast
         public async Task<bool> InitializeAsync(CancellationToken cancellationToken = default)
         {
             // GetCurrentOutfitLinks lazily initializes COF if it hasn't been yet
-            await GetCurrentOutfitLinks(cancellationToken).ConfigureAwait(false);
+            await GetCurrentOutfitLinksAsync(cancellationToken).ConfigureAwait(false);
             return COF != null;
         }
     }

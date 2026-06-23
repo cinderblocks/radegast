@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -29,7 +29,7 @@ using System.Threading.RateLimiting;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 using LibreMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -55,6 +55,24 @@ namespace Radegast
 
         private readonly RadegastInstance instance;
         private readonly string cacheFileName;
+
+        /// <summary>Number of names currently held in the in-memory cache.</summary>
+        public int Count => names.Count;
+
+        /// <summary>Full path to the name.cache file on disk.</summary>
+        public string CacheFilePath => cacheFileName;
+
+        /// <summary>
+        /// Maximum age (in hours) of a cached display name before it is refreshed on next lookup.
+        /// Standard (legacy) names never expire. Persisted in GlobalSettings as "name_cache_max_age_hours".
+        /// </summary>
+        public int DisplayNameMaxAgeHours
+        {
+            get => instance.GlobalSettings["name_cache_max_age_hours"].Type != OSDType.Unknown
+                ? instance.GlobalSettings["name_cache_max_age_hours"].AsInteger()
+                : 48;
+            set => instance.GlobalSettings["name_cache_max_age_hours"] = OSD.FromInteger(Math.Max(1, value));
+        }
 
         private readonly DateTime UUIDNameOnly = new DateTime(1970, 9, 4, 10, 0, 0, DateTimeKind.Utc);
         private readonly ConcurrentDictionary<UUID, AgentDisplayName> names = new ConcurrentDictionary<UUID, AgentDisplayName>();
@@ -185,17 +203,11 @@ namespace Radegast
             else
             {
                 // use display names
-                _ = Client.Avatars.GetDisplayNames(batchedListBuffer, (success, names, badIDs) =>
-                {
-                    if (success)
-                    {
-                        ProcessDisplayNames(names!);
-                    }
-                    else
-                    {
-                        Logger.Warn("Failed fetching display names", Client);
-                    }
-                }, cancellationToken);
+                var (success, names, _) = await Client.Avatars.GetDisplayNamesAsync(batchedListBuffer, cancellationToken).ConfigureAwait(false);
+                if (success)
+                    ProcessDisplayNames(names!);
+                else
+                    Logger.Warn("Failed fetching display names", Client);
             }
 
             batchedNamesBuffer.Clear();
@@ -211,7 +223,7 @@ namespace Radegast
                     OSDMap cache = (OSDMap)OSDParser.DeserializeLLSDBinary(data);
                     OSDArray namesOSD = (OSDArray)cache["names"];
                     DateTime now = DateTime.Now;
-                    TimeSpan maxAge = new TimeSpan(48, 0, 0);
+                    TimeSpan maxAge = TimeSpan.FromHours(DisplayNameMaxAgeHours);
                     NameMode mode = (NameMode)(int)instance.GlobalSettings["display_name_mode"];
 
                     foreach (var osdname in namesOSD)
@@ -332,7 +344,7 @@ namespace Radegast
             string? name = null;
             bool requestName = true;
 
-            if (names.TryGetValue(agentID, out AgentDisplayName displayName))
+            if (names.TryGetValue(agentID, out AgentDisplayName? displayName))
             {
                 if (Mode == NameMode.Standard || displayName.NextUpdate != UUIDNameOnly)
                 {
@@ -534,7 +546,7 @@ namespace Radegast
 
         private void QueueNameRequest(UUID agentID)
         {
-            if (names.TryGetValue(agentID, out AgentDisplayName name) && IsValidName(name.DisplayName))
+            if (names.TryGetValue(agentID, out AgentDisplayName? name) && IsValidName(name.DisplayName))
             {
                 return;
             }
@@ -547,7 +559,7 @@ namespace Radegast
 
         private async ValueTask QueueNameRequestAsync(UUID agentID, CancellationToken cancellationToken = default)
         {
-            if (names.TryGetValue(agentID, out AgentDisplayName name) && IsValidName(name.DisplayName))
+            if (names.TryGetValue(agentID, out AgentDisplayName? name) && IsValidName(name.DisplayName))
             {
                 return;
             }
@@ -567,13 +579,13 @@ namespace Radegast
             c.Avatars.DisplayNameUpdate -= Avatars_DisplayNameUpdate;
         }
 
-        private void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             DeregisterEvents(e.OldClient);
             RegisterEvents(e.Client);
         }
 
-        private void Avatars_DisplayNameUpdate(object sender, DisplayNameUpdateEventArgs e)
+        private void Avatars_DisplayNameUpdate(object? sender, DisplayNameUpdateEventArgs e)
         {
             AgentDisplayName name = e.DisplayName;
             name.Updated = DateTime.Now;
@@ -588,7 +600,7 @@ namespace Radegast
             OnDisplayNamesChanged(results);
         }
 
-        private void Avatars_UUIDNameReply(object sender, UUIDNameReplyEventArgs e)
+        private void Avatars_UUIDNameReply(object? sender, UUIDNameReplyEventArgs e)
         {
             Dictionary<UUID, string> results = new Dictionary<UUID, string>();
 

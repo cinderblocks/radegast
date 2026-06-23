@@ -690,7 +690,7 @@ namespace Radegast
             // 
             // txtCreator
             // 
-            this.txtCreator.AgentID = ((OpenMetaverse.UUID)(resources.GetObject("txtCreator.AgentID")));
+            this.txtCreator.AgentID = ((LibreMetaverse.UUID)(resources.GetObject("txtCreator.AgentID")));
             this.txtCreator.BackColor = System.Drawing.SystemColors.Window;
             this.txtCreator.Location = new System.Drawing.Point(80, 55);
             this.txtCreator.Name = "txtCreator";

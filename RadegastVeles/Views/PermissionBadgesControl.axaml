@@ -10,20 +10,23 @@
     <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center"
                 x:Name="BadgeContainer">
         <!-- No Modify badge (orange) — shown when NoModify=true -->
-        <Border x:Name="ModifyBadge" Background="#CC8800" CornerRadius="2" Padding="3,1"
-                IsVisible="False">
+        <Border x:Name="ModifyBadge" Background="{DynamicResource VelesBadgeNoModify}" CornerRadius="2" Padding="3,1"
+                IsVisible="False"
+                AutomationProperties.Name="No Modify badge">
             <TextBlock Text="M" Foreground="White" FontSize="10" FontWeight="Bold"
                        ToolTip.Tip="No Modify" AutomationProperties.Name="No Modify" />
         </Border>
         <!-- No Copy badge (blue) — shown when NoCopy=true -->
-        <Border x:Name="CopyBadge" Background="#0066CC" CornerRadius="2" Padding="3,1"
-                IsVisible="False">
+        <Border x:Name="CopyBadge" Background="{DynamicResource VelesBadgeNoCopy}" CornerRadius="2" Padding="3,1"
+                IsVisible="False"
+                AutomationProperties.Name="No Copy badge">
             <TextBlock Text="C" Foreground="White" FontSize="10" FontWeight="Bold"
                        ToolTip.Tip="No Copy" AutomationProperties.Name="No Copy" />
         </Border>
         <!-- No Transfer badge (red) — shown when NoTransfer=true -->
-        <Border x:Name="TransferBadge" Background="#CC3300" CornerRadius="2" Padding="3,1"
-                IsVisible="False">
+        <Border x:Name="TransferBadge" Background="{DynamicResource VelesBadgeNoTransfer}" CornerRadius="2" Padding="3,1"
+                IsVisible="False"
+                AutomationProperties.Name="No Transfer badge">
             <TextBlock Text="T" Foreground="White" FontSize="10" FontWeight="Bold"
                        ToolTip.Tip="No Transfer" AutomationProperties.Name="No Transfer" />
         </Border>

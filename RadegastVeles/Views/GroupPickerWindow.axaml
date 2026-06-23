@@ -1,0 +1,49 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.GroupPickerWindow"
+        x:DataType="vm:GroupPickerViewModel"
+        Title="Pick Group"
+        Width="340" Height="400"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Group picker window">
+
+    <DockPanel>
+
+        <!-- Bottom action bar -->
+        <Border DockPanel.Dock="Bottom" Padding="10,8" Background="#18FFFFFF">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Select" Command="{Binding SelectCommand}" MinWidth="80"
+                            AutomationProperties.Name="Select group" />
+                    <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80"
+                            IsCancel="True"
+                            AutomationProperties.Name="Cancel picker" />
+                </StackPanel>
+                <TextBlock Text="{Binding SelectedDisplay}" VerticalAlignment="Center"
+                           IsVisible="{Binding SelectedDisplay, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           FontStyle="Italic" Opacity="0.8" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
+
+        <ListBox x:Name="GroupList"
+                 ItemsSource="{Binding Groups}"
+                 SelectedItem="{Binding SelectedGroup}"
+                 Margin="8"
+                 AutomationProperties.Name="Groups list">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:GroupPickerEntry">
+                    <TextBlock Text="{Binding GroupName}" />
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+    </DockPanel>
+</Window>

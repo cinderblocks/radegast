@@ -48,7 +48,7 @@
                    VerticalAlignment="Center" AutomationProperties.Name="Status" />
 
         <!-- Loading indicator -->
-        <TextBlock DockPanel.Dock="Top" Text="Loading contents…" FontStyle="Italic" Opacity="0.6"
+        <TextBlock DockPanel.Dock="Top" Text="Loading contents…" FontStyle="Italic" Foreground="{DynamicResource VelesMutedForeground}"
                    IsVisible="{Binding IsLoading}" Margin="8,4"
                    AutomationProperties.Name="Loading indicator" />
 
@@ -73,7 +73,7 @@
                             <TextBlock Text="{Binding Name}" TextWrapping="NoWrap"
                                        TextTrimming="CharacterEllipsis"
                                        AutomationProperties.Name="{Binding Name}" />
-                            <TextBlock Text="{Binding TypeName}" FontSize="11" Opacity="0.6"
+                            <TextBlock Text="{Binding TypeName}" FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
                                        AutomationProperties.Name="Item type" />
                         </StackPanel>
 

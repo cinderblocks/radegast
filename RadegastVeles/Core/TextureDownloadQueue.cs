@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
@@ -38,7 +39,158 @@ public enum TexturePriority
 }
 
 /// <summary>
-/// Central throttled queue for downloading and decoding images.
+/// Thread-safe LRU cache for decoded <see cref="Bitmap"/> instances.
+/// Evicted entries are disposed immediately to release Skia pixel buffers.
+/// </summary>
+internal sealed class LruBitmapCache : IDisposable
+{
+    private int _capacity;
+    private readonly Dictionary<string, LinkedListNode<(string Key, Bitmap Value)>> _map;
+    private readonly LinkedList<(string Key, Bitmap Value)> _order = new();
+    private readonly object _lock = new();
+
+    public int Count { get { lock (_lock) return _map.Count; } }
+
+    /// <summary>
+    /// Gets or sets the maximum number of bitmaps the cache will hold.
+    /// Setting a smaller value immediately evicts the least-recently-used
+    /// entries until the count fits within the new capacity.
+    /// Evicted bitmaps are disposed after the lock is released.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="value"/> is less than 1.</exception>
+    public int Capacity
+    {
+        get { lock (_lock) return _capacity; }
+        set
+        {
+            if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value), "Capacity must be at least 1.");
+            var evicted = new List<Bitmap>();
+            lock (_lock)
+            {
+                _capacity = value;
+                while (_map.Count > _capacity)
+                {
+                    var lru = _order.Last!;
+                    _order.RemoveLast();
+                    _map.Remove(lru.Value.Key);
+                    evicted.Add(lru.Value.Value);
+                }
+            }
+            foreach (var bmp in evicted)
+                bmp.Dispose();
+        }
+    }
+
+    public LruBitmapCache(int capacity)
+    {
+        if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
+        _capacity = capacity;
+        _map = new Dictionary<string, LinkedListNode<(string, Bitmap)>>(capacity);
+    }
+
+    /// <summary>
+    /// Try to get a cached bitmap, promoting it to most-recently-used.
+    /// </summary>
+    public bool TryGet(string key, out Bitmap? bitmap)
+    {
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var node))
+            {
+                _order.Remove(node);
+                _order.AddFirst(node);
+                bitmap = node.Value.Value;
+                return true;
+            }
+        }
+        bitmap = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Add or refresh a bitmap. If at capacity, the least-recently-used entry is evicted and disposed.
+    /// </summary>
+    public void Add(string key, Bitmap bitmap)
+    {
+        Bitmap? replacedBitmap = null;
+        Bitmap? lruBitmap = null;
+        lock (_lock)
+        {
+            if (_map.TryGetValue(key, out var existing))
+            {
+                _order.Remove(existing);
+                _map.Remove(key);
+                replacedBitmap = existing.Value.Value;
+            }
+
+            var node = new LinkedListNode<(string, Bitmap)>((key, bitmap));
+            _order.AddFirst(node);
+            _map[key] = node;
+
+            if (_map.Count > _capacity)
+            {
+                var lru = _order.Last!;
+                _order.RemoveLast();
+                _map.Remove(lru.Value.Key);
+                lruBitmap = lru.Value.Value;
+            }
+        }
+        replacedBitmap?.Dispose();
+        lruBitmap?.Dispose();
+    }
+
+    /// <summary>
+    /// Remove and dispose the cached bitmap for <paramref name="key"/>, if present.
+    /// The next request for the same key will trigger a fresh download and decode.
+    /// </summary>
+    /// <returns><see langword="true"/> if an entry was found and removed.</returns>
+    public bool Invalidate(string key)
+    {
+        Bitmap? evicted = null;
+        lock (_lock)
+        {
+            if (!_map.TryGetValue(key, out var node))
+                return false;
+            _order.Remove(node);
+            _map.Remove(key);
+            evicted = node.Value.Value;
+        }
+        evicted.Dispose();
+        return true;
+    }
+
+    /// <summary>
+    /// Remove and dispose every cached bitmap at once.
+    /// The collections are swapped out under the lock so the critical section
+    /// is O(1) regardless of cache size; disposal happens outside the lock.
+    /// </summary>
+    public void InvalidateAll()
+    {
+        LinkedList<(string Key, Bitmap Value)> snapshot;
+        lock (_lock)
+        {
+            snapshot = new LinkedList<(string Key, Bitmap Value)>(_order);
+            _order.Clear();
+            _map.Clear();
+        }
+        foreach (var entry in snapshot)
+            entry.Value.Dispose();
+    }
+
+    public void Dispose()
+    {
+        lock (_lock)
+        {
+            foreach (var node in _order)
+                node.Value.Dispose();
+            _order.Clear();
+            _map.Clear();
+        }
+    }
+}
+
+/// <summary>
+/// Central throttled queue
 /// Limits both concurrent HTTP downloads and concurrent bitmap decode operations
 /// to prevent CPU/network spikes.
 /// </summary>
@@ -51,6 +203,9 @@ public sealed class TextureDownloadQueue : IDisposable
     private readonly SemaphoreSlim _downloadSemaphore;
     private readonly SemaphoreSlim _decodeSemaphore;
     private readonly ConcurrentDictionary<string, byte> _pending = new();
+    private readonly LruBitmapCache _cache;
+
+    private const int DefaultCacheCapacity = 128;
     private readonly BlockingCollection<WorkItem> _highQueue = new();
     private readonly BlockingCollection<WorkItem> _normalQueue = new();
     private readonly BlockingCollection<WorkItem> _lowQueue = new();
@@ -65,6 +220,7 @@ public sealed class TextureDownloadQueue : IDisposable
     {
         _downloadSemaphore = new SemaphoreSlim(MaxConcurrentDownloads, MaxConcurrentDownloads);
         _decodeSemaphore = new SemaphoreSlim(MaxConcurrentDecodes, MaxConcurrentDecodes);
+        _cache = new LruBitmapCache(DefaultCacheCapacity);
 
         _workers = new Task[WorkerCount];
         for (int i = 0; i < WorkerCount; i++)
@@ -88,6 +244,7 @@ public sealed class TextureDownloadQueue : IDisposable
     /// <param name="priority">Download priority.</param>
     public void Enqueue(string key, string url, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal)
     {
+        if (_cache.TryGet(key, out var cached)) { onComplete(cached); return; }
         if (!_pending.TryAdd(key, 0)) return;
 
         var item = new WorkItem(key, url, null, onComplete);
@@ -105,6 +262,7 @@ public sealed class TextureDownloadQueue : IDisposable
     /// </summary>
     public void EnqueueDecode(string key, byte[] data, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal)
     {
+        if (_cache.TryGet(key, out var cached)) { onComplete(cached); return; }
         if (!_pending.TryAdd(key, 0)) return;
 
         var item = new WorkItem(key, null, data, onComplete);
@@ -121,6 +279,49 @@ public sealed class TextureDownloadQueue : IDisposable
     /// Check whether a request with the given key is currently pending.
     /// </summary>
     public bool IsPending(string key) => _pending.ContainsKey(key);
+
+    /// <summary>
+    /// Gets or sets the maximum number of decoded bitmaps held in the LRU cache.
+    /// Reducing the value immediately evicts least-recently-used entries and
+    /// disposes their Skia pixel buffers. Default is 2500.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when set to less than 1.</exception>
+    public int CacheCapacity
+    {
+        get => _cache.Capacity;
+        set => _cache.Capacity = value;
+    }
+
+    /// <summary>Number of decoded bitmaps currently held in the LRU cache.</summary>
+    public int CacheCount => _cache.Count;
+
+    /// <summary>
+    /// Try to retrieve a previously decoded bitmap from the cache without enqueueing a new request.
+    /// </summary>
+    public bool TryGetCached(string key, out Bitmap? bitmap) => _cache.TryGet(key, out bitmap);
+
+    /// <summary>
+    /// Evict the cached bitmap for <paramref name="key"/> and allow the next
+    /// <see cref="Enqueue"/> or <see cref="EnqueueDecode"/> call to re-download
+    /// and re-decode it. Use this when an asset update has been detected server-side.
+    /// </summary>
+    /// <returns><see langword="true"/> if a cached entry was found and removed.</returns>
+    public bool InvalidateCache(string key)
+    {
+        _pending.TryRemove(key, out _);
+        return _cache.Invalidate(key);
+    }
+
+    /// <summary>
+    /// Evict and dispose every cached bitmap. Call this immediately before or
+    /// after a region teleport so stale sim textures are not served from cache.
+    /// Any in-flight pending keys are also cleared so re-enqueuing works immediately.
+    /// </summary>
+    public void InvalidateAll()
+    {
+        _pending.Clear();
+        _cache.InvalidateAll();
+    }
 
     private void ProcessLoop()
     {
@@ -181,7 +382,7 @@ public sealed class TextureDownloadQueue : IDisposable
                 await _downloadSemaphore.WaitAsync(token);
                 try
                 {
-                    data = await _httpClient.GetByteArrayAsync(item.Url);
+                    data = await _httpClient.GetByteArrayAsync(item.Url, CancellationToken.None);
                 }
                 finally
                 {
@@ -197,6 +398,8 @@ public sealed class TextureDownloadQueue : IDisposable
                 {
                     using var ms = new MemoryStream(data);
                     bitmap = new Bitmap(ms);
+                    if (bitmap != null)
+                        _cache.Add(item.Key, bitmap);
                 }
                 finally
                 {
@@ -229,13 +432,16 @@ public sealed class TextureDownloadQueue : IDisposable
 
         try { Task.WaitAll(_workers, TimeSpan.FromSeconds(2)); } catch { }
 
+        // Do not dispose _httpClient — HttpClient is designed to be long-lived.
+        // Disposing it races with the internal connection pool scavenger task
+        // (CheckUsabilityOnScavenge), causing ObjectDisposedException on NetworkStream.
         _downloadSemaphore.Dispose();
         _decodeSemaphore.Dispose();
         _highQueue.Dispose();
         _normalQueue.Dispose();
         _lowQueue.Dispose();
-        _httpClient.Dispose();
         _cts.Dispose();
+        _cache.Dispose();
     }
 
     private sealed record WorkItem(

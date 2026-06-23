@@ -1,0 +1,68 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.InventoryPickerWindow"
+        x:DataType="vm:InventoryPickerViewModel"
+        Title="Pick from Inventory"
+        Width="400" Height="500"
+        MinWidth="280" MinHeight="300"
+        CanResize="True"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Inventory picker window">
+
+    <DockPanel>
+
+        <!-- Bottom action bar -->
+        <Border DockPanel.Dock="Bottom" Padding="10,8" Background="#18FFFFFF">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Select" Command="{Binding SelectCommand}" MinWidth="80"
+                            IsDefault="True"
+                            AutomationProperties.Name="Select item" />
+                    <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80"
+                            IsCancel="True"
+                            AutomationProperties.Name="Cancel picker" />
+                </StackPanel>
+                <TextBlock Text="{Binding SelectedDisplay}" VerticalAlignment="Center"
+                           IsVisible="{Binding SelectedDisplay, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           FontStyle="Italic" Opacity="0.8" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
+
+        <!-- Top: filter box + loading + status -->
+        <StackPanel DockPanel.Dock="Top" Margin="8,8,8,4" Spacing="4">
+            <TextBox x:Name="FilterBox"
+                     Text="{Binding FilterText}"
+                     PlaceholderText="Filter by name&#x2026;"
+                     AutomationProperties.Name="Filter inventory items" />
+            <ProgressBar IsVisible="{Binding IsLoading}"
+                         IsIndeterminate="True" Height="4"
+                         AutomationProperties.Name="Loading inventory" />
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="11" Opacity="0.6"
+                       IsVisible="{Binding !IsLoading}"
+                       AutomationProperties.Name="Item count" />
+        </StackPanel>
+
+        <!-- Filtered item list -->
+        <ListBox x:Name="ItemList"
+                 ItemsSource="{Binding FilteredItems}"
+                 SelectedItem="{Binding SelectedItem}"
+                 Margin="8,0,8,8"
+                 AutomationProperties.Name="Inventory items">
+            <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:InventoryPickerEntry">
+                    <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+    </DockPanel>
+
+</Window>

@@ -21,8 +21,8 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -65,12 +65,23 @@ namespace Radegast
                 var transferID = UUID.Random();
                 if (prim == null)
                 {
-                    client.Assets.RequestInventoryAsset(notecard, true, transferID, Assets_OnAssetReceived);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var asset = await client.Assets.RequestInventoryAssetAsync(notecard, true, transferID);
+                        var xfer = new AssetDownload { Success = asset != null };
+                        Assets_OnAssetReceived(xfer, asset);
+                    });
                 }
                 else
                 {
-                    client.Assets.RequestInventoryAsset(notecard.AssetUUID, notecard.UUID, prim.ID, prim.OwnerID, 
-                        notecard.AssetType, true, transferID, Assets_OnAssetReceived);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var asset = await client.Assets.RequestInventoryAssetAsync(
+                            notecard.AssetUUID, notecard.UUID, prim.ID, prim.OwnerID,
+                            notecard.AssetType, true, transferID);
+                        var xfer = new AssetDownload { Success = asset != null };
+                        Assets_OnAssetReceived(xfer, asset);
+                    });
                 }
             }
 
@@ -145,11 +156,14 @@ namespace Radegast
                         var saveToInv = new ToolStripMenuItem("Save to inventory");
                         saveToInv.Click += (xsender, xe) =>
                             {
-                                client.Inventory.RequestCopyItemFromNotecard(UUID.Zero,
-                                    notecard.UUID,
-                                    client.Inventory.FindFolderForType(item.AssetType),
-                                    item.UUID,
-                                    Inventory_OnInventoryItemCopied);
+                                _ = System.Threading.Tasks.Task.Run(async () =>
+                                {
+                                    var copied = await client.Inventory.RequestCopyItemFromNotecardAsync(UUID.Zero,
+                                        notecard.UUID,
+                                        client.Inventory.FindFolderForType(item.AssetType),
+                                        item.UUID);
+                                    Inventory_OnInventoryItemCopied(copied);
+                                });
                             };
 
                         titem.DropDownItems.Add(saveToInv);
@@ -208,11 +222,12 @@ namespace Radegast
                         break;
 
                     case AssetType.Notecard:
-                        client.Inventory.RequestCopyItemFromNotecard(UUID.Zero,
-                            notecard.UUID,
-                            notecard.ParentUUID,
-                            item.UUID,
-                            Inventory_OnInventoryItemCopied);
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            var copied = await client.Inventory.RequestCopyItemFromNotecardAsync(
+                                UUID.Zero, notecard.UUID, notecard.ParentUUID, item.UUID);
+                            Inventory_OnInventoryItemCopied(copied);
+                        });
                         break;
                 }
             }
@@ -224,7 +239,12 @@ namespace Radegast
 
             rtbContent.Text = "Loading...";
             var transferID = UUID.Random();
-            client.Assets.RequestInventoryAsset(notecard, true, transferID, Assets_OnAssetReceived);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var asset = await client.Assets.RequestInventoryAssetAsync(notecard, true, transferID);
+                var xfer = new AssetDownload { Success = asset != null };
+                Assets_OnAssetReceived(xfer, asset);
+            });
         }
 
         private void rtbContent_LinkClicked(object sender, LinkClickedEventArgs e)
@@ -299,33 +319,36 @@ namespace Radegast
 
             UpdateStatus("Saving...");
 
-            InventoryManager.InventoryUploadedAssetCallback handler = delegate(bool uploadSuccess, string status, UUID itemID, UUID assetID)
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                bool uploadSuccess;
+                UUID itemID, assetID;
+                string uploadStatus;
+                if (prim == null)
+                {
+                    (uploadSuccess, uploadStatus, itemID, assetID) = await client.Inventory
+                        .RequestUploadNotecardAssetAsync(n.AssetData, notecard.UUID);
+                }
+                else
+                {
+                    (uploadSuccess, uploadStatus, itemID, assetID) = await client.Inventory
+                        .RequestUpdateNotecardTaskAsync(n.AssetData, notecard.UUID, prim.ID);
+                }
+                success = uploadSuccess;
+                message = uploadStatus ?? "Unknown error uploading notecard asset";
+                if (itemID == notecard.UUID)
+                {
+                    if (uploadSuccess)
                     {
-                        success = uploadSuccess;
-                        if (itemID == notecard.UUID)
-                        {
-                            if (success)
-                            {
-                                UpdateStatus("OK");
-                                notecard.AssetUUID = assetID;
-                            }
-                            else
-                            {
-                                UpdateStatus("Failed");
-                            }
-
-                        }
-                        message = status ?? "Unknown error uploading notecard asset";
-                    };
-
-            if (prim == null)
-            {
-                client.Inventory.RequestUploadNotecardAsset(n.AssetData, notecard.UUID, handler);
-            }
-            else
-            {
-                _ = client.Inventory.RequestUpdateNotecardTaskAsync(n.AssetData, notecard.UUID, prim.ID, handler);
-            }
+                        UpdateStatus("OK");
+                        notecard.AssetUUID = assetID;
+                    }
+                    else
+                    {
+                        UpdateStatus("Failed");
+                    }
+                }
+            });
         }
 
         private void UpdateStatus(string status)

@@ -1,0 +1,102 @@
+#version 310 es
+// GPU flexi-prim vertex deformer.
+// Mirrors FlexiPrimAnimator.TickAndUpload vertex-deformation logic exactly.
+// Physics (spine positions) is still computed on CPU at 30 Hz; this shader
+// receives the resulting N+1 spine positions and deforms all face vertices
+// in parallel, writing directly into the mesh VBO.
+
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// Bind-pose (rest) vertices: pos(3)+normal(3)+uv(2) per vertex, 8 floats each.
+layout(std430, binding = 0) readonly  buffer BaseVerts { float b[]; };
+// Spine positions: N+1 entries as vec4 (xyz = position metres, w unused).
+layout(std430, binding = 1) readonly  buffer SpineData { vec4 s[];  };
+// Output mesh VBO: same 8-float interleaved layout as BaseVerts.
+layout(std430, binding = 2) writeonly buffer OutVerts  { float v[]; };
+
+uniform highp int   uVertexCount;
+uniform highp int   uSegmentCount;   // N; spine array has N+1 entries
+uniform highp vec3  uScale;          // prim scale in metres (sx, sy, sz)
+uniform highp mat4  uAttachTransform;
+
+// Build the rotation matrix that maps UnitZ=(0,0,1) to 'to'.
+// Uses Rodrigues' rotation formula; simplified because cross(UnitZ,to) = (-to.y, to.x, 0).
+// The result is a column-major mat3 such that (rotFromZ(t) * v) == TransformVector(v, CSharpRot).
+highp mat3 rotFromZ(highp vec3 to) {
+    highp float cosA = to.z;
+    if (cosA >= 1.0 - 1e-6) return mat3(1.0);
+    if (cosA <= -(1.0 - 1e-6)) {
+        // 180 degrees: use Y-axis flip (matches C# RotationFromTo fallback)
+        return mat3(-1.0, 0.0, 0.0,
+                     0.0, 1.0, 0.0,
+                     0.0, 0.0,-1.0);
+    }
+    // axis = normalize(-to.y, to.x, 0); sinA = length of that unnormalized vector
+    highp float sinA = sqrt(max(0.0, 1.0 - cosA * cosA));
+    highp float axX  = -to.y / sinA;
+    highp float axY  =  to.x / sinA;
+    // ax.z == 0, which collapses several terms
+    highp float c1 = 1.0 - cosA;
+    // Column-major mat3: mat3(col0, col1, col2) where col_j = (R[0][j], R[1][j], R[2][j])
+    return mat3(
+        cosA + c1*axX*axX,   c1*axX*axY,           -sinA*axY,
+        c1*axX*axY,          cosA + c1*axY*axY,      sinA*axX,
+        sinA*axY,            -sinA*axX,               cosA
+    );
+}
+
+void main() {
+    highp uint vi = gl_GlobalInvocationID.x;
+    if (int(vi) >= uVertexCount) return;
+
+    highp int o = int(vi) * 8;
+
+    // Read bind-pose vertex
+    highp float bxN = b[o],     byN = b[o+1], bzN = b[o+2];
+    highp float nx  = b[o+3],   ny  = b[o+4], nz  = b[o+5];
+    highp float tu  = b[o+6],   tv  = b[o+7];
+
+    highp float sx = uScale.x, sy = uScale.y, sz = uScale.z;
+
+    // Normalised local coords -> physical metres
+    highp float bxM = bxN * sx, byM = byN * sy, bzM = bzN * sz;
+
+    // Path parameter t in [0,1] from Z position
+    highp float t    = clamp(bzM / sz + 0.5, 0.0, 1.0);
+    highp float segF = t * float(uSegmentCount);
+    highp int   segI = min(int(segF), uSegmentCount - 1);
+    highp float segT = segF - float(segI);
+
+    highp vec3 spineA = s[segI].xyz;
+    highp vec3 spineB = s[segI + 1].xyz;
+    highp vec3 spine  = mix(spineA, spineB, segT);
+
+    // Tangent direction at this segment
+    highp vec3 d       = spineB - spineA;
+    highp float dLen   = length(d);
+    highp vec3 tangent = (dLen > 1e-6) ? d / dLen : vec3(0.0, 0.0, 1.0);
+
+    highp mat3 rot = rotFromZ(tangent);
+
+    // Rotate cross-section offset and accumulate with spine position
+    highp vec3 rotCross = rot * vec3(bxM, byM, 0.0);
+    highp vec3 rotNorm  = rot * vec3(nx, ny, nz);
+
+    highp float pxM = spine.x + rotCross.x;
+    highp float pyM = spine.y + rotCross.y;
+    highp float pzM = spine.z + rotCross.z;
+
+    // Physical metres -> normalised local coords (AttachTransform re-applies scale)
+    highp float pxN = (sx > 1e-6) ? pxM / sx : pxM;
+    highp float pyN = (sy > 1e-6) ? pyM / sy : pyM;
+    highp float pzN = (sz > 1e-6) ? pzM / sz : pzM;
+
+    // Apply attach transform (same convention as glUniformMatrix4fv with transpose=false;
+    // uAttachTransform * v in GLSL equals TransformRow(v, attachTx) in C# OpenTK).
+    highp vec4 p4 = uAttachTransform * vec4(pxN, pyN, pzN, 1.0);
+    highp vec4 n4 = uAttachTransform * vec4(rotNorm, 0.0);
+
+    v[o]   = p4.x; v[o+1] = p4.y; v[o+2] = p4.z;
+    v[o+3] = n4.x; v[o+4] = n4.y; v[o+5] = n4.z;
+    v[o+6] = tu;   v[o+7] = tv;
+}

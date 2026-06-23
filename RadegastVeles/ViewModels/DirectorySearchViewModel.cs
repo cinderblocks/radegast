@@ -23,8 +23,8 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Messages.Linden;
+using LibreMetaverse;
+using LibreMetaverse.Messages.Linden;
 
 using Radegast.Veles.Core;
 
@@ -280,7 +280,11 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         Client.Avatars.RequestAvatarProperties(value.AgentID);
         // Caps-based request for modern SL where UDP may not return bio text
         if (Client.Avatars.AgentProfileAvailable())
-            _ = Client.Avatars.RequestAgentProfile(value.AgentID, OnPersonProfileCapReply);
+            _ = Task.Run(async () =>
+            {
+                var (success, profile) = await Client.Avatars.RequestAgentProfileAsync(value.AgentID);
+                OnPersonProfileCapReply(success, profile);
+            });
     }
 
     private void OnPersonProfileCapReply(bool success, AgentProfileMessage? profile)
@@ -357,7 +361,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         if (!_hasCachedPlaceParcel) return;
         var parcel = _cachedPlaceParcel;
         var localPos = new Vector3(parcel.GlobalX % 256, parcel.GlobalY % 256, parcel.GlobalZ);
-        Task.Run(() => Client.Self.Teleport(parcel.SimName, localPos));
+        _ = Client.Self.TeleportAsync(parcel.SimName, localPos);
     }
 
     // --- Groups ---
@@ -494,7 +498,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         ulong handle = Helpers.GlobalPosToRegionHandle(
             (float)evt.GlobalPos.X, (float)evt.GlobalPos.Y, out var localX, out var localY);
         var pos = new Vector3(localX, localY, (float)evt.GlobalPos.Z);
-        Task.Run(() => Client.Self.Teleport(handle, pos));
+        _ = Client.Self.TeleportAsync(handle, pos);
     }
 
     partial void OnSelectedClassifiedChanged(ClassifiedResult? value)
@@ -533,7 +537,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         var classifiedId = e.ClassifiedID;
         Dispatcher.UIThread.Post(() =>
         {
-            if (_selectedClassified?.ClassifiedID != classifiedId) return;
+            if (SelectedClassified?.ClassifiedID != classifiedId) return;
             ClassifiedDetailDescription = desc;
             ClassifiedDetailLocation = locationText;
             ClassifiedDetailPoster = posterName;
@@ -549,7 +553,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
             (float)_cachedClassifiedPos.X, (float)_cachedClassifiedPos.Y,
             out float localX, out float localY);
         var pos = new Vector3(localX, localY, (float)_cachedClassifiedPos.Z);
-        Task.Run(() => Client.Self.Teleport(handle, pos));
+        _ = Client.Self.TeleportAsync(handle, pos);
     }
 
     [RelayCommand]
@@ -558,7 +562,7 @@ public partial class DirectorySearchViewModel : ObservableObject, IDisposable
         if (!_hasCachedLandSaleParcel) return;
         var parcel = _cachedLandSaleParcel;
         var localPos = new Vector3(parcel.GlobalX % 256, parcel.GlobalY % 256, parcel.GlobalZ);
-        Task.Run(() => Client.Self.Teleport(parcel.SimName, localPos));
+        _ = Client.Self.TeleportAsync(parcel.SimName, localPos);
     }
 
     partial void OnSelectedLandSaleChanged(LandSaleResult? value)

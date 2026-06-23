@@ -23,7 +23,6 @@ using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
@@ -48,10 +47,6 @@ public class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Prevent Avalonia compiled bindings from removing the CommunityToolkit
-            // generated INotifyPropertyChanged properties.
-            BindingPlugins.DataValidators.RemoveAt(0);
-
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             var icons = TrayIcon.GetIcons(this);
@@ -84,6 +79,9 @@ public class App : Application
     private void OnLoginSucceeded(object? sender, AgentLoginSucceededEventArgs e)
     {
         _loginWindow = null;
+
+        e.Instance.CredentialManager = _credentialManager;
+        e.Instance.AccountKey = $"{e.Username.ToLowerInvariant()}:{e.GridId}";
 
         var session = _sessionManager.AddSession(e.Instance);
         var mainWindow = new MainWindow(session);

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -26,8 +26,8 @@ using System.IO.Compression;
 using OpenTK.Graphics.OpenGL;
 using System.Runtime.InteropServices;
 using System.Drawing;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -558,7 +558,7 @@ namespace Radegast.Rendering
 
             try
             {
-                var fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
+                var fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.AssetCache.Dir, textureID) + ".rzi";
 
                 using (var f = File.Open(fname, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
@@ -608,7 +608,7 @@ namespace Radegast.Rendering
         {
             try
             {
-                string fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.ASSET_CACHE_DIR, textureID) + ".rzi";
+                string fname = RadegastInstance.ComputeCacheName(RadegastInstanceForms.Instance.Client.Settings.AssetCache.Dir, textureID) + ".rzi";
 
                 using (var f = File.Open(fname, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
@@ -1015,7 +1015,7 @@ namespace Radegast.Rendering
         {
             Manual = true;
             Vector3 direction = Position - FocalPoint;
-            direction.Normalize();
+            direction = Vector3.Normalize(direction);
             Vector3 vy = direction % Vector3.UnitZ;
             Vector3 vx = vy % direction;
             Vector3 vxy = vx * deltaY + vy * deltaX;
@@ -1258,7 +1258,7 @@ namespace Radegast.Rendering
                 VFSblock block = new VFSblock();
                 offset = block.Readblock(blockdata, offset);
 
-                FileStream writer = File.Open(System.IO.Path.Combine(OpenMetaverse.Settings.RESOURCE_DIR, block.mFileID.ToString()), FileMode.Create);
+                FileStream writer = File.Open(System.IO.Path.Combine(LibreMetaverse.Settings.ResourceDir, block.mFileID.ToString()), FileMode.Create);
                 byte[] data = new byte[block.mSize];
                 datastream.Seek(block.mLocation, SeekOrigin.Begin);
                 datastream.Read(data, 0, block.mSize);

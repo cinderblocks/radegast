@@ -26,7 +26,7 @@ using System.Windows.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -438,6 +438,35 @@ public class NotificationViewModel : ObservableObject
             new("OK", () => vm.Dismiss())
         };
         vm = new NotificationViewModel(title, string.Empty, message, buttons);
+        return vm;
+    }
+
+    /// <summary>Incoming calling card offer with Accept / Decline actions.</summary>
+    public static NotificationViewModel ForCallingCardOffer(GridClient client, CallingCardOfferedEventArgs e)
+    {
+        NotificationViewModel vm = null!;
+        var buttons = new List<NotificationButtonViewModel>
+        {
+            new("Accept", () => { client.Friends.AcceptCallingCard(e.AgentID, e.TransactionID); vm.Dismiss(); }),
+            new("Decline", () => { client.Friends.DeclineCallingCard(e.AgentID, e.TransactionID); vm.Dismiss(); })
+        };
+        vm = new NotificationViewModel(e.AgentName, "is offering you their calling card", string.Empty, buttons);
+        return vm;
+    }
+
+    /// <summary>Incoming P2P voice call with Accept / Decline actions.</summary>
+    public static NotificationViewModel ForVoiceCallIncoming(
+        string callerName,
+        Func<Task> onAccept,
+        Action onDecline)
+    {
+        NotificationViewModel vm = null!;
+        var buttons = new List<NotificationButtonViewModel>
+        {
+            new("Answer", () => { vm.Dismiss(); _ = onAccept(); }),
+            new("Decline", () => { vm.Dismiss(); onDecline(); })
+        };
+        vm = new NotificationViewModel("Incoming Voice Call", callerName, "is calling you.", buttons);
         return vm;
     }
 

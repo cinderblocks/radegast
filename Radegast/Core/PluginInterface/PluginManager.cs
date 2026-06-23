@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -25,7 +25,7 @@ using System.Reflection;
 using System.CodeDom.Compiler;
 using System.Linq;
 using System.Text;
-using OpenMetaverse;
+using LibreMetaverse;
 using Microsoft.CSharp;
 
 namespace Radegast
@@ -81,7 +81,7 @@ namespace Radegast
             "zlib.net.dll",
             "zlib1.dll",
             // Blacklist all of these
-            "OpenMetaverse.",
+            "LibreMetaverse.",
             "LibreMetaverse.",
             "Microsoft.",
             "SkiaSharp.",

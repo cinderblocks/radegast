@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -21,8 +21,8 @@
 using System;
 using System.Threading;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -41,7 +41,11 @@ namespace Radegast
         {
             this.landmark = landmark;
             Init(instance);
-            client.Assets.RequestAsset(landmark.AssetUUID, landmark.AssetType, true, Assets_OnAssetReceived);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var asset = await client.Assets.RequestAssetAsync(landmark.AssetUUID, landmark.AssetType, true);
+                Assets_OnAssetReceived(asset);
+            });
         }
 
         public Landmark(RadegastInstanceForms instance, UUID parcelID)
@@ -101,12 +105,7 @@ namespace Radegast
 
             if (parcelLocation)
             {
-                localPosition = new Vector3
-                {
-                    X = parcel.GlobalX % 256,
-                    Y = parcel.GlobalY % 256,
-                    Z = parcel.GlobalZ
-                };
+                localPosition = new Vector3((float)(parcel.GlobalX % 256), (float)(parcel.GlobalY % 256), (float)parcel.GlobalZ);
             }
 
             txtParcelName.Text = decodedLandmark == null 
@@ -127,11 +126,11 @@ namespace Radegast
             }
         }
 
-        private void Assets_OnAssetReceived(AssetDownload transfer, Asset asset)
+        private void Assets_OnAssetReceived(Asset? asset)
         {
-            if (transfer.Success && asset.AssetType == AssetType.Landmark)
+            if (asset is AssetLandmark lm)
             {
-                decodedLandmark = (AssetLandmark)asset;
+                decodedLandmark = lm;
                 decodedLandmark.Decode();
                 localPosition = decodedLandmark.Position;
                 client.Grid.RequestRegionHandle(decodedLandmark.RegionID);

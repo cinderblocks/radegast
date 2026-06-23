@@ -35,19 +35,23 @@
                         <Button Grid.Row="0" Grid.Column="2" Content="↑" Command="{Binding OrbitUpCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit up (10°)" />
+                                ToolTip.Tip="Orbit up (10°)"
+                                AutomationProperties.Name="Orbit camera up" />
                         <Button Grid.Row="2" Grid.Column="0" Content="←" Command="{Binding OrbitLeftCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit left (15°)" />
+                                ToolTip.Tip="Orbit left (15°)"
+                                AutomationProperties.Name="Orbit camera left" />
                         <Button Grid.Row="2" Grid.Column="2" Content="↓" Command="{Binding OrbitDownCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit down (10°)" />
+                                ToolTip.Tip="Orbit down (10°)"
+                                AutomationProperties.Name="Orbit camera down" />
                         <Button Grid.Row="2" Grid.Column="4" Content="→" Command="{Binding OrbitRightCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Orbit right (15°)" />
+                                ToolTip.Tip="Orbit right (15°)"
+                                AutomationProperties.Name="Orbit camera right" />
                     </Grid>
                 </Border>
 
@@ -58,11 +62,13 @@
                         <Button Content="+" Command="{Binding ZoomInCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Zoom in" />
+                                ToolTip.Tip="Zoom in"
+                                AutomationProperties.Name="Zoom in" />
                         <Button Content="−" Command="{Binding ZoomOutCommand}"
                                 Width="26" Height="22" Padding="0"
                                 HorizontalContentAlignment="Center"
-                                ToolTip.Tip="Zoom out" />
+                                ToolTip.Tip="Zoom out"
+                                AutomationProperties.Name="Zoom out" />
                     </StackPanel>
                 </Border>
 
@@ -71,6 +77,8 @@
                           VerticalAlignment="Center"
                           Margin="0,0,6,0"
                           AutomationProperties.Name="Toggle wireframe overlay" />
+
+
             </WrapPanel>
         </Border>
 
@@ -93,7 +101,7 @@
         <!-- Error overlay -->
         <Border DockPanel.Dock="Top"
                 IsVisible="{Binding HasError}"
-                Background="#CC0000" Padding="8,4" Margin="0,0,0,2">
+                Background="{DynamicResource VelesBadgeError}" Padding="8,4" Margin="0,0,0,2">
             <TextBlock Text="{Binding ErrorText}"
                        Foreground="White" TextWrapping="Wrap"
                        AutomationProperties.Name="Error message" />

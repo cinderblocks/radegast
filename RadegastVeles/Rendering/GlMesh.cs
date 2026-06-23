@@ -19,7 +19,7 @@
 
 using System;
 using System.Collections.Generic;
-using OpenTK.Graphics.OpenGL4;
+using Silk.NET.OpenGL;
 
 namespace Radegast.Veles.Rendering;
 
@@ -37,71 +37,119 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 public sealed class GlMesh : IDisposable
 {
-    private int  _vao, _vbo, _ebo;
+    private uint _vao, _vbo, _ebo;
     private int  _indexCount;
     private bool _disposed;
     // Kept in CPU memory so BuildLineEbo() doesn't need GL.GetBufferSubData (unavailable on ES).
     private readonly ushort[] _cpuIndices;
-    private int  _lebo;      // line EBO (built lazily for ES wireframe)
+    private uint _lebo;      // line EBO (built lazily for ES wireframe)
     private int  _lineCount;
 
-    private const int Stride = 32; // 8 floats × 4 bytes
+    // Exposed so GlInstanceDrawer can set up a shared instance VAO pointing to this mesh's buffers.
+    internal uint Vbo        => _vbo;
+    internal uint Ebo        => _ebo;
+    internal int  IndexCount => _indexCount;
+    internal const int VertexStride = 32; // 8 floats × 4 bytes
 
     public GlMesh(float[] vertices, ushort[] indices)
+        : this(vertices, vertices.Length, indices) { }
+
+    /// <summary>
+    /// Creates a mesh using only the first <paramref name="verticesLength"/> floats of
+    /// <paramref name="vertices"/>, which may be an oversized ArrayPool-rented buffer.
+    /// The caller is responsible for returning the rented buffer to the pool after this
+    /// constructor returns.
+    /// </summary>
+    public unsafe GlMesh(float[] vertices, int verticesLength, ushort[] indices)
     {
         _indexCount = indices.Length;
         _cpuIndices = indices;
 
-        _vao = GL.GenVertexArray();
-        _vbo = GL.GenBuffer();
-        _ebo = GL.GenBuffer();
+        var gl = GlApi.Gl;
+        _vao = gl.GenVertexArray();
+        _vbo = gl.GenBuffer();
+        _ebo = gl.GenBuffer();
 
-        GL.BindVertexArray(_vao);
+        gl.BindVertexArray(_vao);
 
-        GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
-        GL.BufferData(BufferTarget.ArrayBuffer,
-            vertices.Length * sizeof(float), vertices, BufferUsageHint.StaticDraw);
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* p = vertices)
+            gl.BufferData(BufferTargetARB.ArrayBuffer,
+                (nuint)(verticesLength * sizeof(float)), p, BufferUsageARB.DynamicDraw);
 
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo);
-        GL.BufferData(BufferTarget.ElementArrayBuffer,
-            indices.Length * sizeof(ushort), indices, BufferUsageHint.StaticDraw);
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
+        fixed (ushort* p = indices)
+            gl.BufferData(BufferTargetARB.ElementArrayBuffer,
+                (nuint)(indices.Length * sizeof(ushort)), p, BufferUsageARB.StaticDraw);
 
         // Position (location 0)
-        GL.EnableVertexAttribArray(0);
-        GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, Stride, 0);
+        gl.EnableVertexAttribArray(0);
+        gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, VertexStride, (void*)0);
 
         // Normal (location 1)
-        GL.EnableVertexAttribArray(1);
-        GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, Stride, 12);
+        gl.EnableVertexAttribArray(1);
+        gl.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, VertexStride, (void*)12);
 
         // TexCoord (location 2)
-        GL.EnableVertexAttribArray(2);
-        GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, Stride, 24);
+        gl.EnableVertexAttribArray(2);
+        gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, VertexStride, (void*)24);
 
-        GL.BindVertexArray(0);
+        gl.BindVertexArray(0);
     }
 
-    public void Draw()
+    public unsafe void Draw()
     {
-        GL.BindVertexArray(_vao);
-        GL.DrawElements(PrimitiveType.Triangles, _indexCount,
-            DrawElementsType.UnsignedShort, 0);
-        GL.BindVertexArray(0);
+        var gl = GlApi.Gl;
+        gl.BindVertexArray(_vao);
+        gl.DrawElements(PrimitiveType.Triangles, (uint)_indexCount,
+            DrawElementsType.UnsignedShort, (void*)0);
+        gl.BindVertexArray(0);
+    }
+
+    /// <summary>
+    /// Replace the vertex buffer contents in-place (animated LBS update).
+    /// Must be called on the GL thread. <paramref name="verts"/> must have the
+    /// same length as the original array passed to the constructor.
+    /// </summary>
+    public unsafe void UpdateVertices(float[] verts)
+    {
+        var gl = GlApi.Gl;
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* p = verts)
+            gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0,
+                (nuint)(verts.Length * sizeof(float)), p);
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
+    }
+
+    /// <summary>
+    /// Replace the vertex buffer contents in-place using only the first
+    /// <paramref name="vertsLength"/> floats of an oversized (e.g. ArrayPool-rented) buffer.
+    /// Must be called on the GL thread.
+    /// </summary>
+    public unsafe void UpdateVertices(float[] verts, int vertsLength)
+    {
+        var gl = GlApi.Gl;
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        fixed (float* p = verts)
+            gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0,
+                (nuint)(vertsLength * sizeof(float)), p);
+        gl.BindBuffer(BufferTargetARB.ArrayBuffer, 0);
     }
 
     /// <summary>Draw edges as GL_LINES (ES wireframe fallback).</summary>
-    public void DrawLines()
+    public unsafe void DrawLines()
     {
         if (_lebo == 0) BuildLineEbo();
-        GL.BindVertexArray(_vao);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _lebo);
-        GL.DrawElements(PrimitiveType.Lines, _lineCount,
-            DrawElementsType.UnsignedShort, 0);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _ebo); // restore
-        GL.BindVertexArray(0);
+        var gl = GlApi.Gl;
+        gl.BindVertexArray(_vao);
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _lebo);
+        gl.DrawElements(PrimitiveType.Lines, (uint)_lineCount,
+            DrawElementsType.UnsignedShort, (void*)0);
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo); // restore
+        gl.BindVertexArray(0);
     }
 
-    private void BuildLineEbo()
+    private unsafe void BuildLineEbo()
     {
         var edges    = new HashSet<(ushort, ushort)>();
         var lineList = new List<ushort>();
@@ -115,12 +163,14 @@ public sealed class GlMesh : IDisposable
         }
 
         _lineCount = lineList.Count;
-        _lebo = GL.GenBuffer();
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, _lebo);
+        var gl = GlApi.Gl;
+        _lebo = gl.GenBuffer();
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _lebo);
         var arr = lineList.ToArray();
-        GL.BufferData(BufferTarget.ElementArrayBuffer,
-            arr.Length * sizeof(ushort), arr, BufferUsageHint.StaticDraw);
-        GL.BindBuffer(BufferTarget.ElementArrayBuffer, 0);
+        fixed (ushort* p = arr)
+            gl.BufferData(BufferTargetARB.ElementArrayBuffer,
+                (nuint)(arr.Length * sizeof(ushort)), p, BufferUsageARB.StaticDraw);
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, 0);
     }
 
     private static void AddEdge(
@@ -136,9 +186,10 @@ public sealed class GlMesh : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        GL.DeleteVertexArray(_vao);
-        GL.DeleteBuffer(_vbo);
-        GL.DeleteBuffer(_ebo);
-        if (_lebo != 0) GL.DeleteBuffer(_lebo);
+        var gl = GlApi.Gl;
+        gl.DeleteVertexArray(_vao);
+        gl.DeleteBuffer(_vbo);
+        gl.DeleteBuffer(_ebo);
+        if (_lebo != 0) gl.DeleteBuffer(_lebo);
     }
 }

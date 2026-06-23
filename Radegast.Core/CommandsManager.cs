@@ -23,7 +23,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Text;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core.Commands;
 using LibreMetaverse;
 
@@ -273,8 +273,7 @@ namespace Radegast.Commands
             if (cmdline == "") return;
             string[] parsd = ParseArguments(cmdline);
             string cmd = parsd[0];
-            IRadegastCommand cmdimpl;
-            if (CommandsByName.TryGetValue(cmd.ToLower(), out cmdimpl))
+            if (CommandsByName.TryGetValue(cmd.ToLower(), out IRadegastCommand? cmdimpl))
             {
                 try
                 {
@@ -282,7 +281,7 @@ namespace Radegast.Commands
                 }
                 catch (Exception ex)
                 {
-                    WriteLine("Command error: {0} \n{1} {2} ", cmdline, ex.Message, ex.StackTrace);
+                    WriteLine("Command error: {0} \n{1} {2} ", cmdline, ex.Message, ex.StackTrace ?? string.Empty);
                 }
                 return;
             }

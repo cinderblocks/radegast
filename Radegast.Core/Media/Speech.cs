@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -21,7 +21,7 @@
 using System;
 using System.Threading.Tasks;
 using FMOD;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Media
 {
@@ -32,7 +32,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender">Sender</param>
         /// <param name="e">Key, value are sent in e</param>
-        public delegate void SpeechDoneCallback(object sender, EventArgs e);
+        public delegate void SpeechDoneCallback(object? sender, EventArgs e);
         /// <summary>
         /// Fired when a stream meta data is received
         /// </summary>

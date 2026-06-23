@@ -25,7 +25,7 @@ using System.Reflection;
 using CommandLine;
 using CommandLine.Text;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Microsoft.Extensions.Logging;
 
 namespace Radegast

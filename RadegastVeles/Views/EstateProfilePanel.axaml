@@ -1,4 +1,4 @@
-﻿<!--
+<!--
   Radegast Metaverse Client
   Copyright (c) 2026, Sjofn LLC
   All rights reserved.
@@ -100,8 +100,9 @@
                 </StackPanel>
             </Border>
 
-            <!-- Region flags -->
-            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+            <!-- Region flags (view mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding !IsEditingEstate}">
                 <StackPanel Spacing="6">
                     <TextBlock Text="Region Settings" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
                     <WrapPanel Orientation="Horizontal">
@@ -115,6 +116,73 @@
                         <CheckBox IsChecked="{Binding FlagSkipScripts}"    IsEnabled="False" Content="Scripts Disabled" Margin="0,0,8,4" AutomationProperties.Name="Skip scripts flag" />
                         <CheckBox IsChecked="{Binding FlagSkipPhysics}"    IsEnabled="False" Content="Physics Disabled" Margin="0,0,8,0" AutomationProperties.Name="Skip physics flag" />
                     </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Region flags (edit mode) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12"
+                    IsVisible="{Binding IsEditingEstate}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Region Settings" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <WrapPanel Orientation="Horizontal">
+                        <CheckBox IsChecked="{Binding EditAllowDamage}"    Content="Damage Enabled"   Margin="0,0,8,4" AutomationProperties.Name="Edit allow damage" />
+                        <CheckBox IsChecked="{Binding EditNoFly}"          Content="No Fly"           Margin="0,0,8,4" AutomationProperties.Name="Edit no fly" />
+                        <CheckBox IsChecked="{Binding EditAllowVoice}"     Content="Voice Enabled"    Margin="0,0,8,4" AutomationProperties.Name="Edit voice enabled" />
+                        <CheckBox IsChecked="{Binding EditSunFixed}"       Content="Fixed Sun"        Margin="0,0,8,4" AutomationProperties.Name="Edit fixed sun" />
+                        <CheckBox IsChecked="{Binding EditBlockTerraform}" Content="Block Terraform"  Margin="0,0,8,4" AutomationProperties.Name="Edit block terraform" />
+                        <CheckBox IsChecked="{Binding EditDirectTeleport}" Content="Direct Teleport"  Margin="0,0,8,4" AutomationProperties.Name="Edit direct teleport" />
+                        <CheckBox IsChecked="{Binding EditRestrictPush}"   Content="Restrict Push"    Margin="0,0,8,4" AutomationProperties.Name="Edit restrict push" />
+                        <CheckBox IsChecked="{Binding EditSkipScripts}"    Content="Scripts Disabled" Margin="0,0,8,4" AutomationProperties.Name="Edit skip scripts" />
+                        <CheckBox IsChecked="{Binding EditSkipPhysics}"    Content="Physics Disabled" Margin="0,0,8,0" AutomationProperties.Name="Edit skip physics" />
+                    </WrapPanel>
+                    <Grid ColumnDefinitions="Auto,8,Auto,20,Auto,8,Auto" Margin="0,4,0,0">
+                        <TextBlock Grid.Column="0" Text="Agent Limit:" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <NumericUpDown Grid.Column="2" Value="{Binding EditAgentLimit}" Minimum="0" Maximum="500"
+                                       FormatString="N0" Width="90"
+                                       AutomationProperties.Name="Agent limit" />
+                        <TextBlock Grid.Column="4" Text="Prim Bonus:" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <NumericUpDown Grid.Column="6" Value="{Binding EditObjectBonus}" Minimum="0" Maximum="10"
+                                       Increment="0.1" FormatString="N2" Width="90"
+                                       AutomationProperties.Name="Prim bonus" />
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Region environment (EEP / legacy WindLight) -->
+            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Environment" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                    <TextBlock Text="Loading environment data..." IsVisible="{Binding IsEnvironmentLoading}"
+                               FontStyle="Italic" Opacity="0.6"
+                               AutomationProperties.Name="Environment loading" />
+                    <StackPanel IsVisible="{Binding !IsEnvironmentLoading}" Spacing="4">
+                        <TextBlock Text="Using grid default environment." Opacity="0.8"
+                                   IsVisible="{Binding !EnvIsCustom}"
+                                   AutomationProperties.Name="Region uses grid environment" />
+                        <StackPanel IsVisible="{Binding EnvIsCustom}" Spacing="4">
+                            <TextBlock Text="Custom EEP environment is set." Opacity="0.8" />
+                            <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Day Length:" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding EnvDayLength}"
+                                           AutomationProperties.Name="Day length" />
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Day Offset:" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding EnvDayOffset}"
+                                           AutomationProperties.Name="Day offset" />
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Sky Track:" FontWeight="SemiBold" />
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding EnvSkyTrack}"
+                                           AutomationProperties.Name="Sky track" />
+                            </Grid>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
+                            <TextBlock Text="Legacy WindLight:" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            <TextBlock Text="&#x2713;" IsVisible="{Binding EnvHasLegacyWindLight}" Foreground="LimeGreen" VerticalAlignment="Center" />
+                            <TextBlock Text="&#x2717;" IsVisible="{Binding !EnvHasLegacyWindLight}" Foreground="Tomato" VerticalAlignment="Center" />
+                            <TextBlock Text="Available" IsVisible="{Binding EnvHasLegacyWindLight}" VerticalAlignment="Center"
+                                       AutomationProperties.Name="Legacy WindLight available" />
+                            <TextBlock Text="Not available" IsVisible="{Binding !EnvHasLegacyWindLight}" VerticalAlignment="Center"
+                                       AutomationProperties.Name="Legacy WindLight not available" />
+                        </StackPanel>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -136,6 +204,15 @@
             </Border>
 
             <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="Edit Region Settings" Command="{Binding BeginEditEstateCommand}"
+                        IsVisible="{Binding CanEditEstate}"
+                        AutomationProperties.Name="Edit region settings" />
+                <Button Content="Save Changes" Command="{Binding SaveEstateCommand}"
+                        IsVisible="{Binding IsEditingEstate}"
+                        AutomationProperties.Name="Save region settings" />
+                <Button Content="Discard" Command="{Binding DiscardEditEstateCommand}"
+                        IsVisible="{Binding IsEditingEstate}"
+                        AutomationProperties.Name="Discard region settings changes" />
                 <Button Content="Refresh" Command="{Binding RefreshCommand}"
                         AutomationProperties.Name="Refresh estate info" />
             </StackPanel>

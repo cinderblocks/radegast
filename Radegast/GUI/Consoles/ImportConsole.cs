@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -25,8 +25,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.IO;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 
 namespace Radegast
 {
@@ -341,8 +341,8 @@ namespace Radegast
 			}
 			else
 			{
-				Importer.RezAt = Client.Self.SimPosition;
-				Importer.RezAt.Z += 3.5f;
+				var simPos = Client.Self.SimPosition;
+				Importer.RezAt = new Vector3(simPos.X, simPos.Y, simPos.Z + 3.5f);
 			}
 
             try

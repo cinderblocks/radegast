@@ -28,6 +28,7 @@ using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Input.Platform;
 using AvaloniaGrid = Avalonia.Controls.Grid;
 
 namespace Radegast.Veles.Views;
@@ -158,7 +159,7 @@ public partial class AboutWindow : Window
         foreach (var (label, value) in _sysInfoRows)
             sb.AppendLine($"{label}: {value}");
 
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        var clipboard = GetTopLevel(this)?.Clipboard;
         if (clipboard != null)
             await clipboard.SetTextAsync(sb.ToString());
     }

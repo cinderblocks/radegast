@@ -24,21 +24,17 @@ using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class FriendsViewModel : ObservableObject, IDisposable
+public partial class FriendsViewModel : InstanceViewModelBase, IDisposable
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private GridClient Client => _instance.Client;
-
     private DispatcherTimer? _refreshTimer;
     private bool _refreshPending;
 
     public ObservableCollection<FriendEntry> Friends { get; } = [];
-    public RadegastInstanceAvalonia Instance => _instance;
 
     [ObservableProperty]
     private FriendEntry? _selectedFriend;
@@ -57,9 +53,8 @@ public partial class FriendsViewModel : ObservableObject, IDisposable
 
     private bool _settingFriend;
 
-    public FriendsViewModel(RadegastInstanceAvalonia instance)
+    public FriendsViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
 
         _refreshTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         _refreshTimer.Tick += (_, _) =>
@@ -213,6 +208,60 @@ public partial class FriendsViewModel : ObservableObject, IDisposable
         Client.Friends.TerminateFriendship(SelectedFriend.Id);
         StatusText = $"Removed {SelectedFriend.Name} from friends";
         QueueRefresh();
+    }
+
+    [RelayCommand]
+    private void OfferTeleport()
+    {
+        if (SelectedFriend == null) return;
+        Client.Self.SendTeleportLure(SelectedFriend.Id);
+        StatusText = $"Teleport offer sent to {SelectedFriend.Name}";
+    }
+
+    [RelayCommand]
+    private void TeleportTo()
+    {
+        if (SelectedFriend == null) return;
+        var friend = Client.Friends.FriendList.GetValueOrDefault(SelectedFriend.Id);
+        if (friend == null || !friend.CanSeeThemOnMap)
+        {
+            StatusText = $"{SelectedFriend.Name} has not granted you map rights";
+            return;
+        }
+
+        var friendId = SelectedFriend.Id;
+        var friendName = SelectedFriend.Name;
+
+        void OnFriendFound(object? sender, FriendFoundReplyEventArgs e)
+        {
+            if (e.AgentID != friendId) return;
+            Client.Friends.FriendFoundReply -= OnFriendFound;
+
+            if (e.RegionHandle == 0)
+            {
+                Dispatcher.UIThread.Post(() => StatusText = $"Could not locate {friendName}");
+                return;
+            }
+
+            _ = Client.Self.TeleportAsync(e.RegionHandle, e.Location);
+        }
+
+        Client.Friends.FriendFoundReply += OnFriendFound;
+        Client.Friends.MapFriend(friendId);
+        StatusText = $"Locating {friendName}\u2026";
+    }
+
+    [RelayCommand]
+    private void InviteToGroup()
+    {
+        if (SelectedFriend == null) return;
+        var friendId = SelectedFriend.Id;
+        var friendName = SelectedFriend.Name;
+        _instance.ShowGroupPicker($"Invite {friendName} to Group", entry =>
+        {
+            Client.Groups.Invite(entry.GroupId, new System.Collections.Generic.List<UUID> { UUID.Zero }, friendId);
+            _instance.ShowNotificationInChat($"Invited {friendName} to {entry.GroupName}.");
+        });
     }
 
     #region Network Events

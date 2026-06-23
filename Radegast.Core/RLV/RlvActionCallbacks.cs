@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -19,7 +19,7 @@
  */
 
 using LibreMetaverse.RLV;
-using OpenMetaverse;
+using LibreMetaverse;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -60,11 +60,11 @@ namespace Radegast.Core.RLV
 
                 if (inventoryItem.InventoryType == InventoryType.Wearable)
                 {
-                    await instance.COF.AddToOutfit(inventoryItem, item.ReplaceExistingAttachments, cancellationToken);
+                    await instance.COF.AddToOutfitAsync(inventoryItem, item.ReplaceExistingAttachments, cancellationToken);
                 }
                 else
                 {
-                    await instance.COF.Attach(inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments, cancellationToken);
+                    await instance.COF.AttachAsync(inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments, cancellationToken);
                 }
             }
         }
@@ -72,13 +72,13 @@ namespace Radegast.Core.RLV
         public async Task DetachAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
             var items = await GetInventoryItemsByIdAsync(itemIds).ConfigureAwait(false);
-            await instance.COF.RemoveFromOutfit(items, cancellationToken);
+            await instance.COF.RemoveFromOutfitAsync(items, cancellationToken);
         }
 
         public async Task RemOutfitAsync(IReadOnlyList<Guid> itemIds, CancellationToken cancellationToken)
         {
             var items = await GetInventoryItemsByIdAsync(itemIds).ConfigureAwait(false);
-            await instance.COF.RemoveFromOutfit(items, cancellationToken);
+            await instance.COF.RemoveFromOutfitAsync(items, cancellationToken);
         }
 
         public Task SendInstantMessageAsync(Guid targetUser, string message, CancellationToken cancellationToken)
@@ -168,7 +168,7 @@ namespace Radegast.Core.RLV
                 }
             }
 
-            instance.Client.Groups.ActivateGroup(new UUID(group.ID));
+            instance.Client.Groups.ActivateGroup(group.ID);
             if (roleId.HasValue && roleId.Value != UUID.Zero)
             {
                 instance.Client.Groups.ActivateTitle(group.ID, roleId.Value);
@@ -203,17 +203,17 @@ namespace Radegast.Core.RLV
             {
                 vecLookAt = Vector3.UnitX;
                 vecLookAt *= Quaternion.CreateFromAxisAngle(Vector3.UnitZ, lookat.Value);
-                vecLookAt.Normalize();
+                vecLookAt = Vector3.Normalize(vecLookAt);
             }
 
             if (string.IsNullOrEmpty(regionName))
             {
                 var regionHandle = Helpers.GlobalPosToRegionHandle(x, y, out var localX, out var localY);
-                _ = instance.Client.Self.Teleport(regionHandle, new Vector3(localX, localY, z), vecLookAt);
+                _ = instance.Client.Self.TeleportAsync(regionHandle, new Vector3(localX, localY, z), vecLookAt);
             }
             else
             {
-                _ = instance.Client.Self.Teleport(regionName!, new Vector3(x, y, z), vecLookAt);
+                _ = instance.Client.Self.TeleportAsync(regionName!, new Vector3(x, y, z), vecLookAt);
             }
 
             return Task.CompletedTask;

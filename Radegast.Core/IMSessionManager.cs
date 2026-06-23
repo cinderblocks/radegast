@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -68,13 +68,13 @@ namespace Radegast
             cleanupTimer = new Timer(CleanupCallback, null, (int)CleanupInterval.TotalMilliseconds, (int)CleanupInterval.TotalMilliseconds);
         }
 
-        private void NetCom_InstantMessageSent(object sender, InstantMessageSentEventArgs e)
+        private void NetCom_InstantMessageSent(object? sender, InstantMessageSentEventArgs e)
         {
             if (e == null) return;
             UpdateSessionActivity(e.SessionID, e.FromAgentID == UUID.Zero ? instance.Client.Self.AgentID : e.FromAgentID);
         }
 
-        private void NetCom_InstantMessageReceived(object sender, InstantMessageEventArgs e)
+        private void NetCom_InstantMessageReceived(object? sender, InstantMessageEventArgs e)
         {
             if (e == null) return;
 
@@ -99,7 +99,7 @@ namespace Radegast
         {
             if (sessionId == UUID.Zero) return;
 
-            IMSessionInfo info;
+            IMSessionInfo? info;
             bool isNew = false;
             lock (sync)
             {
@@ -169,7 +169,7 @@ namespace Radegast
             try { TypingStopped?.Invoke(this, new IMTypingEventArgs(sessionId, agentId)); } catch { }
         }
 
-        private void CleanupCallback(object state)
+        private void CleanupCallback(object? state)
         {
             List<IMSessionInfo> toClose = new List<IMSessionInfo>();
             lock (sync)

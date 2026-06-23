@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace RadegastSpeech.Conversation
 {
@@ -51,7 +51,7 @@ namespace RadegastSpeech.Conversation
                 case "yes":
                 case "go":
                     Talker.SayMore("Here we go.");
-                    Client.Self.Teleport(asset.AssetUUID);
+                    _ = Client.Self.TeleportAsync(asset.AssetUUID);
                     // TODO Should force conversation to Chat here.
                     FinishInterruption();
                     return true;

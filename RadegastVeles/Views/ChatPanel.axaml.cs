@@ -19,8 +19,10 @@
 
 using System;
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -51,6 +53,7 @@ public partial class ChatPanel : UserControl
         {
             minimap.WalkToRequested += (x, y) => _vm.WalkToPoint(x, y);
             minimap.TeleportRequested += (x, y) => _vm.TeleportToPoint(x, y);
+            minimap.AboutLandRequested += (x, y) => _vm.Instance.ShowLandProfile(x, y);
         }
 
         // Wire movement button press/release
@@ -127,6 +130,10 @@ public partial class ChatPanel : UserControl
                 _vm.SendChatCommand.Execute(null);
                 e.Handled = true;
                 break;
+            case Key.Enter when e.KeyModifiers == KeyModifiers.Shift:
+                _vm.SendWhisperCommand.Execute(null);
+                e.Handled = true;
+                break;
             case Key.Enter when e.KeyModifiers == KeyModifiers.Control:
                 _vm.SendShoutCommand.Execute(null);
                 e.Handled = true;
@@ -140,6 +147,25 @@ public partial class ChatPanel : UserControl
                 e.Handled = true;
                 break;
         }
+    }
+
+    private void OnChatLineContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not WrapPanel panel || panel.DataContext is not ChatLine line) return;
+        var copyItem = new MenuItem { Header = "Copy" };
+        copyItem.Click += async (_, _) =>
+        {
+            var chatLog = this.FindControl<ListBox>("ChatLog");
+            var lines = chatLog?.SelectedItems?.OfType<ChatLine>().Where(l => !l.IsDateSeparator).ToList();
+            // If nothing is selected (or only this row) fall back to the right-clicked line
+            if (lines == null || lines.Count == 0) lines = [line];
+            var text = string.Join(Environment.NewLine, lines.Select(l => l.CopyText));
+            IClipboard? clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null) await clipboard.SetTextAsync(text);
+        };
+        var menu = new ContextMenu { Items = { copyItem } };
+        menu.Open(panel);
+        e.Handled = true;
     }
 
     private void OnChatNameClick(object? sender, RoutedEventArgs e)

@@ -1,0 +1,65 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.ReconnectWindow"
+        x:DataType="vm:ReconnectViewModel"
+        Title="Disconnected"
+        Width="380" Height="280"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Reconnect dialog">
+
+    <Border Padding="24">
+        <StackPanel Spacing="12">
+
+            <TextBlock Text="Connection Lost" FontSize="18" FontWeight="SemiBold"
+                       HorizontalAlignment="Center" />
+
+            <TextBlock Text="{Binding DisconnectReason}"
+                       FontSize="12" Foreground="{DynamicResource VelesMutedForeground}"
+                       HorizontalAlignment="Center"
+                       TextWrapping="Wrap" />
+
+            <TextBlock Text="Authenticator Code" IsVisible="{Binding IsMfaRequired}" />
+            <TextBox Text="{Binding MfaToken}"
+                     PlaceholderText="6-digit code"
+                     IsVisible="{Binding IsMfaRequired}"
+                     IsEnabled="{Binding !IsReconnecting}"
+                     AutomationProperties.Name="Multi-factor authenticator code" />
+
+            <!-- Countdown bar -->
+            <ProgressBar Minimum="0" Maximum="1"
+                         Value="{Binding CountdownSeconds}"
+                         IsVisible="{Binding IsCountingDown}"
+                         Height="4"
+                         AutomationProperties.Name="Auto-reconnect countdown" />
+
+            <Grid ColumnDefinitions="*,8,*" Margin="0,8,0,0">
+                <Button Grid.Column="0" Content="Reconnect Now"
+                        Command="{Binding ReconnectCommand}"
+                        IsEnabled="{Binding !IsReconnecting}"
+                        HorizontalAlignment="Stretch" />
+                <Button Grid.Column="2" Content="Return to Login"
+                        Command="{Binding ReturnToLoginCommand}"
+                        IsEnabled="{Binding !IsReconnecting}"
+                        HorizontalAlignment="Stretch" />
+            </Grid>
+
+            <Button Content="Cancel Auto-Reconnect"
+                    Command="{Binding CancelAutoReconnectCommand}"
+                    IsVisible="{Binding IsCountingDown}"
+                    HorizontalAlignment="Stretch" />
+
+            <ProgressBar IsIndeterminate="True"
+                         IsVisible="{Binding IsReconnecting}"
+                         Height="4"
+                         AutomationProperties.Name="Reconnect progress indicator" />
+            <TextBlock Text="{Binding StatusText}"
+                       FontSize="12" Foreground="{DynamicResource VelesMutedForeground}"
+                       HorizontalAlignment="Center"
+                       TextWrapping="Wrap" />
+
+        </StackPanel>
+    </Border>
+
+</Window>

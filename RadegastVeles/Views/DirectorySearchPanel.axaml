@@ -10,10 +10,10 @@
              x:DataType="vm:DirectorySearchViewModel"
              AutomationProperties.Name="Directory search panel">
 
-    <DockPanel>
+    <Grid RowDefinitions="Auto,*">
 
         <!-- Maturity filter — applies to all searches -->
-        <Border DockPanel.Dock="Top" Background="#14FFFFFF" Padding="8,6" Margin="0,0,0,2">
+        <Border Grid.Row="0" Background="#14FFFFFF" Padding="8,6" Margin="0,0,0,2">
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <TextBlock Text="Maturity:" VerticalAlignment="Center" Opacity="0.8" />
                 <ComboBox SelectedIndex="{Binding MaturityIndex}" Width="200"
@@ -25,13 +25,13 @@
             </StackPanel>
         </Border>
 
-    <TabControl SelectedIndex="{Binding SelectedTabIndex}">
+    <TabControl Grid.Row="1" SelectedIndex="{Binding SelectedTabIndex}">
 
         <!-- People -->
         <TabItem Header="People" AutomationProperties.Name="People search tab">
             <DockPanel Margin="8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                    <TextBox Text="{Binding PeopleQuery}" Width="250" Watermark="Search people…"
+                    <TextBox Text="{Binding PeopleQuery}" Width="250" PlaceholderText="Search people…"
                              AutomationProperties.Name="People search query">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Return" Command="{Binding SearchPeopleCommand}" />
@@ -83,7 +83,7 @@
         <TabItem Header="Places" AutomationProperties.Name="Places search tab">
             <DockPanel Margin="8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                    <TextBox Text="{Binding PlacesQuery}" Width="250" Watermark="Search places…"
+                    <TextBox Text="{Binding PlacesQuery}" Width="250" PlaceholderText="Search places…"
                              AutomationProperties.Name="Places search query">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Return" Command="{Binding SearchPlacesCommand}" />
@@ -151,7 +151,7 @@
         <TabItem Header="Groups" AutomationProperties.Name="Groups search tab">
             <DockPanel Margin="8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                    <TextBox Text="{Binding GroupsQuery}" Width="250" Watermark="Search groups…"
+                    <TextBox Text="{Binding GroupsQuery}" Width="250" PlaceholderText="Search groups…"
                              AutomationProperties.Name="Groups search query">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Return" Command="{Binding SearchGroupsCommand}" />
@@ -208,7 +208,7 @@
         <TabItem Header="Events" AutomationProperties.Name="Events search tab">
             <DockPanel Margin="8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                    <TextBox Text="{Binding EventsQuery}" Width="250" Watermark="Search events…"
+                    <TextBox Text="{Binding EventsQuery}" Width="250" PlaceholderText="Search events…"
                              AutomationProperties.Name="Events search query">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Return" Command="{Binding SearchEventsCommand}" />
@@ -277,7 +277,7 @@
         <TabItem Header="Classifieds" AutomationProperties.Name="Classifieds search tab">
             <DockPanel Margin="8">
                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
-                    <TextBox Text="{Binding ClassifiedsQuery}" Width="250" Watermark="Search classifieds…"
+                    <TextBox Text="{Binding ClassifiedsQuery}" Width="250" PlaceholderText="Search classifieds…"
                              AutomationProperties.Name="Classifieds search query">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Return" Command="{Binding SearchClassifiedsCommand}" />
@@ -430,6 +430,6 @@
 
     </TabControl>
 
-    </DockPanel>
+    </Grid>
 
 </UserControl>

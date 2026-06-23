@@ -9,7 +9,96 @@
              xmlns:views="using:Radegast.Veles.Views"
              x:Class="Radegast.Veles.Views.GesturePanel"
              x:DataType="vm:GestureViewModel"
-             AutomationProperties.Name="Gesture viewer">
+             AutomationProperties.Name="Gesture editor">
+
+    <UserControl.DataTemplates>
+        <!-- Chat step -->
+        <DataTemplate DataType="{x:Type vm:ChatGestureStepViewModel}" x:DataType="vm:ChatGestureStepViewModel">
+            <Grid ColumnDefinitions="76,*" Margin="0,2">
+                <Border Grid.Column="0" Background="#30FF8800" CornerRadius="4" Margin="0,0,6,0" Padding="6,4"
+                        VerticalAlignment="Stretch">
+                    <TextBlock Text="Chat" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBox Grid.Column="1" Text="{Binding Text}"
+                         PlaceholderText="Chat text..."
+                         AutomationProperties.Name="Chat step text" />
+            </Grid>
+        </DataTemplate>
+
+        <!-- Wait step -->
+        <DataTemplate DataType="{x:Type vm:WaitGestureStepViewModel}" x:DataType="vm:WaitGestureStepViewModel">
+            <Grid ColumnDefinitions="76,*" Margin="0,2">
+                <Border Grid.Column="0" Background="#30AAAAFF" CornerRadius="4" Margin="0,0,6,0" Padding="6,4"
+                        VerticalAlignment="Stretch">
+                    <TextBlock Text="Wait" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <CheckBox Content="For Time" IsChecked="{Binding WaitForTime}"
+                              AutomationProperties.Name="Wait for time" />
+                    <NumericUpDown Value="{Binding WaitTime}" Minimum="0" Maximum="3600"
+                                   FormatString="N2" Width="100"
+                                   IsEnabled="{Binding WaitForTime}"
+                                   AutomationProperties.Name="Wait time in seconds" />
+                    <CheckBox Content="For Animations" IsChecked="{Binding WaitForAnimation}"
+                              AutomationProperties.Name="Wait for animations to finish" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Animation step -->
+        <DataTemplate DataType="{x:Type vm:AnimationGestureStepViewModel}" x:DataType="vm:AnimationGestureStepViewModel">
+            <Grid ColumnDefinitions="76,*" Margin="0,2">
+                <Border Grid.Column="0" Background="#3000CC88" CornerRadius="4" Margin="0,0,6,0" Padding="6,4"
+                        VerticalAlignment="Stretch">
+                    <StackPanel Spacing="4" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding TypeLabel}" FontSize="11" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                    <CheckBox Content="Start animation (uncheck = stop)"
+                              IsChecked="{Binding AnimationStart}"
+                              AutomationProperties.Name="Animation start or stop" />
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Text="{Binding Name}" PlaceholderText="Animation name..."
+                                 AutomationProperties.Name="Animation name" />
+                        <Button Grid.Column="1" Content="Pick&#x2026;" Command="{Binding PickAssetCommand}"
+                                Margin="4,0,0,0"
+                                AutomationProperties.Name="Pick animation from inventory" />
+                    </Grid>
+                    <TextBlock Text="{Binding IdText}" FontSize="11" Opacity="0.55"
+                               IsVisible="{Binding IdText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Animation asset UUID" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Sound step -->
+        <DataTemplate DataType="{x:Type vm:SoundGestureStepViewModel}" x:DataType="vm:SoundGestureStepViewModel">
+            <Grid ColumnDefinitions="76,*" Margin="0,2">
+                <Border Grid.Column="0" Background="#30FF4488" CornerRadius="4" Margin="0,0,6,0" Padding="6,4"
+                        VerticalAlignment="Stretch">
+                    <TextBlock Text="Sound" FontSize="11" FontWeight="SemiBold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Grid.Column="0" Text="{Binding Name}" PlaceholderText="Sound name..."
+                                 AutomationProperties.Name="Sound name" />
+                        <Button Grid.Column="1" Content="Pick&#x2026;" Command="{Binding PickAssetCommand}"
+                                Margin="4,0,0,0"
+                                AutomationProperties.Name="Pick sound from inventory" />
+                    </Grid>
+                    <TextBlock Text="{Binding IdText}" FontSize="11" Opacity="0.55"
+                               IsVisible="{Binding IdText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               AutomationProperties.Name="Sound asset UUID" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+    </UserControl.DataTemplates>
+
     <DockPanel>
 
         <!-- Toolbar -->
@@ -22,16 +111,20 @@
                         AutomationProperties.Name="Play gesture" />
                 <Button Content="Deactivate" Command="{Binding ToggleActiveCommand}"
                         IsVisible="{Binding IsActive}"
-                        Margin="0,0,8,0" MinWidth="88"
+                        Margin="0,0,4,0" MinWidth="88"
                         AutomationProperties.Name="Deactivate gesture" />
                 <Button Content="Activate" Command="{Binding ToggleActiveCommand}"
                         IsVisible="{Binding !IsActive}"
                         Margin="0,0,8,0" MinWidth="88"
                         AutomationProperties.Name="Activate gesture" />
+                <Button Content="&#x1F4BE; Save" Command="{Binding SaveGestureCommand}"
+                        IsVisible="{Binding IsModified}"
+                        Margin="0,0,8,0"
+                        AutomationProperties.Name="Save gesture" />
                 <Button x:Name="BtnDetach" Content="&#x23CF; Detach" Margin="0,0,4,0" MinWidth="72"
-                        AutomationProperties.Name="Detach gesture viewer" />
+                        AutomationProperties.Name="Detach gesture editor" />
                 <Button x:Name="BtnClose" Content="&#x2715; Close" Margin="0,0,4,0" MinWidth="64"
-                        AutomationProperties.Name="Close gesture viewer" />
+                        AutomationProperties.Name="Close gesture editor" />
             </WrapPanel>
         </Border>
 
@@ -41,9 +134,10 @@
                        AutomationProperties.Name="Gesture status" />
             <ProgressBar Grid.Column="1" IsVisible="{Binding IsLoading}" IsIndeterminate="True"
                          Width="80" Height="8" VerticalAlignment="Center"
-                         AutomationProperties.Name="Loading indicator" />
+                         AutomationProperties.Name="Activity indicator" />
         </Grid>
 
+        <!-- Item metadata -->
         <ContentControl DockPanel.Dock="Bottom" Content="{Binding Metadata}">
             <ContentControl.ContentTemplate>
                 <DataTemplate x:DataType="vm:ItemMetadataViewModel">
@@ -52,19 +146,82 @@
             </ContentControl.ContentTemplate>
         </ContentControl>
 
-        <!-- Gesture sequence steps -->
-        <DockPanel Margin="8,4">
-            <TextBlock DockPanel.Dock="Top" Text="Gesture Sequence:" FontWeight="SemiBold"
-                       Margin="0,0,0,4" AutomationProperties.Name="Sequence header" />
-            <ListBox ItemsSource="{Binding Steps}"
-                     AutomationProperties.Name="Gesture steps list">
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Padding="2" />
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </DockPanel>
+        <!-- Editor content -->
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="8">
+            <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+
+                <!-- Trigger settings -->
+                <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Trigger" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+                        <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Trigger phrase:"
+                                       VerticalAlignment="Center" FontWeight="SemiBold" />
+                            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Trigger}"
+                                     PlaceholderText="e.g. /wave"
+                                     AutomationProperties.Name="Trigger phrase" />
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Replace with:"
+                                       VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ReplaceWith}"
+                                     PlaceholderText="Chat replacement text"
+                                     Margin="0,6,0,0"
+                                     AutomationProperties.Name="Replace with text" />
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Key trigger:"
+                                       VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding TriggerKey}"
+                                           Minimum="0" Maximum="255" FormatString="N0"
+                                           Width="100" HorizontalAlignment="Left" Margin="0,6,0,0"
+                                           AutomationProperties.Name="Key trigger code" />
+
+                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Key mask:"
+                                       VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,6,0,0" />
+                            <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding TriggerKeyMask}"
+                                           Minimum="0" Maximum="999999999" FormatString="N0"
+                                           Width="140" HorizontalAlignment="Left" Margin="0,6,0,0"
+                                           AutomationProperties.Name="Key trigger modifier mask" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Sequence editor -->
+                <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Sequence" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
+
+                        <ListBox ItemsSource="{Binding EditSteps}"
+                                 SelectedItem="{Binding SelectedStep}"
+                                 MinHeight="80" MaxHeight="340"
+                                 AutomationProperties.Name="Gesture steps" />
+
+                        <!-- Add step buttons -->
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="+ Chat" Command="{Binding AddChatStepCommand}"
+                                    AutomationProperties.Name="Add chat step" />
+                            <Button Content="+ Wait" Command="{Binding AddWaitStepCommand}"
+                                    AutomationProperties.Name="Add wait step" />
+                            <Button Content="+ Animation" Command="{Binding AddAnimationStepCommand}"
+                                    AutomationProperties.Name="Add animation step" />
+                            <Button Content="+ Sound" Command="{Binding AddSoundStepCommand}"
+                                    AutomationProperties.Name="Add sound step" />
+                        </StackPanel>
+
+                        <!-- Step order / remove controls -->
+                        <StackPanel Orientation="Horizontal" Spacing="6"
+                                    IsVisible="{Binding SelectedStep, Converter={x:Static ObjectConverters.IsNotNull}}">
+                            <Button Content="&#x25B2; Move Up" Command="{Binding MoveStepUpCommand}"
+                                    AutomationProperties.Name="Move step up" />
+                            <Button Content="&#x25BC; Move Down" Command="{Binding MoveStepDownCommand}"
+                                    AutomationProperties.Name="Move step down" />
+                            <Button Content="&#x2715; Remove" Command="{Binding RemoveStepCommand}"
+                                    AutomationProperties.Name="Remove step" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
 
     </DockPanel>
 </UserControl>

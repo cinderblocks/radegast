@@ -3,6 +3,37 @@
              x:Class="Radegast.Veles.App"
              RequestedThemeVariant="Dark">
 
+    <Application.Resources>
+        <ResourceDictionary>
+            <!-- ── Semantic foreground brushes ──────────────────────────────────
+                 Use VelesMutedForeground instead of Opacity="0.x" on TextBlocks.
+                 FluentTheme supplies SystemBaseMediumColor for dark / light /
+                 high-contrast themes automatically.                              -->
+            <SolidColorBrush x:Key="VelesMutedForeground"  Color="{DynamicResource SystemBaseMediumColor}" />
+            <SolidColorBrush x:Key="VelesWarningForeground" Color="OrangeRed" />
+
+            <!-- ── Badge / banner background brushes ────────────────────────────
+                 Centralised here so a high-contrast theme can override them all. -->
+            <!-- Permissions -->
+            <SolidColorBrush x:Key="VelesBadgeNoModify"    Color="#CC8800" />
+            <SolidColorBrush x:Key="VelesBadgeNoCopy"      Color="#0066CC" />
+            <SolidColorBrush x:Key="VelesBadgeNoTransfer"  Color="#CC3300" />
+            <!-- Object type tags -->
+            <SolidColorBrush x:Key="VelesBadgeHud"         Color="#1565C0" />
+            <SolidColorBrush x:Key="VelesBadgeGroupOwned"  Color="#6A1B9A" />
+            <SolidColorBrush x:Key="VelesBadgeForSale"     Color="#558B2F" />
+            <SolidColorBrush x:Key="VelesBadgePrimitive"   Color="#555555" />
+            <SolidColorBrush x:Key="VelesBadgeTempRez"     Color="#E65100" />
+            <SolidColorBrush x:Key="VelesBadgeAttached"    Color="#FF107C10" />
+            <SolidColorBrush x:Key="VelesBadgeSitting"     Color="#CC6600" />
+            <SolidColorBrush x:Key="VelesBadgeError"       Color="#CC0000" />
+            <SolidColorBrush x:Key="VelesBadgeInfo"        Color="#0288D1" />
+            <SolidColorBrush x:Key="VelesBadgeMaterial"    Color="#795548" />
+            <!-- Subtle panel highlight -->
+            <SolidColorBrush x:Key="VelesPanelHighlight"   Color="#11808080" />
+        </ResourceDictionary>
+    </Application.Resources>
+
     <Application.Styles>
         <FluentTheme />
         <Style Selector="Button.hyperlink">

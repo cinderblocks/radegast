@@ -20,9 +20,11 @@
 using System;
 using System.Linq;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
+using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Controls;
 
@@ -48,7 +50,7 @@ public static class AvatarMenuBuilder
         });
         menu.Items.Add(new MenuItem
         {
-            Header = "3D View",
+            Header = "View 3D",
             Command = new RelayCommand(() => instance.ShowAvatarViewer(agentId, agentName))
         });
 
@@ -66,6 +68,42 @@ public static class AvatarMenuBuilder
             });
             menu.Items.Add(new MenuItem
             {
+                Header = "Share Item\u2026",
+                Command = new RelayCommand(() =>
+                    instance.ShowInventoryPicker(
+                        $"Share item with {agentName}",
+                        null,
+                        entry =>
+                        {
+                            instance.Client.Inventory.GiveItem(entry.ItemId, entry.Name, entry.AssetType, agentId, true);
+                            instance.ShowNotificationInChat($"Offered '{entry.Name}' to {agentName}.");
+                        },
+                        item => (item.Permissions.OwnerMask & PermissionMask.Transfer) != 0))
+            });
+            menu.Items.Add(new Separator());
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Turn To",
+                Command = new RelayCommand(() =>
+                {
+                    var sim = instance.Client.Network.CurrentSim;
+                    if (sim != null && instance.State.TryGetCoarsePosition(sim, agentId, out var pos))
+                        instance.Client.Self.Movement.TurnToward(pos);
+                })
+            });
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Walk To",
+                Command = new RelayCommand(() =>
+                {
+                    var sim = instance.Client.Network.CurrentSim;
+                    if (sim != null && instance.State.TryGetCoarsePosition(sim, agentId, out var pos))
+                        instance.State.MoveTo(sim, pos, false);
+                })
+            });
+            menu.Items.Add(new Separator());
+            menu.Items.Add(new MenuItem
+            {
                 Header = "Offer Teleport",
                 Command = new RelayCommand(() => instance.Client.Self.SendTeleportLure(agentId))
             });
@@ -77,11 +115,37 @@ public static class AvatarMenuBuilder
                     InstantMessageDialog.RequestLure, InstantMessageOnline.Online,
                     instance.Client.Self.SimPosition, UUID.Zero, Array.Empty<byte>()))
             });
+
+            bool canSeeOnMap = instance.Client.Friends.FriendList.TryGetValue(agentId, out var friendInfo)
+                               && friendInfo.CanSeeThemOnMap;
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Show on Map",
+                IsEnabled = canSeeOnMap,
+                Command = new RelayCommand(() => instance.ShowOnMap(agentId))
+            });
+
             menu.Items.Add(new Separator());
             menu.Items.Add(new MenuItem
             {
                 Header = "Add Friend",
                 Command = new RelayCommand(() => instance.Client.Friends.OfferFriendship(agentId))
+            });
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Give Calling Card",
+                Command = new RelayCommand(() => instance.Client.Friends.GiveCallingCard(agentId))
+            });
+            menu.Items.Add(new MenuItem
+            {
+                Header = "Invite to Group\u2026",
+                Command = new RelayCommand(() =>
+                    instance.ShowGroupPicker($"Invite {agentName} to Group", entry =>
+                    {
+                        // Invite to the Everyone role (UUID.Zero) by default
+                        instance.Client.Groups.Invite(entry.GroupId, new System.Collections.Generic.List<UUID> { UUID.Zero }, agentId);
+                        instance.ShowNotificationInChat($"Invited {agentName} to {entry.GroupName}.");
+                    }))
             });
 
             bool isMuted = instance.Client.Self.MuteList.Values
@@ -104,7 +168,28 @@ public static class AvatarMenuBuilder
                         instance.Client.Self.UpdateMuteListEntry(MuteType.Resident, agentId, agentName))
                 });
             }
+
+            menu.Items.Add(new Separator());
+
+            bool isFriend = instance.Client.Friends.FriendList.ContainsKey(agentId);
+            if (isFriend)
+            {
+                menu.Items.Add(new MenuItem
+                {
+                    Header = "Remove Friend",
+                    Command = new RelayCommand(() => instance.Client.Friends.TerminateFriendship(agentId))
+                });
+            }
         }
+
+        menu.Items.Add(new Separator());
+        var copyUuidItem = new MenuItem { Header = "Copy UUID" };
+        copyUuidItem.Click += async (s, _) =>
+        {
+            var clip = TopLevel.GetTopLevel(s as MenuItem)?.Clipboard;
+            if (clip != null) await clip.SetTextAsync(agentId.ToString());
+        };
+        menu.Items.Add(copyUuidItem);
 
         menu.Items.Add(new Separator());
         var slapp = SlurlParser.GetAgentUrl(agentId);

@@ -27,6 +27,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -73,7 +74,7 @@ public class LogViewerWindow : Window
 
         _filterText = new TextBox
         {
-            Watermark = "Filter by category or text...",
+            PlaceholderText = "Filter by category or text...",
             Margin = new Thickness(4),
             Width = 250
         };
@@ -309,7 +310,7 @@ public class LogViewerWindow : Window
             sb.AppendLine(FormatEntry(item));
         }
 
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        var clipboard = GetTopLevel(this)?.Clipboard;
         if (clipboard != null)
         {
             await clipboard.SetTextAsync(sb.ToString().TrimEnd());
@@ -326,7 +327,7 @@ public class LogViewerWindow : Window
             sb.AppendLine(FormatEntry(entry));
         }
 
-        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        var clipboard = GetTopLevel(this)?.Clipboard;
         if (clipboard != null)
         {
             await clipboard.SetTextAsync(sb.ToString().TrimEnd());

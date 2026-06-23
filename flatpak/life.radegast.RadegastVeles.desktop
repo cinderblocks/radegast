@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Radegast Veles
+Comment=Second Life viewer
+Exec=RadegastVeles
+Icon=life.radegast.RadegastVeles
+Type=Application
+Categories=Network;
+StartupNotify=true

@@ -41,7 +41,7 @@
                     <!-- Region search -->
                     <TextBlock Text="Region Search" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Grid.Column="0" x:Name="TxtRegionSearch" Text="{Binding RegionSearch, Mode=TwoWay}" Watermark="Region name..." AutomationProperties.Name="Region search input" />
+                        <TextBox Grid.Column="0" x:Name="TxtRegionSearch" Text="{Binding RegionSearch, Mode=TwoWay}" PlaceholderText="Region name..." AutomationProperties.Name="Region search input" />
                         <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" Margin="4,0,0,0" AutomationProperties.Name="Search for region" />
                     </Grid>
 

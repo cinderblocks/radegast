@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -21,7 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -73,33 +73,23 @@ namespace Radegast
 
         private async Task StartDisplayNameChange(string name)
         {
-            var tcs = new TaskCompletionSource<bool>();
+            var (success, names, _) = await Client.Avatars.GetDisplayNamesAsync(
+                new List<UUID> { Client.Self.AgentID }).ConfigureAwait(false);
 
-#pragma warning disable CS4014 // Callback is properly synchronized via TaskCompletionSource
-            // Request current display name, callback will perform the update
-            Client.Avatars.GetDisplayNames(new List<UUID>() { Client.Self.AgentID }, async (success, names, badIDs) =>
+            if (!success || names == null || names.Length < 1)
             {
-                if (!success || names.Length < 1)
-                {
-                    UpdateStatus("Failed to get current name");
-                    tcs.TrySetResult(false);
-                    return;
-                }
+                UpdateStatus("Failed to get current name");
+                return;
+            }
 
-                try
-                {
-                    await Client.Self.SetDisplayNameAsync(names[0].DisplayName, name).ConfigureAwait(false);
-                    tcs.TrySetResult(true);
-                }
-                catch (Exception ex)
-                {
-                    UpdateStatus($"Failed to set display name: {ex.Message}");
-                    tcs.TrySetResult(false);
-                }
-            });
-#pragma warning restore CS4014
-
-            await tcs.Task.ConfigureAwait(false);
+            try
+            {
+                await Client.Self.SetDisplayNameAsync(names[0].DisplayName, name).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Failed to set display name: {ex.Message}");
+            }
         }
 
         private async void button1_Click(object sender, EventArgs e)

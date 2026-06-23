@@ -47,7 +47,7 @@ public static class LslHighlighting
         }
         catch (Exception ex)
         {
-            OpenMetaverse.Logger.Warn($"LslHighlighting: failed to build definition: {ex.Message}");
+            LibreMetaverse.Logger.Warn($"LslHighlighting: failed to build definition: {ex.Message}");
         }
 
         return _definition;

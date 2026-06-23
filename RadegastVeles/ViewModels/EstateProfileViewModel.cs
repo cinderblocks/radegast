@@ -18,11 +18,12 @@
  */
 
 using System;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -81,6 +82,33 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _covenantText = string.Empty;
     [ObservableProperty] private bool _isCovenantLoading = true;
 
+    // Estate ownership / edit permissions
+    private UUID _estateOwnerID = UUID.Zero;
+    private string _estateName = string.Empty;
+    [ObservableProperty] private bool _canEditEstate;
+    [ObservableProperty] private bool _isEditingEstate;
+
+    // Edit-mode region flags
+    [ObservableProperty] private bool _editAllowDamage;
+    [ObservableProperty] private bool _editNoFly;
+    [ObservableProperty] private bool _editAllowVoice;
+    [ObservableProperty] private bool _editSunFixed;
+    [ObservableProperty] private bool _editBlockTerraform;
+    [ObservableProperty] private bool _editDirectTeleport;
+    [ObservableProperty] private bool _editRestrictPush;
+    [ObservableProperty] private bool _editSkipScripts;
+    [ObservableProperty] private bool _editSkipPhysics;
+    [ObservableProperty] private decimal _editAgentLimit = 40;
+    [ObservableProperty] private decimal _editObjectBonus = 1;
+
+    // Region environment (EEP / legacy WindLight)
+    [ObservableProperty] private bool _envIsCustom;
+    [ObservableProperty] private string _envDayLength = string.Empty;
+    [ObservableProperty] private string _envDayOffset = string.Empty;
+    [ObservableProperty] private string _envSkyTrack = string.Empty;
+    [ObservableProperty] private bool _envHasLegacyWindLight;
+    [ObservableProperty] private bool _isEnvironmentLoading = true;
+
     public EstateProfileViewModel(RadegastInstanceAvalonia instance)
     {
         _instance = instance;
@@ -89,6 +117,12 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
 
         Client.Estate.EstateCovenantReply += Estate_CovenantReply;
         Client.Estate.RequestCovenant();
+        Client.Estate.EstateUpdateInfoReply += Estate_UpdateInfoReply;
+        Client.Estate.RequestInfo();
+
+        Client.Environment.RegionEnvironmentUpdated += Environment_RegionEnvironmentUpdated;
+        _ = Client.Environment.GetRegionEnvironmentAsync();
+        _ = FetchLegacyEnvironmentAsync();
 
         _refreshTimer = new DispatcherTimer
         {
@@ -103,6 +137,8 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
         _refreshTimer?.Stop();
         _refreshTimer = null;
         Client.Estate.EstateCovenantReply -= Estate_CovenantReply;
+        Client.Estate.EstateUpdateInfoReply -= Estate_UpdateInfoReply;
+        Client.Environment.RegionEnvironmentUpdated -= Environment_RegionEnvironmentUpdated;
     }
 
     private void UpdateDisplay()
@@ -166,10 +202,96 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
         UpdateDisplay();
         IsCovenantLoading = true;
         Client.Estate.RequestCovenant();
+        Client.Estate.RequestInfo();
+        IsEnvironmentLoading = true;
+        _ = Client.Environment.GetRegionEnvironmentAsync();
+        _ = FetchLegacyEnvironmentAsync();
     }
+
+    [RelayCommand]
+    private void BeginEditEstate()
+    {
+        if (!CanEditEstate) return;
+        EditAllowDamage    = FlagAllowDamage;
+        EditNoFly          = FlagNoFly;
+        EditAllowVoice     = FlagAllowVoice;
+        EditSunFixed       = FlagSunFixed;
+        EditBlockTerraform = FlagBlockTerraform;
+        EditDirectTeleport = FlagDirectTeleport;
+        EditRestrictPush   = FlagRestrictPush;
+        EditSkipScripts    = FlagSkipScripts;
+        EditSkipPhysics    = FlagSkipPhysics;
+        IsEditingEstate = true;
+    }
+
+    [RelayCommand]
+    private void DiscardEditEstate()
+    {
+        IsEditingEstate = false;
+    }
+
+    [RelayCommand]
+    private async Task SaveEstateAsync()
+    {
+        if (!CanEditEstate) return;
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        var maturity = sim.Access switch
+        {
+            SimAccess.Adult  => EstateTools.RegionMaturity.Adult,
+            SimAccess.Mature => EstateTools.RegionMaturity.Mature,
+            _                => EstateTools.RegionMaturity.PG
+        };
+
+        await Client.Estate.SetRegionInfoAsync(
+            blockTerraform:       EditBlockTerraform,
+            blockFly:             EditNoFly,
+            blockFlyOver:         false,
+            allowDamage:          EditAllowDamage,
+            allowLandResell:      !sim.Flags.HasFlag(RegionFlags.BlockLandResell),
+            restrictPushing:      EditRestrictPush,
+            allowParcelJoinDivide: sim.Flags.HasFlag(RegionFlags.AllowParcelChanges),
+            agentLimit:           (float)EditAgentLimit,
+            objectBonus:          (float)EditObjectBonus,
+            blockParcelSearch:    sim.Flags.HasFlag(RegionFlags.BlockParcelSearch),
+            maturity:             maturity);
+
+        Client.Estate.SetRegionDebug(EditSkipScripts, false, EditSkipPhysics);
+
+        var flags = sim.Flags;
+        flags = SetRegionFlag(flags, RegionFlags.AllowVoice,         EditAllowVoice);
+        flags = SetRegionFlag(flags, RegionFlags.SunFixed,           EditSunFixed);
+        flags = SetRegionFlag(flags, RegionFlags.AllowDirectTeleport, EditDirectTeleport);
+        await Client.Estate.SendEstateChangeInfoAsync(
+            _estateName.Length > 0 ? _estateName : RegionName, 0, flags);
+
+        IsEditingEstate = false;
+        UpdateDisplay();
+    }
+
+    private void Estate_UpdateInfoReply(object? sender, EstateUpdateInfoReplyEventArgs e)
+    {
+        _estateName = e.EstateName;
+        _estateOwnerID = e.EstateOwner;
+        Dispatcher.UIThread.Post(UpdateCanEditEstate);
+    }
+
+    private void UpdateCanEditEstate()
+    {
+        var sim = Client.Network.CurrentSim;
+        CanEditEstate = (sim?.IsEstateManager ?? false)
+                     || (_estateOwnerID != UUID.Zero && _estateOwnerID == Client.Self.AgentID);
+    }
+
+    private static RegionFlags SetRegionFlag(RegionFlags flags, RegionFlags flag, bool value) =>
+        value ? flags | flag : flags & ~flag;
 
     private void Estate_CovenantReply(object? sender, EstateCovenantReplyEventArgs e)
     {
+        _estateOwnerID = e.EstateOwnerID;
+        Dispatcher.UIThread.Post(UpdateCanEditEstate);
+
         if (e.CovenantID == UUID.Zero)
         {
             Dispatcher.UIThread.Post(() =>
@@ -180,8 +302,9 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
             return;
         }
 
-        Client.Estate.RequestCovenantNotecard(e.CovenantID, (transfer, asset) =>
+        _ = Task.Run(async () =>
         {
+            var asset = await Client.Estate.RequestCovenantNotecardAsync(e.CovenantID);
             string text;
             if (asset is AssetNotecard notecard)
             {
@@ -194,7 +317,6 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
             {
                 text = "Unable to load covenant.";
             }
-
             Dispatcher.UIThread.Post(() =>
             {
                 CovenantText = text;
@@ -202,4 +324,42 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
             });
         });
     }
+
+    private void Environment_RegionEnvironmentUpdated(object? sender, RegionEnvironmentEventArgs e)
+    {
+        var env = e.Environment.Environment;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (env != null && !env.IsDefault)
+            {
+                EnvIsCustom = true;
+                EnvDayLength = FormatDayTime(env.DayLength);
+                EnvDayOffset = FormatDayTime(env.DayOffset);
+                EnvSkyTrack = ((EnvironmentTrack)env.SkyTrack).ToString();
+            }
+            else
+            {
+                EnvIsCustom = false;
+                EnvDayLength = string.Empty;
+                EnvDayOffset = string.Empty;
+                EnvSkyTrack = string.Empty;
+            }
+            IsEnvironmentLoading = false;
+        });
+    }
+
+    private async Task FetchLegacyEnvironmentAsync()
+    {
+        var legacyEnv = await Client.Environment.GetLegacyEnvironmentAsync();
+        Dispatcher.UIThread.Post(() =>
+        {
+            EnvHasLegacyWindLight = legacyEnv != null;
+            IsEnvironmentLoading = false;
+        });
+    }
+
+    private static string FormatDayTime(int seconds) =>
+        seconds <= 0 ? "Default" :
+        seconds >= 3600 ? $"{seconds / 3600.0:0.##}h" :
+        $"{seconds / 60.0:0.##}m";
 }

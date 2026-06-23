@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {
@@ -47,9 +47,7 @@ namespace Radegast.Rendering
             float[] mat = new float[16];
 
             // Transpose the quaternion (don't ask me why)
-            q.X *= -1f;
-            q.Y *= -1f;
-            q.Z *= -1f;
+            q = new Quaternion(-q.X, -q.Y, -q.Z, q.W);
 
             float x2 = q.X + q.X;
             float y2 = q.Y + q.Y;
@@ -92,9 +90,7 @@ namespace Radegast.Rendering
             float[] mat = new float[16];
 
             // Transpose the quaternion (don't ask me why)
-            q.X *= -1f;
-            q.Y *= -1f;
-            q.Z *= -1f;
+            q = new Quaternion(-q.X, -q.Y, -q.Z, q.W);
 
             float x2 = q.X + q.X;
             float y2 = q.Y + q.Y;

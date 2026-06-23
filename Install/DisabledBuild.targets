@@ -1,0 +1,14 @@
+<Project>
+  <!--
+    VS 2026 workaround: provides no-op targets when WiX SDK is not imported.
+    Used to prevent WiX installer builds in non-applicable solution configurations.
+    The .sln maps non-building configs to Configuration=Disabled, and each .wixproj
+    conditionally skips the WiX SDK import when Configuration=Disabled.
+  -->
+  <Target Name="Build" />
+  <Target Name="Clean" />
+  <Target Name="Rebuild" />
+  <Target Name="Restore" />
+  <Target Name="GetTargetPath" />
+  <Target Name="CollectPackageReferences" />
+</Project>

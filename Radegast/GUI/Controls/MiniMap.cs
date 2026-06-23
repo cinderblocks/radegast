@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2016, openmetaverse.co
+ * Copyright (c) 2006-2016, LibreMetaverse.co
  * Copyright (c) 2021-2025, Sjofn LLC.
  * All rights reserved.
  *
@@ -8,7 +8,7 @@
  *
  * - Redistributions of source code must retain the above copyright notice, this
  *   list of conditions and the following disclaimer.
- * - Neither the name of the openmetaverse.co nor the names 
+ * - Neither the name of the LibreMetaverse.co nor the names 
  *   of its contributors may be used to endorse or promote products derived from
  *   this software without specific prior written permission.
  *
@@ -25,12 +25,13 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using CoreJ2K;
-using OpenMetaverse.Assets;
-using OpenMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -104,16 +105,16 @@ namespace Radegast.WinForms
 
         private void Grid_CoarseLocationUpdate(object sender, CoarseLocationUpdateEventArgs e)
         {
-            UpdateMiniMap(e.Simulator);
+            UpdateMiniMap(e.Simulator, e.Positions);
         }
 
-        private void UpdateMiniMap(Simulator sim)
+        private void UpdateMiniMap(Simulator sim, IReadOnlyDictionary<UUID, Vector3> positions)
         {
             if (!this.IsHandleCreated) { return; }
 
             if (this.InvokeRequired)
             {
-                this.BeginInvoke((MethodInvoker)delegate { UpdateMiniMap(sim); });
+                this.BeginInvoke((MethodInvoker)delegate { UpdateMiniMap(sim, positions); });
             }
             else
             {
@@ -126,12 +127,12 @@ namespace Radegast.WinForms
                     var bmp = (Bitmap)_MapLayer.Clone();
                     var g = Graphics.FromImage(bmp);
 
-                    if (!sim.AvatarPositions.TryGetValue(Client.Self.AgentID, out var agentCoarsePosition))
+                    if (!positions.TryGetValue(Client.Self.AgentID, out var agentCoarsePosition))
                     {
                         return;
                     }
 
-                    foreach (var coarse in _Client.Network.CurrentSim.AvatarPositions)
+                    foreach (var coarse in positions)
                     {
                         var x = (int)coarse.Value.X;
                         var y = 255 - (int)coarse.Value.Y;
@@ -196,22 +197,16 @@ namespace Radegast.WinForms
         private void FetchMapLayer()
         {
             if (!_Client.Network.Connected) { return; }
-
-            if (Client.Grid.GetGridRegion(Client.Network.CurrentSim.Name, GridLayerType.Objects, out var region))
+            _ = System.Threading.Tasks.Task.Run(async () =>
             {
+                var region = await Client.Grid.GetGridRegionAsync(Client.Network.CurrentSim.Name, GridLayerType.Objects);
+                if (region == null) return;
                 SetMapLayer(null);
-
-                _MapImageID = region.MapImageID;
-
-                Client.Assets.RequestImage(_MapImageID, ImageType.Baked,
-                    delegate (TextureRequestState state, AssetTexture asset)
-                    {
-                        if (state == TextureRequestState.Finished)
-                        {
-                            _MapLayer = J2kImage.FromBytes(asset.AssetData).As<SKBitmap>().ToBitmap();
-                        }
-                    });
-            }
+                _MapImageID = region.Value.MapImageID;
+                var asset = await Client.Assets.RequestImageAsync(_MapImageID, ImageType.Baked);
+                if (asset?.AssetData != null)
+                    _MapLayer = J2kImage.DecodeToImage<SKBitmap>(asset.AssetData).ToBitmap();
+            });
         }
 
     }

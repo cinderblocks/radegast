@@ -19,8 +19,8 @@
  */
 
 using LibreMetaverse.RLV;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -113,7 +113,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private void Restrictions_RestrictionUpdated(object sender, LibreMetaverse.RLV.EventArguments.RestrictionUpdatedEventArgs e)
+        private void Restrictions_RestrictionUpdated(object? sender, LibreMetaverse.RLV.EventArguments.RestrictionUpdatedEventArgs e)
         {
             if (EnabledDebugCommands)
             {
@@ -122,7 +122,7 @@ namespace Radegast.Core.RLV
         }
 
         #region Item Reporting
-        private async void Objects_KillObject(object sender, KillObjectEventArgs e)
+        private async void Objects_KillObject(object? sender, KillObjectEventArgs e)
         {
             if (!Enabled)
             {
@@ -154,7 +154,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private async void Objects_AttachmentUpdate(object sender, PrimEventArgs e)
+        private async void Objects_AttachmentUpdate(object? sender, PrimEventArgs e)
         {
             if (!Enabled)
             {
@@ -202,7 +202,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            var isInTrash = await instance.COF.IsObjectDescendentOf(realItem, sharedFolder.Data!.UUID, cancellationToken);
+            var isInTrash = await instance.COF.IsObjectDescendentOfAsync(realItem, sharedFolder.Data!.UUID, cancellationToken);
             if (isInTrash)
             {
                 return true;
@@ -247,7 +247,7 @@ namespace Radegast.Core.RLV
             {
                 if (item is InventoryWearable wearable)
                 {
-                    await instance.RLV.rlvService.ReportItemWorn(
+                    await instance.RLV.rlvService.ReportItemWornAsync(
                         wearable.ParentUUID.Guid,
                         isShared,
                         (RlvWearableType)wearable.WearableType,
@@ -258,7 +258,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await instance.RLV.rlvService.ReportItemAttached(
+                    await instance.RLV.rlvService.ReportItemAttachedAsync(
                         attachment.ParentUUID.Guid,
                         isShared,
                         attachmentPoint,
@@ -269,7 +269,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await instance.RLV.rlvService.ReportItemAttached(
+                    await instance.RLV.rlvService.ReportItemAttachedAsync(
                         obj.ParentUUID.Guid,
                         isShared,
                         attachmentPoint,
@@ -281,7 +281,7 @@ namespace Radegast.Core.RLV
             {
                 if (item is InventoryWearable wearable)
                 {
-                    await instance.RLV.rlvService.ReportItemUnworn(
+                    await instance.RLV.rlvService.ReportItemUnwornAsync(
                         wearable.ResolvedItemID.Guid,
                         wearable.ParentUUID.Guid,
                         isShared,
@@ -293,7 +293,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await instance.RLV.rlvService.ReportItemDetached(
+                    await instance.RLV.rlvService.ReportItemDetachedAsync(
                         attachment.ResolvedItemID.Guid,
                         attachedPrimId.Guid,
                         attachment.ParentUUID.Guid,
@@ -306,7 +306,7 @@ namespace Radegast.Core.RLV
                 {
                     var (attachedPrimId, attachmentPoint) = GetAttachedPrimId(item);
 
-                    await instance.RLV.rlvService.ReportItemDetached(
+                    await instance.RLV.rlvService.ReportItemDetachedAsync(
                         attachedObj.ResolvedItemID.Guid,
                         attachedPrimId.Guid,
                         attachedObj.ParentUUID.Guid,
@@ -338,7 +338,7 @@ namespace Radegast.Core.RLV
                     continue;
                 }
 
-                if (!UUID.TryParse(attachItemID.ToString(), out var attachmentId))
+                if (!UUID.TryParse(attachItemID.ToString()!, out var attachmentId))
                 {
                     continue;
                 }
@@ -381,7 +381,7 @@ namespace Radegast.Core.RLV
             }
         }
 
-        private async void CleanupTimer_Elapsed(object sender, System.Timers.ElapsedEventArgs e)
+        private async void CleanupTimer_Elapsed(object? sender, System.Timers.ElapsedEventArgs e)
         {
             if (!Enabled)
             {
@@ -391,7 +391,7 @@ namespace Radegast.Core.RLV
             var objects = new List<UUID>();
             var rlvTrackedPrimIds = rlvService.Restrictions.GetTrackedPrimIds();
 
-            var wornItems = (await instance.COF.GetCurrentOutfitLinks().ConfigureAwait(false))
+            var wornItems = (await instance.COF.GetCurrentOutfitLinksAsync().ConfigureAwait(false))
                 .ToDictionary(k => k.UUID.Guid, v => v);
 
             var deadPrimIds = new List<Guid>();
@@ -409,7 +409,7 @@ namespace Radegast.Core.RLV
 
             if (deadPrimIds.Count > 0)
             {
-                await rlvService.Restrictions.RemoveRestrictionsForObjects(deadPrimIds).ConfigureAwait(false);
+                await rlvService.Restrictions.RemoveRestrictionsForObjectsAsync(deadPrimIds).ConfigureAwait(false);
             }
         }
 
@@ -420,7 +420,7 @@ namespace Radegast.Core.RLV
                 return false;
             }
 
-            var result = await rlvService.ProcessMessage(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
+            var result = await rlvService.ProcessMessageAsync(e.Message, e.SourceID.Guid, e.FromName, cancellationToken);
             return result;
         }
     }

@@ -24,7 +24,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using BugSplatDotNetStandard;
 using Microsoft.Extensions.Logging;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Core;
 using Radegast.Veles.Core;
 
@@ -54,6 +54,37 @@ internal static class Program
             builder.AddProvider(new VelesLogProvider());
         });
         Logger.SetLoggerFactory(loggerFactory, "RadegastVeles");
+
+        // Tune the J2K decode concurrency gate based on GC-visible available RAM.
+        // Must run after the logger is configured so the diagnostic line is captured.
+        // Read user overrides from the persisted settings file if it already exists;
+        // this mirrors the path RadegastInstance.InitializeAppData() uses at runtime.
+        var settingsFile = Path.Combine(logDir, "settings.xml");
+        double reservedMb  = GridTextureHelper.DefaultDecodeReservedMb;
+        double perDecodeMb = GridTextureHelper.DefaultDecodePerDecodeMb;
+        try
+        {
+            if (File.Exists(settingsFile))
+            {
+                var settingsXml = File.ReadAllText(settingsFile);
+                if (LibreMetaverse.StructuredData.OSDParser.DeserializeLLSDXml(settingsXml)
+                        is LibreMetaverse.StructuredData.OSDMap map)
+                {
+                    if (map["decode_reserved_ram_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
+                        reservedMb  = map["decode_reserved_ram_mb"].AsInteger();
+                    if (map["decode_per_decode_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
+                        perDecodeMb = map["decode_per_decode_mb"].AsReal();
+                }
+            }
+        }
+        catch { /* corrupt or missing settings file; fall through to defaults */ }
+
+        GridTextureHelper.TuneDecodeGateForAvailableRam(reservedMb, perDecodeMb);
+        var availableMb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024.0);
+        Logger.Log(
+            $"J2K decode gate tuned: MaxConcurrentDecodes={GridTextureHelper.MaxConcurrentDecodes} " +
+            $"(available RAM: {availableMb:F0} MB, reserved: {reservedMb:F0} MB, per-decode: {perDecodeMb:F1} MB)",
+            LogLevel.Information);
 
         // Initialize BugSplat if a database has been configured at build time
         if (!string.IsNullOrEmpty(Generated.BugsplatDatabase))

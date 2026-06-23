@@ -29,7 +29,7 @@ using CoreJ2K;
 using CoreJ2K.Configuration;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Pfim;
 using Radegast.Veles.Core;
 using SkiaSharp;
@@ -61,6 +61,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         _instance = instance;
         instance.NetCom.ClientConnected += NetCom_ClientConnected;
         instance.NetCom.ClientDisconnected += NetCom_ClientDisconnected;
+        Client.Self.ViewerBenefitsUpdated += Self_ViewerBenefitsUpdated;
         RefreshUploadButtonText();
     }
 
@@ -158,8 +159,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         if (ext is ".jp2" or ".j2c")
         {
             var raw = File.ReadAllBytes(filePath);
-            skBitmap = J2kImage.FromBytes(raw).As<SKBitmap>();
-            if (skBitmap == null) throw new InvalidOperationException("Failed to decode JPEG2000 image.");
+            skBitmap = J2kImage.DecodeToImage<SKBitmap>(raw);
 
             skBitmap = ResizeToNearestPow2(skBitmap, out _);
             var encBuilder = new CompleteEncoderConfigurationBuilder();
@@ -307,6 +307,11 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
         StatusLog += message + Environment.NewLine;
     }
 
+    private void Self_ViewerBenefitsUpdated(object? sender, ViewerBenefitsEventArgs e)
+    {
+        Dispatcher.UIThread.Post(RefreshUploadButtonText);
+    }
+
     private void NetCom_ClientConnected(object? sender, EventArgs e)
     {
         Dispatcher.UIThread.Post(() =>
@@ -329,6 +334,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
     {
         _instance.NetCom.ClientConnected -= NetCom_ClientConnected;
         _instance.NetCom.ClientDisconnected -= NetCom_ClientDisconnected;
+        Client.Self.ViewerBenefitsUpdated -= Self_ViewerBenefitsUpdated;
 
         _uploadCts?.Cancel();
         _uploadCts?.Dispose();

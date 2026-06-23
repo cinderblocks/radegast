@@ -1,0 +1,99 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Radegast.Veles.ViewModels"
+        x:Class="Radegast.Veles.Views.AvatarPickerWindow"
+        x:DataType="vm:AvatarPickerViewModel"
+        Title="Pick Avatar"
+        Width="420" Height="500"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner"
+        Icon="/Assets/radegast.ico"
+        AutomationProperties.Name="Avatar picker window">
+
+    <DockPanel>
+
+        <!-- Bottom action bar -->
+        <Border DockPanel.Dock="Bottom" Padding="10,8" Background="#18FFFFFF">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                    <Button Content="Select" Command="{Binding SelectCommand}" MinWidth="80"
+                            AutomationProperties.Name="Select avatar" />
+                    <Button Content="Cancel" Command="{Binding CancelCommand}" MinWidth="80"
+                            IsCancel="True"
+                            AutomationProperties.Name="Cancel picker" />
+                </StackPanel>
+                <TextBlock Text="{Binding SelectedDisplay}" VerticalAlignment="Center"
+                           IsVisible="{Binding SelectedDisplay, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                           FontStyle="Italic" Opacity="0.8" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
+
+        <!-- Tabs: Friends / Nearby / Search -->
+        <TabControl>
+
+            <TabItem Header="Friends">
+                <ListBox x:Name="FriendsList"
+                         ItemsSource="{Binding FriendResults}"
+                         SelectedItem="{Binding SelectedFriend}"
+                         AutomationProperties.Name="Friends list">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AvatarPickerEntry">
+                            <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </TabItem>
+
+            <TabItem Header="Nearby">
+                <ListBox x:Name="NearbyList"
+                         ItemsSource="{Binding NearbyResults}"
+                         SelectedItem="{Binding SelectedNearby}"
+                         AutomationProperties.Name="Nearby avatars list">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AvatarPickerEntry">
+                            <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </TabItem>
+
+            <TabItem Header="Search">
+                <DockPanel Margin="8">
+                    <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="SearchBox"
+                                     Text="{Binding SearchText}"
+                                     PlaceholderText="Enter name (3+ characters)&#x2026;"
+                                     MinWidth="260"
+                                     AutomationProperties.Name="Avatar name search" />
+                            <Button Content="Search" Command="{Binding SearchCommand}"
+                                    AutomationProperties.Name="Search for avatar" />
+                        </StackPanel>
+                        <TextBlock Text="{Binding SearchStatus}"
+                                   IsVisible="{Binding SearchStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   Opacity="0.7" FontStyle="Italic" FontSize="12"
+                                   AutomationProperties.Name="Search status" />
+                    </StackPanel>
+                    <ListBox x:Name="SearchList"
+                             ItemsSource="{Binding SearchResults}"
+                             SelectedItem="{Binding SelectedSearch}"
+                             AutomationProperties.Name="Search results list">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AvatarPickerEntry">
+                                <TextBlock Text="{Binding DisplayName}" />
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </TabItem>
+
+        </TabControl>
+
+    </DockPanel>
+
+</Window>

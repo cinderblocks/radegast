@@ -1,0 +1,11 @@
+[*.cs]
+indent_style = space
+indent_size = 4
+
+[*.axaml]
+indent_style = space
+indent_size = 4
+
+[*.{vert,frag,glsl}]
+indent_style = space
+indent_size = 4

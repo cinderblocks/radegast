@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -23,8 +23,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Packets;
+using LibreMetaverse;
+using LibreMetaverse.Packets;
 
 namespace Radegast
 {
@@ -100,6 +100,7 @@ namespace Radegast
             client.Groups.GroupRoleDataReply += Groups_GroupRoleDataReply;
             client.Groups.GroupMemberEjected += Groups_GroupMemberEjected;
             client.Groups.GroupRoleMembersReply += Groups_GroupRoleMembersReply;
+            client.Groups.BannedAgents += Groups_BannedAgents;
             client.Self.IM += Self_IM;
             instance.Names.NameUpdated += Names_NameUpdated;
             RefreshControlsAvailability();
@@ -120,6 +121,7 @@ namespace Radegast
             client.Groups.GroupRoleDataReply -= Groups_GroupRoleDataReply;
             client.Groups.GroupRoleMembersReply -= Groups_GroupRoleMembersReply;
             client.Groups.GroupMemberEjected -= Groups_GroupMemberEjected;
+            client.Groups.BannedAgents -= Groups_BannedAgents;
             client.Self.IM -= Self_IM;
             if (instance?.Names != null)
             {
@@ -1170,16 +1172,16 @@ namespace Radegast
                             sw.Close();
                             break;
                         case 2:
-                            OpenMetaverse.StructuredData.OSDArray members = new OpenMetaverse.StructuredData.OSDArray(GroupMembers.Count);
+                            LibreMetaverse.StructuredData.OSDArray members = new LibreMetaverse.StructuredData.OSDArray(GroupMembers.Count);
                             foreach (var item in GroupMembers)
                             {
-                                OpenMetaverse.StructuredData.OSDMap member = new OpenMetaverse.StructuredData.OSDMap(2)
+                                LibreMetaverse.StructuredData.OSDMap member = new LibreMetaverse.StructuredData.OSDMap(2)
                                 {
                                     ["UUID"] = item.Base.ID, ["Name"] = item.Name
                                 };
                                 members.Add(member);
                             }
-                            System.IO.File.WriteAllText(saveMembers.FileName, OpenMetaverse.StructuredData.OSDParser.SerializeJsonString(members));
+                            System.IO.File.WriteAllText(saveMembers.FileName, LibreMetaverse.StructuredData.OSDParser.SerializeJsonString(members));
                             break;
                     }
 
@@ -1220,10 +1222,12 @@ namespace Radegast
         #region Group Bans
         public void RefreshBans()
         {
-            _ = client.Groups.RequestBannedAgents(group.ID, (xs, xe) =>
-            {
-                UpdateBannedAgents(xe);
-            });
+            _ = client.Groups.RequestBannedAgentsAsync(group.ID);
+        }
+
+        private void Groups_BannedAgents(object? sender, BannedAgentsEventArgs e)
+        {
+            UpdateBannedAgents(e);
         }
 
         private void UpdateBannedAgents(BannedAgentsEventArgs e)
@@ -1266,10 +1270,8 @@ namespace Radegast
 
             if (toUnban.Count > 0)
             {
-                _ = client.Groups.RequestBanAction(group.ID, GroupBanAction.Unban, toUnban.ToArray(), (xs, se) =>
-                {
-                    RefreshBans();
-                });
+                _ = client.Groups.RequestBanActionAsync(group.ID, GroupBanAction.Unban, toUnban.ToArray())
+                    .ContinueWith(_ => RefreshBans());
             }
         }
 
@@ -1292,10 +1294,8 @@ namespace Radegast
 
                 if (toBan.Count > 0)
                 {
-                    _ = client.Groups.RequestBanAction(group.ID, GroupBanAction.Ban, toBan.ToArray(), (xs, xe) =>
-                    {
-                        RefreshBans();
-                    });
+                    _ = client.Groups.RequestBanActionAsync(group.ID, GroupBanAction.Ban, toBan.ToArray())
+                        .ContinueWith(_ => RefreshBans());
                 }
             }
             catch { }

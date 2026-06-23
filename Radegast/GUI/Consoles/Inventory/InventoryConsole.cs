@@ -18,8 +18,8 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.WinForms;
 using System;
 using System.Collections.Concurrent;
@@ -872,7 +872,7 @@ namespace Radegast
                     }
                     catch (Exception ex) { Logger.Debug("Status update exception: " + ex.Message, Client); }
                     var tasks = folderKeys
-                        .Select(folderKey => Client.Inventory.RequestFolderContents(
+                        .Select(folderKey => Client.Inventory.RequestFolderContentsAsync(
                             folderKey,
                             Client.Self.AgentID,
                             true,
@@ -1269,7 +1269,9 @@ namespace Radegast
             if (cbNextOwnCopy.Checked) pm |= PermissionMask.Copy;
             if (cbNextOwnModify.Checked) pm |= PermissionMask.Modify;
             if (cbNextOwnTransfer.Checked) pm |= PermissionMask.Transfer;
-            item.Permissions.NextOwnerMask = pm;
+            var perms = item.Permissions;
+            perms.NextOwnerMask = pm;
+            item.Permissions = perms;
 
             Client.Inventory.RequestUpdateItem(item);
             Client.Inventory.RequestFetchInventory(item.UUID, item.OwnerID);
@@ -1318,7 +1320,7 @@ namespace Radegast
                     break;
 
                 case AssetType.Gesture:
-                    Client.Self.PlayGesture(item.AssetUUID);
+                    _ = Client.Self.PlayGestureAsync(item.AssetUUID);
                     break;
 
                 case AssetType.Notecard:
@@ -1338,11 +1340,11 @@ namespace Radegast
                     {
                         if (IsAttached(item))
                         {
-                            await instance.COF.Detach(item, cancellationtoken);
+                            await instance.COF.DetachAsync(item, cancellationtoken);
                         }
                         else
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationtoken);
+                            await instance.COF.AttachAsync(item, AttachmentPoint.Default, true, cancellationtoken);
                         }
                         UpdateLabelsFor(item);
                     }, UpdateWornLabels);
@@ -1356,12 +1358,12 @@ namespace Radegast
                         {
                             if (item.AssetType == AssetType.Clothing)
                             {
-                                await instance.COF.RemoveFromOutfit(item, cancellationtoken);
+                                await instance.COF.RemoveFromOutfitAsync(item, cancellationtoken);
                             }
                         }
                         else
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationtoken);
+                            await instance.COF.AddToOutfitAsync(item, true, cancellationtoken);
                         }
                     }, UpdateWornLabels);
                     break;
@@ -1377,7 +1379,7 @@ namespace Radegast
                     // recorded as fetched
                 }
 
-                await Client.Inventory.RequestFolderContents(folderID, ownerID,
+                await Client.Inventory.RequestFolderContentsAsync(folderID, ownerID,
                     true, true, InventorySortOrder.ByDate, token).ConfigureAwait(false);
             }
         }
@@ -1529,13 +1531,13 @@ namespace Radegast
                 {
                     if (IsAttached(resolvedItem))
                     {
-                        canDetach = await instance.COF.CanDetachItem(resolvedItem).ConfigureAwait(false);
+                        canDetach = await instance.COF.CanDetachItemAsync(resolvedItem).ConfigureAwait(false);
                     }
 
                     if (!IsAttached(resolvedItem) &&
                         (resolvedItem.InventoryType == InventoryType.Object || resolvedItem.InventoryType == InventoryType.Attachment))
                     {
-                        canAttach = await instance.COF.CanAttachItem(resolvedItem).ConfigureAwait(false);
+                        canAttach = await instance.COF.CanAttachItemAsync(resolvedItem).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -2036,13 +2038,23 @@ namespace Radegast
                         break;
 
                     case "new_notecard":
-                        Client.Inventory.RequestCreateItem(folder.UUID, "New Note", "Radegast note: " + DateTime.Now.ToString(CultureInfo.InvariantCulture),
-                            AssetType.Notecard, UUID.Zero, InventoryType.Notecard, PermissionMask.All, NotecardCreated);
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            var item = await Client.Inventory.CreateItemAsync(folder.UUID, "New Note",
+                                "Radegast note: " + DateTime.Now.ToString(CultureInfo.InvariantCulture),
+                                AssetType.Notecard, UUID.Zero, InventoryType.Notecard, PermissionMask.All);
+                            NotecardCreated(item != null, item ?? new InventoryNotecard(UUID.Zero));
+                        });
                         break;
 
                     case "new_script":
-                        Client.Inventory.RequestCreateItem(folder.UUID, "New script", "Radegast script: " + DateTime.Now.ToString(CultureInfo.InvariantCulture),
-                            AssetType.LSLText, UUID.Zero, InventoryType.LSL, PermissionMask.All, ScriptCreated);
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            var item = await Client.Inventory.CreateItemAsync(folder.UUID, "New script",
+                                "Radegast script: " + DateTime.Now.ToString(CultureInfo.InvariantCulture),
+                                AssetType.LSLText, UUID.Zero, InventoryType.LSL, PermissionMask.All);
+                            ScriptCreated(item != null, item ?? new InventoryLSL(UUID.Zero));
+                        });
                         break;
 
                     case "cut_folder":
@@ -2116,7 +2128,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.ReplaceOutfit(folder.UUID, cancellationToken);
+                            await instance.COF.ReplaceOutfitAsync(folder.UUID, cancellationToken);
                         }, UpdateWornLabels);
                         break;
                     case "outfit_add":
@@ -2124,7 +2136,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(addToOutfit, false, cancellationToken);
+                            await instance.COF.AddToOutfitAsync(addToOutfit, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
                     case "outfit_take_off":
@@ -2132,7 +2144,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(removeFromOutfit, cancellationToken);
+                            await instance.COF.RemoveFromOutfitAsync(removeFromOutfit, cancellationToken);
                         }, UpdateWornLabels);
                         break;
                 }
@@ -2219,7 +2231,7 @@ namespace Radegast
                     case "detach":
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Detach(item, cancellationToken);
+                            await instance.COF.DetachAsync(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
@@ -2228,14 +2240,14 @@ namespace Radegast
                     case "wear_attachment":
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, true, cancellationToken);
+                            await instance.COF.AttachAsync(item, AttachmentPoint.Default, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
                     case "wear_attachment_add":
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, AttachmentPoint.Default, false, cancellationToken);
+                            await instance.COF.AttachAsync(item, AttachmentPoint.Default, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2244,7 +2256,7 @@ namespace Radegast
 
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.Attach(item, pt, true, cancellationToken);
+                            await instance.COF.AttachAsync(item, pt, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2261,7 +2273,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.RemoveFromOutfit(item, cancellationToken);
+                            await instance.COF.RemoveFromOutfitAsync(item, cancellationToken);
 
                             UpdateLabelsFor(item);
                         }, UpdateWornLabels);
@@ -2271,7 +2283,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, true, cancellationToken);
+                            await instance.COF.AddToOutfitAsync(item, true, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2279,7 +2291,7 @@ namespace Radegast
                         appearanceWasBusy = Client.Appearance.ManagerBusy;
                         RunBackgroundTask(async (cancellationToken) =>
                         {
-                            await instance.COF.AddToOutfit(item, false, cancellationToken);
+                            await instance.COF.AddToOutfitAsync(item, false, cancellationToken);
                         }, UpdateWornLabels);
                         break;
 
@@ -2301,7 +2313,7 @@ namespace Radegast
                         break;
 
                     case "gesture_play":
-                        Client.Self.PlayGesture(item.AssetUUID);
+                        _ = Client.Self.PlayGestureAsync(item.AssetUUID);
                         break;
 
                     case "gesture_activate":
@@ -2427,10 +2439,10 @@ namespace Radegast
                     }
 
                 case ClipboardOperation.Copy when instance.InventoryClipboard.Item is InventoryItem:
-                    Client.Inventory.RequestCopyItem(instance.InventoryClipboard.Item.UUID, dest.UUID, instance.InventoryClipboard.Item.Name, instance.InventoryClipboard.Item.OwnerID, target =>
+                    _ = System.Threading.Tasks.Task.Run(async () =>
                     {
-                    }
-                    );
+                        await Client.Inventory.RequestCopyItemAsync(instance.InventoryClipboard.Item.UUID, dest.UUID, instance.InventoryClipboard.Item.Name, instance.InventoryClipboard.Item.OwnerID);
+                    });
                     break;
                 case ClipboardOperation.Copy:
                     {
@@ -2445,7 +2457,7 @@ namespace Radegast
 
                                     foreach (InventoryBase oldItem in Inventory.GetContents((InventoryFolder)instance.InventoryClipboard.Item))
                                     {
-                                        await Client.Inventory.RequestCopyItemAsync(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID, target => { });
+                                        await Client.Inventory.RequestCopyItemAsync(oldItem.UUID, newFolderID, oldItem.Name, oldItem.OwnerID);
                                     }
                                 }
                                 catch (Exception ex)
@@ -2464,14 +2476,15 @@ namespace Radegast
         {
             if (instance.InventoryClipboard == null || dest == null) return;
 
-            Client.Inventory.CreateLink(dest.UUID, instance.InventoryClipboard.Item,
-                (success, item) =>
+            var clipItem = instance.InventoryClipboard.Item;
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var created = await Client.Inventory.CreateLinkAsync(dest.UUID, clipItem.UUID, clipItem.Name, string.Empty, (clipItem as InventoryItem)?.InventoryType ?? InventoryType.Unknown, UUID.Random());
+                if (created != null)
                 {
-                    if (success)
-                    {
-                        Client.Inventory.RequestFetchInventory(item.UUID, item.OwnerID);
-                    }
-                });
+                    Client.Inventory.RequestFetchInventory(created.UUID, created.OwnerID);
+                }
+            });
         }
 
         #endregion
@@ -2489,7 +2502,7 @@ namespace Radegast
             });
         }
 
-        private void UpdateLabelsFor(OpenMetaverse.AppearanceManager.WearableData wearable, bool suspendLayout = true)
+        private void UpdateLabelsFor(LibreMetaverse.AppearanceManager.WearableData wearable, bool suspendLayout = true)
         {
             UUID itemUUID = wearable.AssetType == AssetType.Link ? wearable.AssetID : wearable.ItemID;
             UpdateLabelsFor(itemUUID, suspendLayout);

@@ -35,7 +35,7 @@ using System.Drawing;
 using System.Linq;
 using System.Windows.Forms;
 using OpenTK.Graphics.OpenGL;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 
 namespace Radegast.Rendering
@@ -419,7 +419,14 @@ namespace Radegast.Rendering
 
                 Logger.Trace($"Requesting new animation asset {anim.AnimationID}");
 
-                Client.Assets.RequestAsset(anim.AnimationID, AssetType.Animation, false, SourceType.Asset, tid, AnimReceivedCallback);
+                var capturedTid = tid;
+                var capturedAnimID = anim.AnimationID;
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    var asset = await Client.Assets.RequestAssetAsync(capturedAnimID, AssetType.Animation, false, SourceType.Asset);
+                    var transfer = new AssetDownload { Success = asset != null, ID = capturedTid, AssetID = capturedAnimID };
+                    AnimReceivedCallback(transfer, asset);
+                });
             }
 
             av.glavatar.skel.flushanimationsfinal();
@@ -482,8 +489,8 @@ namespace Radegast.Rendering
                     // Prim rotation and position
                     //Vector3 pos = av.avatar.Position;
 
-                    var avataroffset = av.glavatar.skel.getOffset("mPelvis");
-                    avataroffset.X += 1.0f;
+                    var avataroffset0 = av.glavatar.skel.getOffset("mPelvis");
+                    var avataroffset = new Vector3(avataroffset0.X + 1.0f, avataroffset0.Y, avataroffset0.Z);
 
                     GL.MultMatrix(Math3D.CreateSRTMatrix(Vector3.One, av.RenderRotation, av.RenderPosition - avataroffset * av.RenderRotation));
 
@@ -493,7 +500,8 @@ namespace Radegast.Rendering
 
                     foreach (var b in av.glavatar.skel.mBones.Values)
                     {
-                        var newpos = b.getTotalOffset();
+                        var newposVec = b.getTotalOffset();
+                        float nx = newposVec.X, ny = newposVec.Y, nz = newposVec.Z;
 
                         if (b.parent != null)
                         {
@@ -502,59 +510,53 @@ namespace Radegast.Rendering
                         }
                         else
                         {
-                            GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                            GL.Vertex3(nx, ny, nz);
                         }
 
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        GL.Vertex3(nx, ny, nz);
 
                         //Mark the joints
+                        nx += 0.01f; ny += 0.01f; nz += 0.01f;
+                        GL.Vertex3(nx, ny, nz);
 
+                        nx -= 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.X += 0.01f;
-                        newpos.Y += 0.01f;
-                        newpos.Z += 0.01f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        ny -= 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.X -= 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        nx += 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.Y -= 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        ny += 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.X += 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        nz -= 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.Y += 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        ny -= 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.Z -= 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        nx -= 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.Y -= 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        ny += 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.X -= 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        nx += 0.02f;
+                        GL.Vertex3(nx, ny, nz);
+                        GL.Vertex3(nx, ny, nz);
 
-                        newpos.Y += 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-
-                        newpos.X += 0.02f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
-
-                        newpos.Y -= 0.01f;
-                        newpos.Z += 0.01f;
-                        newpos.X -= 0.01f;
-                        GL.Vertex3(newpos.X, newpos.Y, newpos.Z);
+                        ny -= 0.01f; nz += 0.01f; nx -= 0.01f;
+                        GL.Vertex3(nx, ny, nz);
 
 
 

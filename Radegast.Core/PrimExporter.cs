@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -22,10 +22,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using LibreMetaverse;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
-using OpenMetaverse.Assets;
+using LibreMetaverse.StructuredData;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -62,7 +62,7 @@ namespace Radegast
 
 		public void ExportToFile(string filename, uint localID)
 		{
-			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename),Path.GetFileNameWithoutExtension(filename));
+			ExportDirectory = Path.Combine(Path.GetDirectoryName(filename)!, Path.GetFileNameWithoutExtension(filename));
 			Directory.CreateDirectory(ExportDirectory);
 			
 			// Search all connected simulators for the prim
@@ -163,7 +163,7 @@ namespace Radegast
 					if (prim.Textures!.DefaultTexture!.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
 						!Textures.Contains(prim.Textures.DefaultTexture.TextureID))
 					{
-						texture = new UUID(prim.Textures.DefaultTexture.TextureID);
+						texture = prim.Textures.DefaultTexture.TextureID;
 						Textures.Add(texture);
 					}
 						
@@ -173,14 +173,14 @@ namespace Radegast
 							tex.TextureID != Primitive.TextureEntry.WHITE_TEXTURE &&
 							!Textures.Contains(tex.TextureID))
 						{
-							texture = new UUID(tex.TextureID);
+							texture = tex.TextureID;
 							Textures.Add(texture);
 						}
 					}
 						
 					if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero && !Textures.Contains(prim.Sculpt.SculptTexture))
 					{
-						texture = new UUID(prim.Sculpt.SculptTexture);
+						texture = prim.Sculpt.SculptTexture;
 						Textures.Add(texture);
 					}
 				}
@@ -191,7 +191,13 @@ namespace Radegast
 
 				foreach (var request in textureRequests)
 				{
-					Client.Assets.RequestImage(request.ImageID, request.Type, Assets_OnImageReceived!);
+					var req = request;
+					_ = Task.Run(async () =>
+					{
+						var texture = await Client.Assets.RequestImageAsync(req.ImageID, req.Type);
+						if (texture != null)
+							Assets_OnImageReceived(TextureRequestState.Finished, texture);
+					});
 				}
 			}
 		}
@@ -278,7 +284,7 @@ namespace Radegast
             return PrimsWaiting.Count == 0;
         }
 
-        private void Objects_OnObjectPropertiesFamily(object sender, ObjectPropertiesFamilyEventArgs e)
+        private void Objects_OnObjectPropertiesFamily(object? sender, ObjectPropertiesFamilyEventArgs e)
 		{
 			Properties = new Primitive.ObjectProperties();
 			Properties.SetFamilyProperties(e.Properties);
@@ -292,7 +298,7 @@ namespace Radegast
 			}
 		}
 
-        private void Objects_OnObjectProperties(object sender, ObjectPropertiesEventArgs e)
+        private void Objects_OnObjectProperties(object? sender, ObjectPropertiesEventArgs e)
 		{
 			if (e.Properties.ObjectID == Properties.ObjectID)
 			{

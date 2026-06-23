@@ -15,15 +15,17 @@
 
         <!-- Bottom: Mute by name input -->
         <Border DockPanel.Dock="Bottom" Padding="8,4" BorderThickness="0,1,0,0">
-            <Grid ColumnDefinitions="*,4,Auto,4,Auto" RowDefinitions="Auto">
-                <TextBox Grid.Column="0" Text="{Binding MuteByNameInput, Mode=TwoWay}"
-                         Watermark="Name to mute..."
-                         AutomationProperties.Name="Enter name to mute" />
-                <Button Grid.Column="2" Content="Mute by Name" Command="{Binding MuteByNameCommand}"
-                        AutomationProperties.Name="Add mute by name" />
-                <Button Grid.Column="4" Content="Refresh" Command="{Binding RefreshCommand}"
-                        AutomationProperties.Name="Refresh mute list" />
-            </Grid>
+            <Grid ColumnDefinitions="*,4,Auto,4,Auto,4,Auto" RowDefinitions="Auto">
+                    <TextBox Grid.Column="0" Text="{Binding MuteByNameInput, Mode=TwoWay}"
+                             PlaceholderText="Name to mute..."
+                             AutomationProperties.Name="Enter name to mute" />
+                    <Button Grid.Column="2" Content="Mute by Name" Command="{Binding MuteByNameCommand}"
+                            AutomationProperties.Name="Add mute by name" />
+                    <Button Grid.Column="4" Content="Mute Resident…" Command="{Binding MuteResidentCommand}"
+                            AutomationProperties.Name="Pick a resident to mute" />
+                    <Button Grid.Column="6" Content="Refresh" Command="{Binding RefreshCommand}"
+                            AutomationProperties.Name="Refresh mute list" />
+                </Grid>
         </Border>
 
         <!-- Unselect / Unmute bar -->

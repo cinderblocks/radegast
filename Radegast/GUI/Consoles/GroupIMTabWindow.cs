@@ -21,9 +21,10 @@
 using System;
 using System.Drawing;
 using System.Collections.Generic;
+using System.Linq;
 using System.Windows.Forms;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 
 namespace Radegast
@@ -409,6 +410,16 @@ namespace Radegast
 
         private void rtbIMText_LinkClicked(object sender, LinkClickedEventArgs e)
         {
+            var link = e.LinkText;
+            var sepPos = link.IndexOf(RRichTextBox.LinkSeparator);
+            if (sepPos > 0) link = link.Substring(sepPos + 1);
+
+            if (link == IMTextManager.LoadMoreIMUri)
+            {
+                TextManager.LoadMoreHistory();
+                return;
+            }
+
             instance.MainForm.ProcessLink(e.LinkText);
         }
 
@@ -457,7 +468,7 @@ namespace Radegast
             {
                 ctxMute.Enabled = ctxPay.Enabled = ctxStartIM.Enabled = true;
 
-                bool isMuted = client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == av) != null;
+                bool isMuted = client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == av);
                 ctxMute.Text = isMuted ? "Unmute" : "Mute";
             }
         }

@@ -19,6 +19,7 @@
 
 using System;
 using Avalonia.Controls;
+using Avalonia.Input.Platform;
 
 namespace Radegast.Veles.Views;
 
@@ -48,7 +49,7 @@ public partial class CrashWindow : Window
         if (btnCopy != null)
             btnCopy.Click += async (_, _) =>
             {
-                var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+                var clipboard = GetTopLevel(this)?.Clipboard;
                 if (clipboard != null)
                     await clipboard.SetTextAsync(_text);
             };

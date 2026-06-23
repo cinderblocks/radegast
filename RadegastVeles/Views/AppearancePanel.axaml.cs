@@ -17,24 +17,14 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-using System;
-using OpenTK;
-using AvaloniaGlInterface = Avalonia.OpenGL.GlInterface;
+using Avalonia.Controls;
 
-namespace Radegast.Veles.Rendering;
+namespace Radegast.Veles.Views;
 
-/// <summary>
-/// Bridges Avalonia's <see cref="Avalonia.OpenGL.GlInterface"/> to OpenTK's
-/// <see cref="IBindingsContext"/> so that <c>OpenTK.Graphics.OpenGL4.GL</c>
-/// can resolve function pointers from Avalonia's managed GL context.
-/// Call <c>GL.LoadBindings(new AvaloniaGlBindings(gl))</c> inside
-/// <c>OnOpenGlInit</c>.
-/// </summary>
-internal sealed class AvaloniaGlBindings : IBindingsContext
+public partial class AppearancePanel : UserControl
 {
-    private readonly AvaloniaGlInterface _gl;
-
-    public AvaloniaGlBindings(AvaloniaGlInterface gl) => _gl = gl;
-
-    public IntPtr GetProcAddress(string procName) => _gl.GetProcAddress(procName);
+    public AppearancePanel()
+    {
+        InitializeComponent();
+    }
 }

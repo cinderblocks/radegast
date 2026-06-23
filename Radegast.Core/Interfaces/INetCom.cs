@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2025, Sjofn, LLC
  * All rights reserved.
@@ -18,7 +18,7 @@
  */
 
 using System;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -31,6 +31,7 @@ namespace Radegast
         LoginOptions LoginOptions { get; set; }
 
         void Login();
+        void CancelLogin();
         void Logout();
         void ChatOut(string chat, ChatType type, int channel);
         void SendInstantMessage(string message, UUID target, UUID session);
@@ -52,6 +53,6 @@ namespace Radegast
         event EventHandler<AlertMessageEventArgs> AlertMessageReceived;
         event EventHandler<BalanceEventArgs> MoneyBalanceUpdated;
 
-        void Instance_ClientChanged(object sender, ClientChangedEventArgs e);
+        void Instance_ClientChanged(object? sender, ClientChangedEventArgs e);
     }
 }

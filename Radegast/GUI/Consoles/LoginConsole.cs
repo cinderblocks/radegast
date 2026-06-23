@@ -23,8 +23,8 @@ using System.Drawing;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.GUI;
 
 namespace Radegast
@@ -533,6 +533,18 @@ namespace Radegast
                     btnLogin.Text = "Login";
                     break;
             }
+        }
+
+        private void btnCancelLogin_Click(object sender, EventArgs e)
+        {
+            NetCom.CancelLogin();
+            pnlLoginPrompt.Visible = true;
+            pnlLoggingIn.Visible = false;
+            proLogin.Visible = false;
+            btnLogin.Text = "Login";
+            btnLogin.Enabled = true;
+            lblLoginStatus.Text = "Login cancelled.";
+            lblLoginStatus.ForeColor = Color.FromKnownColor(KnownColor.ControlText);
         }
 
         #region IRadegastTabControl Members

@@ -24,7 +24,7 @@ using System.Threading;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -173,7 +173,7 @@ public partial class ObjectViewModel : ObservableObject, IDisposable
     {
         if (_instance.COF != null)
         {
-            _ = _instance.COF.AddToOutfit(new List<InventoryItem> { _item }, true, CancellationToken.None);
+            _ = _instance.COF.AddToOutfitAsync(new List<InventoryItem> { _item }, true, CancellationToken.None);
             StatusText = "Attaching…";
         }
         else
@@ -187,7 +187,7 @@ public partial class ObjectViewModel : ObservableObject, IDisposable
     {
         if (_instance.COF != null)
         {
-            _ = _instance.COF.RemoveFromOutfit(_item, CancellationToken.None);
+            _ = _instance.COF.RemoveFromOutfitAsync(_item, CancellationToken.None);
             StatusText = "Detaching…";
         }
         else

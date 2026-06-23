@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -19,7 +19,7 @@
  */
 
 using LibreMetaverse.RLV;
-using OpenMetaverse;
+using LibreMetaverse;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -102,7 +102,7 @@ namespace Radegast.Core.RLV
             return true;
         }
 
-        public async Task ReportItemChange(List<InventoryItem>? addedItems, List<InventoryItem>? removedItems, CancellationToken cancellationToken = default)
+        public async Task ReportItemChangeAsync(List<InventoryItem>? addedItems, List<InventoryItem>? removedItems, CancellationToken cancellationToken = default)
         {
             if (!instance.RLV.Enabled)
             {

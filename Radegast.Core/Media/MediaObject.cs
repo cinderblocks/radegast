@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -23,7 +23,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Runtime.InteropServices;
 using FMOD;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Media
 {
@@ -42,7 +42,7 @@ namespace Radegast.Media
 
         /// Queue of sound commands
         ///
-        protected static Queue<SoundDelegate> queue = null!;
+        protected static readonly Queue<SoundDelegate> queue = new Queue<SoundDelegate>();
         protected static MediaManager manager = null!;
         protected static Dictionary<UUID,BufferSound> allBuffers = null!;
 

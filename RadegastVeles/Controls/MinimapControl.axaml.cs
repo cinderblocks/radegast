@@ -25,9 +25,10 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Shapes;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Controls;
@@ -77,6 +78,8 @@ public partial class MinimapControl : UserControl
     public event Action<float, float>? WalkToRequested;
     /// <summary>Fired when the user right-clicks and chooses Teleport To. x/y are region coordinates (0–256).</summary>
     public event Action<float, float>? TeleportRequested;
+    /// <summary>Fired when the user chooses "About Land…" from the context menu. x/y are region coordinates (0–256).</summary>
+    public event Action<float, float>? AboutLandRequested;
 
     private Canvas? _canvas;
     private Border? _hoverTooltip;
@@ -157,6 +160,11 @@ public partial class MinimapControl : UserControl
             tpItem.Click += (_, _) => TeleportRequested?.Invoke(rx, ry);
             menu.Items.Add(walkItem);
             menu.Items.Add(tpItem);
+
+            menu.Items.Add(new Separator());
+            var landItem = new MenuItem { Header = "About Land…" };
+            landItem.Click += (_, _) => AboutLandRequested?.Invoke(rx, ry);
+            menu.Items.Add(landItem);
 
             var sim = SimName;
             if (!string.IsNullOrEmpty(sim))
@@ -324,6 +332,48 @@ public partial class MinimapControl : UserControl
             Canvas.SetLeft(dot, cx - dotSize / 2);
             Canvas.SetTop(dot,  cy - dotSize / 2);
             _canvas.Children.Add(dot);
+
+            // Heading arc: 1/5-circle arc on the outer rim pointing in the facing direction
+            if (entry.Heading is float yaw)
+            {
+                double arcR = dotSize / 2.0 + 2.5;
+                const double sweepHalf = Math.PI / 5.0; // 36° → 72° total sweep
+                // Canvas angle: negate yaw because canvas Y increases downward (north = -Y)
+                double ca = -(double)yaw;
+                double sa = ca - sweepHalf;
+                double ea = ca + sweepHalf;
+
+                double sx = cx + arcR * Math.Cos(sa);
+                double sy = cy + arcR * Math.Sin(sa);
+                double ex = cx + arcR * Math.Cos(ea);
+                double ey = cy + arcR * Math.Sin(ea);
+
+                var figure = new PathFigure
+                {
+                    StartPoint = new Point(sx, sy),
+                    IsClosed = false,
+                    IsFilled = false
+                };
+                figure.Segments.Add(new ArcSegment
+                {
+                    Point = new Point(ex, ey),
+                    Size = new Size(arcR, arcR),
+                    SweepDirection = SweepDirection.Clockwise,
+                    IsLargeArc = false
+                });
+                var pathGeo = new PathGeometry();
+                pathGeo.Figures.Add(figure);
+                var arc = new Path
+                {
+                    Data = pathGeo,
+                    Stroke = new SolidColorBrush(Color.FromArgb(220, 255, 255, 255)),
+                    StrokeThickness = 2.0,
+                    StrokeLineCap = PenLineCap.Round
+                };
+                Canvas.SetLeft(arc, 0);
+                Canvas.SetTop(arc, 0);
+                _canvas.Children.Add(arc);
+            }
 
             // Hit area for hover (slightly larger than the visual dot)
             double hitPad = 4;

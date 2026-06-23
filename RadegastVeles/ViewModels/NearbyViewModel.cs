@@ -20,28 +20,30 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
-using OpenMetaverse;
+using LibreMetaverse.Voice.WebRTC;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
 
-public partial class NearbyViewModel : ObservableObject, IDisposable, IChatContext
+public partial class NearbyViewModel : TabViewModelBase, IChatContext
 {
-    private readonly RadegastInstanceAvalonia _instance;
-    private INetCom NetCom => _instance.NetCom;
-    private GridClient Client => _instance.Client;
     private RadegastMovement Movement => _instance.Movement;
 
     private readonly Regex _chatRegex = new(@"^/(\d+)\s*(.*)", RegexOptions.Compiled);
     private readonly List<string> _chatHistory = [];
     private int _chatPointer;
     private DispatcherTimer? _healthTimer;
+    private DispatcherTimer? _typingStopTimer;
+    private bool _isSendingTyping;
 
     [ObservableProperty]
     private string _chatInput = string.Empty;
@@ -57,6 +59,10 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
 
     [ObservableProperty]
     private bool _isRunning;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SitOnGroundLabel))]
+    private bool _isSittingOnGround;
 
     [ObservableProperty]
     private string _locationText = string.Empty;
@@ -80,6 +86,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HealthText))]
+    [NotifyPropertyChangedFor(nameof(HealthAccessibleText))]
     private float _health = 100f;
 
     [ObservableProperty] private bool _isDamageEnabled;
@@ -90,6 +97,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     [ObservableProperty] private bool _voiceAllowed    = true;
 
     public string HealthText => $"♥ {Health:0}%";
+    public string HealthAccessibleText => $"Avatar health {Health:0} percent";
 
     public bool HasRegionName => !string.IsNullOrEmpty(RegionName);
     public bool HasParcelName => !string.IsNullOrEmpty(ParcelName);
@@ -104,22 +112,106 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     public ObservableCollection<ChatLine> ChatLines { get; } = [];
     public ObservableCollection<NearbyAvatar> NearbyAvatars { get; } = [];
     public ObservableCollection<MinimapEntry> MinimapEntries { get; } = [];
-    public RadegastInstanceAvalonia Instance => _instance;
+
+    // Voice participant tracking (updated from VoiceViewModel events)
+    private readonly HashSet<UUID> _voiceParticipantIds = [];
+    private readonly HashSet<UUID> _speakingIds = [];
+    // Typing indicator tracking (updated from AvatarManager.AvatarAnimation)
+    private readonly HashSet<UUID> _typingIds = [];
+    // Away / Busy status tracking (updated from AvatarManager.AvatarAnimation)
+    private readonly HashSet<UUID> _awayIds = [];
+    private readonly HashSet<UUID> _busyIds = [];
+    // Flying / Sitting status tracking
+    private readonly HashSet<UUID> _flyingIds = [];
+    private readonly HashSet<UUID> _sittingIds = [];
 
     /// <summary>Voice ViewModel — set by MainViewModel after both are constructed.</summary>
-    public VoiceViewModel? Voice { get; internal set; }
+    private VoiceViewModel? _voiceViewModel;
+    public VoiceViewModel? Voice
+    {
+        get => _voiceViewModel;
+        internal set
+        {
+            if (_voiceViewModel != null)
+            {
+                _voiceViewModel.PeerJoined        -= OnVoicePeerJoined;
+                _voiceViewModel.PeerLeft          -= OnVoicePeerLeft;
+                _voiceViewModel.PeerAudioUpdated  -= OnVoicePeerAudioUpdated;
+                _voiceViewModel.PropertyChanged   -= OnVoicePropertyChanged;
+            }
+            _voiceViewModel = value;
+            if (_voiceViewModel != null)
+            {
+                _voiceViewModel.PeerJoined        += OnVoicePeerJoined;
+                _voiceViewModel.PeerLeft          += OnVoicePeerLeft;
+                _voiceViewModel.PeerAudioUpdated  += OnVoicePeerAudioUpdated;
+                _voiceViewModel.PropertyChanged   += OnVoicePropertyChanged;
+            }
+        }
+    }
+
+    private MediaViewModel? _media;
+    /// <summary>Media ViewModel — set by MainViewModel after both are constructed.</summary>
+    public MediaViewModel? Media
+    {
+        get => _media;
+        internal set
+        {
+            if (_media != null) _media.PropertyChanged -= OnMediaPropertyChanged;
+            _media = value;
+            if (_media != null) _media.PropertyChanged += OnMediaPropertyChanged;
+            IsMediaAvailable = _media != null;
+            UpdateNowPlaying();
+        }
+    }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(UnreadTabLabel))]
-    private bool _hasUnread;
+    private string _nowPlayingText = string.Empty;
 
-    /// <summary>True when the Chat tab is the currently selected tab.</summary>
-    public bool IsActive { get; set; }
+    [ObservableProperty]
+    private bool _isStreamPlaying;
 
-    /// <summary>Screenreader-friendly tab label that announces unread state.</summary>
-    public string UnreadTabLabel => HasUnread ? "Chat, new messages" : "Chat";
+    private bool _isMediaAvailable;
+    public bool IsMediaAvailable
+    {
+        get => _isMediaAvailable;
+        private set => SetProperty(ref _isMediaAvailable, value);
+    }
 
-    public void ClearUnread() => HasUnread = false;
+    private void OnMediaPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MediaViewModel.SongTitle) or nameof(MediaViewModel.StationName))
+            UpdateNowPlaying();
+        else if (e.PropertyName == nameof(MediaViewModel.IsPlaying))
+        {
+            IsStreamPlaying = _media?.IsPlaying ?? false;
+            if (!IsStreamPlaying) NowPlayingText = string.Empty;
+        }
+    }
+
+    private void UpdateNowPlaying()
+    {
+        if (_media == null) { NowPlayingText = string.Empty; IsStreamPlaying = false; return; }
+        IsStreamPlaying = _media.IsPlaying;
+        var station = _media.StationName;
+        var song = _media.SongTitle;
+        if (!string.IsNullOrEmpty(song) && !string.IsNullOrEmpty(station))
+            NowPlayingText = $"{station} - {song}";
+        else if (!string.IsNullOrEmpty(song))
+            NowPlayingText = song;
+        else if (!string.IsNullOrEmpty(station))
+            NowPlayingText = station;
+        else
+            NowPlayingText = string.Empty;
+    }
+
+    [RelayCommand]
+    private void PlayStream() => _media?.PlayStreamCommand.Execute(null);
+
+    [RelayCommand]
+    private void StopStream() => _media?.StopStreamCommand.Execute(null);
+
+    public override string UnreadTabLabel => HasUnread ? "Chat, new messages" : "Chat";
 
     [ObservableProperty]
     private Bitmap? _minimapTile;
@@ -132,10 +224,8 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
 
     public string[] ChatTypes { get; } = ["Whisper", "Normal", "Shout"];
 
-    public NearbyViewModel(RadegastInstanceAvalonia instance)
+    public NearbyViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
-        _instance = instance;
-
         // Subscribe to events
         NetCom.ChatReceived += NetCom_ChatReceived;
         NetCom.ChatSent += NetCom_ChatSent;
@@ -145,7 +235,6 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         NetCom.ClientDisconnected += NetCom_ClientDisconnected;
 
         RegisterClientEvents(Client);
-        _instance.ClientChanged += Instance_ClientChanged;
         _instance.NotificationInChat += Instance_NotificationInChat;
 
         // Initial status
@@ -155,11 +244,18 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         RequestCurrentParcel();
 
         _healthTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
-        _healthTimer.Tick += (_, _) => Health = Client.Self.Health;
+        _healthTimer.Tick += (_, _) =>
+        {
+            Health = Client.Self.Health;
+            IsSittingOnGround = Client.Self.Movement.SitOnGround;
+        };
+
+        ShowMotdIfAvailable();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
+        if (_media != null) _media.PropertyChanged -= OnMediaPropertyChanged;
         NetCom.ChatReceived -= NetCom_ChatReceived;
         NetCom.ChatSent -= NetCom_ChatSent;
         NetCom.AlertMessageReceived -= NetCom_AlertMessageReceived;
@@ -167,39 +263,95 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         NetCom.ClientLoggedOut -= NetCom_ClientLoggedOut;
         NetCom.ClientDisconnected -= NetCom_ClientDisconnected;
 
-        UnregisterClientEvents(Client);
-        _instance.ClientChanged -= Instance_ClientChanged;
         _instance.NotificationInChat -= Instance_NotificationInChat;
 
         _healthTimer?.Stop();
         _healthTimer = null;
+
+        _typingStopTimer?.Stop();
+        _typingStopTimer = null;
+
+        base.Dispose();
     }
 
-    private void RegisterClientEvents(GridClient client)
+    // Typing-indicator debounce: send StartTyping on first keystroke,
+    // StopTyping after 5 s of inactivity (or immediately on send/clear).
+    partial void OnChatInputChanged(string value)
+    {
+        if (!string.IsNullOrEmpty(value))
+        {
+            if (!_isSendingTyping)
+            {
+                _isSendingTyping = true;
+                NotifyTypingStarted();
+            }
+            if (_typingStopTimer == null)
+            {
+                _typingStopTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+                _typingStopTimer.Tick += (_, _) => StopTypingIndicator();
+            }
+            _typingStopTimer.Stop();
+            _typingStopTimer.Start();
+        }
+        else
+        {
+            StopTypingIndicator();
+        }
+    }
+
+    internal void StopTypingIndicator()
+    {
+        _typingStopTimer?.Stop();
+        if (_isSendingTyping)
+        {
+            _isSendingTyping = false;
+            NotifyTypingStopped();
+        }
+    }
+
+    protected override void RegisterClientEvents(GridClient client)
     {
         client.Grid.CoarseLocationUpdate += Grid_CoarseLocationUpdate;
         client.Self.TeleportProgress += Self_TeleportProgress;
         client.Network.SimDisconnected += Network_SimDisconnected;
         client.Network.SimChanged += Network_SimChanged;
         client.Parcels.ParcelProperties += Parcels_ParcelProperties;
+        client.Avatars.AvatarAnimation += Avatars_AvatarAnimation;
     }
 
-    private void UnregisterClientEvents(GridClient client)
+    protected override void UnregisterClientEvents(GridClient client)
     {
         client.Grid.CoarseLocationUpdate -= Grid_CoarseLocationUpdate;
         client.Self.TeleportProgress -= Self_TeleportProgress;
         client.Network.SimDisconnected -= Network_SimDisconnected;
         client.Network.SimChanged -= Network_SimChanged;
         client.Parcels.ParcelProperties -= Parcels_ParcelProperties;
-    }
-
-    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
-    {
-        UnregisterClientEvents(e.OldClient);
-        RegisterClientEvents(e.Client);
+        client.Avatars.AvatarAnimation -= Avatars_AvatarAnimation;
     }
 
     #region Chat Processing
+
+    /// <summary>
+    /// Called by the view when the user starts typing in the chat input box.
+    /// Sends ChatType.StartTyping so nearby avatars see the typing animation.
+    /// </summary>
+    public void NotifyTypingStarted()
+    {
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
+        Client.Self.Chat(string.Empty, 0, ChatType.StartTyping);
+    }
+
+    /// <summary>
+    /// Called by the view when the user stops typing (idle timeout or message sent).
+    /// Sends ChatType.StopTyping to clear the typing animation for nearby avatars.
+    /// </summary>
+    public void NotifyTypingStopped()
+    {
+        if (_instance.GlobalSettings["send_typing_notifications"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            && !_instance.GlobalSettings["send_typing_notifications"].AsBoolean()) return;
+        Client.Self.Chat(string.Empty, 0, ChatType.StopTyping);
+    }
 
     [RelayCommand]
     private void SendChat()
@@ -213,6 +365,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
             _ => ChatType.Normal
         };
 
+        NotifyTypingStopped();
         ProcessChatInput(ChatInput, chatType);
         ChatInput = string.Empty;
     }
@@ -221,6 +374,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     private void SendWhisper()
     {
         if (string.IsNullOrEmpty(ChatInput)) return;
+        NotifyTypingStopped();
         ProcessChatInput(ChatInput, ChatType.Whisper);
         ChatInput = string.Empty;
     }
@@ -229,6 +383,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     private void SendShout()
     {
         if (string.IsNullOrEmpty(ChatInput)) return;
+        NotifyTypingStopped();
         ProcessChatInput(ChatInput, ChatType.Shout);
         ChatInput = string.Empty;
     }
@@ -264,7 +419,16 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
             processedMessage = processedMessage?.Trim();
             if (!string.IsNullOrEmpty(processedMessage))
             {
+                // Apply @sendchat / @sendchannel restriction
+                if (_instance.RLV?.Enabled == true &&
+                    !_instance.RLV.Permissions.CanChat(ch, processedMessage))
+                {
+                    _instance.ShowNotificationInChat("[RLV] Sending chat is currently restricted.");
+                    return;
+                }
                 NetCom.ChatOut(processedMessage, type, ch);
+                if (ch == 0)
+                    Voice?.VoiceSynth.SpeakOutbound(processedMessage);
             }
         }
     }
@@ -322,6 +486,11 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     [RelayCommand]
     private void ToggleFly()
     {
+        if (_instance.RLV?.Enabled == true && !_instance.RLV.Permissions.CanFly())
+        {
+            _instance.ShowNotificationInChat("[RLV] Flying is restricted.");
+            return;
+        }
         IsFlying = Movement.ToggleFlight();
     }
 
@@ -329,6 +498,23 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     private void ToggleRun()
     {
         IsRunning = Movement.ToggleAlwaysRun();
+    }
+
+    public string SitOnGroundLabel => IsSittingOnGround ? "Stand Up" : "Sit";
+
+    [RelayCommand]
+    private void ToggleSitOnGround()
+    {
+        if (IsSittingOnGround)
+        {
+            Client.Self.Stand();
+            IsSittingOnGround = false;
+        }
+        else
+        {
+            Client.Self.SitOnGround();
+            IsSittingOnGround = true;
+        }
     }
 
     public void SetMovingForward(bool value) => Movement.MovingForward = value;
@@ -345,6 +531,21 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     private void NetCom_ChatReceived(object? sender, ChatEventArgs e)
     {
         if (e.Message == null) return;
+
+        // Process RLV commands from scripted objects — suppress them from the chat display
+        if (e.SourceType == ChatSourceType.Object && e.Message.StartsWith("@"))
+        {
+            _ = _instance.RLV?.ProcessCMD(e);
+            return;
+        }
+
+        // Apply @recvchat restriction — suppress incoming agent chat when restricted
+        if (e.SourceType == ChatSourceType.Agent &&
+            _instance.RLV?.Enabled == true &&
+            !_instance.RLV.Permissions.CanReceiveChat(e.Message, e.SourceID.Guid))
+        {
+            return;
+        }
 
         // Determine style
         var lineType = e.SourceType switch
@@ -370,7 +571,15 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
             lineType = ChatLineType.Emote;
         }
 
-        AddChatLine(new ChatLine(DateTime.Now, e.FromName, text, lineType, e.SourceID));
+        // Apply @shownames restriction — anonymize non-self agent names when restricted
+        var fromName = e.SourceType == ChatSourceType.Agent &&
+            e.SourceID != Client.Self.AgentID &&
+            _instance.RLV?.Enabled == true &&
+            !_instance.RLV.Permissions.CanShowNames(e.SourceID.Guid)
+            ? "Nearby Resident"
+            : e.FromName;
+
+        AddChatLine(new ChatLine(DateTime.Now, fromName, text, lineType, e.SourceID));
     }
 
     private void NetCom_ChatSent(object? sender, ChatSentEventArgs e)
@@ -381,29 +590,30 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
 
     private void NetCom_AlertMessageReceived(object? sender, AlertMessageEventArgs e)
     {
-        Dispatcher.UIThread.Post(() =>
-            VelesNotificationService.Show("Alert", e.Message, Avalonia.Controls.Notifications.NotificationType.Warning));
+        VelesNotificationService.Show("Alert", e.Message, Avalonia.Controls.Notifications.NotificationType.Warning);
     }
 
     private void NetCom_ClientLoginStatus(object? sender, LoginProgressEventArgs e)
     {
         if (e.Status != LoginStatus.Success) return;
+        ShowMotdIfAvailable();
+    }
+
+    private void ShowMotdIfAvailable()
+    {
         var motd = Client.Network.LoginResponseData?.Message;
-        if (string.IsNullOrWhiteSpace(motd)) return;
-        // Show MOTD in nearby chat as a system message (not logged to disk)
-        AddChatLine(new ChatLine(DateTime.Now, "Welcome", $": {motd}", ChatLineType.System));
+        if (!string.IsNullOrWhiteSpace(motd))
+            AddChatLine(new ChatLine(DateTime.Now, "Welcome", $": {motd}", ChatLineType.System));
     }
 
     private void NetCom_ClientLoggedOut(object? sender, EventArgs e)
     {
-        Dispatcher.UIThread.Post(() =>
-            VelesNotificationService.Show("Session", "Logged out.", Avalonia.Controls.Notifications.NotificationType.Information));
+        VelesNotificationService.Show("Session", "Logged out.", Avalonia.Controls.Notifications.NotificationType.Information);
     }
 
     private void NetCom_ClientDisconnected(object? sender, DisconnectedEventArgs e)
     {
-        Dispatcher.UIThread.Post(() =>
-            VelesNotificationService.Show("Disconnected", e.Message, Avalonia.Controls.Notifications.NotificationType.Error));
+        VelesNotificationService.Show("Disconnected", e.Message, Avalonia.Controls.Notifications.NotificationType.Error);
     }
 
     private void Instance_NotificationInChat(object? sender, NotificationChatEventArgs e)
@@ -415,6 +625,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     {
         Dispatcher.UIThread.Post(() =>
         {
+            MaybeInsertDateSeparator(ChatLines, line);
             ChatLines.Add(line);
             LogChatLine(line);
             if (!IsActive && line.Type is ChatLineType.Normal or ChatLineType.Object or ChatLineType.Emote)
@@ -422,9 +633,24 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         });
     }
 
+    private static void MaybeInsertDateSeparator(ObservableCollection<ChatLine> lines, ChatLine incoming)
+    {
+        if (incoming.Type is ChatLineType.System or ChatLineType.DateSeparator) return;
+        DateTime? lastDate = null;
+        for (int i = lines.Count - 1; i >= 0; i--)
+        {
+            var l = lines[i];
+            if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+            lastDate = l.Timestamp.Date;
+            break;
+        }
+        if (lastDate.HasValue && incoming.Timestamp.Date != lastDate.Value)
+            lines.Add(ChatLine.CreateDateSeparator(incoming.Timestamp.Date));
+    }
+
     private void LogChatLine(ChatLine line)
     {
-        if (line.Type is ChatLineType.System or ChatLineType.Alert or ChatLineType.History) return;
+        if (line.Type is ChatLineType.System or ChatLineType.History) return;
         if (!_instance.ChatLog.IsEnabled) return;
         var avatarName = Client.Self.Name;
         if (string.IsNullOrWhiteSpace(avatarName)) return;
@@ -439,6 +665,9 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     public  bool IsLoadingHistory { get; private set; }
 
     public bool HistoryExhausted => _historyExhausted;
+
+    /// <summary>True when at least one history chunk has been loaded and more chunks remain above.</summary>
+    public bool HasPrecedingHistory => _historyOffset > 0 && !_historyExhausted;
 
     public void LoadInitialHistory()
     {
@@ -455,12 +684,24 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         Dispatcher.UIThread.Post(() =>
         {
             IsLoadingHistory = true;
-            for (int i = chunk.Count - 1; i >= 0; i--)
-                ChatLines.Insert(0, chunk[i]);
+
+            DateTime? firstLiveDate = null;
+            foreach (var l in ChatLines)
+            {
+                if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+                firstLiveDate = l.Timestamp.Date;
+                break;
+            }
+
+            var processed = ChatLine.WithDateSeparators(chunk, firstLiveDate);
+
+            for (int i = processed.Count - 1; i >= 0; i--)
+                ChatLines.Insert(0, processed[i]);
             if (_historyOffset > 0)
-                ChatLines.Insert(chunk.Count, new ChatLine(DateTime.MinValue, string.Empty,
+                ChatLines.Insert(processed.Count, new ChatLine(DateTime.MinValue, string.Empty,
                     "─── Previous messages ───", ChatLineType.System));
             IsLoadingHistory = false;
+            OnPropertyChanged(nameof(HasPrecedingHistory));
         });
     }
 
@@ -476,11 +717,22 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
 
         Dispatcher.UIThread.Post(() =>
         {
-            for (int i = chunk.Count - 1; i >= 0; i--)
-                ChatLines.Insert(0, chunk[i]);
+            DateTime? oldestCurrentDate = null;
+            foreach (var l in ChatLines)
+            {
+                if (l.Type is ChatLineType.DateSeparator or ChatLineType.System) continue;
+                oldestCurrentDate = l.Timestamp.Date;
+                break;
+            }
+
+            var processed = ChatLine.WithDateSeparators(chunk, oldestCurrentDate);
+
+            for (int i = processed.Count - 1; i >= 0; i--)
+                ChatLines.Insert(0, processed[i]);
             _historyOffset += chunk.Count;
             if (chunk.Count == 0) _historyExhausted = true;
             IsLoadingHistory = false;
+            OnPropertyChanged(nameof(HasPrecedingHistory));
         });
     }
 
@@ -504,6 +756,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
                 LocationText = string.Empty;
                 ParcelName = string.Empty;
                 MinimapTile = null;
+                IsSittingOnGround = false;
                 UpdateLocationText();
                 FetchMinimapTile();
                 RequestCurrentParcel();
@@ -556,14 +809,16 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         var sim = e.Simulator;
         var agentId = Client.Self.AgentID;
 
-        var agentPosition = sim.AvatarPositions.TryGetValue(agentId, out var myPos)
+        var positions = e.Positions;
+
+        var agentPosition = positions.TryGetValue(agentId, out var myPos)
             ? PositionHelper.ToGlobalPosition(sim.Handle, myPos)
             : Client.Self.GlobalPosition;
         if (agentPosition.Z < 0.1)
             agentPosition.Z = Client.Self.GlobalPosition.Z;
 
-        var globalPositions = new Dictionary<UUID, Vector3d>(sim.AvatarPositions.Count);
-        foreach (var kv in sim.AvatarPositions)
+        var globalPositions = new Dictionary<UUID, Vector3d>(positions.Count);
+        foreach (var kv in positions)
             globalPositions[kv.Key] = PositionHelper.ToGlobalPosition(sim.Handle, kv.Value);
 
         var avatarsById = new Dictionary<UUID, Avatar>(sim.ObjectsAvatars.Count);
@@ -573,8 +828,8 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
                 avatarsById[kv.Value.ID] = kv.Value;
         }
 
-        var precomputedNames = new Dictionary<UUID, string>(sim.AvatarPositions.Count);
-        foreach (var id in sim.AvatarPositions.Keys)
+        var precomputedNames = new Dictionary<UUID, string>(positions.Count);
+        foreach (var id in positions.Keys)
             precomputedNames[id] = id == agentId
                 ? _instance.Names.Get(id, Client.Self.Name)
                 : _instance.Names.Get(id);
@@ -599,14 +854,21 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         bool changed = removed.Count > 0;
 
         // Add new avatars
-        foreach (var avatarPos in e.Simulator.AvatarPositions)
+        foreach (var avatarPos in e.Positions)
         {
             existing.Add(avatarPos.Key);
             if (_agentSimHandle.ContainsKey(avatarPos.Key)) continue;
 
             precomputedNames.TryGetValue(avatarPos.Key, out var name);
             var isSelf = avatarPos.Key == Client.Self.AgentID;
-            NearbyAvatars.Add(new NearbyAvatar(avatarPos.Key, name ?? string.Empty, 0, isSelf));
+            NearbyAvatars.Add(new NearbyAvatar(avatarPos.Key, name ?? string.Empty, 0, isSelf,
+                IsInVoice: _voiceParticipantIds.Contains(avatarPos.Key),
+                IsSpeaking: _speakingIds.Contains(avatarPos.Key),
+                IsTyping: _typingIds.Contains(avatarPos.Key),
+                IsAway: _awayIds.Contains(avatarPos.Key),
+                IsBusy: _busyIds.Contains(avatarPos.Key),
+                IsFlying: _flyingIds.Contains(avatarPos.Key),
+                IsSitting: _sittingIds.Contains(avatarPos.Key)));
             _agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
             changed = true;
         }
@@ -621,7 +883,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
             if (entry.IsSelf) continue;
 
             if (!existing.Contains(entry.Id) ||
-                !e.Simulator.AvatarPositions.TryGetValue(entry.Id, out var pos))
+                !e.Positions.TryGetValue(entry.Id, out var pos))
             {
                 removed.Add(entry.Id);
                 changed = true;
@@ -662,7 +924,21 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
             if (newName == entry.Name && d == entry.Distance && distText == entry.DistanceText)
                 continue;
 
-            NearbyAvatars[i] = new NearbyAvatar(entry.Id, newName, d, entry.IsSelf, distText);
+            // Track sitting via ParentID — more reliable than any specific sit animation.
+            if (foundAvi != null)
+            {
+                if (foundAvi.ParentID != 0) _sittingIds.Add(entry.Id);
+                else _sittingIds.Remove(entry.Id);
+            }
+
+            NearbyAvatars[i] = new NearbyAvatar(entry.Id, newName, d, entry.IsSelf, distText,
+                IsInVoice: _voiceParticipantIds.Contains(entry.Id),
+                IsSpeaking: _speakingIds.Contains(entry.Id),
+                IsTyping: _typingIds.Contains(entry.Id),
+                IsAway: _awayIds.Contains(entry.Id),
+                IsBusy: _busyIds.Contains(entry.Id),
+                IsFlying: _flyingIds.Contains(entry.Id),
+                IsSitting: _sittingIds.Contains(entry.Id));
             changed = true;
         }
 
@@ -709,14 +985,34 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     private void RebuildMinimap()
     {
         MinimapEntries.Clear();
+        var sim = Client.Network.CurrentSim;
+        if (sim == null) return;
+
+        var rotationById = new Dictionary<UUID, Quaternion>(sim.ObjectsAvatars.Count);
+        foreach (var kv in sim.ObjectsAvatars)
+        {
+            if (kv.Value?.ID != UUID.Zero)
+                rotationById[kv.Value!.ID] = kv.Value.Rotation;
+        }
+
+        var coarsePositions = _instance.State.GetCoarsePositions(sim);
         foreach (var av in NearbyAvatars)
         {
-            if (Client.Network.CurrentSim == null ||
-                !Client.Network.CurrentSim.AvatarPositions.TryGetValue(av.Id, out var pos))
-                continue;
-            MinimapEntries.Add(new MinimapEntry(av.Id, av.Name, pos.X, pos.Y, pos.Z, av.IsSelf));
+            if (!coarsePositions.TryGetValue(av.Id, out var pos)) continue;
+
+            float? heading = null;
+            if (av.IsSelf)
+                heading = ExtractHeadingYaw(Client.Self.SimRotation);
+            else if (rotationById.TryGetValue(av.Id, out var rot))
+                heading = ExtractHeadingYaw(rot);
+
+            MinimapEntries.Add(new MinimapEntry(av.Id, av.Name, pos.X, pos.Y, pos.Z, av.IsSelf, heading));
         }
     }
+
+    // Avatar faces +X at rest; this extracts the yaw (CCW from east, in radians).
+    private static float ExtractHeadingYaw(Quaternion q) =>
+        MathF.Atan2(2f * (q.W * q.Z + q.X * q.Y), 1f - 2f * (q.Y * q.Y + q.Z * q.Z));
 
     public void WalkToPoint(float x, float y)
     {
@@ -729,7 +1025,7 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
     {
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
-        Client.Self.Teleport(sim.Handle, new Vector3(x, y, Client.Self.SimPosition.Z));
+        _ = Client.Self.TeleportAsync(sim.Handle, new Vector3(x, y, Client.Self.SimPosition.Z));
     }
 
     private void UpdateLocationText()
@@ -749,6 +1045,13 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
                 _                => "General"
             };
             var locationText = $"{regionName} {coords}";
+
+            // Apply @showloc restriction — hide location when restricted
+            if (_instance.RLV?.Enabled == true && !_instance.RLV.Permissions.CanShowLoc())
+            {
+                locationText = "(Hidden)";
+                regionName = "(Hidden)";
+            }
 
             // Only assign observable properties that actually changed to avoid
             // spurious binding updates on every CoarseLocationUpdate tick.
@@ -808,6 +1111,116 @@ public partial class NearbyViewModel : ObservableObject, IDisposable, IChatConte
         }
     }
 
+    #region Voice integration
+
+    private void OnVoicePeerJoined(UUID peerId)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _voiceParticipantIds.Add(peerId);
+            RefreshNearbyAvatarVoiceState(peerId);
+        });
+    }
+
+    private void OnVoicePeerLeft(UUID peerId)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            _voiceParticipantIds.Remove(peerId);
+            _speakingIds.Remove(peerId);
+            RefreshNearbyAvatarVoiceState(peerId);
+        });
+    }
+
+    private void OnVoicePeerAudioUpdated(UUID peerId, LibreMetaverse.Voice.WebRTC.VoiceSession.PeerAudioState state)
+    {
+        bool speaking = state.VoiceActive ?? false;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (speaking) _speakingIds.Add(peerId);
+            else _speakingIds.Remove(peerId);
+            RefreshNearbyAvatarVoiceState(peerId);
+        });
+    }
+
+    private void OnVoicePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // When voice disconnects, clear all voice indicators
+        if (e.PropertyName != nameof(VoiceViewModel.IsConnected)) return;
+        if (_voiceViewModel?.IsConnected == false)
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                _voiceParticipantIds.Clear();
+                _speakingIds.Clear();
+                for (int i = 0; i < NearbyAvatars.Count; i++)
+                {
+                    var av = NearbyAvatars[i];
+                    if (av.IsInVoice || av.IsSpeaking)
+                        NearbyAvatars[i] = av with { IsInVoice = false, IsSpeaking = false };
+                }
+            });
+        }
+    }
+
+    private void RefreshNearbyAvatarVoiceState(UUID peerId)
+    {
+        for (int i = 0; i < NearbyAvatars.Count; i++)
+        {
+            var av = NearbyAvatars[i];
+            if (av.Id != peerId) continue;
+            bool inVoice = _voiceParticipantIds.Contains(peerId);
+            bool speaking = _speakingIds.Contains(peerId);
+            if (av.IsInVoice != inVoice || av.IsSpeaking != speaking)
+                NearbyAvatars[i] = av with { IsInVoice = inVoice, IsSpeaking = speaking };
+            break;
+        }
+    }
+
+    private void Avatars_AvatarAnimation(object? sender, AvatarAnimationEventArgs e)
+    {
+        // Ignore self — we don't show status indicators for the local avatar.
+        if (e.AvatarID == Client.Self.AgentID) return;
+
+        bool isTyping  = e.Animations.Any(a => a.AnimationID == Animations.TYPE);
+        bool isAway    = e.Animations.Any(a => a.AnimationID == Animations.AWAY);
+        bool isBusy    = e.Animations.Any(a => a.AnimationID == Animations.BUSY);
+        bool isFlying  = e.Animations.Any(a =>
+            a.AnimationID == Animations.FLY      ||
+            a.AnimationID == Animations.FLYSLOW  ||
+            a.AnimationID == Animations.HOVER    ||
+            a.AnimationID == Animations.HOVER_UP ||
+            a.AnimationID == Animations.HOVER_DOWN);
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (isTyping) _typingIds.Add(e.AvatarID);  else _typingIds.Remove(e.AvatarID);
+            if (isAway)   _awayIds.Add(e.AvatarID);    else _awayIds.Remove(e.AvatarID);
+            if (isBusy)   _busyIds.Add(e.AvatarID);    else _busyIds.Remove(e.AvatarID);
+            if (isFlying) _flyingIds.Add(e.AvatarID);  else _flyingIds.Remove(e.AvatarID);
+            RefreshNearbyAvatarStatusState(e.AvatarID);
+        });
+    }
+
+    private void RefreshNearbyAvatarStatusState(UUID avatarId)
+    {
+        for (int i = 0; i < NearbyAvatars.Count; i++)
+        {
+            var av = NearbyAvatars[i];
+            if (av.Id != avatarId) continue;
+            bool typing  = _typingIds.Contains(avatarId);
+            bool away    = _awayIds.Contains(avatarId);
+            bool busy    = _busyIds.Contains(avatarId);
+            bool flying  = _flyingIds.Contains(avatarId);
+            bool sitting = _sittingIds.Contains(avatarId);
+            if (av.IsTyping != typing || av.IsAway != away || av.IsBusy != busy ||
+                av.IsFlying != flying || av.IsSitting != sitting)
+                NearbyAvatars[i] = av with { IsTyping = typing, IsAway = away, IsBusy = busy, IsFlying = flying, IsSitting = sitting };
+            break;
+        }
+    }
+
+    #endregion
+
     private void ResetParcelFlags()
     {
         _healthTimer?.Stop();
@@ -864,20 +1277,89 @@ public record ChatLine(DateTime Timestamp, string From, string Text, ChatLineTyp
         ? $"{From} {Text}"
         : $"{From}{Text}";
 
-    public string AutomationText => $"{FormattedTime} {DisplayText}";
+    public string AutomationText => IsDateSeparator
+        ? DateLabel
+        : Timestamp == DateTime.MinValue
+            ? Text
+            : $"{FormattedTime} {DisplayText}";
+
+    /// <summary>Full date + time timestamp for copy operations.</summary>
+    public string CopyText => IsDateSeparator || Timestamp == DateTime.MinValue
+        ? string.Empty
+        : $"[{Timestamp:yyyy-MM-dd HH:mm}] {DisplayText}";
 
     public bool HasAgentLink => Type is ChatLineType.Normal or ChatLineType.Emote or ChatLineType.Self
                                 && AgentID != UUID.Zero;
 
+    /// <summary>True for non-emote lines with a clickable agent name.</summary>
+    public bool HasNonEmoteAgentLink => HasAgentLink && !IsEmote;
+
     public bool HasObjectLink => Type == ChatLineType.Object && AgentID != UUID.Zero;
 
-    /// <summary>True when neither an agent nor an object clickable link is available.</summary>
-    public bool ShowStaticName => !HasAgentLink && !HasObjectLink;
+    /// <summary>True when neither an agent nor an object clickable link is available, and not an emote (whose name is inline).</summary>
+    public bool ShowStaticName => !HasAgentLink && !HasObjectLink && !IsEmote;
 
     /// <summary>True for lines loaded from the log file (rendered with reduced opacity).</summary>
     public bool IsHistory => Type == ChatLineType.History;
 
     public double HistoryOpacity => IsHistory ? 0.6 : 1.0;
+
+    /// <summary>True when this line is a /me emote action.</summary>
+    public bool IsEmote => Type == ChatLineType.Emote;
+
+    /// <summary>False for emotes — emotes show the name inline as part of DisplayText, not as a separate prefix.</summary>
+    public bool ShowNamePrefix => !IsEmote;
+
+    /// <summary>Emote text wrapped in asterisks for display: *Name does something*</summary>
+    public string EmoteDisplayText => $"* {From} {Text} *";
+
+    public bool IsDateSeparator => Type == ChatLineType.DateSeparator;
+
+    /// <summary>Human-readable date label shown in the day-change separator.</summary>
+    public string DateLabel
+    {
+        get
+        {
+            var today = DateTime.Today;
+            if (Timestamp.Date == today) return "Today";
+            if (Timestamp.Date == today.AddDays(-1)) return "Yesterday";
+            return Timestamp.ToString("dddd, MMMM d, yyyy");
+        }
+    }
+
+    public static ChatLine CreateDateSeparator(DateTime date) =>
+        new(date, string.Empty, string.Empty, ChatLineType.DateSeparator);
+
+    /// <summary>
+    /// Returns a new list that is <paramref name="chunk"/> with date-change separator items
+    /// injected between messages on different calendar days.
+    /// <paramref name="dateAfterChunk"/> is the date of the first item that will follow this
+    /// chunk in the display list; pass it so a boundary separator is added when needed.
+    /// </summary>
+    public static List<ChatLine> WithDateSeparators(IReadOnlyList<ChatLine> chunk, DateTime? dateAfterChunk = null)
+    {
+        var result = new List<ChatLine>(chunk.Count + 4);
+        DateTime? prevDate = null;
+
+        foreach (var line in chunk)
+        {
+            if (line.Type is ChatLineType.System or ChatLineType.DateSeparator)
+            {
+                result.Add(line);
+                continue;
+            }
+            var date = line.Timestamp.Date;
+            if (prevDate.HasValue && date != prevDate.Value)
+                result.Add(CreateDateSeparator(date));
+            prevDate = date;
+            result.Add(line);
+        }
+
+        if (prevDate.HasValue && dateAfterChunk.HasValue && prevDate.Value != dateAfterChunk.Value)
+            result.Add(CreateDateSeparator(dateAfterChunk.Value));
+
+        return result;
+    }
 }
 
 public enum ChatLineType
@@ -888,14 +1370,50 @@ public enum ChatLineType
     Emote,
     System,
     Alert,
-    History   // Lines loaded from the log file (shown with dimmed style)
+    History,      // Lines loaded from the log file (shown with dimmed style)
+    DateSeparator // Visual day-change divider — not a real chat message
 }
 
-public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, string DistanceText = "")
+public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, string DistanceText = "", bool IsInVoice = false, bool IsSpeaking = false, bool IsTyping = false, bool IsAway = false, bool IsBusy = false, bool IsFlying = false, bool IsSitting = false)
 {
     public string DisplayText => IsSelf ? Name : $"{Name} ({DistanceText}m)";
+
+    public string AccessibleText
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder(DisplayText);
+            if (IsSpeaking)       sb.Append(", speaking");
+            else if (IsInVoice)   sb.Append(", in voice channel");
+            if (IsTyping)         sb.Append(", typing");
+            if (IsAway)           sb.Append(", away");
+            if (IsBusy)           sb.Append(", busy");
+            if (IsFlying)         sb.Append(", flying");
+            if (IsSitting)        sb.Append(", sitting");
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>Mic icon shown when the avatar is in the same voice channel.</summary>
+    public string VoiceIcon => IsSpeaking ? "🔊" : IsInVoice ? "🎙" : string.Empty;
+    public bool ShowVoiceIcon => IsInVoice || IsSpeaking;
+    /// <summary>Typing indicator icon.</summary>
+    public string TypingIcon => IsTyping ? "✍" : string.Empty;
+    public bool ShowTypingIcon => IsTyping;
+    /// <summary>Away indicator icon.</summary>
+    public string AwayIcon => IsAway ? "💤" : string.Empty;
+    public bool ShowAwayIcon => IsAway;
+    /// <summary>Busy (Do Not Disturb) indicator icon.</summary>
+    public string BusyIcon => IsBusy ? "⛔" : string.Empty;
+    public bool ShowBusyIcon => IsBusy;
+    /// <summary>Flying indicator icon.</summary>
+    public string FlyingIcon => IsFlying ? "✈" : string.Empty;
+    public bool ShowFlyingIcon => IsFlying;
+    /// <summary>Sitting indicator icon.</summary>
+    public string SittingIcon => IsSitting ? "🪑" : string.Empty;
+    public bool ShowSittingIcon => IsSitting;
 }
 
-public record MinimapEntry(UUID Id, string Name, float X, float Y, float Z, bool IsSelf);
+public record MinimapEntry(UUID Id, string Name, float X, float Y, float Z, bool IsSelf, float? Heading = null);
 
 #endregion

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,7 +18,7 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast;
 using System.Windows.Forms;
 
@@ -195,20 +195,20 @@ namespace RadegastSpeech.Conversation
         {
             switch (item.WearableType)
             {
-                case OpenMetaverse.WearableType.Shirt: return "shirt";
-                case OpenMetaverse.WearableType.Pants: return "pants";
-                case OpenMetaverse.WearableType.Skirt: return "skirt";
-                case OpenMetaverse.WearableType.Shoes: return "shoes";
-                case OpenMetaverse.WearableType.Jacket: return "jacket";
-                case OpenMetaverse.WearableType.Socks: return "socks";
-                case OpenMetaverse.WearableType.Undershirt: return "undershirt";
-                case OpenMetaverse.WearableType.Underpants: return "underpants";
-                case OpenMetaverse.WearableType.Skin: return "skin";
-                case OpenMetaverse.WearableType.Eyes: return "eyes";
-                case OpenMetaverse.WearableType.Gloves: return "gloves";
-                case OpenMetaverse.WearableType.Hair: return "hair";
-                case OpenMetaverse.WearableType.Shape: return "body shape";
-                //case OpenMetaverse.WearableType.Universal: 
+                case LibreMetaverse.WearableType.Shirt: return "shirt";
+                case LibreMetaverse.WearableType.Pants: return "pants";
+                case LibreMetaverse.WearableType.Skirt: return "skirt";
+                case LibreMetaverse.WearableType.Shoes: return "shoes";
+                case LibreMetaverse.WearableType.Jacket: return "jacket";
+                case LibreMetaverse.WearableType.Socks: return "socks";
+                case LibreMetaverse.WearableType.Undershirt: return "undershirt";
+                case LibreMetaverse.WearableType.Underpants: return "underpants";
+                case LibreMetaverse.WearableType.Skin: return "skin";
+                case LibreMetaverse.WearableType.Eyes: return "eyes";
+                case LibreMetaverse.WearableType.Gloves: return "gloves";
+                case LibreMetaverse.WearableType.Hair: return "hair";
+                case LibreMetaverse.WearableType.Shape: return "body shape";
+                //case LibreMetaverse.WearableType.Universal: 
                 default: return "clothes";
             }
         }

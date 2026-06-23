@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2026, Sjofn, LLC
@@ -27,8 +27,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreJ2K;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using Radegast.Rendering;
 using SkiaSharp;
 
@@ -60,7 +60,7 @@ namespace Radegast
         private readonly IRadegastInstance Instance;
         private GridClient Client => Instance.Client;
         private readonly System.Globalization.CultureInfo invariant = System.Globalization.CultureInfo.InvariantCulture;
-        private readonly MeshmerizerR Mesher;
+        private readonly MeshFoundry Mesher;
         private XmlDocument Doc = null!;
 
         public event EventHandler<DAEStatutsEventArgs>? Progress;
@@ -76,7 +76,7 @@ namespace Radegast
             ImageFormat = "PNG";
             ConsolidateMaterials = true;
             SkipTransparentFaces = true;
-            Mesher = new MeshmerizerR();
+            Mesher = new MeshFoundry();
             Init(Client.Network.CurrentSim!, requestedPrim);
         }
 
@@ -92,7 +92,7 @@ namespace Radegast
 
             if (requestedPrim.ParentID != 0)
             {
-                Primitive parent;
+                Primitive? parent;
                 // Search for parent on the correct simulator
                 var foundSim = sim;
                 if (!sim.ObjectsPrimitives.TryGetValue(requestedPrim.ParentID, out parent))
@@ -256,43 +256,16 @@ namespace Radegast
 
                 try
                 {
-                    var tcs = new TaskCompletionSource<(byte[]? jpeg, SKBitmap? bmp)>();
-
-                    Client.Assets.RequestImage(id, ImageType.Normal, (state, asset) =>
+                    var texAsset = await Client.Assets.RequestImageAsync(id, ImageType.Normal).ConfigureAwait(false);
+                    if (texAsset != null)
                     {
-                        try
-                        {
-                            if (state == TextureRequestState.Finished && asset != null)
-                            {
-                                var data = asset.AssetData;
-                                SKBitmap? bmp = null;
-                                try { bmp = J2kImage.FromBytes(data).As<SKBitmap>(); } catch { bmp = null; }
-                                tcs.TrySetResult((data, bmp));
-                                return;
-                            }
-
-                            if (state != TextureRequestState.Pending && state != TextureRequestState.Started && state != TextureRequestState.Progress)
-                            {
-                                tcs.TrySetResult((null, null));
-                            }
-                        }
-                        catch (Exception)
-                        {
-                            tcs.TrySetResult((null, null));
-                        }
-                    });
-
-                    var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(120))).ConfigureAwait(false);
-                    if (completed == tcs.Task)
-                    {
-                        var res = await tcs.Task.ConfigureAwait(false);
-                        jpegData = res.jpeg;
-                        bitmap = res.bmp;
+                        jpegData = texAsset.AssetData;
+                        try { bitmap = J2kImage.DecodeToImage<SKBitmap>(jpegData); } catch { bitmap = null; }
                     }
 
                     if (bitmap != null)
                     {
-                        string fullFileName = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(FileName), filename);
+                        string fullFileName = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(FileName)!, filename);
                         switch (ImageFormat)
                         {
                             case "PNG":
@@ -402,32 +375,10 @@ namespace Radegast
             }
             else
             {
-                var tcs = new TaskCompletionSource<FacetedMesh?>();
-
-                Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
+                var meshAsset = await Client.Assets.RequestMeshAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
+                if (meshAsset != null && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out var localMesh))
                 {
-                    try
-                    {
-                        FacetedMesh? localMesh = null;
-                        if (success && meshAsset != null && FacetedMesh.TryDecodeFromAsset(prim, meshAsset, DetailLevel.Highest, out localMesh))
-                        {
-                            tcs.TrySetResult(localMesh);
-                        }
-                        else
-                        {
-                            tcs.TrySetResult(null);
-                        }
-                    }
-                    catch
-                    {
-                        tcs.TrySetResult(null);
-                    }
-                });
-
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(false);
-                if (completed == tcs.Task)
-                {
-                    mesh = await tcs.Task.ConfigureAwait(false);
+                    mesh = localMesh;
                 }
             }
             return mesh;
@@ -435,29 +386,11 @@ namespace Radegast
 
         private async Task<SKBitmap?> LoadTextureAsync(UUID textureID)
         {
-            var tcs = new TaskCompletionSource<SKBitmap?>();
-
             try
             {
-                Client.Assets.RequestImage(textureID, (state, assetTexture) =>
-                {
-                    try
-                    {
-                        if (state != TextureRequestState.Finished || assetTexture == null) { return; }
-                        SKBitmap? img = null;
-                        try { img = J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>(); } catch { img = null; }
-                        tcs.TrySetResult(img);
-                    }
-                    catch
-                    {
-                        tcs.TrySetResult(null);
-                    }
-                });
-
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(30))).ConfigureAwait(false);
-                if (completed != tcs.Task) return null;
-
-                return await tcs.Task.ConfigureAwait(false);
+                var assetTexture = await Client.Assets.RequestImageAsync(textureID).ConfigureAwait(false);
+                if (assetTexture == null) return null;
+                try { return J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData); } catch { return null; }
             }
             catch (Exception ex)
             {
@@ -469,30 +402,30 @@ namespace Radegast
         private XmlNode ColladaInit()
         {
             Doc = new XmlDocument();
-            var root = Doc.AppendChild(Doc.CreateElement("COLLADA"));
+            var root = Doc.AppendChild(Doc.CreateElement("COLLADA"))!;
             if (root.Attributes != null)
             {
                 root.Attributes.Append(Doc.CreateAttribute("xmlns")).Value =
                     "http://www.collada.org/2005/11/COLLADASchema";
                 root.Attributes.Append(Doc.CreateAttribute("version")).Value = "1.4.1";
 
-                var asset = root.AppendChild(Doc.CreateElement("asset"));
-                var contributor = asset.AppendChild(Doc.CreateElement("contributor"));
-                contributor.AppendChild(Doc.CreateElement("author")).InnerText = "Radegast User";
-                contributor.AppendChild(Doc.CreateElement("authoring_tool")).InnerText = "Radegast Collada Export";
+                var asset = root.AppendChild(Doc.CreateElement("asset"))!;
+                var contributor = asset.AppendChild(Doc.CreateElement("contributor"))!;
+                contributor.AppendChild(Doc.CreateElement("author"))!.InnerText = "Radegast User";
+                contributor.AppendChild(Doc.CreateElement("authoring_tool"))!.InnerText = "Radegast Collada Export";
 
-                asset.AppendChild(Doc.CreateElement("created")).InnerText =
+                asset.AppendChild(Doc.CreateElement("created"))!.InnerText =
                     DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
-                asset.AppendChild(Doc.CreateElement("modified")).InnerText = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
+                asset.AppendChild(Doc.CreateElement("modified"))!.InnerText = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss");
 
-                var unit = asset.AppendChild(Doc.CreateElement("unit"));
+                var unit = asset.AppendChild(Doc.CreateElement("unit"))!;
                 if (unit.Attributes != null)
                 {
                     unit.Attributes.Append(Doc.CreateAttribute("name")).Value = "meter";
                     unit.Attributes.Append(Doc.CreateAttribute("meter")).Value = "1";
                 }
 
-                asset.AppendChild(Doc.CreateElement("up_axis")).InnerText = "Z_UP";
+                asset.AppendChild(Doc.CreateElement("up_axis"))!.InnerText = "Z_UP";
             }
 
             return root;
@@ -500,9 +433,9 @@ namespace Radegast
 
         private void AddSource(XmlNode mesh, string src_id, string param, List<float> vals)
         {
-            var source = mesh.AppendChild(Doc.CreateElement("source"));
-            source.Attributes.Append(Doc.CreateAttribute("id")).InnerText = src_id;
-            var src_array = source.AppendChild(Doc.CreateElement("float_array"));
+            var source = mesh.AppendChild(Doc.CreateElement("source"))!;
+            source.Attributes!.Append(Doc.CreateAttribute("id")).InnerText = src_id;
+            var src_array = source.AppendChild(Doc.CreateElement("float_array"))!;
 
             if (src_array.Attributes != null)
             {
@@ -522,8 +455,8 @@ namespace Radegast
 
                 src_array.InnerText = sb.ToString();
 
-                var acc = source.AppendChild(Doc.CreateElement("technique_common"))
-                    .AppendChild(Doc.CreateElement("accessor"));
+                var acc = source.AppendChild(Doc.CreateElement("technique_common"))!
+                    .AppendChild(Doc.CreateElement("accessor"))!;
                 if (acc.Attributes != null)
                 {
                     acc.Attributes.Append(Doc.CreateAttribute("source")).InnerText =
@@ -533,8 +466,8 @@ namespace Radegast
 
                     foreach (char c in param)
                     {
-                        var pX = acc.AppendChild(Doc.CreateElement("param"));
-                        pX.Attributes.Append(Doc.CreateAttribute("name")).InnerText = c.ToString();
+                        var pX = acc.AppendChild(Doc.CreateElement("param"))!;
+                        pX.Attributes!.Append(Doc.CreateAttribute("name")).InnerText = c.ToString();
                         pX.Attributes.Append(Doc.CreateAttribute("type")).InnerText = "float";
                     }
                 }
@@ -543,20 +476,20 @@ namespace Radegast
 
         private void AddPolygons(XmlNode mesh, string geomID, string materialID, FacetedMesh obj, List<int> faces_to_include)
         {
-            var polylist = mesh.AppendChild(Doc.CreateElement("polylist"));
-            polylist.Attributes.Append(Doc.CreateAttribute("material")).InnerText = materialID;
+            var polylist = mesh.AppendChild(Doc.CreateElement("polylist"))!;
+            polylist.Attributes!.Append(Doc.CreateAttribute("material")).InnerText = materialID;
 
             // Vertices semantic
             {
-                var input = polylist.AppendChild(Doc.CreateElement("input"));
-                input.Attributes.Append(Doc.CreateAttribute("semantic")).InnerText = "VERTEX";
+                var input = polylist.AppendChild(Doc.CreateElement("input"))!;
+                input.Attributes!.Append(Doc.CreateAttribute("semantic")).InnerText = "VERTEX";
                 input.Attributes.Append(Doc.CreateAttribute("offset")).InnerText = "0";
                 input.Attributes.Append(Doc.CreateAttribute("source")).InnerText = string.Format("#{0}-{1}", geomID, "vertices");
             }
 
             // Normals semantic
             {
-                var input = polylist.AppendChild(Doc.CreateElement("input"));
+                var input = polylist.AppendChild(Doc.CreateElement("input"))!;
                 if (input.Attributes != null)
                 {
                     input.Attributes.Append(Doc.CreateAttribute("semantic")).InnerText = "NORMAL";
@@ -568,7 +501,7 @@ namespace Radegast
 
             // UV semantic
             {
-                var input = polylist.AppendChild(Doc.CreateElement("input"));
+                var input = polylist.AppendChild(Doc.CreateElement("input"))!;
                 if (input.Attributes != null)
                 {
                     input.Attributes.Append(Doc.CreateAttribute("semantic")).InnerText = "TEXCOORD";
@@ -578,8 +511,8 @@ namespace Radegast
             }
 
             // Save indices
-            var vcount = polylist.AppendChild(Doc.CreateElement("vcount"));
-            var p = polylist.AppendChild(Doc.CreateElement("p"));
+            var vcount = polylist.AppendChild(Doc.CreateElement("vcount"))!;
+            var p = polylist.AppendChild(Doc.CreateElement("p"))!;
             int index_offset = 0;
             int num_tris = 0;
             StringBuilder pBuilder = new StringBuilder();
@@ -607,7 +540,7 @@ namespace Radegast
 
             p.InnerText = pBuilder.ToString().TrimEnd();
             vcount.InnerText = vcountBuilder.ToString().TrimEnd();
-            polylist.Attributes.Append(Doc.CreateAttribute("count")).InnerText = num_tris.ToString();
+            polylist.Attributes!.Append(Doc.CreateAttribute("count")).InnerText = num_tris.ToString();
         }
 
         private void GenerateImagesSection(XmlNode images)
@@ -616,14 +549,14 @@ namespace Radegast
             {
                 if (name == null) continue;
                 string colladaName = name + "_" + ImageFormat.ToLower();
-                var image = images.AppendChild(Doc.CreateElement("image"));
+                var image = images.AppendChild(Doc.CreateElement("image"))!;
                 if (image.Attributes != null)
                 {
                     image.Attributes.Append(Doc.CreateAttribute("id")).InnerText = colladaName;
                     image.Attributes.Append(Doc.CreateAttribute("name")).InnerText = colladaName;
                 }
 
-                image.AppendChild(Doc.CreateElement("init_from")).InnerText = System.Web.HttpUtility.UrlEncode(name + "." + ImageFormat.ToLower());
+                image.AppendChild(Doc.CreateElement("init_from"))!.InnerText = System.Web.HttpUtility.UrlEncode(name + "." + ImageFormat.ToLower());
             }
         }
 
@@ -706,9 +639,9 @@ namespace Radegast
             foreach (var mat in AllMeterials)
             {
                 var color = mat.Color;
-                var effect = effects.AppendChild(Doc.CreateElement("effect"));
-                effect.Attributes.Append(Doc.CreateAttribute("id")).InnerText = mat.Name + "-fx";
-                var profile = effect.AppendChild(Doc.CreateElement("profile_COMMON"));
+                var effect = effects.AppendChild(Doc.CreateElement("effect"))!;
+                effect.Attributes!.Append(Doc.CreateAttribute("id")).InnerText = mat.Name + "-fx";
+                var profile = effect.AppendChild(Doc.CreateElement("profile_COMMON"))!;
                 string? colladaName = null;
                 if (ExportTextures)
                 {
@@ -726,39 +659,39 @@ namespace Radegast
                     if (textID != UUID.Zero && TextureNames[i] != null)
                     {
                         colladaName = TextureNames[i] + "_" + ImageFormat.ToLower();
-                        var newparam = profile.AppendChild(Doc.CreateElement("newparam"));
+                        var newparam = profile.AppendChild(Doc.CreateElement("newparam"))!;
                         if (newparam.Attributes != null)
                         {
                             newparam.Attributes.Append(Doc.CreateAttribute("sid")).InnerText = colladaName + "-surface";
-                            var surface = newparam.AppendChild(Doc.CreateElement("surface"));
+                            var surface = newparam.AppendChild(Doc.CreateElement("surface"))!;
                             if (surface.Attributes != null)
                             {
                                 surface.Attributes.Append(Doc.CreateAttribute("type")).InnerText = "2D";
-                                surface.AppendChild(Doc.CreateElement("init_from")).InnerText = colladaName;
-                                newparam = profile.AppendChild(Doc.CreateElement("newparam"));
+                                surface.AppendChild(Doc.CreateElement("init_from"))!.InnerText = colladaName;
+                                newparam = profile.AppendChild(Doc.CreateElement("newparam"))!;
                                 if (newparam.Attributes != null)
                                     newparam.Attributes.Append(Doc.CreateAttribute("sid")).InnerText =
                                         colladaName + "-sampler";
                             }
                         }
 
-                        newparam.AppendChild(Doc.CreateElement("sampler2D"))
-                            .AppendChild(Doc.CreateElement("source"))
+                        newparam.AppendChild(Doc.CreateElement("sampler2D"))!
+                            .AppendChild(Doc.CreateElement("source"))!
                             .InnerText = colladaName + "-surface";
                     }
 
                 }
-                var t = profile.AppendChild(Doc.CreateElement("technique"));
+                var t = profile.AppendChild(Doc.CreateElement("technique"))!;
                 if (t.Attributes != null)
                 {
                     t.Attributes.Append(Doc.CreateAttribute("sid")).InnerText = "common";
-                    var phong = t.AppendChild(Doc.CreateElement("phong"));
+                    var phong = t.AppendChild(Doc.CreateElement("phong"))!;
 
-                    var diffuse = phong.AppendChild(Doc.CreateElement("diffuse"));
+                    var diffuse = phong.AppendChild(Doc.CreateElement("diffuse"))!;
                     // Only one <color> or <texture> can appear inside diffuse element
                     if (colladaName != null)
                     {
-                        var txtr = diffuse.AppendChild(Doc.CreateElement("texture"));
+                        var txtr = diffuse.AppendChild(Doc.CreateElement("texture"))!;
                         if (txtr.Attributes != null)
                         {
                             txtr.Attributes.Append(Doc.CreateAttribute("texture")).InnerText = colladaName + "-sampler";
@@ -767,7 +700,7 @@ namespace Radegast
                     }
                     else
                     {
-                        var diffuseColor = diffuse.AppendChild(Doc.CreateElement("color"));
+                        var diffuseColor = diffuse.AppendChild(Doc.CreateElement("color"))!;
                         if (diffuseColor.Attributes != null)
                             diffuseColor.Attributes.Append(Doc.CreateAttribute("sid")).InnerText = "diffuse";
                         diffuseColor.InnerText = string.Format("{0} {1} {2} {3}",
@@ -777,8 +710,8 @@ namespace Radegast
                             color.A.ToString(invariant));
                     }
 
-                    phong.AppendChild(Doc.CreateElement("transparency"))
-                        .AppendChild(Doc.CreateElement("float"))
+                    phong.AppendChild(Doc.CreateElement("transparency"))!
+                        .AppendChild(Doc.CreateElement("float"))!
                         .InnerText = color.A.ToString(invariant);
                 }
             }
@@ -788,19 +721,19 @@ namespace Radegast
         {
             AllMeterials.Clear();
             var root = ColladaInit();
-            var images = root.AppendChild(Doc.CreateElement("library_images"));
-            var geomLib = root.AppendChild(Doc.CreateElement("library_geometries"));
-            var effects = root.AppendChild(Doc.CreateElement("library_effects"));
-            var materials = root.AppendChild(Doc.CreateElement("library_materials"));
-            var scene = root.AppendChild(Doc.CreateElement("library_visual_scenes"))
-                .AppendChild(Doc.CreateElement("visual_scene"));
+            var images = root.AppendChild(Doc.CreateElement("library_images"))!;
+            var geomLib = root.AppendChild(Doc.CreateElement("library_geometries"))!;
+            var effects = root.AppendChild(Doc.CreateElement("library_effects"))!;
+            var materials = root.AppendChild(Doc.CreateElement("library_materials"))!;
+            var scene = root.AppendChild(Doc.CreateElement("library_visual_scenes"))!
+                .AppendChild(Doc.CreateElement("visual_scene"))!;
             if (scene.Attributes != null)
             {
                 scene.Attributes.Append(Doc.CreateAttribute("id")).InnerText = "Scene";
                 scene.Attributes.Append(Doc.CreateAttribute("name")).InnerText = "Scene";
                 if (ExportTextures)
                 {
-                    GenerateImagesSection(images);
+                    GenerateImagesSection(images!);
                 }
 
                 int prim_nr = 0;
@@ -810,9 +743,9 @@ namespace Radegast
                     string name = $"prim{prim_nr++}";
                     string geomID = name;
 
-                    var geom = geomLib.AppendChild(Doc.CreateElement("geometry"));
-                    geom.Attributes.Append(Doc.CreateAttribute("id")).InnerText = $"{geomID}-mesh";
-                    var mesh = geom.AppendChild(Doc.CreateElement("mesh"));
+                    var geom = geomLib.AppendChild(Doc.CreateElement("geometry"))!;
+                    geom.Attributes!.Append(Doc.CreateAttribute("id")).InnerText = $"{geomID}-mesh";
+                    var mesh = geom.AppendChild(Doc.CreateElement("mesh"))!;
 
                     List<float> position_data = new List<float>();
                     List<float> normal_data = new List<float>();
@@ -840,16 +773,16 @@ namespace Radegast
                         }
                     }
 
-                    AddSource(mesh, $"{geomID}-positions", "XYZ", position_data);
-                    AddSource(mesh, $"{geomID}-normals", "XYZ", normal_data);
-                    AddSource(mesh, $"{geomID}-map0", "ST", uv_data);
+                    AddSource(mesh!, $"{geomID}-positions", "XYZ", position_data);
+                    AddSource(mesh!, $"{geomID}-normals", "XYZ", normal_data);
+                    AddSource(mesh!, $"{geomID}-map0", "ST", uv_data);
 
                     // Add the <vertices> element
                     {
-                        var verticesNode = mesh.AppendChild(Doc.CreateElement("vertices"));
-                        verticesNode.Attributes.Append(Doc.CreateAttribute("id")).InnerText = $"{geomID}-vertices";
-                        var verticesInput = verticesNode.AppendChild(Doc.CreateElement("input"));
-                        verticesInput.Attributes.Append(Doc.CreateAttribute("semantic")).InnerText = "POSITION";
+                        var verticesNode = mesh.AppendChild(Doc.CreateElement("vertices"))!;
+                        verticesNode.Attributes!.Append(Doc.CreateAttribute("id")).InnerText = $"{geomID}-vertices";
+                        var verticesInput = verticesNode.AppendChild(Doc.CreateElement("input"))!;
+                        verticesInput.Attributes!.Append(Doc.CreateAttribute("semantic")).InnerText = "POSITION";
                         verticesInput.Attributes.Append(Doc.CreateAttribute("source")).InnerText =
                             $"#{geomID}-positions";
                     }
@@ -863,7 +796,7 @@ namespace Radegast
                             GetFacesWithMaterial(obj, objMaterial));
                     }
 
-                    var node = scene.AppendChild(Doc.CreateElement("node"));
+                    var node = scene.AppendChild(Doc.CreateElement("node"))!;
                     if (node.Attributes != null)
                     {
                         node.Attributes.Append(Doc.CreateAttribute("type")).InnerText = "NODE";
@@ -871,7 +804,7 @@ namespace Radegast
                         node.Attributes.Append(Doc.CreateAttribute("name")).InnerText = geomID;
 
                         // Set transform matrix (node position, rotation and scale)
-                        var matrix = node.AppendChild(Doc.CreateElement("matrix"));
+                        var matrix = node.AppendChild(Doc.CreateElement("matrix"))!;
 
                         var srt = Math3D.CreateSRTMatrix(obj.Prim.Scale, obj.Prim.Rotation,
                             obj.Prim.Position);
@@ -887,14 +820,14 @@ namespace Radegast
                         matrix.InnerText = matrixVal.TrimEnd();
 
                         // Geometry of the node
-                        var nodeGeometry = node.AppendChild(Doc.CreateElement("instance_geometry"));
+                        var nodeGeometry = node.AppendChild(Doc.CreateElement("instance_geometry"))!;
 
                         // Bind materials
-                        var tq = nodeGeometry.AppendChild(Doc.CreateElement("bind_material"))
-                            .AppendChild(Doc.CreateElement("technique_common"));
+                        var tq = nodeGeometry.AppendChild(Doc.CreateElement("bind_material"))!
+                            .AppendChild(Doc.CreateElement("technique_common"))!;
                         foreach (var objMaterial in objMaterials)
                         {
-                            var instanceMaterial = tq.AppendChild(Doc.CreateElement("instance_material"));
+                            var instanceMaterial = tq.AppendChild(Doc.CreateElement("instance_material"))!;
                             if (instanceMaterial.Attributes != null)
                             {
                                 instanceMaterial.Attributes.Append(Doc.CreateAttribute("symbol")).InnerText =
@@ -910,24 +843,24 @@ namespace Radegast
                     }
                 }
 
-                GenerateEffects(effects);
+                GenerateEffects(effects!);
 
                 // Materials
                 foreach (var objMaterial in AllMeterials)
                 {
-                    var mat = materials.AppendChild(Doc.CreateElement("material"));
+                    var mat = materials.AppendChild(Doc.CreateElement("material"))!;
                     if (mat.Attributes != null)
                     {
                         mat.Attributes.Append(Doc.CreateAttribute("id")).InnerText = objMaterial.Name + "-material";
-                        var matEffect = mat.AppendChild(Doc.CreateElement("instance_effect"));
+                        var matEffect = mat.AppendChild(Doc.CreateElement("instance_effect"))!;
                         if (matEffect.Attributes != null)
                             matEffect.Attributes.Append(Doc.CreateAttribute("url")).InnerText =
                                 $"#{objMaterial.Name}-fx";
                     }
                 }
 
-                XmlAttributeCollection xmlAttributeCollection = root.AppendChild(Doc.CreateElement("scene"))
-                    .AppendChild(Doc.CreateElement("instance_visual_scene"))
+                XmlAttributeCollection? xmlAttributeCollection = root.AppendChild(Doc.CreateElement("scene"))!
+                    .AppendChild(Doc.CreateElement("instance_visual_scene"))!
                     .Attributes;
                 if (xmlAttributeCollection != null)
                     xmlAttributeCollection.Append(Doc.CreateAttribute("url")).InnerText = "#Scene";

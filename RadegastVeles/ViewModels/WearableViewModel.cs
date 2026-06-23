@@ -21,11 +21,12 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -88,14 +89,14 @@ public partial class WearableViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Wear()
     {
-        _ = _instance.COF.AddToOutfit(new List<InventoryItem> { _item }, false, CancellationToken.None);
+        _ = _instance.COF.AddToOutfitAsync(new List<InventoryItem> { _item }, false, CancellationToken.None);
         StatusText = "Adding to outfit...";
     }
 
     [RelayCommand]
     private void TakeOff()
     {
-        _ = _instance.COF.RemoveFromOutfit(_item, CancellationToken.None);
+        _ = _instance.COF.RemoveFromOutfitAsync(_item, CancellationToken.None);
         StatusText = "Removing from outfit...";
     }
 
@@ -104,26 +105,26 @@ public partial class WearableViewModel : ObservableObject, IDisposable
         IsLoadingTextures = true;
         Textures.Clear();
 
-        Client.Assets.RequestInventoryAsset(_item, true, UUID.Random(),
-            (transfer, asset) =>
+        _ = Task.Run(async () =>
+        {
+            var asset = await Client.Assets.RequestInventoryAssetAsync(_item, true, UUID.Random());
+            Dispatcher.UIThread.Post(() =>
             {
-                Dispatcher.UIThread.Post(() =>
-                {
-                    IsLoadingTextures = false;
-                    if (asset is not AssetWearable wearable) return;
-                    if (!wearable.Decode()) return;
+                IsLoadingTextures = false;
+                if (asset is not AssetWearable wearable) return;
+                if (!wearable.Decode()) return;
 
-                    Textures.Clear();
-                    var defaultTex = AppearanceManager.DEFAULT_AVATAR_TEXTURE;
-                    foreach (var kvp in wearable.Textures)
-                    {
-                        if (kvp.Value == UUID.Zero || kvp.Value == defaultTex) continue;
-                        var slotName = kvp.Key.ToString().Replace("_", " ");
-                        Textures.Add(new WearableTextureSlot(slotName, kvp.Value));
-                    }
-                    HasTextures = Textures.Count > 0;
-                });
+                Textures.Clear();
+                var defaultTex = AppearanceManager.DEFAULT_AVATAR_TEXTURE;
+                foreach (var kvp in wearable.Textures)
+                {
+                    if (kvp.Value == UUID.Zero || kvp.Value == defaultTex) continue;
+                    var slotName = kvp.Key.ToString().Replace("_", " ");
+                    Textures.Add(new WearableTextureSlot(slotName, kvp.Value));
+                }
+                HasTextures = Textures.Count > 0;
             });
+        });
     }
 
     [RelayCommand]

@@ -17,6 +17,7 @@
             <controls:GridMapControl x:Name="MapControl"
                 Regions="{Binding MapRegions}"
                 Avatars="{Binding MapAvatars}"
+                SelfEntry="{Binding SelfEntry}"
                 AutomationProperties.Name="Grid map display" />
         </Border>
 
@@ -37,7 +38,7 @@
                     <!-- Region search -->
                     <TextBlock Text="Region Search" FontWeight="SemiBold" />
                     <Grid ColumnDefinitions="*,Auto">
-                        <TextBox Grid.Column="0" x:Name="TxtRegionSearch" Text="{Binding RegionSearch, Mode=TwoWay}" Watermark="Region name..." AutomationProperties.Name="Region search input" />
+                        <TextBox Grid.Column="0" x:Name="TxtRegionSearch" Text="{Binding RegionSearch, Mode=TwoWay}" PlaceholderText="Region name..." AutomationProperties.Name="Region search input" />
                         <Button Grid.Column="1" Content="Search" Command="{Binding SearchCommand}" Margin="4,0,0,0" AutomationProperties.Name="Search for region" />
                     </Grid>
 
@@ -47,6 +48,19 @@
                     <!-- Online friends -->
                     <TextBlock Text="Online Friends" FontWeight="SemiBold" />
                     <ComboBox ItemsSource="{Binding OnlineFriends}" SelectedItem="{Binding SelectedFriend}" HorizontalAlignment="Stretch" AutomationProperties.Name="Find online friend on map" />
+
+                    <!-- Favorites -->
+                    <TextBlock Text="Favorites" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{Binding FavoriteLandmarks}"
+                              SelectedItem="{Binding SelectedFavorite}"
+                              HorizontalAlignment="Stretch"
+                              AutomationProperties.Name="Favorite landmarks">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FavoriteLandmarkEntry">
+                                <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
 
                     <!-- Coordinates -->
                     <TextBlock Text="Coordinates" FontWeight="SemiBold" />
@@ -61,7 +75,7 @@
 
                     <!-- Action buttons -->
                     <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">
-                        <Button Content="Teleport" Command="{Binding TeleportCommand}" IsEnabled="{Binding CanTeleport}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Teleport to destination" />
+                        <Button Content="&#x2708; Teleport" Command="{Binding TeleportCommand}" IsEnabled="{Binding CanTeleport}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Teleport to destination" />
                         <Button Content="Go Home" Command="{Binding GoHomeCommand}" Margin="0,0,4,4" MinWidth="80" AutomationProperties.Name="Teleport home" />
                     </WrapPanel>
                     <WrapPanel Orientation="Horizontal" HorizontalAlignment="Stretch">

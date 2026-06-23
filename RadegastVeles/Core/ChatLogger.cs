@@ -180,5 +180,6 @@ public sealed class ChatLogger : IDisposable
         if (_disposed) return;
         _disposed = true;
         _queue.CompleteAdding();
+        _worker.Join(TimeSpan.FromSeconds(5));
     }
 }

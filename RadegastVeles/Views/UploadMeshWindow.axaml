@@ -53,7 +53,7 @@
             <!-- File count -->
             <TextBlock Text="{Binding FileCount}"
                        FontSize="12"
-                       Opacity="0.75"
+                       Foreground="{DynamicResource VelesMutedForeground}"
                        AutomationProperties.Name="Queued file count" />
 
             <!-- Queued files list -->

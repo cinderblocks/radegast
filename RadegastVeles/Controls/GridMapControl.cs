@@ -27,7 +27,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Avalonia.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.ViewModels;
 
@@ -47,6 +47,9 @@ public class GridMapControl : Control
     public static readonly StyledProperty<ObservableCollection<MapAvatarEntry>?> AvatarsProperty =
         AvaloniaProperty.Register<GridMapControl, ObservableCollection<MapAvatarEntry>?>(nameof(Avatars));
 
+    public static readonly StyledProperty<MapSelfEntry?> SelfEntryProperty =
+        AvaloniaProperty.Register<GridMapControl, MapSelfEntry?>(nameof(SelfEntry));
+
     public static readonly StyledProperty<double> ZoomProperty =
         AvaloniaProperty.Register<GridMapControl, double>(nameof(Zoom), 1.0);
 
@@ -60,6 +63,12 @@ public class GridMapControl : Control
     {
         get => GetValue(AvatarsProperty);
         set => SetValue(AvatarsProperty, value);
+    }
+
+    public MapSelfEntry? SelfEntry
+    {
+        get => GetValue(SelfEntryProperty);
+        set => SetValue(SelfEntryProperty, value);
     }
 
     public double Zoom
@@ -100,6 +109,8 @@ public class GridMapControl : Control
     private static readonly IBrush RegionBorderBrush = new SolidColorBrush(Color.FromArgb(80, 200, 200, 200));
     private static readonly IBrush AvatarBrush = new SolidColorBrush(Color.FromRgb(30, 210, 30));
     private static readonly IBrush MarkerBrush = new SolidColorBrush(Color.FromRgb(255, 80, 80));
+    private static readonly IBrush SelfBrush = new SolidColorBrush(Color.FromRgb(255, 220, 0));
+    private static readonly IPen SelfPen = new Pen(new SolidColorBrush(Color.FromRgb(255, 220, 0)), 2);
     private static readonly IBrush TextBrush = new SolidColorBrush(Color.FromRgb(200, 200, 200));
     private static readonly IBrush TextBgBrush = new SolidColorBrush(Color.FromArgb(160, 0, 0, 0));
     private static readonly IPen GridLinePen = new Pen(new SolidColorBrush(Color.FromArgb(30, 255, 255, 255)), 0.5);
@@ -116,9 +127,15 @@ public class GridMapControl : Control
     /// <summary>Event raised when the visible grid range changes (for requesting map blocks).</summary>
     public event EventHandler<VisibleRangeEventArgs>? VisibleRangeChanged;
 
+    /// <summary>Event raised when the user chooses "About Land…" from the context menu.</summary>
+    public event EventHandler<MapClickEventArgs>? AboutLandRequested;
+
+    /// <summary>Event raised when the user chooses "About Estate…" from the context menu.</summary>
+    public event EventHandler<MapClickEventArgs>? AboutEstateRequested;
+
     static GridMapControl()
     {
-        AffectsRender<GridMapControl>(RegionsProperty, AvatarsProperty, ZoomProperty);
+        AffectsRender<GridMapControl>(RegionsProperty, AvatarsProperty, ZoomProperty, SelfEntryProperty);
     }
 
     public GridMapControl()
@@ -191,6 +208,10 @@ public class GridMapControl : Control
                 newC.CollectionChanged += OnCollectionChanged;
             InvalidateVisual();
         }
+        else if (change.Property == SelfEntryProperty)
+        {
+            InvalidateVisual();
+        }
     }
 
     private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => ScheduleRepaint();
@@ -201,6 +222,30 @@ public class GridMapControl : Control
     {
         base.OnPointerPressed(e);
         var pt = e.GetPosition(this);
+        if (e.GetCurrentPoint(this).Properties.IsRightButtonPressed)
+        {
+            double pxPerReg = GetPixelsPerRegion();
+            double w = Bounds.Width;
+            double h = Bounds.Height;
+            double gridX = _centerGridX + (pt.X - w / 2) / pxPerReg;
+            double gridY = _centerGridY - (pt.Y - h / 2) / pxPerReg;
+            uint regionX = (uint)Math.Floor(gridX);
+            uint regionY = (uint)Math.Floor(gridY);
+            uint localX = (uint)Math.Clamp((gridX - regionX) * 256, 0, 255);
+            uint localY = (uint)Math.Clamp((gridY - regionY) * 256, 0, 255);
+            var args = new MapClickEventArgs(regionX, regionY, localX, localY);
+
+            var menu = new ContextMenu();
+            var landItem = new MenuItem { Header = "About Land…" };
+            landItem.Click += (_, _) => AboutLandRequested?.Invoke(this, args);
+            var estateItem = new MenuItem { Header = "About Estate…" };
+            estateItem.Click += (_, _) => AboutEstateRequested?.Invoke(this, args);
+            menu.Items.Add(landItem);
+            menu.Items.Add(estateItem);
+            menu.Open(this);
+            e.Handled = true;
+            return;
+        }
         if (e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
         {
             _lastPressClickCount = e.ClickCount;
@@ -351,6 +396,7 @@ public class GridMapControl : Control
         }
 
         // Build region lookup from bound Regions collection
+        var typeface = new Typeface("Inter", FontStyle.Normal, FontWeight.Normal);
         var regions = Regions;
         Dictionary<(uint, uint), MapRegionEntry>? regionLookup = null;
         if (regions != null)
@@ -361,7 +407,6 @@ public class GridMapControl : Control
         }
 
         // Draw tiles for ALL visible grid cells (not just known regions)
-        var typeface = new Typeface("Inter", FontStyle.Normal, FontWeight.Normal);
         bool fetchTiles = pxPerReg >= 8;
 
         for (int gy = Math.Max(0, minGY); gy <= maxGY; gy++)
@@ -432,6 +477,23 @@ public class GridMapControl : Control
                 double dotSize = Math.Max(4, av.Count * 2);
                 ctx.DrawEllipse(AvatarBrush, null, new Point(sx, sy), dotSize / 2, dotSize / 2);
             }
+        }
+
+        // Draw "You" marker
+        var self = SelfEntry;
+        if (self != null)
+        {
+            double sx = (self.GridX + self.LocalX / 256.0 - _centerGridX) * pxPerReg + w / 2;
+            double sy = (_centerGridY - self.GridY - self.LocalY / 256.0) * pxPerReg + h / 2;
+            ctx.DrawEllipse(SelfBrush, SelfPen, new Point(sx, sy), 6, 6);
+            var selfLabel = new FormattedText(
+                "You",
+                CultureInfo.CurrentCulture,
+                FlowDirection.LeftToRight,
+                typeface, 10, TextBrush);
+            ctx.DrawRectangle(TextBgBrush, null,
+                new Rect(sx + 9, sy - 7, selfLabel.Width + 4, selfLabel.Height + 2));
+            ctx.DrawText(selfLabel, new Point(sx + 11, sy - 6));
         }
 
         // Draw marker (teleport target / click position)

@@ -21,7 +21,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -226,6 +226,16 @@ namespace Radegast
 
         private void rtbIMText_LinkClicked(object sender, LinkClickedEventArgs e)
         {
+            var link = e.LinkText;
+            var sepPos = link.IndexOf(RRichTextBox.LinkSeparator);
+            if (sepPos > 0) link = link.Substring(sepPos + 1);
+
+            if (link == IMTextManager.LoadMoreIMUri)
+            {
+                TextManager.LoadMoreHistory();
+                return;
+            }
+
             instance.MainForm.ProcessLink(e.LinkText);
         }
 

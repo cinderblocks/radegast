@@ -43,10 +43,10 @@ using Microsoft.Extensions.Logging;
 using OpenTK.Graphics.OpenGL;
 using OpenTK.Graphics;
 using OpenTK.Platform;
-using OpenMetaverse;
-using OpenMetaverse.Rendering;
-using OpenMetaverse.Assets;
-using OpenMetaverse.Packets;
+using LibreMetaverse;
+using LibreMetaverse.Rendering;
+using LibreMetaverse.Assets;
+using LibreMetaverse.Packets;
 using SkiaSharp;
 using static LibreMetaverse.DisposalHelper;
 
@@ -126,7 +126,7 @@ namespace Radegast.Rendering
         private RenderAvatar myself;
 
         private readonly Dictionary<UUID, TextureInfo> TexturesPtrMap = new Dictionary<UUID, TextureInfo>();
-        private readonly MeshmerizerR renderer;
+        private readonly MeshFoundry renderer;
 
         private OpenTK.Graphics.GraphicsMode GLMode = null;
 
@@ -204,7 +204,7 @@ namespace Radegast.Rendering
             };
             genericTaskThread.Start();
 
-            renderer = new MeshmerizerR();
+            renderer = new MeshFoundry();
             renderTimer = new System.Diagnostics.Stopwatch();
             renderTimer.Start();
 
@@ -827,7 +827,7 @@ namespace Radegast.Rendering
             if (sky != null)
             {
                 Vector3 sunDir = new Vector3(sunPos[0], sunPos[1], sunPos[2]);
-                sunDir.Normalize();
+                sunDir = Vector3.Normalize(sunDir);
                 sky.UpdateSunDirection(sunDir);
             }
         }
@@ -1118,7 +1118,7 @@ namespace Radegast.Rendering
         }
 
         // Set material color uniform for shader
-        public void SetShaderMaterialColor(OpenMetaverse.Color4 color)
+        public void SetShaderMaterialColor(LibreMetaverse.Color4 color)
         {
             if (!RenderSettings.HasShaders || !RenderSettings.EnableShiny) return;
 
@@ -1981,13 +1981,13 @@ namespace Radegast.Rendering
                 return Vector3.DistanceSquared(calcPos, p.RenderPosition);
             }
 
-            var posToCheckFrom = Vector3.Zero;
             //Get the bounding boxes for this prim
             var boundingBoxMin = p.RenderPosition + p.BoundingVolume.ScaledMin;
             var boundingBoxMax = p.RenderPosition + p.BoundingVolume.ScaledMax;
-            posToCheckFrom.X = (calcPos.X < boundingBoxMin.X) ? boundingBoxMin.X : (calcPos.X > boundingBoxMax.X) ? boundingBoxMax.X : calcPos.X;
-            posToCheckFrom.Y = (calcPos.Y < boundingBoxMin.Y) ? boundingBoxMin.Y : (calcPos.Y > boundingBoxMax.Y) ? boundingBoxMax.Y : calcPos.Y;
-            posToCheckFrom.Z = (calcPos.Z < boundingBoxMin.Z) ? boundingBoxMin.Z : (calcPos.Z > boundingBoxMax.Z) ? boundingBoxMax.Z : calcPos.Z;
+            var posToCheckFrom = new Vector3(
+                (calcPos.X < boundingBoxMin.X) ? boundingBoxMin.X : (calcPos.X > boundingBoxMax.X) ? boundingBoxMax.X : calcPos.X,
+                (calcPos.Y < boundingBoxMin.Y) ? boundingBoxMin.Y : (calcPos.Y > boundingBoxMax.Y) ? boundingBoxMax.Y : calcPos.Y,
+                (calcPos.Z < boundingBoxMin.Z) ? boundingBoxMin.Z : (calcPos.Z > boundingBoxMax.Z) ? boundingBoxMax.Z : calcPos.Z);
             return Vector3.DistanceSquared(calcPos, posToCheckFrom);
         }
 
@@ -2567,7 +2567,9 @@ namespace Radegast.Rendering
                 {
                     mesh.Faces = mesh.Faces.FindAll(f => f.Vertices != null && f.Vertices.Count > 0 && f.Indices != null && f.Indices.Count > 0);
                 }
-                rprim.Faces = mesh.Faces;
+                // MeshFoundry returns null on failure; MeshmerizerR returned an empty mesh.
+                // Fall back to an empty face list so downstream null-checks hold.
+                rprim.Faces = mesh?.Faces ?? new System.Collections.Generic.List<Face>();
                 CalculateBoundingBox(rprim);
                 rprim.Meshing = false;
                 rprim.Meshed = true;
@@ -2615,18 +2617,12 @@ namespace Radegast.Rendering
                     }
                     else
                     { // Mesh
-                        var gotMesh = new AutoResetEvent(false);
-
-                        Client.Assets.RequestMesh(prim.Sculpt.SculptTexture, (success, meshAsset) =>
+                        var meshAsset = System.Threading.Tasks.Task.Run(
+                            () => Client.Assets.RequestMeshAsync(prim.Sculpt.SculptTexture)).GetAwaiter().GetResult();
+                        if (meshAsset == null || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, RenderSettings.MeshRenderDetail, out mesh))
                         {
-                            if (!success || !FacetedMesh.TryDecodeFromAsset(prim, meshAsset, RenderSettings.MeshRenderDetail, out mesh))
-                            {
-                                Logger.Warn("Failed to fetch or decode the mesh asset", Client);
-                            }
-                            gotMesh.Set();
-                        });
-
-                        gotMesh.WaitOne(20 * 1000, false);
+                            Logger.Warn("Failed to fetch or decode the mesh asset", Client);
+                        }
                     }
                 }
                 catch

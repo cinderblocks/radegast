@@ -42,7 +42,18 @@ internal static class ShaderLoader
             // leading whitespace that would push #version off line 1.
             using var reader = new StreamReader(stream, System.Text.Encoding.UTF8,
                 detectEncodingFromByteOrderMarks: true);
-            return reader.ReadToEnd().TrimStart();
+            var raw = reader.ReadToEnd()
+                            .TrimStart()
+                            .Replace("\r\n", "\n")  // normalize CRLF -> LF
+                            .Replace("\r",   "\n"); // normalize lone CR -> LF
+
+            // GLSL ES 3.00 §3.1 permits only 7-bit ASCII source characters.
+            // Strip anything outside that range (e.g. Unicode box-drawing chars
+            // used as decorative comment rulers) so strict drivers don't error.
+            var sb = new System.Text.StringBuilder(raw.Length);
+            foreach (char c in raw)
+                if (c < 128) sb.Append(c);
+            return sb.ToString();
         }
         catch (Exception ex)
         {

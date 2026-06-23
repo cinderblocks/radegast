@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -24,14 +24,14 @@ using System.Windows.Forms;
 using System.IO;
 using System.Runtime.InteropServices;
 using CoreJ2K;
-using OpenMetaverse;
-using OpenMetaverse.Imaging;
+using LibreMetaverse;
+using LibreMetaverse.Imaging;
 using Pfim;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 using ImageFormat = System.Drawing.Imaging.ImageFormat;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
-using Targa = OpenMetaverse.Imaging.Targa;
+using Targa = LibreMetaverse.Imaging.Targa;
 using System.Threading;
 using CoreJ2K.Configuration;
 using LibreMetaverse;
@@ -63,7 +63,7 @@ namespace Radegast
             instance.NetCom.ClientDisconnected += Netcom_ClientDisconnected;
             client.Assets.AssetUploaded += Assets_AssetUploaded;
             UpdateButtons();
-            OriginalCapsTimeout = client.Settings.CAPS_TIMEOUT;
+            OriginalCapsTimeout = client.Settings.Timing.CapsTimeout;
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
@@ -83,9 +83,14 @@ namespace Radegast
                 }
                 else
                 {
-                    client.Inventory.RequestCreateItem(client.Inventory.FindFolderForType(AssetType.Texture),
-                        TextureName, TextureDescription, AssetType.Texture, TransactionID,
-                        InventoryType.Texture, PermissionMask.All, TempUploadHandler);
+                    _ = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        var item = await client.Inventory.CreateItemAsync(
+                            client.Inventory.FindFolderForType(AssetType.Texture),
+                            TextureName, TextureDescription, AssetType.Texture, TransactionID,
+                            InventoryType.Texture, PermissionMask.All);
+                        TempUploadHandler(item != null, item ?? new InventoryTexture(UUID.Zero));
+                    });
                 }
             }
         }
@@ -155,7 +160,7 @@ namespace Radegast
                     case ".j2c":
                         // Upload JPEG2000 images untouched
                         UploadData = File.ReadAllBytes(FileName);
-                        bitmap = J2kImage.FromBytes(UploadData).As<SKBitmap>().ToBitmap();
+                        bitmap = J2kImage.DecodeToImage<SKBitmap>(UploadData).ToBitmap();
 
                         txtStatus.AppendText("Loaded raw JPEG2000 data " + FileName + Environment.NewLine);
                         break;
@@ -290,7 +295,7 @@ namespace Radegast
                 }
                 else if (type == 2)
                 { // targa
-                    var bitmap = J2kImage.FromBytes(UploadData).As<SKBitmap>();
+                    var bitmap = J2kImage.DecodeToImage<SKBitmap>(UploadData);
                     File.WriteAllBytes(dlg.FileName, Targa.Encode(bitmap));
                 }
                 else if (type == 1)
@@ -352,7 +357,7 @@ namespace Radegast
                 return;
             }
 
-            client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+            client.Settings.Timing.CapsTimeout = OriginalCapsTimeout;
 
             AssetID = assetID;
             InventoryID = itemID;
@@ -447,7 +452,7 @@ namespace Radegast
 
             Permissions perms = new Permissions { EveryoneMask = PermissionMask.All, NextOwnerMask = PermissionMask.All };
 
-            client.Settings.CAPS_TIMEOUT = 180 * 1000;
+            client.Settings.Timing.CapsTimeout = 180 * 1000;
 
             using (var progress = new UploadProgressDialog())
             {
@@ -460,7 +465,7 @@ namespace Radegast
                     var result = await client.Inventory.CreateItemFromAssetAsync(UploadData, TextureName, TextureDescription,
                         AssetType.Texture, InventoryType.Texture, folder, perms, progress.Token);
 
-                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+                    client.Settings.Timing.CapsTimeout = OriginalCapsTimeout;
 
                     if (result != null && result.Success)
                     {
@@ -486,13 +491,13 @@ namespace Radegast
                 }
                 catch (OperationCanceledException)
                 {
-                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+                    client.Settings.Timing.CapsTimeout = OriginalCapsTimeout;
                     txtStatus.AppendText("Upload cancelled." + Environment.NewLine);
                     UpdateButtons();
                 }
                 catch (Exception ex)
                 {
-                    client.Settings.CAPS_TIMEOUT = OriginalCapsTimeout;
+                    client.Settings.Timing.CapsTimeout = OriginalCapsTimeout;
                     txtStatus.AppendText("Upload failed: " + ex.Message + Environment.NewLine);
                     UpdateButtons();
                 }

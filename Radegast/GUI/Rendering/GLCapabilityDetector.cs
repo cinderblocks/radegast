@@ -30,7 +30,7 @@
 
 using System;
 using OpenTK.Graphics;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {

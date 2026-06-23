@@ -1,4 +1,4 @@
-﻿<!--
+<!--
   Radegast Metaverse Client
   Copyright (c) 2026, Sjofn LLC
   All rights reserved.
@@ -175,7 +175,7 @@
                         <DockPanel Margin="8">
                             <!-- Action bar -->
                             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6" Spacing="4">
-                                <Button Content="Invite…" Command="{Binding InviteMemberCommand}"
+                                <Button Content="Invite…" Command="{Binding PickInviteAvatarCommand}"
                                         IsVisible="{Binding CanInvite}"
                                         AutomationProperties.Name="Invite member" />
                                 <Button Content="Eject" Command="{Binding EjectMemberCommand}"
@@ -195,15 +195,25 @@
                                     Margin="0,0,0,6"
                                     IsVisible="{Binding CanInvite}"
                                     AutomationProperties.Name="Invite form">
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="Invite by Avatar UUID:" FontSize="11" Opacity="0.7" />
-                                    <Grid ColumnDefinitions="*,Auto,Auto" Margin="0,2,0,0">
-                                        <TextBox Grid.Column="0" Text="{Binding InviteAvatarIdText}"
-                                                 Watermark="Avatar UUID…"
-                                                 AutomationProperties.Name="Invite avatar UUID" />
-                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Roles}"
+                                <StackPanel Spacing="6">
+                                    <TextBlock Text="Invite to Group" FontSize="11" FontWeight="SemiBold" Opacity="0.7" />
+                                    <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,2,0,0">
+                                        <Border Grid.Column="0" Background="#0AFFFFFF" CornerRadius="3" Padding="6,4"
+                                                AutomationProperties.Name="Picked invite avatar">
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                                <TextBlock Text="{Binding PickedInviteName}" VerticalAlignment="Center"
+                                                           IsVisible="{Binding PickedInviteAvatar, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                                                <TextBlock Text="No avatar selected" Opacity="0.4" FontStyle="Italic"
+                                                           VerticalAlignment="Center"
+                                                           IsVisible="{Binding PickedInviteAvatar, Converter={x:Static ObjectConverters.IsNull}}" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Button Grid.Column="1" Content="Pick…" Command="{Binding PickInviteAvatarCommand}"
+                                                Margin="4,0,0,0"
+                                                AutomationProperties.Name="Pick avatar to invite" />
+                                        <ComboBox Grid.Column="2" ItemsSource="{Binding Roles}"
                                                   SelectedItem="{Binding SelectedInviteRole}"
-                                                  Margin="4,0" Width="130"
+                                                  Margin="4,0" Width="120"
                                                   AutomationProperties.Name="Invite role selector">
                                             <ComboBox.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:GroupRoleEntry">
@@ -211,7 +221,8 @@
                                                 </DataTemplate>
                                             </ComboBox.ItemTemplate>
                                         </ComboBox>
-                                        <Button Grid.Column="2" Content="Send" Command="{Binding InviteMemberCommand}"
+                                        <Button Grid.Column="3" Content="Send" Command="{Binding InviteMemberCommand}"
+                                                IsEnabled="{Binding PickedInviteAvatar, Converter={x:Static ObjectConverters.IsNotNull}}"
                                                 AutomationProperties.Name="Send invite" />
                                     </Grid>
                                     <TextBlock Text="{Binding InviteStatusText}" FontSize="11" Opacity="0.7"
@@ -314,14 +325,28 @@
 
                                     <!-- Members in this role -->
                                     <TextBlock Text="Members in Role" FontWeight="SemiBold" FontSize="13" Opacity="0.7" />
-                                    <ItemsControl ItemsSource="{Binding SelectedRoleMembers}" MaxHeight="120">
+                                    <ItemsControl ItemsSource="{Binding SelectedRoleMembers}" MaxHeight="150">
                                         <ItemsControl.ItemTemplate>
-                                            <DataTemplate x:DataType="x:String">
-                                                <TextBlock Text="{Binding}" FontSize="12" Margin="2,1" />
+                                            <DataTemplate x:DataType="vm:GroupRoleMemberEntry">
+                                                <Grid ColumnDefinitions="*,Auto" Margin="2,1">
+                                                    <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="12"
+                                                               VerticalAlignment="Center"
+                                                               AutomationProperties.Name="{Binding Name}" />
+                                                    <Button Grid.Column="1" Content="Remove"
+                                                            Command="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).RemoveMemberFromRoleCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            MinWidth="60" Padding="4,2" FontSize="11"
+                                                            IsVisible="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).IsNotEveryoneRole}"
+                                                            IsEnabled="{Binding $parent[UserControl].((vm:GroupProfileViewModel)DataContext).CanRemoveMember}"
+                                                            AutomationProperties.Name="Remove from role" />
+                                                </Grid>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>
-
+                                    <Button Content="Add Member to Role…" Command="{Binding AddMemberToRoleCommand}"
+                                            IsVisible="{Binding IsNotEveryoneRole}"
+                                            IsEnabled="{Binding CanAssignMember}"
+                                            AutomationProperties.Name="Add member to role" />
                                     <Button Content="Save Role" Command="{Binding SaveRoleCommand}"
                                             IsVisible="{Binding CanEditRoleProps}"
                                             HorizontalAlignment="Right"
@@ -378,13 +403,34 @@
                             <StackPanel IsVisible="{Binding ShowNewNoticeForm}" Spacing="6">
                                 <TextBlock Text="New Notice" FontWeight="SemiBold" FontSize="14" />
                                 <TextBlock Text="Subject" FontSize="11" Opacity="0.6" />
-                                <TextBox Text="{Binding NewNoticeSubject}" Watermark="Subject…"
+                                <TextBox Text="{Binding NewNoticeSubject}" PlaceholderText="Subject…"
                                          AutomationProperties.Name="Notice subject" />
                                 <TextBlock Text="Message" FontSize="11" Opacity="0.6" />
                                 <TextBox Text="{Binding NewNoticeBody}"
                                          AcceptsReturn="True" MinHeight="120" MaxHeight="240"
                                          TextWrapping="Wrap"
                                          AutomationProperties.Name="Notice body" />
+                                <Border Background="#14FFFFFF" CornerRadius="4" Padding="8"
+                                        AutomationProperties.Name="Notice attachment">
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="Attachment" FontSize="11" Opacity="0.6" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{Binding NewNoticeAttachment.Name}"
+                                                       IsVisible="{Binding NewNoticeAttachment, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.Name="Attachment name" />
+                                            <TextBlock Text="No attachment" Opacity="0.4" FontStyle="Italic"
+                                                       IsVisible="{Binding NewNoticeAttachment, Converter={x:Static ObjectConverters.IsNull}}"
+                                                       VerticalAlignment="Center" />
+                                            <Button Content="Attach&#x2026;" Command="{Binding PickNoticeAttachmentCommand}"
+                                                    AutomationProperties.Name="Pick attachment from inventory" />
+                                            <Button Content="Remove" Command="{Binding ClearNoticeAttachmentCommand}"
+                                                    IsVisible="{Binding NewNoticeAttachment, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                    AutomationProperties.Name="Remove attachment" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <Button Content="Send" Command="{Binding SendNoticeCommand}"
                                             AutomationProperties.Name="Send notice" />

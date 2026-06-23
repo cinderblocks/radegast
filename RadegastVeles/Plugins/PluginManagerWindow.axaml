@@ -1,0 +1,112 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:plugins="using:Radegast.Veles.Plugins"
+        x:Class="Radegast.Veles.Plugins.PluginManagerWindow"
+        x:DataType="plugins:PluginManagerViewModel"
+        Title="Plugin Manager"
+        Width="700" Height="480"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Plugin Manager window">
+    <DockPanel Margin="8">
+
+        <!-- Bottom status bar -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" />
+            <TextBlock Text=" | " VerticalAlignment="Center" />
+            <TextBlock Text="{Binding PluginDirectory}" Foreground="Gray" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Right-side action buttons -->
+        <StackPanel DockPanel.Dock="Right" Width="110" Spacing="4" Margin="8,0,0,0">
+            <Button Content="Start" Command="{Binding StartCommand}"
+                    IsVisible="{Binding SelectedPlugin.CanStart, FallbackValue=False}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Start plugin" />
+            <Button Content="Stop" Command="{Binding StopCommand}"
+                    IsVisible="{Binding SelectedPlugin.CanStop, FallbackValue=False}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Stop plugin" />
+            <Button Content="Reload" Command="{Binding ReloadCommand}"
+                    IsEnabled="{Binding SelectedPlugin, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Reload plugin" />
+            <Button Content="Unload" Command="{Binding UnloadCommand}"
+                    IsEnabled="{Binding SelectedPlugin, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Unload plugin" />
+            <Separator Margin="0,4" />
+            <Button Content="Start All" Command="{Binding StartAllCommand}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Start all plugins" />
+            <Button Content="Stop All" Command="{Binding StopAllCommand}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Stop all plugins" />
+            <Separator Margin="0,4" />
+            <Button Content="Rescan" Command="{Binding RescanCommand}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Rescan plugin directory" />
+            <Button Content="Open Folder" Command="{Binding OpenPluginFolderCommand}"
+                    HorizontalAlignment="Stretch" AutomationProperties.Name="Open plugin folder" />
+        </StackPanel>
+
+        <!-- Main area: plugin list + detail -->
+        <Grid RowDefinitions="*,Auto">
+            <!-- Column headers + list -->
+            <Grid Grid.Row="0" RowDefinitions="Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="*,80,100,80" Margin="4,0,4,2">
+                    <TextBlock Grid.Column="0" Text="Name" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="1" Text="Version" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="2" Text="Author" FontWeight="SemiBold" />
+                    <TextBlock Grid.Column="3" Text="State" FontWeight="SemiBold" />
+                </Grid>
+                <ListBox Grid.Row="1" ItemsSource="{Binding Plugins}"
+                         SelectedItem="{Binding SelectedPlugin}"
+                         SelectionMode="Single"
+                         AutomationProperties.Name="Plugin list">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="plugins:PluginListItem">
+                            <Grid ColumnDefinitions="*,80,100,80">
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1" Text="{Binding Version}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Author}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="3" Text="{Binding State}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+
+            <!-- Detail panel -->
+            <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="0,1,0,0"
+                    Margin="0,6,0,0" Padding="0,6,0,0"
+                    IsVisible="{Binding SelectedPlugin, Converter={x:Static ObjectConverters.IsNotNull}}">
+                <StackPanel Spacing="2" DataContext="{Binding SelectedPlugin}">
+                    <TextBlock>
+                        <Run Text="Name: " FontWeight="SemiBold" /><Run Text="{Binding Name}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="Description: " FontWeight="SemiBold" /><Run Text="{Binding Description}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="Author: " FontWeight="SemiBold" /><Run Text="{Binding Author}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="Version: " FontWeight="SemiBold" /><Run Text="{Binding Version}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="State: " FontWeight="SemiBold" /><Run Text="{Binding State}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="File: " FontWeight="SemiBold" /><Run Text="{Binding FileName}" />
+                    </TextBlock>
+                    <TextBlock>
+                        <Run Text="Loaded: " FontWeight="SemiBold" /><Run Text="{Binding LoadedAt}" />
+                    </TextBlock>
+                    <TextBlock IsVisible="{Binding ErrorMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                               Foreground="Red">
+                        <Run Text="Error: " FontWeight="SemiBold" /><Run Text="{Binding ErrorMessage}" />
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+        </Grid>
+
+    </DockPanel>
+</Window>

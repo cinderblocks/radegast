@@ -1,4 +1,4 @@
-﻿// 
+// 
 // Radegast Metaverse Client
 // Copyright (c) 2009-2014, Radegast Development Team
 // All rights reserved.
@@ -34,7 +34,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 using Radegast;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Threading;
 
 namespace Radegast.Plugin.Demo

@@ -20,11 +20,12 @@
 
 using System;
 using System.Collections;
+using System.Linq;
 using System.Drawing;
 using System.Text;
 using System.IO;
-using OpenMetaverse;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -34,10 +35,14 @@ namespace Radegast
     {
         public bool DingOnAllIncoming = false;
 
+        private const int IMPageSize = 100;
+        internal const string LoadMoreIMUri = "radegast://loadmoreim";
+
         private readonly IMTextManagerType Type;
         private readonly string sessionName;
         private bool AutoResponseSent = false;
         private ArrayList textBuffer;
+        private int _historyDisplayStart;
 
         private bool showTimestamps;
 
@@ -104,7 +109,7 @@ namespace Radegast
                 e.IM.Dialog == InstantMessageDialog.StopTyping)
                 return;
 
-            if (instance.Client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID) != null)
+            if (instance.Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == e.IM.FromAgentID))
             {
                 return;
             }
@@ -433,10 +438,50 @@ namespace Radegast
 
         public override void ReprintAllText()
         {
+            ReprintFromOffset(Math.Max(0, textBuffer.Count - IMPageSize));
+        }
+
+        public void LoadMoreHistory()
+        {
+            int newStart = Math.Max(0, _historyDisplayStart - IMPageSize);
+            ReprintFromOffset(newStart);
+        }
+
+        private void ReprintFromOffset(int startIndex)
+        {
+            _historyDisplayStart = startIndex;
             TextPrinter.ClearText();
+
             PrintLastLog();
-            foreach (object obj in textBuffer)
-                ProcessIM(obj, false);
+
+            if (_historyDisplayStart > 0)
+            {
+                PrintLoadMoreLink();
+            }
+
+            for (int i = _historyDisplayStart; i < textBuffer.Count; i++)
+            {
+                ProcessIM(textBuffer[i], false);
+            }
+        }
+
+        private void PrintLoadMoreLink()
+        {
+            if (FontSettings.ContainsKey("History"))
+            {
+                var fontSetting = FontSettings["History"];
+                TextPrinter.ForeColor = fontSetting.ForeColor;
+                TextPrinter.BackColor = fontSetting.BackColor;
+                TextPrinter.Font = fontSetting.Font;
+            }
+            else
+            {
+                TextPrinter.ForeColor = SystemColors.GrayText.ToSKColor();
+                TextPrinter.BackColor = SKColors.Transparent;
+                TextPrinter.Font = SettingsForms.FontSetting.DefaultFont;
+            }
+            TextPrinter.InsertLink($"[ Load {Math.Min(_historyDisplayStart, IMPageSize)} more messages... ]", LoadMoreIMUri);
+            TextPrinter.PrintTextLine(string.Empty);
         }
 
         public void CleanUp()

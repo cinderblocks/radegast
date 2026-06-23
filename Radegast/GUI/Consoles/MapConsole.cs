@@ -26,7 +26,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -381,15 +381,14 @@ namespace Radegast
             lblStatus.Text = $"Teleporting to {txtRegion.Text}";
             prgTeleport.Style = ProgressBarStyle.Marquee;
 
-            ThreadPool.QueueUserWorkItem(state =>
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                if (!await client.Self.TeleportAsync(txtRegion.Text, new Vector3((int)nudX.Value, (int)nudY.Value, (int)nudZ.Value)))
                 {
-                    if (!client.Self.Teleport(txtRegion.Text, new Vector3((int)nudX.Value, (int)nudY.Value, (int)nudZ.Value)))
-                    {
-                        Self_TeleportProgress(this, new TeleportEventArgs(string.Empty, TeleportStatus.Failed, TeleportFlags.Default));
-                    }
-                    InTeleport = false;
+                    Self_TeleportProgress(this, new TeleportEventArgs(string.Empty, TeleportStatus.Failed, TeleportFlags.Default));
                 }
-            );
+                InTeleport = false;
+            });
         }
 
         #region JavascriptHooks

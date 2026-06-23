@@ -31,7 +31,7 @@
 using System;
 using System.Reflection;
 using OpenTK.Graphics.OpenGL;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {
@@ -95,7 +95,7 @@ namespace Radegast.Rendering
         {
             scene = sceneWindow;
             sunDirection = new Vector3(0.5f, 0.5f, 1.0f);
-            sunDirection.Normalize();
+            sunDirection = Vector3.Normalize(sunDirection);
         }
 
         public void Dispose()
@@ -201,7 +201,7 @@ namespace Radegast.Rendering
 
                     // Calculate color based on position
                     Vector3 vertPos = new Vector3(x, y, z);
-                    vertPos.Normalize();
+                    vertPos = Vector3.Normalize(vertPos);
                     
                     // Clamp altitude to 0..1 range (0 at/below horizon, 1 at zenith)
                     float altitude = Math.Max(0.0f, z); // Clamp negative values to 0
@@ -489,7 +489,7 @@ namespace Radegast.Rendering
         public void UpdateSunDirection(Vector3 direction)
         {
             sunDirection = direction;
-            sunDirection.Normalize();
+            sunDirection = Vector3.Normalize(sunDirection);
             
             // Regenerate sky colors with new sun position
             if (initialized)

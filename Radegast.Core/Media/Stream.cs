@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -23,7 +23,7 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using FMOD;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Media
 {
@@ -46,7 +46,7 @@ namespace Radegast.Media
         /// </summary>
         /// <param name="sender">Sender</param>
         /// <param name="e">Key, value are sent in e</param>
-        public delegate void StreamInfoCallback(object sender, StreamInfoArgs e);
+        public delegate void StreamInfoCallback(object? sender, StreamInfoArgs e);
 
         /// <summary>
         /// Fired when a stream meta data is received
@@ -169,7 +169,7 @@ namespace Radegast.Media
             });
         }
 
-        private void Update(object sender)
+        private void Update(object? sender)
         {
             if (!sound.hasHandle()) return;
 
@@ -195,7 +195,7 @@ namespace Radegast.Media
 
                         if (tag.type == TAGTYPE.FMOD && tag.name == "Sample Rate Change")
                         {
-                            float newfreq = (float)Marshal.PtrToStructure(tag.data, typeof(float));
+                            float newfreq = (float)Marshal.PtrToStructure(tag.data, typeof(float))!;
                             Logger.DebugLog("New stream frequency: " + newfreq.ToString("F" + 0));
                             channel.setFrequency(newfreq);
                         }
@@ -204,7 +204,7 @@ namespace Radegast.Media
 
                         // Tell listeners about the Stream tag.  This can be
                         // displayed to the user.
-                        OnStreamInfo?.Invoke(this, new StreamInfoArgs(tag.name.ToString().ToLower(), Marshal.PtrToStringAnsi(tag.data)));
+                        OnStreamInfo?.Invoke(this, new StreamInfoArgs(tag.name.ToString()!.ToLower(), Marshal.PtrToStringAnsi(tag.data) ?? string.Empty));
                     }
                 }
                 catch (Exception ex)

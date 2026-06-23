@@ -1,0 +1,7 @@
+<WixLocalization xmlns="http://wixtoolset.org/schemas/v4/wxl" Culture="en-US">
+  <?include ..\VelesBuildProperties.wxi?>
+
+  <String Id="DowngradeError" Value="A newer version of [ProductName] is already installed." />
+  <String Id="MissingDotNet8" Value="$(var.productName) requires the .NET 8 Desktop Runtime. Please install it from https://dotnet.microsoft.com/download/dotnet/8.0 and run this installer again." />
+
+</WixLocalization>

@@ -45,7 +45,8 @@
                           ItemsSource="{Binding SavedAccounts}"
                           SelectedItem="{Binding SelectedSavedAccount}"
                           IsEnabled="{Binding !IsLoggingIn}"
-                          HorizontalAlignment="Stretch">
+                          HorizontalAlignment="Stretch"
+                          AutomationProperties.Name="Saved accounts">
                     <ComboBox.ItemTemplate>
                         <DataTemplate x:DataType="models:SavedAccount">
                             <TextBlock Text="{Binding}" />
@@ -62,23 +63,34 @@
             <!-- Username -->
             <TextBlock Text="Username (First Last)" />
             <TextBox Text="{Binding Username}"
-                     Watermark="First Last"
-                     IsEnabled="{Binding !IsLoggingIn}" />
+                     PlaceholderText="First Last"
+                     IsEnabled="{Binding !IsLoggingIn}"
+                     AutomationProperties.Name="Username" />
 
             <!-- Password -->
             <TextBlock Text="Password" />
             <TextBox Text="{Binding Password}"
                      PasswordChar="•"
                      RevealPassword="False"
-                     Watermark="Password"
-                     IsEnabled="{Binding !IsLoggingIn}" />
+                     PlaceholderText="Password"
+                     IsEnabled="{Binding !IsLoggingIn}"
+                     AutomationProperties.Name="Password" />
+
+            <!-- MFA Authenticator Code (only shown after server issues an MFA challenge) -->
+            <TextBlock Text="Authenticator Code" IsVisible="{Binding IsMfaRequired}" />
+            <TextBox Text="{Binding MfaToken}"
+                     PlaceholderText="6-digit code"
+                     IsVisible="{Binding IsMfaRequired}"
+                     IsEnabled="{Binding !IsLoggingIn}"
+                     AutomationProperties.Name="Multi-factor authenticator code" />
 
             <!-- Grid Selection -->
             <TextBlock Text="Grid" />
             <ComboBox ItemsSource="{Binding Grids}"
                       SelectedItem="{Binding SelectedGrid}"
                       IsEnabled="{Binding !IsLoggingIn}"
-                      HorizontalAlignment="Stretch">
+                      HorizontalAlignment="Stretch"
+                      AutomationProperties.Name="Grid selector">
                 <ComboBox.ItemTemplate>
                     <DataTemplate x:DataType="core:Grid">
                         <TextBlock Text="{Binding Name}" />
@@ -88,27 +100,31 @@
 
             <!-- Custom Login URI (only shown for custom grid) -->
             <TextBox Text="{Binding CustomLoginUri}"
-                     Watermark="Custom Login URI"
+                     PlaceholderText="Custom Login URI"
                      IsVisible="{Binding IsCustomGrid}"
-                     IsEnabled="{Binding !IsLoggingIn}" />
+                     IsEnabled="{Binding !IsLoggingIn}"
+                     AutomationProperties.Name="Custom login URI" />
 
             <!-- Start Location -->
             <TextBlock Text="Start Location" />
-            <ComboBox ItemsSource="{Binding LocationOptions}"
-                      SelectedIndex="{Binding SelectedLocationIndex}"
+            <ComboBox ItemsSource="{Binding LocationItems}"
+                      SelectedItem="{Binding SelectedLocationItem}"
                       IsEnabled="{Binding !IsLoggingIn}"
-                      HorizontalAlignment="Stretch" />
+                      HorizontalAlignment="Stretch"
+                      AutomationProperties.Name="Start location selector" />
 
             <!-- Custom location (visible only when Custom… is selected) -->
             <TextBox Text="{Binding CustomLocation}"
-                     Watermark="Region/X/Y/Z  e.g. Refugio/120/120/40"
+                     PlaceholderText="Region/X/Y/Z  e.g. Refugio/120/120/40"
                      IsVisible="{Binding IsCustomLocation}"
-                     IsEnabled="{Binding !IsLoggingIn}" />
+                     IsEnabled="{Binding !IsLoggingIn}"
+                     AutomationProperties.Name="Custom start location" />
 
             <!-- Remember Credentials -->
             <CheckBox Content="Remember credentials"
                       IsChecked="{Binding RememberCredentials}"
-                      IsEnabled="{Binding !IsLoggingIn}" />
+                      IsEnabled="{Binding !IsLoggingIn}"
+                      AutomationProperties.Name="Remember credentials" />
 
             <!-- Buttons -->
             <Grid ColumnDefinitions="*,8,*" Margin="0,8,0,0">
@@ -139,7 +155,7 @@
                          AutomationProperties.Name="Login progress indicator" />
             <TextBlock Text="{Binding StatusText}"
                        FontSize="12"
-                       Foreground="Gray"
+                       Foreground="{DynamicResource VelesMutedForeground}"
                        HorizontalAlignment="Center"
                        TextWrapping="Wrap" />
 

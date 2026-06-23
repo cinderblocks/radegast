@@ -18,8 +18,9 @@
  */
 
 using System;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -41,6 +42,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _balanceText = string.Empty;
 
+    [ObservableProperty]
+    private bool _isAway;
+
+    [ObservableProperty]
+    private bool _isBusy;
+
     public NearbyViewModel Chat { get; }
     public IMViewModel IM { get; }
     public MapViewModel Map { get; }
@@ -51,29 +58,59 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public MediaViewModel Media { get; }
     public NotificationQueueViewModel Notifications { get; }
     public VoiceViewModel Voice { get; }
+    public MarketplaceViewModel Marketplace { get; }
+
+    /// <summary>
+    /// The in-world 3-D scene viewer ViewModel. Lazily created when the user first
+    /// opens the Scene Viewer tab (see <see cref="OpenSceneViewer"/>) and disposed
+    /// when the user closes the tab (see <see cref="CloseSceneViewer"/>), so the
+    /// rendering pipeline only consumes CPU/GPU resources while it is open.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSceneViewerOpen))]
+    private SceneViewerViewModel? _sceneViewer;
+
+    public bool IsSceneViewerOpen => SceneViewer != null;
+
+    /// <summary>Tab index of the Scene Viewer tab when it is visible.</summary>
+    public const int SceneViewerTabIndex = 7;
 
     [ObservableProperty]
     private int _selectedTabIndex;
 
-    public MainViewModel(RadegastInstanceAvalonia instance)
+    public MainViewModel(
+        RadegastInstanceAvalonia instance,
+        NearbyViewModel chat,
+        IMViewModel im,
+        MapViewModel map,
+        ObjectsViewModel objects,
+        InventoryViewModel inventory,
+        FriendsViewModel friends,
+        GroupsViewModel groups,
+        MediaViewModel media,
+        NotificationQueueViewModel notifications,
+        VoiceViewModel voice,
+        MarketplaceViewModel marketplace)
     {
         _instance = instance;
 
-        Chat = new NearbyViewModel(instance);
-        IM = new IMViewModel(instance);
-        Map = new MapViewModel(instance);
-        Objects = new ObjectsViewModel(instance);
-        Inventory = new InventoryViewModel(instance);
-        Friends = new FriendsViewModel(instance);
-        Groups = new GroupsViewModel(instance);
-        Media = new MediaViewModel(instance);
-        Notifications = new NotificationQueueViewModel(instance);
-        Voice = new VoiceViewModel(instance);
+        Chat = chat;
+        IM = im;
+        Map = map;
+        Objects = objects;
+        Inventory = inventory;
+        Friends = friends;
+        Groups = groups;
+        Media = media;
+        Notifications = notifications;
+        Voice = voice;
+        Marketplace = marketplace;
 
-        // Expose voice through instance so sub-ViewModels (e.g. GroupProfileViewModel) can access it.
-        _instance.Voice = Voice;
-        // Expose voice through NearbyViewModel so ChatPanel can bind to it.
-        Chat.Voice = Voice;
+        // Back-references used by other parts of the session.
+        _instance.Voice = voice;
+        _instance.Media = media;
+        Chat.Voice = voice;
+        Chat.Media = media;
 
         // Forward status from Chat VM
         Chat.PropertyChanged += (_, e) =>
@@ -95,7 +132,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.Client.Self.MoneyBalance += Self_MoneyBalance;
         _instance.IMRequested += Instance_IMRequested;
         _instance.GroupIMRequested += Instance_GroupIMRequested;
+        _instance.ShowOnMapRequested += Instance_ShowOnMapRequested;
         _instance.NotificationReceived += Instance_NotificationReceived;
+        IM.NavigateToSessionRequested += OnIMNavigateRequested;
+
+        // Auto-connect voice if the setting is enabled
+        _ = Voice.TryAutoConnectAsync();
     }
 
     public void Dispose()
@@ -103,7 +145,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.Client.Self.MoneyBalance -= Self_MoneyBalance;
         _instance.IMRequested -= Instance_IMRequested;
         _instance.GroupIMRequested -= Instance_GroupIMRequested;
+        _instance.ShowOnMapRequested -= Instance_ShowOnMapRequested;
         _instance.NotificationReceived -= Instance_NotificationReceived;
+        IM.NavigateToSessionRequested -= OnIMNavigateRequested;
 
         Chat.Dispose();
         IM.Dispose();
@@ -114,6 +158,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Groups.Dispose();
         Media.Dispose();
         Voice.Dispose();
+        Marketplace.Dispose();
+        SceneViewer?.Dispose();
     }
 
     private void Self_MoneyBalance(object? sender, BalanceEventArgs e)
@@ -128,6 +174,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             BalanceText = $"L${e.Balance:N0}");
+    }
+
+    private void OnIMNavigateRequested(IMSession session)
+    {
+        IM.FocusSession(session);
+        ShowTab(1);
     }
 
     private void Instance_IMRequested(object? sender, IMRequestedEventArgs e)
@@ -148,6 +200,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void Instance_ShowOnMapRequested(object? sender, LibreMetaverse.UUID agentId)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ShowTab(2);
+            Map.ShowFriendOnMap(agentId);
+        });
+    }
+
     private void Instance_NotificationReceived(object? sender, NotificationViewModel e)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() => Notifications.Add(e));
@@ -156,6 +217,38 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void ShowTab(int index)
     {
         SelectedTabIndex = index;
+    }
+
+    /// <summary>
+    /// Open (or activate) the Scene Viewer tab. The first call constructs the
+    /// <see cref="SceneViewerViewModel"/>; subsequent calls just re-select the tab.
+    /// </summary>
+    public void OpenSceneViewer()
+    {
+        if (SceneViewer == null)
+        {
+            var vm = new SceneViewerViewModel(_instance);
+            vm.CloseRequested += (_, _) => CloseSceneViewer();
+            SceneViewer = vm;
+        }
+        ShowTab(SceneViewerTabIndex);
+    }
+
+    /// <summary>
+    /// Close the Scene Viewer tab. Disposes the ViewModel (which tears down the
+    /// GL viewport, shaders, FBOs, and per-frame rendering) and switches back to
+    /// the Nearby tab so the now-hidden tab is not selected.
+    /// </summary>
+    public void CloseSceneViewer()
+    {
+        if (SceneViewer == null) return;
+
+        if (SelectedTabIndex == SceneViewerTabIndex)
+            SelectedTabIndex = 0;
+
+        var vm = SceneViewer;
+        SceneViewer = null;
+        vm.Dispose();
     }
 
     partial void OnSelectedTabIndexChanged(int value)

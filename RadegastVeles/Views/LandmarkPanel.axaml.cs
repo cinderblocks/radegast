@@ -43,11 +43,25 @@ public partial class LandmarkPanel : UserControl
         _vm = DataContext as LandmarkViewModel;
         if (_vm == null) return;
 
+        var standalone = VisualRoot is ProfileWindow;
+
         var btnDetach = this.FindControl<Button>("BtnDetach");
-        if (btnDetach != null) btnDetach.Click += (_, _) => DetachRequested?.Invoke(this, EventArgs.Empty);
+        if (btnDetach != null)
+        {
+            if (standalone)
+                btnDetach.IsVisible = false;
+            else
+                btnDetach.Click += (_, _) => DetachRequested?.Invoke(this, EventArgs.Empty);
+        }
 
         var btnClose = this.FindControl<Button>("BtnClose");
-        if (btnClose != null) btnClose.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
+        if (btnClose != null)
+        {
+            if (standalone)
+                btnClose.IsVisible = false;
+            else
+                btnClose.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     protected override void OnUnloaded(RoutedEventArgs e)

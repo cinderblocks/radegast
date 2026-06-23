@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -18,8 +18,8 @@
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
-using OpenMetaverse.Assets;
-using OpenMetaverse;
+using LibreMetaverse.Assets;
+using LibreMetaverse;
 
 namespace RadegastSpeech.Conversation
 {
@@ -41,49 +41,42 @@ namespace RadegastSpeech.Conversation
             base.Start();
             var transferID = UUID.Random();
             Talker.SayMore("Reading " + asset.Name + ". Just a moment.");
-            Client.Assets.RequestInventoryAsset(
-                asset,
-                true,
-                transferID,
-                (AssetDownload transfer, Asset asset) =>
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var downloaded = await Client.Assets.RequestInventoryAssetAsync(asset, true, transferID).ConfigureAwait(false);
+                if (downloaded is AssetNotecard n)
                 {
-                    if (transfer.Success && transfer.ID == transferID)
+                    n.Decode();
+
+                    text = string.Empty;
+
+                    for (int i = 0; i < n.BodyText.Length; i++)
                     {
-                        AssetNotecard n = (AssetNotecard)asset;
-                        n.Decode();
-                        AssetNotecard recievedNotecard = n;
+                        char c = n.BodyText[i];
 
-                        text = string.Empty;
-
-                        for (int i = 0; i < n.BodyText.Length; i++)
+                        // Special marker for embedded things.
+                        if ((int)c == 0xdbc0)
                         {
-                            char c = n.BodyText[i];
-
-                            // Special marker for embedded things.
-                            if ((int)c == 0xdbc0)
-                            {
-                                int index = (int)n.BodyText[++i] - 0xdc00;
-                                InventoryItem e = n.EmbeddedItems[index];
-                                text += " (embedded) ";
-                            }
-                            else
-                            {
-                                text += c;
-                            }
+                            int index = (int)n.BodyText[++i] - 0xdc00;
+                            InventoryItem e = n.EmbeddedItems[index];
+                            text += " (embedded) ";
                         }
+                        else
+                        {
+                            text += c;
+                        }
+                    }
 
-                        // TODO put in controls to stop, back up etc
-                        StopPosition = 0;
-                        NextSection();
-                        control.instance.MainForm.KeyDown +=
-                            MainForm_KeyPress;
-                    }
-                    else
-                    {
-                        Talker.Say("Failed to download the notecard.", Talk.BeepType.Bad);
-                    }
+                    // TODO put in controls to stop, back up etc
+                    StopPosition = 0;
+                    NextSection();
+                    control.instance.MainForm.KeyDown += MainForm_KeyPress;
                 }
-            );
+                else
+                {
+                    Talker.Say("Failed to download the notecard.", Talk.BeepType.Bad);
+                }
+            });
         }
 
         internal override bool Hear(string cmd)

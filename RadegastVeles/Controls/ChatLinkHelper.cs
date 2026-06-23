@@ -21,7 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using OpenMetaverse;
+using LibreMetaverse;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.Controls;
@@ -127,7 +127,7 @@ public static class ChatLinkHelper
 
                         case SlappCommand.Group when parts.Length >= 2 && UUID.TryParse(parts[1], out var groupId):
                             if (instance != null &&
-                                instance.Client.Groups.GroupName2KeyCache.TryGetValue(groupId, out var cachedGroupName))
+                                instance.TryGetCachedGroupName(groupId, out var cachedGroupName))
                                 return cachedGroupName;
                             return "Group Profile";
 
@@ -184,7 +184,7 @@ public static class ChatLinkHelper
             {
                 var sim = parser.Sim;
                 var pos = new Vector3(parser.X, parser.Y, parser.Z);
-                Task.Run(() => instance.Client.Self.Teleport(sim, pos));
+                _ = instance.Client.Self.TeleportAsync(sim, pos);
                 return;
             }
 
@@ -217,7 +217,7 @@ public static class ChatLinkHelper
                     case SlappCommand.Teleport:
                         var tpSim = parser.Sim;
                         var tpPos = new Vector3(parser.X, parser.Y, parser.Z);
-                        Task.Run(() => instance.Client.Self.Teleport(tpSim, tpPos));
+                        _ = instance.Client.Self.TeleportAsync(tpSim, tpPos);
                         break;
 
                     case SlappCommand.WorldMap:

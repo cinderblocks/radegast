@@ -56,6 +56,8 @@ public partial class MapPanel : UserControl
             _mapControl.MapDoubleClicked += OnMapDoubleClicked;
             _mapControl.VisibleRangeChanged += OnVisibleRangeChanged;
             _mapControl.ZoomChanged += OnMapZoomChanged;
+            _mapControl.AboutLandRequested += OnAboutLandRequested;
+            _mapControl.AboutEstateRequested += OnAboutEstateRequested;
         }
 
         // Wire zoom slider to map control
@@ -121,6 +123,16 @@ public partial class MapPanel : UserControl
         }
     }
 
+    private void OnAboutLandRequested(object? sender, MapClickEventArgs e)
+    {
+        _vm?.Instance.ShowLandProfile();
+    }
+
+    private void OnAboutEstateRequested(object? sender, MapClickEventArgs e)
+    {
+        _vm?.Instance.ShowEstateProfile();
+    }
+
     private void SearchBox_KeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && _vm != null)
@@ -144,6 +156,8 @@ public partial class MapPanel : UserControl
             _mapControl.MapDoubleClicked -= OnMapDoubleClicked;
             _mapControl.VisibleRangeChanged -= OnVisibleRangeChanged;
             _mapControl.ZoomChanged -= OnMapZoomChanged;
+            _mapControl.AboutLandRequested -= OnAboutLandRequested;
+            _mapControl.AboutEstateRequested -= OnAboutEstateRequested;
         }
 
         base.OnUnloaded(e);

@@ -61,9 +61,12 @@ before_build:
 
 after_build:
   - ps: New-Item -ItemType directory -Path .\$env:PLATFORM
-  - cmd: '7z a -ttar -so Radegast-%TAG_VERSION%.tar %APPVEYOR_BUILD_FOLDER%\bin\Release\ | 7z a -si Radegast_%PLATFORM%-%TAG_VERSION%.tbz'
+  - cmd: '7z a -ttar -so Radegast-%TAG_VERSION%.tar %APPVEYOR_BUILD_FOLDER%\bin\Radegast\Release\ | 7z a -si Radegast_%PLATFORM%-%TAG_VERSION%.tbz'
   - ps: Copy-Item bin\Packages\en-US\RadegastSetup_$env:PLATFORM.msi RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.msi
   - ps: Copy-Item bin\Packages\RadegastBundle_$env:PLATFORM.exe RadegastSetup_$env:PLATFORM-$env:TAG_VERSION.exe
+  - cmd: '7z a -ttar -so RadegastVeles-%TAG_VERSION%.tar %APPVEYOR_BUILD_FOLDER%\bin\Veles\Release\ | 7z a -si RadegastVeles_%PLATFORM%-%TAG_VERSION%.tbz'
+  - ps: Copy-Item bin\Packages\en-US\RadegastVelesSetup_$env:PLATFORM.msi RadegastVelesSetup_$env:PLATFORM-$env:TAG_VERSION.msi
+  - ps: Copy-Item bin\Packages\RadegastVelesBundle_$env:PLATFORM.exe RadegastVelesBundle_$env:PLATFORM-$env:TAG_VERSION.exe
   - ps: netsparkle-generate-appcast -n Radegast -e msi -a . --output-type json -o windows-$env:PLATFORM --file-version $env:TAG_VERSION -u https://github.com/cinderblocks/radegast/releases/download/tag/$env:APPVEYOR_REPO_TAG_NAME
 
 artifacts:
@@ -85,8 +88,20 @@ artifacts:
   - path: 'Radegast-*.tbz'
     name: 'Radegast Linux x86'
     type: Auto
-  - path: 'bin\Release\Radegast.pdb'
+  - path: 'bin\Radegast\Release\Radegast.pdb'
     name: 'Radegast symbols'
+    type: Auto
+  - path: 'RadegastVelesBundle*.exe'
+    name: 'Radegast Veles Windows Bundle'
+    type: Auto
+  - path: 'RadegastVelesSetup*.msi'
+    name: 'Radegast Veles Windows MSI'
+    type: Auto
+  - path: 'RadegastVeles*.tbz'
+    name: 'Radegast Veles archive'
+    type: Auto
+  - path: 'bin\Veles\Release\RadegastVeles.pdb'
+    name: 'Radegast Veles symbols'
     type: Auto
   - path: 'appcast.json'
     name: AppCast

@@ -1,0 +1,23 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Radegast.Veles.Plugins.PluginSettingsWindow"
+        Title="Plugin Settings"
+        Width="520" Height="500"
+        WindowStartupLocation="CenterOwner"
+        AutomationProperties.Name="Plugin settings window">
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="8,4,8,8" Spacing="6">
+            <Button Content="OK"     x:Name="OkButton"     IsDefault="True" AutomationProperties.Name="OK" />
+            <Button Content="Apply"  x:Name="ApplyButton"               AutomationProperties.Name="Apply" />
+            <Button Content="Cancel" x:Name="CancelButton" IsCancel="True" AutomationProperties.Name="Cancel" />
+        </StackPanel>
+        <TabControl x:Name="TabControl" Margin="8,8,8,4"
+                    AutomationProperties.Name="Plugin settings tabs" />
+    </DockPanel>
+</Window>

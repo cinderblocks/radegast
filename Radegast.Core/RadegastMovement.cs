@@ -20,7 +20,7 @@
 
 using System;
 using System.Timers;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {

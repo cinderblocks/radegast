@@ -33,7 +33,7 @@
 using System;
 using System.Globalization;
 using System.Windows.Forms;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast.Rendering
 {

@@ -57,26 +57,26 @@
                         <TextBlock Text="{Binding ObjectName}" FontSize="14" FontWeight="SemiBold"
                                    TextWrapping="Wrap" AutomationProperties.Name="Object name label" />
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <Border Background="#555" CornerRadius="3" Padding="5,2">
+                            <Border Background="{DynamicResource VelesBadgePrimitive}" CornerRadius="3" Padding="5,2">
                                 <TextBlock Text="{Binding ItemTypeName}" FontSize="11" Foreground="White"
                                            AutomationProperties.Name="Item type" />
                             </Border>
-                            <Border Background="#1565C0" CornerRadius="3" Padding="5,2"
+                            <Border Background="{DynamicResource VelesBadgeHud}" CornerRadius="3" Padding="5,2"
                                     IsVisible="{Binding IsHudObject}">
                                 <TextBlock Text="HUD" FontSize="11" Foreground="White"
                                            ToolTip.Tip="This is a HUD attachment" />
                             </Border>
-                            <Border Background="#6A1B9A" CornerRadius="3" Padding="5,2"
+                            <Border Background="{DynamicResource VelesBadgeGroupOwned}" CornerRadius="3" Padding="5,2"
                                     IsVisible="{Binding IsCoalesced}">
                                 <TextBlock Text="Coalesced" FontSize="11" Foreground="White"
                                            ToolTip.Tip="Contains multiple objects" />
                             </Border>
-                            <Border Background="#558B2F" CornerRadius="3" Padding="5,2"
+                            <Border Background="{DynamicResource VelesBadgeForSale}" CornerRadius="3" Padding="5,2"
                                     IsVisible="{Binding IsForSale}">
                                 <TextBlock Text="For Sale" FontSize="11" Foreground="White"
                                            ToolTip.Tip="{Binding SaleText}" />
                             </Border>
-                            <Border Background="#E65100" CornerRadius="3" Padding="5,2"
+                            <Border Background="{DynamicResource VelesBadgeTempRez}" CornerRadius="3" Padding="5,2"
                                     IsVisible="{Binding IsGroupOwned}">
                                 <TextBlock Text="Group" FontSize="11" Foreground="White"
                                            ToolTip.Tip="Group-owned item" />
@@ -87,7 +87,7 @@
 
                 <!-- Description -->
                 <Border IsVisible="{Binding HasDescription}" Margin="0,0,0,10"
-                        Background="#11808080" CornerRadius="4" Padding="8,6">
+                        Background="{DynamicResource VelesPanelHighlight}" CornerRadius="4" Padding="8,6">
                     <TextBlock Text="{Binding Description}" TextWrapping="Wrap"
                                FontStyle="Italic" Opacity="0.85"
                                AutomationProperties.Name="Description" />
@@ -102,7 +102,7 @@
                                     VerticalAlignment="Center">
                             <TextBlock Text="{Binding AttachPointText}"
                                        AutomationProperties.Name="Default attach point" />
-                            <Border Background="#1565C0" CornerRadius="3" Padding="4,1"
+                            <Border Background="{DynamicResource VelesBadgeHud}" CornerRadius="3" Padding="4,1"
                                     IsVisible="{Binding IsHudObject}">
                                 <TextBlock Text="HUD" FontSize="10" Foreground="White" />
                             </Border>
@@ -168,13 +168,13 @@
 
                 <!-- Slam warnings -->
                 <StackPanel Spacing="4" Margin="0,0,0,8">
-                    <Border Background="#CC6600" CornerRadius="4" Padding="8,4"
+                    <Border Background="{DynamicResource VelesBadgeSitting}" CornerRadius="4" Padding="8,4"
                             IsVisible="{Binding HasSlamPerm}" HorizontalAlignment="Left">
                         <TextBlock Text="&#x26A0; Permissions will be overwritten on rez"
                                    Foreground="White" FontSize="11"
                                    AutomationProperties.Name="Permission slam warning" />
                     </Border>
-                    <Border Background="#CC6600" CornerRadius="4" Padding="8,4"
+                    <Border Background="{DynamicResource VelesBadgeSitting}" CornerRadius="4" Padding="8,4"
                             IsVisible="{Binding HasSlamSale}" HorizontalAlignment="Left">
                         <TextBlock Text="&#x26A0; Sale settings will be overwritten on rez"
                                    Foreground="White" FontSize="11"
@@ -183,7 +183,7 @@
                 </StackPanel>
 
                 <!-- Attachment state badge -->
-                <Border Background="#FF107C10" CornerRadius="4" Padding="8,4"
+                <Border Background="{DynamicResource VelesBadgeAttached}" CornerRadius="4" Padding="8,4"
                         IsVisible="{Binding IsAttached}" HorizontalAlignment="Left">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="&#x1F4CC; Attached at" Foreground="White" FontWeight="SemiBold" />

@@ -9,7 +9,7 @@
         x:Class="Radegast.Veles.Views.PreferencesWindow"
         x:DataType="vm:PreferencesViewModel"
         Title="Preferences"
-        Width="540" Height="500"
+        Width="720" Height="600"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
         AutomationProperties.Name="Preferences window">
@@ -21,30 +21,20 @@
             <Button Content="Cancel" Click="OnCancelClick" IsCancel="True" AutomationProperties.Name="Cancel" />
         </StackPanel>
         <TabControl Margin="8,8,8,4" AutomationProperties.Name="Preferences tabs">
+
+            <!-- ═══════════════════════════════════════════════════ GENERAL -->
             <TabItem Header="General" AutomationProperties.Name="General preferences">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="8" Spacing="12">
-                        <TextBlock Text="Image Cache" FontWeight="SemiBold" FontSize="14" />
-                        <CheckBox Content="Enable image cache" IsChecked="{Binding ImageCacheEnabled}" AutomationProperties.Name="Enable image cache" />
-                        <Grid ColumnDefinitions="160,*,40" IsEnabled="{Binding ImageCacheEnabled}">
-                            <TextBlock Grid.Column="0" Text="Cache expiry (minutes)" VerticalAlignment="Center" />
-                            <Slider Grid.Column="1" Minimum="1" Maximum="1440" Value="{Binding ImageCacheExpireMinutes}" AutomationProperties.Name="Cache expiry in minutes" />
-                            <TextBlock Grid.Column="2" Text="{Binding ImageCacheExpireMinutes}" VerticalAlignment="Center" HorizontalAlignment="Right" />
-                        </Grid>
-                        <Grid ColumnDefinitions="160,*,40">
-                            <TextBlock Grid.Column="0" Text="Decode concurrency" VerticalAlignment="Center" />
-                            <Slider Grid.Column="1" Minimum="1" Maximum="{Binding MaxDecodeConcurrency}" Value="{Binding ImageDecodeConcurrency}" AutomationProperties.Name="Image decode concurrency" />
-                            <TextBlock Grid.Column="2" Text="{Binding ImageDecodeConcurrency}" VerticalAlignment="Center" HorizontalAlignment="Right" />
-                        </Grid>
-                        <Separator />
-                        <TextBlock Text="Paths" FontWeight="SemiBold" FontSize="14" />
-                        <TextBlock Text="Chat Logging" FontWeight="SemiBold" />
-                        <CheckBox Content="Enable chat logging" IsChecked="{Binding ChatLoggingEnabled}"
+
+                        <TextBlock Text="Chat Logging" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Enable chat logging"
+                                  IsChecked="{Binding ChatLoggingEnabled}"
                                   AutomationProperties.Name="Enable chat logging" />
-                        <TextBlock Text="Chat Log Directory" Opacity="0.7" />
+                        <TextBlock Text="Chat Log Directory" Foreground="{DynamicResource VelesMutedForeground}" />
                         <Grid ColumnDefinitions="*,Auto">
                             <TextBox Grid.Column="0" Text="{Binding ChatLogDir}"
-                                     Watermark="Default (%APPDATA%\RadegastVeles)"
+                                     PlaceholderText="Default (%APPDATA%\RadegastVeles)"
                                      IsEnabled="{Binding ChatLoggingEnabled}"
                                      AutomationProperties.Name="Chat log directory path" />
                             <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
@@ -52,17 +42,361 @@
                                     IsEnabled="{Binding ChatLoggingEnabled}"
                                     AutomationProperties.Name="Browse for chat log directory" />
                         </Grid>
-                        <TextBlock Text="Image Cache Directory" Opacity="0.7" />
-                        <Grid ColumnDefinitions="*,Auto">
-                            <TextBox Grid.Column="0" Text="{Binding ImageCacheDir}"
-                                     AutomationProperties.Name="Image cache directory path" />
-                            <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
-                                    Click="OnBrowseImageCacheDirClick"
-                                    AutomationProperties.Name="Browse for image cache directory" />
+
+                        <Separator />
+                        <TextBlock Text="Connection" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Auto-reconnect after unexpected disconnection"
+                                  IsChecked="{Binding AutoReconnect}"
+                                  AutomationProperties.Name="Auto-reconnect on disconnect" />
+                        <Grid ColumnDefinitions="180,*,50" IsEnabled="{Binding IsReconnectTimeEnabled}">
+                            <TextBlock Grid.Column="0" Text="Reconnect delay (seconds)" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="10" Maximum="300"
+                                    Value="{Binding ReconnectTime}"
+                                    AutomationProperties.Name="Reconnect delay slider" />
+                            <TextBlock Grid.Column="2" Text="{Binding ReconnectTime}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
                         </Grid>
+
+                        <Separator />
+                        <TextBlock Text="Privacy" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Disable look-at targets (prevents others seeing where you look)"
+                                  IsChecked="{Binding DisableLookAt}"
+                                  AutomationProperties.Name="Disable look-at targets" />
+
+                        <Separator />
+                        <TextBlock Text="Restrained Life / RLVa" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Allows in-world scripted objects to control certain viewer behaviours. Only enable if you trust the objects you interact with." />
+                        <CheckBox Content="Enable RLV (Restrained Life Viewer v2.4.x / RLVa 2.4.2)"
+                                  IsChecked="{Binding RlvEnabled}"
+                                  AutomationProperties.Name="Enable RLV" />
+                        <CheckBox Content="Log debug command output to chat"
+                                  IsChecked="{Binding RlvDebugCommands}"
+                                  IsEnabled="{Binding RlvEnabled}"
+                                  AutomationProperties.Name="Enable RLV debug command logging" />
+
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
+
+            <!-- ═══════════════════════════════════════════════════ CHAT -->
+            <TabItem Header="Chat" AutomationProperties.Name="Chat preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+
+                        <TextBlock Text="Emotes &amp; Poses" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Enable MU* style emotes  (:action sends as /me action)"
+                                  IsChecked="{Binding MuEmotes}"
+                                  AutomationProperties.Name="Enable MU* style emotes" />
+
+                        <Separator />
+                        <TextBlock Text="Appearance" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Show timestamps in nearby chat"
+                                  IsChecked="{Binding ChatTimestamps}"
+                                  AutomationProperties.Name="Show timestamps in nearby chat" />
+                        <CheckBox Content="Show timestamps in IMs"
+                                  IsChecked="{Binding ImTimestamps}"
+                                  AutomationProperties.Name="Show timestamps in IMs" />
+                        <CheckBox Content="Make avatar names clickable links"
+                                  IsChecked="{Binding AvNameLink}"
+                                  AutomationProperties.Name="Make avatar names clickable links" />
+
+                        <Separator />
+                        <TextBlock Text="Behaviour" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Don't play typing animation while composing messages"
+                                  IsChecked="{Binding NoTypingAnim}"
+                                  AutomationProperties.Name="Disable typing animation" />
+                        <CheckBox Content="Send typing notifications to other residents"
+                                  IsChecked="{Binding SendTypingNotifications}"
+                                  AutomationProperties.Name="Send typing notifications" />
+                        <CheckBox Content="Resolve URLs in chat to their page titles"
+                                  IsChecked="{Binding ResolveUris}"
+                                  AutomationProperties.Name="Resolve URLs in chat" />
+                        <CheckBox Content="Resolve URLs as plaintext only (no metadata fetch)"
+                                  IsChecked="{Binding ResolveUrisAsPlaintext}"
+                                  IsEnabled="{Binding IsResolveUriPlaintextEnabled}"
+                                  AutomationProperties.Name="Resolve URLs as plaintext only" />
+
+                        <Separator />
+                        <TextBlock Text="Conference Chats" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Ignore unsolicited conference chats"
+                                  IsChecked="{Binding IgnoreConferenceChats}"
+                                  AutomationProperties.Name="Ignore conference chats" />
+                        <CheckBox Content="Allow conference chats from friends even if ignoring"
+                                  IsChecked="{Binding AllowConferenceChatsFromFriends}"
+                                  IsEnabled="{Binding IsConferenceAllowFromFriendsEnabled}"
+                                  AutomationProperties.Name="Allow conference chats from friends" />
+
+                        <Separator />
+                        <TextBlock Text="Auto-Response" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Send this reply automatically:" Foreground="{DynamicResource VelesMutedForeground}" />
+                        <ComboBox ItemsSource="{Binding AutoResponseTypeItems}"
+                                  SelectedIndex="{Binding AutoResponseTypeIndex}"
+                                  HorizontalAlignment="Stretch"
+                                  AutomationProperties.Name="Auto-response trigger" />
+                        <TextBox Text="{Binding AutoResponseText}"
+                                 AcceptsReturn="False"
+                                 PlaceholderText="Auto-response message text"
+                                 AutomationProperties.Name="Auto-response message text" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══════════════════════════════════════════════════ NOTIFICATIONS -->
+            <TabItem Header="Notifications" AutomationProperties.Name="Notification preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <DockPanel Margin="8">
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                                    Spacing="6" Margin="0,8,0,0">
+                            <Button Content="Refresh" Command="{Binding LoadNotificationPrefsCommand}"
+                                    AutomationProperties.Name="Reload notification preferences" />
+                            <Button Content="Save" Command="{Binding SaveNotificationPrefsCommand}"
+                                    AutomationProperties.Name="Save notification preferences" />
+                            <TextBlock Text="{Binding NotificationPrefsStatus}" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource VelesMutedForeground}" FontStyle="Italic"
+                                       IsVisible="{Binding NotificationPrefsStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Top" Spacing="10">
+
+                            <TextBlock Text="Friends" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Show online / offline notifications for friends"
+                                      IsChecked="{Binding FriendsNotificationHighlight}"
+                                      AutomationProperties.Name="Friends online notification" />
+
+                            <Separator />
+                            <TextBlock Text="Chat &amp; IMs" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Flash window on nearby chat activity"
+                                      IsChecked="{Binding HighlightOnChat}"
+                                      AutomationProperties.Name="Highlight on nearby chat" />
+                            <CheckBox Content="Flash window on new personal IM"
+                                      IsChecked="{Binding HighlightOnIm}"
+                                      AutomationProperties.Name="Highlight on personal IM" />
+                            <CheckBox Content="Flash window on new group IM"
+                                      IsChecked="{Binding HighlightOnGroupIm}"
+                                      AutomationProperties.Name="Highlight on group IM" />
+                            <CheckBox Content="Play sound on new group IM"
+                                      IsChecked="{Binding GroupImSound}"
+                                      AutomationProperties.Name="Play sound on group IM" />
+                            <CheckBox Content="Play sound when mentioned by name in chat"
+                                      IsChecked="{Binding MentionMeSound}"
+                                      AutomationProperties.Name="Play sound on mention" />
+
+                            <Separator />
+                            <TextBlock Text="Transactions" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Show L$ transaction amount in nearby chat"
+                                      IsChecked="{Binding TransactionNotificationChat}"
+                                      AutomationProperties.Name="Transaction notification in chat" />
+                            <CheckBox Content="Show L$ transaction dialog"
+                                      IsChecked="{Binding TransactionNotificationDialog}"
+                                      AutomationProperties.Name="Transaction notification dialog" />
+
+                            <Separator />
+                            <TextBlock Text="Server Notification Channels" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                       Text="Click Refresh to load your per-channel email/IM notification preferences from the server."
+                                       IsVisible="{Binding !IsLoadingNotificationPrefs}" />
+                            <TextBlock Text="Loading&#x2026;"
+                                       IsVisible="{Binding IsLoadingNotificationPrefs}"
+                                       FontStyle="Italic" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <ItemsControl ItemsSource="{Binding NotificationChannels}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:NotificationChannelEntry">
+                                        <CheckBox Content="{Binding Name}"
+                                                  IsChecked="{Binding IsEnabled, Mode=TwoWay}"
+                                                  Margin="0,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                        </StackPanel>
+                    </DockPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══════════════════════════════════════════════════ VOICE -->
+            <TabItem Header="Voice" AutomationProperties.Name="Voice preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+
+                        <CheckBox Content="Enable Voice Chat"
+                                  IsChecked="{Binding VoiceEnabled}"
+                                  FontWeight="SemiBold"
+                                  AutomationProperties.Name="Enable voice chat" />
+                        <TextBlock Text="Voice chat requires the WebRTC audio backend which was not detected."
+                                   FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                                   IsVisible="{Binding !VoiceSystemAvailable}" />
+
+                        <StackPanel IsEnabled="{Binding VoiceSystemAvailable}" Spacing="12">
+                            <Separator />
+                            <TextBlock Text="Connection" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Automatically connect to parcel voice on login / region change"
+                                      IsChecked="{Binding VoiceAutoConnect}"
+                                      AutomationProperties.Name="Auto-connect to parcel voice" />
+                            <CheckBox Content="Push-to-Talk (hold the Talk button in the status bar to speak)"
+                                      IsChecked="{Binding VoicePushToTalkEnabled}"
+                                      AutomationProperties.Name="Enable push to talk" />
+                            <Grid ColumnDefinitions="Auto,*" IsEnabled="{Binding VoicePushToTalkEnabled}"
+                                  AutomationProperties.Name="PTT key row">
+                                <TextBlock Grid.Column="0" Text="PTT Hotkey" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding Voice.PttKeyOptions}"
+                                          SelectedItem="{Binding Voice.PttKey}"
+                                          AutomationProperties.Name="Push-to-talk hotkey" />
+                            </Grid>
+
+                            <Separator />
+                            <TextBlock Text="Volumes" FontWeight="SemiBold" FontSize="14" />
+                            <Grid ColumnDefinitions="140,*,40">
+                                <TextBlock Grid.Column="0" Text="Speaker Volume" VerticalAlignment="Center" />
+                                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding VoiceOutputVolume}"
+                                        AutomationProperties.Name="Voice speaker volume slider" />
+                                <TextBlock Grid.Column="2" Text="{Binding VoiceOutputVolume, StringFormat='{}{0}%'}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+                            </Grid>
+
+                            <Separator />
+                            <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Input Device" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <ComboBox ItemsSource="{Binding VoiceInputDevices}"
+                                      SelectedItem="{Binding VoiceSelectedInputDevice, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch"
+                                      AutomationProperties.Name="Voice microphone input device" />
+                            <TextBlock Text="Select the microphone to use for voice chat."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <TextBlock Text="Input Level" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <ProgressBar Minimum="0" Maximum="1"
+                                         Value="{Binding Voice.MicLevel}"
+                                         Height="12" CornerRadius="3"
+                                         AutomationProperties.Name="Microphone input level" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button Content="Test Microphone"
+                                        Command="{Binding Voice.ToggleMicTestCommand}"
+                                        IsVisible="{Binding Voice.IsMicTestActive, Converter={x:Static BoolConverters.Not}}"
+                                        AutomationProperties.Name="Start microphone test" />
+                                <Button Content="Stop Test"
+                                        Command="{Binding Voice.ToggleMicTestCommand}"
+                                        IsVisible="{Binding Voice.IsMicTestActive}"
+                                        AutomationProperties.Name="Stop microphone test" />
+                                <TextBlock Text="Recording&#x2026;" VerticalAlignment="Center"
+                                           FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                                           IsVisible="{Binding Voice.IsMicTestActive}" />
+                            </StackPanel>
+                            <TextBlock Text="Click 'Test Microphone' to verify your mic is working. The level bar will animate when sound is detected."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+
+                            <!-- ── Audio Processing ───────────────────────────────────── -->
+                            <Separator />
+                            <TextBlock Text="Audio Processing" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="WebRTC APM processes the captured microphone signal before transmission."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+                            <CheckBox Content="Noise Suppression"
+                                      IsChecked="{Binding VoiceNoiseSuppression}"
+                                      AutomationProperties.Name="Enable noise suppression" />
+                            <CheckBox Content="High-Pass Filter (remove low-frequency rumble)"
+                                      IsChecked="{Binding VoiceHighPassFilter}"
+                                      AutomationProperties.Name="Enable high-pass filter" />
+                            <CheckBox Content="Automatic Gain Control (AGC)"
+                                      IsChecked="{Binding VoiceAgc}"
+                                      AutomationProperties.Name="Enable automatic gain control" />
+                            <CheckBox Content="Echo Cancellation"
+                                      IsChecked="{Binding VoiceEchoCancellation}"
+                                      AutomationProperties.Name="Enable echo cancellation" />
+                            <TextBlock Text="Changes take effect when you click Apply."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" />
+
+                            <!-- ── Text to Speech ─────────────────────────────────────── -->
+                            <Separator />
+                            <TextBlock Text="Text to Speech" FontWeight="SemiBold" FontSize="14" />
+                            <CheckBox Content="Enable Text to Speech (speak via voice channel)"
+                                      IsChecked="{Binding Voice.VoiceSynth.VoiceSynthEnabled}"
+                                      AutomationProperties.Name="Enable text to speech" />
+                            <TextBlock Text="TTS requires a connected voice session and a Piper voice model."
+                                       FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+
+                            <StackPanel IsEnabled="{Binding Voice.VoiceSynth.VoiceSynthEnabled}" Spacing="12">
+                                <TextBlock Text="Voice Model" FontWeight="SemiBold" FontSize="13" Margin="0,4,0,0" />
+                                <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                           Text="Download a Piper ONNX voice model from https://github.com/rhasspy/piper and extract it to a folder. Point the path below to that folder." />
+
+                                <TextBlock Text="Model Directory" Foreground="{DynamicResource VelesMutedForeground}" />
+                                <Grid ColumnDefinitions="*,Auto">
+                                    <TextBox Grid.Column="0"
+                                             Text="{Binding Voice.VoiceSynth.ModelDirectory}"
+                                             PlaceholderText="Path to folder containing the .onnx model and tokens.txt"
+                                             AutomationProperties.Name="TTS model directory" />
+                                    <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
+                                            Click="OnBrowseTtsModelDirClick"
+                                            AutomationProperties.Name="Browse for TTS model directory" />
+                                </Grid>
+
+                                <TextBlock Text="{Binding Voice.VoiceSynth.ModelStatusText}"
+                                           FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" FontStyle="Italic"
+                                           AutomationProperties.Name="TTS model status" />
+
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="Download Voice Model&#x2026;"
+                                            Click="OnDownloadVoiceModelClick"
+                                            AutomationProperties.Name="Download Piper voice model" />
+                                    <Button Content="Load Model"
+                                            Command="{Binding Voice.VoiceSynth.LoadModelCommand}"
+                                            IsEnabled="{Binding Voice.VoiceSynth.ModelLoading, Converter={x:Static BoolConverters.Not}}"
+                                            AutomationProperties.Name="Load TTS model" />
+                                    <Button Content="Unload"
+                                            Command="{Binding Voice.VoiceSynth.UnloadModelCommand}"
+                                            IsEnabled="{Binding Voice.VoiceSynth.ModelLoaded}"
+                                            AutomationProperties.Name="Unload TTS model" />
+                                </StackPanel>
+
+                                <TextBlock Text="Parameters" FontWeight="SemiBold" FontSize="13" Margin="0,4,0,0" />
+                                <Grid ColumnDefinitions="140,*,40">
+                                    <TextBlock Grid.Column="0" Text="Speed" VerticalAlignment="Center" />
+                                    <Slider Grid.Column="1" Minimum="0.5" Maximum="2.0"
+                                            Value="{Binding Voice.VoiceSynth.Speed}"
+                                            TickFrequency="0.1" IsSnapToTickEnabled="True"
+                                            AutomationProperties.Name="TTS speech speed" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding Voice.VoiceSynth.Speed, StringFormat='{}{0:F1}x'}"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                                <Grid ColumnDefinitions="140,*,40">
+                                    <TextBlock Grid.Column="0" Text="Speaker ID" VerticalAlignment="Center" />
+                                    <Slider Grid.Column="1" Minimum="0" Maximum="100"
+                                            Value="{Binding Voice.VoiceSynth.SpeakerId}"
+                                            TickFrequency="1" IsSnapToTickEnabled="True"
+                                            AutomationProperties.Name="TTS speaker ID" />
+                                    <TextBlock Grid.Column="2"
+                                               Text="{Binding Voice.VoiceSynth.SpeakerId}"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                                <TextBlock Text="Speaker ID selects between voices in multi-speaker models. Use 0 for single-speaker models."
+                                           FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
+
+                                <TextBlock Text="Voice Output" FontWeight="SemiBold" FontSize="13" Margin="0,4,0,0" />
+                                <CheckBox Content="Speak what I type in nearby chat as voice"
+                                          IsChecked="{Binding Voice.VoiceSynth.SpeakOutboundChat}"
+                                          AutomationProperties.Name="Speak outbound nearby chat as voice" />
+
+                                <TextBlock Text="Test" FontWeight="SemiBold" FontSize="13" Margin="0,4,0,0" />
+                                <TextBox Text="{Binding Voice.VoiceSynth.TestText}"
+                                         PlaceholderText="Enter text to speak&#x2026;"
+                                         AutomationProperties.Name="TTS test text" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button Content="Speak Test"
+                                            Command="{Binding Voice.VoiceSynth.SpeakTestCommand}"
+                                            IsEnabled="{Binding Voice.VoiceSynth.CanSpeak}"
+                                            AutomationProperties.Name="Speak test text" />
+                                    <TextBlock Text="Voice must be connected and a model loaded to test."
+                                               FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" VerticalAlignment="Center"
+                                               IsVisible="{Binding Voice.VoiceSynth.CanSpeak, Converter={x:Static BoolConverters.Not}}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- ═══════════════════════════════════════════════════ AUDIO -->
             <TabItem Header="Audio" AutomationProperties.Name="Audio preferences">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="8" Spacing="12">
@@ -92,6 +426,7 @@
                         <CheckBox Content="Auto-play parcel audio" IsChecked="{Binding AutoPlay}" AutomationProperties.Name="Auto-play parcel audio" />
                         <CheckBox Content="Keep URL on parcel change" IsChecked="{Binding KeepUrl}" AutomationProperties.Name="Keep URL on parcel change" />
                         <CheckBox Content="Enable object sounds" IsChecked="{Binding ObjectSoundsEnabled}" AutomationProperties.Name="Enable object sounds" />
+                        <CheckBox Content="Show Now Playing notification (song title / station)" IsChecked="{Binding MediaMetadataNotificationsEnabled}" AutomationProperties.Name="Show media metadata notifications" />
                         <Separator />
                         <TextBlock Text="Audio Device" FontWeight="SemiBold" FontSize="14" />
                         <ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" IsEnabled="{Binding SoundSystemAvailable}" HorizontalAlignment="Stretch" AutomationProperties.Name="Audio device selection" />
@@ -104,128 +439,307 @@
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="Voice" AutomationProperties.Name="Voice preferences">
+
+            <!-- ═══════════════════════════════════════════════════ GRAPHICS -->
+            <TabItem Header="Graphics" AutomationProperties.Name="Graphics preferences">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="8" Spacing="12">
+                        <TextBlock Text="Rendering" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Screen-Space Ambient Occlusion (SSAO)"
+                                  IsChecked="{Binding SsaoEnabled}"
+                                  AutomationProperties.Name="Enable screen-space ambient occlusion" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Adds soft contact shadows to geometry. Takes effect the next time a viewer window is opened." />
 
-                        <!-- Master enable toggle — always accessible regardless of hardware -->
-                        <CheckBox Content="Enable Voice Chat"
-                                  IsChecked="{Binding VoiceEnabled}"
-                                  FontWeight="SemiBold"
-                                  AutomationProperties.Name="Enable voice chat" />
+                        <Separator />
 
-                        <TextBlock Text="Voice chat requires the WebRTC/SDL3 audio backend which was not detected."
-                                   FontSize="11" Opacity="0.65"
-                                   IsVisible="{Binding !VoiceSystemAvailable}" />
-
-                        <!-- Everything below is only functional when hardware is present and voice enabled -->
-                        <StackPanel IsEnabled="{Binding VoiceSystemAvailable}" Spacing="12">
-
-                            <Separator />
-                            <TextBlock Text="Connection" FontWeight="SemiBold" FontSize="14" />
-                            <CheckBox Content="Automatically connect to parcel voice on login / region change"
-                                      IsChecked="{Binding VoiceAutoConnect}"
-                                      AutomationProperties.Name="Auto-connect to parcel voice" />
-                            <CheckBox Content="Push-to-Talk (hold the Talk button in the status bar to speak)"
-                                      IsChecked="{Binding VoicePushToTalkEnabled}"
-                                      AutomationProperties.Name="Enable push to talk" />
-
-                            <Separator />
-                            <TextBlock Text="Volumes" FontWeight="SemiBold" FontSize="14" />
-                            <Grid ColumnDefinitions="140,*,40">
-                                <TextBlock Grid.Column="0" Text="Speaker Volume" VerticalAlignment="Center" />
-                                <Slider Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding VoiceOutputVolume}"
-                                        AutomationProperties.Name="Voice speaker volume slider" />
-                                <TextBlock Grid.Column="2" Text="{Binding VoiceOutputVolume, StringFormat='{}{0}%'}"
-                                           VerticalAlignment="Center" HorizontalAlignment="Right" />
-                            </Grid>
-
-                            <Separator />
-                            <TextBlock Text="Microphone" FontWeight="SemiBold" FontSize="14" />
-                            <TextBlock Text="Input Device" Opacity="0.7" />
-                            <ComboBox ItemsSource="{Binding VoiceInputDevices}"
-                                      SelectedItem="{Binding VoiceSelectedInputDevice, Mode=TwoWay}"
-                                      HorizontalAlignment="Stretch"
-                                      AutomationProperties.Name="Voice microphone input device" />
-                            <TextBlock Text="Select the microphone to use for voice chat."
-                                       FontSize="11" Opacity="0.65" />
-
-                            <!-- Mic level meter -->
-                            <TextBlock Text="Input Level" Opacity="0.7" />
-                            <ProgressBar Minimum="0" Maximum="1"
-                                         Value="{Binding Voice.MicLevel}"
-                                         Height="12" CornerRadius="3"
-                                         AutomationProperties.Name="Microphone input level" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="Test Microphone"
-                                        Command="{Binding Voice.ToggleMicTestCommand}"
-                                        IsVisible="{Binding Voice.IsMicTestActive, Converter={x:Static BoolConverters.Not}}"
-                                        AutomationProperties.Name="Start microphone test" />
-                                <Button Content="Stop Test"
-                                        Command="{Binding Voice.ToggleMicTestCommand}"
-                                        IsVisible="{Binding Voice.IsMicTestActive}"
-                                        AutomationProperties.Name="Stop microphone test" />
-                                <TextBlock Text="Recording…" VerticalAlignment="Center"
-                                           FontSize="11" Opacity="0.7"
-                                           IsVisible="{Binding Voice.IsMicTestActive}" />
-                            </StackPanel>
-                            <TextBlock Text="Click 'Test Microphone' to verify your mic is working. The level bar will animate when sound is detected."
-                                       FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
-
-                        </StackPanel>
+                        <TextBlock Text="Scene Viewer" FontWeight="SemiBold" FontSize="14" />
+                        <CheckBox Content="Enable frustum culling"
+                                  IsChecked="{Binding FrustumCullingEnabled}"
+                                  AutomationProperties.Name="Enable frustum culling" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Skip CPU draw calls for faces outside the camera frustum. Disable temporarily to rule out culling artefacts." />
+                        <CheckBox Content="Enable water reflections"
+                                  IsChecked="{Binding WaterReflectionsEnabled}"
+                                  AutomationProperties.Name="Enable water reflections" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Renders the scene a second time into a reflection texture sampled by the water surface. Disabled by default due to GPU cost. Takes effect the next time a viewer window is opened." />
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="Draw Distance"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <Slider Grid.Row="0" Grid.Column="1"
+                                    Minimum="16" Maximum="512"
+                                    TickFrequency="16" IsSnapToTickEnabled="True"
+                                    Value="{Binding SceneViewerDrawDistance}"
+                                    AutomationProperties.Name="Scene viewer draw distance" />
+                            <TextBlock Grid.Row="0" Grid.Column="2"
+                                       VerticalAlignment="Center" Margin="8,0,0,0">
+                                <TextBlock.Text>
+                                    <MultiBinding StringFormat="{}{0:0} m">
+                                        <Binding Path="SceneViewerDrawDistance" />
+                                    </MultiBinding>
+                                </TextBlock.Text>
+                            </TextBlock>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                       Text="How far (in metres) the scene viewer streams and renders objects. Takes effect the next time a viewer window is opened." />
+                        </Grid>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
-                    <TabItem Header="Grids" AutomationProperties.Name="Grid preferences">
-                        <Grid RowDefinitions="*,Auto" Margin="8">
-                            <Grid Grid.Row="0" ColumnDefinitions="180,*">
-                                <!-- Left: grid list + Add/Remove -->
-                                <DockPanel Grid.Column="0" Margin="0,0,8,0">
-                                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                                                Spacing="4" Margin="0,6,0,0">
-                                        <Button Content="Add" Command="{Binding AddNewGridCommand}"
-                                                AutomationProperties.Name="Add grid" />
-                                        <Button Content="Remove" Command="{Binding RemoveGridCommand}"
-                                                AutomationProperties.Name="Remove grid" />
-                                    </StackPanel>
-                                    <ListBox ItemsSource="{Binding Grids}"
-                                             SelectedItem="{Binding SelectedGrid}"
-                                             AutomationProperties.Name="Grid list">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate>
-                                                <TextBlock Text="{Binding Name}" />
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-                                </DockPanel>
-                                <!-- Right: edit form -->
-                                <StackPanel Grid.Column="1" Spacing="6">
-                                    <TextBlock Text="Select a grid or click Add."
-                                               Opacity="0.55" FontStyle="Italic"
-                                               IsVisible="{Binding !IsFormActive}" />
-                                    <StackPanel Spacing="6" IsVisible="{Binding IsFormActive}">
-                                        <TextBlock Text="Grid ID" Opacity="0.7" />
-                                        <TextBox Text="{Binding EditGridId}"
-                                                 IsReadOnly="{Binding !IsEditingNewGrid}"
-                                                 Watermark="auto-generated if blank"
-                                                 AutomationProperties.Name="Grid ID" />
-                                        <TextBlock Text="Name" Opacity="0.7" />
-                                        <TextBox Text="{Binding EditGridName}"
-                                                 AutomationProperties.Name="Grid name" />
-                                        <TextBlock Text="Login URI" Opacity="0.7" />
-                                        <TextBox Text="{Binding EditGridLoginUri}"
-                                                 AutomationProperties.Name="Grid login URI" />
-                                        <Button Content="Save" Command="{Binding SaveGridCommand}"
-                                                HorizontalAlignment="Right"
-                                                AutomationProperties.Name="Save grid" />
-                                    </StackPanel>
-                                </StackPanel>
-                            </Grid>
-                            <TextBlock Grid.Row="1"
-                                       Text="Built-in grids (agni, aditi) cannot be removed."
-                                       FontSize="11" Opacity="0.65" Margin="0,6,0,0" />
+
+            <!-- ═══════════════════════════════════════════════════ GRIDS -->
+            <TabItem Header="Grids" AutomationProperties.Name="Grid preferences">
+                <Grid RowDefinitions="*,Auto" Margin="8">
+                    <Grid Grid.Row="0" ColumnDefinitions="180,*">
+                        <DockPanel Grid.Column="0" Margin="0,0,8,0">
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                                        Spacing="4" Margin="0,6,0,0">
+                                <Button Content="Add" Command="{Binding AddNewGridCommand}"
+                                        AutomationProperties.Name="Add grid" />
+                                <Button Content="Remove" Command="{Binding RemoveGridCommand}"
+                                        AutomationProperties.Name="Remove grid" />
+                            </StackPanel>
+                            <ListBox ItemsSource="{Binding Grids}"
+                                     SelectedItem="{Binding SelectedGrid}"
+                                     AutomationProperties.Name="Grid list">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                        <StackPanel Grid.Column="1" Spacing="6">
+                            <TextBlock Text="Select a grid or click Add."
+                                       Foreground="{DynamicResource VelesMutedForeground}" FontStyle="Italic"
+                                       IsVisible="{Binding !IsFormActive}" />
+                            <StackPanel Spacing="6" IsVisible="{Binding IsFormActive}">
+                                <TextBlock Text="Grid ID" Foreground="{DynamicResource VelesMutedForeground}" />
+                                <TextBox Text="{Binding EditGridId}"
+                                         IsReadOnly="{Binding !IsEditingNewGrid}"
+                                         PlaceholderText="auto-generated if blank"
+                                         AutomationProperties.Name="Grid ID" />
+                                <TextBlock Text="Name" Foreground="{DynamicResource VelesMutedForeground}" />
+                                <TextBox Text="{Binding EditGridName}"
+                                         AutomationProperties.Name="Grid name" />
+                                <TextBlock Text="Login URI" Foreground="{DynamicResource VelesMutedForeground}" />
+                                <TextBox Text="{Binding EditGridLoginUri}"
+                                         AutomationProperties.Name="Grid login URI" />
+                                <Button Content="Save" Command="{Binding SaveGridCommand}"
+                                        HorizontalAlignment="Right"
+                                        AutomationProperties.Name="Save grid" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Grid.Row="1"
+                               Text="Built-in grids (agni, aditi) cannot be removed."
+                               FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" Margin="0,6,0,0" />
+                </Grid>
+            </TabItem>
+
+            <!-- ═══════════════════════════════════════════════════ ADVANCED -->
+            <TabItem Header="Advanced" AutomationProperties.Name="Advanced preferences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Margin="8" Spacing="12">
+
+                        <!-- ── J2K Decode Tuning ──────────────────────────── -->
+                        <TextBlock Text="J2K Decode Tuning" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Controls how much RAM is reserved for the rest of the application and how much each concurrent JPEG 2000 decode is expected to consume. Lower 'reserved RAM' or 'per-decode budget' to allow more simultaneous decodes on low-memory devices; raise them to reduce GC pressure on constrained systems. Changes take effect immediately without restarting." />
+                        <Grid ColumnDefinitions="180,*,60">
+                            <TextBlock Grid.Column="0" Text="Reserved RAM (MB)" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1"
+                                    Minimum="128" Maximum="4096"
+                                    Value="{Binding DecodeReservedRamMb}"
+                                    AutomationProperties.Name="J2K decode reserved RAM in megabytes" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding DecodeReservedRamMb, StringFormat='{}{0} MB'}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
                         </Grid>
-                    </TabItem>
-                </TabControl>
-            </DockPanel>
-        </Window>
+                        <Grid ColumnDefinitions="180,*,60">
+                            <TextBlock Grid.Column="0" Text="Per-decode budget (MB)" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1"
+                                    Minimum="5" Maximum="100"
+                                    Value="{Binding DecodePerDecodeMb}"
+                                    AutomationProperties.Name="J2K per-decode memory budget in megabytes" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding DecodePerDecodeMb, StringFormat='{}{0:F1} MB'}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <Grid ColumnDefinitions="180,*,60">
+                            <TextBlock Grid.Column="0" Text="Decoded bitmap cache cap" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1"
+                                    Minimum="8" Maximum="2048"
+                                    Value="{Binding SkBitmapCacheCap}"
+                                    AutomationProperties.Name="Maximum number of decoded SKBitmap objects held in the LRU cache" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding SkBitmapCacheCap, StringFormat='{}{0}'}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                                   Text="{Binding MaxConcurrentDecodes, StringFormat='Current gate: {0} simultaneous decode(s)'}"
+                                   AutomationProperties.Name="Current maximum concurrent J2K decodes" />
+                        <Button Content="Reset to auto-detected defaults"
+                                Command="{Binding ResetDecodeGateToAutoCommand}"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.Name="Reset J2K decode tuning to auto-detected defaults" />
+
+                        <Separator />
+
+                        <!-- ── Performance ───────────────────────────────── -->
+                        <TextBlock Text="Performance" FontWeight="SemiBold" FontSize="14" />
+                        <Grid ColumnDefinitions="160,*,40">
+                            <TextBlock Grid.Column="0" Text="Decode concurrency" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1" Minimum="1" Maximum="{Binding MaxDecodeConcurrency}"
+                                    Value="{Binding ImageDecodeConcurrency}"
+                                    AutomationProperties.Name="Image decode concurrency" />
+                            <TextBlock Grid.Column="2" Text="{Binding ImageDecodeConcurrency}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+
+                        <Separator />
+
+                        <!-- ── Asset Cache ───────────────────────────────── -->
+                        <TextBlock Text="Asset Cache" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Stores all downloaded assets (textures, sounds, animations, wearables) on disk. Shared with the texture disk cache directory by default." />
+                        <StackPanel IsEnabled="{Binding AssetCacheEnabled}" Spacing="8">
+                            <TextBlock Text="Cache Directory" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding AssetCacheDir}"
+                                         PlaceholderText="Default (%APPDATA%\RadegastVeles\cache)"
+                                         AutomationProperties.Name="Asset cache directory path" />
+                                <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
+                                        Click="OnBrowseAssetCacheDirClick"
+                                        AutomationProperties.Name="Browse for asset cache directory" />
+                            </Grid>
+                        </StackPanel>
+
+                        <Separator />
+
+                        <!-- ── Texture Disk Cache ─────────────────────────── -->
+                        <TextBlock Text="Texture Disk Cache" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Grid textures (JPEG 2000) are saved to disk as raw .j2k files so they can be reused across sessions without re-downloading or re-decoding." />
+                        <CheckBox Content="Enable texture disk cache"
+                                  IsChecked="{Binding TextureDiskCacheEnabled}"
+                                  AutomationProperties.Name="Enable texture disk cache" />
+                        <StackPanel IsEnabled="{Binding TextureDiskCacheEnabled}" Spacing="8">
+                            <TextBlock Text="Cache Directory" Foreground="{DynamicResource VelesMutedForeground}" />
+                            <Grid ColumnDefinitions="*,Auto">
+                                <TextBox Grid.Column="0"
+                                         Text="{Binding TextureDiskCacheDir}"
+                                         PlaceholderText="Default (%APPDATA%\RadegastVeles\texturecache)"
+                                         AutomationProperties.Name="Texture disk cache directory path" />
+                                <Button Grid.Column="1" Content="Browse&#x2026;" Margin="4,0,0,0"
+                                        Click="OnBrowseTextureDiskCacheDirClick"
+                                        AutomationProperties.Name="Browse for texture disk cache directory" />
+                            </Grid>
+                            <Grid ColumnDefinitions="180,*,60">
+                                <TextBlock Grid.Column="0" Text="Max cached files" VerticalAlignment="Center" />
+                                <Slider Grid.Column="1"
+                                        Minimum="64" Maximum="32768"
+                                        Value="{Binding TextureDiskCacheMaxFiles}"
+                                        AutomationProperties.Name="Maximum cached texture files" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding TextureDiskCacheMaxFiles, StringFormat='{}{0:N0}'}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+                            </Grid>
+                        </StackPanel>
+
+                        <Separator />
+
+                        <!-- ── Texture Bitmap Memory Cache ───────────────── -->
+                        <TextBlock Text="Texture Bitmap Memory Cache" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Decoded bitmaps are kept in memory so textures already seen do not need to be re-decoded. Increase for large worlds with many unique surfaces; decrease on low-memory devices." />
+                        <Grid ColumnDefinitions="180,*,60">
+                            <TextBlock Grid.Column="0" Text="Max cached bitmaps" VerticalAlignment="Center" />
+                            <Slider Grid.Column="1"
+                                    Minimum="64" Maximum="8192"
+                                    Value="{Binding TextureBitmapCacheCapacity}"
+                                    AutomationProperties.Name="Maximum cached decoded bitmaps" />
+                            <TextBlock Grid.Column="2"
+                                       Text="{Binding TextureBitmapCacheCapacity, StringFormat='{}{0:N0}'}"
+                                       VerticalAlignment="Center" HorizontalAlignment="Right" />
+                        </Grid>
+                        <TextBlock Text="{Binding TextureBitmapCacheCount, StringFormat='Currently {0:N0} bitmap(s) in cache'}"
+                                   FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                                   AutomationProperties.Name="Current bitmap cache entry count" />
+                        <ProgressBar Minimum="0" Maximum="1"
+                                     Value="{Binding TextureBitmapCacheFill}"
+                                     Height="6" CornerRadius="3"
+                                     AutomationProperties.Name="Bitmap cache fill level" />
+                        <TextBlock FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" HorizontalAlignment="Right"
+                                   Text="{Binding TextureBitmapCacheFill, StringFormat='{}{0:P0} full'}"
+                                   AutomationProperties.Name="Bitmap cache fill percentage" />
+
+                        <Separator />
+
+                        <!-- ── Cache Statistics + Clear ─────────────────────── -->
+                        <TextBlock Text="Cache Statistics" FontWeight="SemiBold" FontSize="14" />
+                        <Grid ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Center">
+                            <TextBlock Grid.Column="0" Text="{Binding TextureDiskCacheSizeText}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="Refresh"
+                                    Command="{Binding RefreshCacheStatsCommand}"
+                                    Margin="6,0,0,0"
+                                    AutomationProperties.Name="Refresh cache statistics" />
+                            <Button Grid.Column="2" Content="Clear Cache"
+                                    Command="{Binding ClearTextureDiskCacheCommand}"
+                                    IsEnabled="{Binding !IsClearingTextureDiskCache}"
+                                    Margin="6,0,0,0"
+                                    AutomationProperties.Name="Clear texture disk cache" />
+                        </Grid>
+                        <TextBlock Text="{Binding TextureDiskCacheStatusText}"
+                                   FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" FontStyle="Italic"
+                                   IsVisible="{Binding TextureDiskCacheStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                        <Separator />
+
+                        <!-- ── Name Cache ─────────────────────────────────── -->
+                        <TextBlock Text="Name Cache" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Avatar names are cached on disk so they can be resolved instantly across sessions without contacting the server." />
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Display name format" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <ComboBox Grid.Row="0" Grid.Column="1"
+                                      ItemsSource="{Binding NameDisplayModeItems}"
+                                      SelectedIndex="{Binding NameCacheDisplayModeIndex}"
+                                      AutomationProperties.Name="Display name format" />
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Display name max age" VerticalAlignment="Center" Margin="0,8,8,0" />
+                            <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="6" Margin="0,8,0,0">
+                                <Slider Minimum="1" Maximum="168"
+                                        Value="{Binding NameCacheDisplayNameMaxAgeHours}"
+                                        Width="180"
+                                        AutomationProperties.Name="Display name cache max age in hours" />
+                                <TextBlock Text="{Binding NameCacheDisplayNameMaxAgeHours, StringFormat='{}{0} h'}"
+                                           VerticalAlignment="Center" Width="40" />
+                            </StackPanel>
+                        </Grid>
+                        <Grid ColumnDefinitions="*,Auto,Auto" VerticalAlignment="Center" Margin="0,4,0,0">
+                            <TextBlock Grid.Column="0" Text="{Binding NameCacheSizeText}" VerticalAlignment="Center" />
+                            <Button Grid.Column="1" Content="Refresh"
+                                    Command="{Binding RefreshNameCacheStatsCommand}"
+                                    Margin="6,0,0,0"
+                                    AutomationProperties.Name="Refresh name cache statistics" />
+                            <Button Grid.Column="2" Content="Clear Cache"
+                                    Command="{Binding ClearNameCacheCommand}"
+                                    IsEnabled="{Binding !IsClearingNameCache}"
+                                    Margin="6,0,0,0"
+                                    AutomationProperties.Name="Clear name cache" />
+                        </Grid>
+                        <TextBlock Text="{Binding NameCacheStatusText}"
+                                   FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" FontStyle="Italic"
+                                   IsVisible="{Binding NameCacheStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+        </TabControl>
+    </DockPanel>
+</Window>
+

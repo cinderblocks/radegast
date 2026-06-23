@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -26,7 +26,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using CoreJ2K;
-using OpenMetaverse;
+using LibreMetaverse;
 using SkiaSharp;
 using SkiaSharp.Views.Desktop;
 
@@ -245,7 +245,7 @@ namespace Radegast
             // opensim grids need extra push
             if (Instance.NetCom.Grid.Platform == "OpenSim")
             {
-                Client.Grid.RequestMapLayer(GridLayerType.Objects);
+                _ = Client.Grid.RequestMapLayerAsync(GridLayerType.Objects);
             }
             SafeInvalidate();
         }
@@ -292,8 +292,8 @@ namespace Radegast
             {
                 if (Client.Assets.Cache.HasAsset(imageID))
                 {
-                    regionTiles[handle] = J2kImage.FromBytes(
-                            Client.Assets.Cache.GetCachedAssetBytes(imageID)).As<SKBitmap>().ToBitmap();
+                    regionTiles[handle] = J2kImage.DecodeToImage<SKBitmap>(
+                            Client.Assets.Cache.GetCachedAssetBytes(imageID)).ToBitmap();
                     needRepaint = true;
 
                     lock (tileRequests)
@@ -319,7 +319,7 @@ namespace Radegast
                             var responseData = result.data;
                             if (response != null && responseData != null && response.IsSuccessStatusCode)
                             {
-                                regionTiles[handle] = J2kImage.FromBytes(responseData).As<SKBitmap>().ToBitmap();
+                                regionTiles[handle] = J2kImage.DecodeToImage<SKBitmap>(responseData).ToBitmap();
                                 needRepaint = true;
                                 await Client.Assets.Cache.SaveAssetToCacheAsync(imageID, responseData);
                             }
@@ -340,32 +340,24 @@ namespace Radegast
             }
             else
             {
-                Client.Assets.RequestImage(imageID, (state, assetTexture) =>
+                _ = Task.Run(async () =>
                 {
-                    switch (state)
+                    try
                     {
-                        case TextureRequestState.Pending:
-                        case TextureRequestState.Progress:
-                        case TextureRequestState.Started:
-                            return;
-
-                        case TextureRequestState.Finished:
-                            if (assetTexture?.AssetData != null)
-                            {
-                                regionTiles[handle] =
-                                    J2kImage.FromBytes(assetTexture.AssetData).As<SKBitmap>().ToBitmap();
-                                needRepaint = true;
-                            }
-                            lock (tileRequests)
-                                if (tileRequests.Contains(handle))
-                                    tileRequests.Remove(handle);
-                            break;
-
-                        default:
-                            lock (tileRequests)
-                                if (tileRequests.Contains(handle))
-                                    tileRequests.Remove(handle);
-                            break;
+                        var assetTexture = await Client.Assets.RequestImageAsync(imageID);
+                        if (assetTexture?.AssetData != null)
+                        {
+                            regionTiles[handle] =
+                                J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData).ToBitmap();
+                            needRepaint = true;
+                        }
+                    }
+                    catch { }
+                    finally
+                    {
+                        lock (tileRequests)
+                            if (tileRequests.Contains(handle))
+                                tileRequests.Remove(handle);
                     }
                 });
             }
@@ -527,7 +519,7 @@ namespace Radegast
                         }
                     }
 
-                    Client.Grid.RequestMapItems(handle, OpenMetaverse.GridItemType.AgentLocations, GridLayerType.Objects);
+                    Client.Grid.RequestMapItems(handle, LibreMetaverse.GridItemType.AgentLocations, GridLayerType.Objects);
                     
                     lock (requestedLocations)
                     {
@@ -584,7 +576,7 @@ namespace Radegast
                         if (!requestedLocations.Contains(handle))
                         {
                             requestedLocations.Add(handle);
-                            Client.Grid.RequestMapItems(handle, OpenMetaverse.GridItemType.AgentLocations, GridLayerType.Objects);
+                            Client.Grid.RequestMapItems(handle, LibreMetaverse.GridItemType.AgentLocations, GridLayerType.Objects);
                         }
                     }
 
@@ -716,7 +708,7 @@ namespace Radegast
             // Run asynchronously to avoid blocking threads with ManualResetEvent
             Task.Run(async () =>
             {
-                UUID parcelID = Client.Parcels.RequestRemoteParcelID(
+                UUID parcelID = await Client.Parcels.RequestRemoteParcelIDAsync(
                     new Vector3((float)(targetX % regionSize), (float)(targetY % regionSize), 20f),
                     targetRegion.RegionHandle, UUID.Zero);
 

@@ -23,8 +23,8 @@ using System.Collections.Generic;
 using System.Windows.Forms;
 using System.IO;
 using System.Linq;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 
 namespace Radegast
 {
@@ -76,7 +76,12 @@ namespace Radegast
                 cbFriends.Items.Add(f);
             }
 
-            instance.Client.Assets.RequestAsset(anim, AssetType.Animation, true, Assets_OnAssetReceived);
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var asset = await instance.Client.Assets.RequestAssetAsync(anim, AssetType.Animation, true);
+                var transfer = new AssetDownload { Success = asset != null };
+                Assets_OnAssetReceived(transfer, asset);
+            });
         }
 
         private void btnSave_Click(object sender, EventArgs e)
@@ -147,9 +152,15 @@ namespace Radegast
         {
             if (animData == null) return;
 
-            instance.Client.Inventory.RequestCreateItemFromAsset(animData, boxAnimName.Text, "(No description)", AssetType.Animation, InventoryType.Animation, instance.Client.Inventory.FindFolderForType(AssetType.Animation), On_ItemCreated);
             lblStatus.Text = "Uploading...";
             cbFriends.Enabled = false;
+            _ = System.Threading.Tasks.Task.Run(async () =>
+            {
+                var (success, status, itemID, assetID) = await instance.Client.Inventory.RequestCreateItemFromAssetAsync(
+                    animData, boxAnimName.Text, "(No description)", AssetType.Animation, InventoryType.Animation,
+                    instance.Client.Inventory.FindFolderForType(AssetType.Animation), Permissions.NoPermissions);
+                On_ItemCreated(success, status, itemID, assetID);
+            });
         }
 
         private void On_ItemCreated(bool success, string status, UUID itemID, UUID assetID)

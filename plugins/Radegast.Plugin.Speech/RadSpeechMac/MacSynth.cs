@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -27,7 +27,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using RadegastSpeech.Talk;
 using Monobjc.Cocoa;
-using OpenMetaverse.StructuredData;
+using LibreMetaverse.StructuredData;
 
 namespace RadegastSpeech
 {

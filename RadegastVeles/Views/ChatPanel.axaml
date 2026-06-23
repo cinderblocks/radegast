@@ -16,13 +16,31 @@
         <DockPanel Grid.Column="0">
             <!-- Chat input -->
             <Grid DockPanel.Dock="Bottom" ColumnDefinitions="Auto,*,Auto" Margin="4" AutomationProperties.Name="Chat input area">
-                <ComboBox Grid.Column="0" ItemsSource="{Binding ChatTypes}" SelectedIndex="{Binding SelectedChatTypeIndex}" MinWidth="90" VerticalAlignment="Stretch" AutomationProperties.Name="Chat type selector" />
-                <TextBox Grid.Column="1" x:Name="ChatInputBox" Text="{Binding ChatInput, Mode=TwoWay}" Watermark="Type a message..." Margin="4,0" VerticalAlignment="Center" AutomationProperties.Name="Chat message input" AutomationProperties.HelpText="Type your message and press Enter to send" />
+
+                <ComboBox Grid.Column="0" ItemsSource="{Binding ChatTypes}" SelectedIndex="{Binding SelectedChatTypeIndex}" MinWidth="90" VerticalAlignment="Stretch" AutomationProperties.Name="Chat type selector" AutomationProperties.HelpText="Select Whisper, Normal, or Shout. Shift+Enter whispers, Ctrl+Enter shouts." />
+                <TextBox Grid.Column="1" x:Name="ChatInputBox" Text="{Binding ChatInput, Mode=TwoWay}" PlaceholderText="Type a message..." Margin="4,0" VerticalAlignment="Center" AutomationProperties.Name="Chat message input" AutomationProperties.HelpText="Type your message and press Enter to send" />
                 <Button Grid.Column="2" Content="Send" Command="{Binding SendChatCommand}" MinWidth="60" VerticalAlignment="Stretch" AutomationProperties.Name="Send chat message" />
             </Grid>
 
+            <!-- History indicator: appears when earlier messages exist above the current view -->
+            <Grid DockPanel.Dock="Top"
+                  IsVisible="{Binding HasPrecedingHistory}"
+                  Margin="4,4,4,0"
+                  AutomationProperties.Name="Chat history indicator">
+                <TextBlock IsVisible="{Binding !IsLoadingHistory}"
+                           Text="▲  Earlier messages · scroll up to load more"
+                           HorizontalAlignment="Center" FontSize="11" Opacity="0.6"
+                           AutomationProperties.Name="Earlier messages available above" />
+                <StackPanel IsVisible="{Binding IsLoadingHistory}"
+                            Orientation="Horizontal" HorizontalAlignment="Center" Spacing="6">
+                    <ProgressBar IsIndeterminate="True" Width="40" Height="3" VerticalAlignment="Center" />
+                    <TextBlock Text="Loading earlier messages…"
+                               FontSize="11" Opacity="0.6" VerticalAlignment="Center" />
+                </StackPanel>
+            </Grid>
+
             <!-- Chat log -->
-            <ListBox x:Name="ChatLog" ItemsSource="{Binding ChatLines}" Margin="4,4,4,0" AutomationProperties.Name="Chat message history" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <ListBox x:Name="ChatLog" ItemsSource="{Binding ChatLines}" Margin="4,4,4,0" AutomationProperties.Name="Chat message history" AutomationProperties.LiveSetting="Polite" ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionMode="Multiple,Toggle">
                 <ListBox.Styles>
                     <Style Selector="Button.chatName">
                         <Setter Property="Background" Value="Transparent" />
@@ -41,23 +59,53 @@
                 </ListBox.Styles>
                 <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:ChatLine">
-                        <WrapPanel AutomationProperties.Name="{Binding AutomationText}"
-                                   Opacity="{Binding HistoryOpacity}">
-                            <TextBlock Text="{Binding FormattedTime}" Opacity="0.6" Margin="0,0,4,0" />
-                            <Button Classes="chatName" Click="OnChatNameClick" ContextRequested="OnChatNameContextRequested" Tag="{Binding}"
-                                    IsVisible="{Binding HasAgentLink}"
-                                    AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
-                                <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
-                            </Button>
-                            <Button Classes="chatName" Click="OnChatObjectClick" ContextRequested="OnChatObjectContextRequested" Tag="{Binding}"
-                                    IsVisible="{Binding HasObjectLink}"
-                                    AutomationProperties.Name="{Binding From, StringFormat=Object: {0}}">
-                                <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
-                            </Button>
-                            <TextBlock Text="{Binding From}" FontWeight="SemiBold"
-                                       IsVisible="{Binding ShowStaticName}" />
-                            <controls:RichChatText Text="{Binding Text}" />
-                        </WrapPanel>
+                        <Grid AutomationProperties.Name="{Binding AutomationText}">
+                            <!-- Date-change separator -->
+                            <Grid IsVisible="{Binding IsDateSeparator}"
+                                  ColumnDefinitions="*,Auto,*"
+                                  Margin="4,6,4,4"
+                                  AutomationProperties.Name="{Binding DateLabel}">
+                                <Border Grid.Column="0" Height="1" VerticalAlignment="Center"
+                                        Background="Gray" Opacity="0.3" Margin="0,0,8,0" />
+                                <TextBlock Grid.Column="1" Text="{Binding DateLabel}"
+                                           FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                                <Border Grid.Column="2" Height="1" VerticalAlignment="Center"
+                                        Background="Gray" Opacity="0.3" Margin="8,0,0,0" />
+                            </Grid>
+
+                            <!-- Normal message row -->
+                            <WrapPanel IsVisible="{Binding !IsDateSeparator}"
+                                       AutomationProperties.Name="{Binding AutomationText}"
+                                       Opacity="{Binding HistoryOpacity}"
+                                       ContextRequested="OnChatLineContextRequested">
+                                <TextBlock Text="{Binding FormattedTime}" Opacity="0.6" Margin="0,0,4,0" />
+
+                                <!-- Emote row: * Name action text * in italic, no separator link -->
+                                <Button Classes="chatName" Click="OnChatNameClick" ContextRequested="OnChatNameContextRequested" Tag="{Binding}"
+                                        IsVisible="{Binding IsEmote}"
+                                        AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
+                                    <TextBlock Text="{Binding EmoteDisplayText}"
+                                               FontStyle="Italic"
+                                               Foreground="#AA88CC" />
+                                </Button>
+
+                                <!-- Normal / Self / Object rows -->
+                                <Button Classes="chatName" Click="OnChatNameClick" ContextRequested="OnChatNameContextRequested" Tag="{Binding}"
+                                        IsVisible="{Binding HasNonEmoteAgentLink}"
+                                        AutomationProperties.Name="{Binding From, StringFormat=Open profile for {0}}">
+                                    <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
+                                </Button>
+                                <Button Classes="chatName" Click="OnChatObjectClick" ContextRequested="OnChatObjectContextRequested" Tag="{Binding}"
+                                        IsVisible="{Binding HasObjectLink}"
+                                        AutomationProperties.Name="{Binding From, StringFormat=Object: {0}}">
+                                    <TextBlock Text="{Binding From}" FontWeight="SemiBold" />
+                                </Button>
+                                <TextBlock Text="{Binding From}" FontWeight="SemiBold"
+                                           IsVisible="{Binding ShowStaticName}" />
+                                <controls:RichChatText Text="{Binding Text}"
+                                                       IsVisible="{Binding ShowNamePrefix}" />
+                            </WrapPanel>
+                        </Grid>
                     </DataTemplate>
                 </ListBox.ItemTemplate>
             </ListBox>
@@ -81,19 +129,55 @@
 
             <!-- Movement controls (compact) -->
             <Border DockPanel.Dock="Top" Padding="4,4,4,2" AutomationProperties.Name="Movement controls">
+                <Border.Styles>
+                    <!-- Pressed visual: accent fill + white glyph while the button is held down -->
+                    <Style Selector="Button.movementBtn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                        <Setter Property="Background" Value="#2B6CB0" />
+                    </Style>
+                    <Style Selector="Button.movementBtn:pressed">
+                        <Setter Property="Foreground" Value="White" />
+                    </Style>
+                </Border.Styles>
                 <StackPanel Spacing="2">
                     <Grid ColumnDefinitions="32,2,32,2,32" RowDefinitions="28,2,28" HorizontalAlignment="Center">
-                        <Button x:Name="BtnForward"  Grid.Row="0" Grid.Column="2" Content="&#x25B2;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Move forward" />
-                        <Button x:Name="BtnLeft"     Grid.Row="2" Grid.Column="0" Content="&#x25C0;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Turn left" />
-                        <Button x:Name="BtnBackward" Grid.Row="2" Grid.Column="2" Content="&#x25BC;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Move backward" />
-                        <Button x:Name="BtnRight"    Grid.Row="2" Grid.Column="4" Content="&#x25B6;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Turn right" />
+                        <Button x:Name="BtnForward"  Classes="movementBtn" Grid.Row="0" Grid.Column="2" Content="&#x25B2;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Move forward" />
+                        <Button x:Name="BtnLeft"     Classes="movementBtn" Grid.Row="2" Grid.Column="0" Content="&#x25C0;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Turn left" />
+                        <Button x:Name="BtnBackward" Classes="movementBtn" Grid.Row="2" Grid.Column="2" Content="&#x25BC;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Move backward" />
+                        <Button x:Name="BtnRight"    Classes="movementBtn" Grid.Row="2" Grid.Column="4" Content="&#x25B6;" Width="32" Height="28" Padding="0" HorizontalContentAlignment="Center" AutomationProperties.Name="Turn right" />
                     </Grid>
                     <WrapPanel HorizontalAlignment="Center" Orientation="Horizontal">
-                        <Button x:Name="BtnJump"   Content="Jump"  Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Jump" />
-                        <Button x:Name="BtnCrouch" Content="Crouch" Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Crouch" />
+                        <Button x:Name="BtnJump"   Classes="movementBtn" Content="Jump"  Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Jump" />
+                        <Button x:Name="BtnCrouch" Classes="movementBtn" Content="Crouch" Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Crouch" />
                         <ToggleButton Content="Fly" IsChecked="{Binding IsFlying}"  Command="{Binding ToggleFlyCommand}"  Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Toggle flying" />
                         <ToggleButton Content="Run" IsChecked="{Binding IsRunning}" Command="{Binding ToggleRunCommand}" Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Toggle running" />
+                        <ToggleButton Content="{Binding SitOnGroundLabel}" IsChecked="{Binding IsSittingOnGround}" Command="{Binding ToggleSitOnGroundCommand}" Margin="2,1" MinWidth="44" Padding="4,2" AutomationProperties.Name="Toggle sit on ground" />
                     </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Media controls + Now Playing ticker -->
+            <Border DockPanel.Dock="Bottom" Padding="4,3,4,3"
+                    IsVisible="{Binding IsMediaAvailable}"
+                    AutomationProperties.Name="Media controls">
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Button Content="&#x25B6;" Command="{Binding PlayStreamCommand}"
+                            IsVisible="{Binding !IsStreamPlaying}"
+                            MinWidth="20" MinHeight="16" Padding="3,0" FontSize="10"
+                            ToolTip.Tip="Play stream"
+                            AutomationProperties.Name="Play stream" />
+                    <Button Content="&#x23F8;" Command="{Binding StopStreamCommand}"
+                            IsVisible="{Binding IsStreamPlaying}"
+                            MinWidth="20" MinHeight="16" Padding="3,0" FontSize="10"
+                            ToolTip.Tip="Stop stream"
+                            AutomationProperties.Name="Stop stream" />
+                    <TextBlock Text="&#x266B;" FontSize="11" Opacity="0.6" VerticalAlignment="Center"
+                               IsVisible="{Binding IsStreamPlaying}" />
+                    <TextBlock Text="{Binding NowPlayingText}" FontSize="11"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding NowPlayingText}"
+                               IsVisible="{Binding IsStreamPlaying}"
+                               AutomationProperties.Name="Now playing text" />
                 </StackPanel>
             </Border>
 
@@ -103,67 +187,80 @@
                     <TextBlock DockPanel.Dock="Top" Text="Nearby" FontWeight="SemiBold" Margin="0,0,0,2" />
 
                     <!-- Sim permission / health status bar -->
-                    <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+                    <WrapPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4"
+                               AutomationProperties.Name="Sim status"
+                               AutomationProperties.LiveSetting="Polite">
                         <!-- Health: ♥ + percentage, shown only when damage is enabled -->
                         <StackPanel Orientation="Horizontal" Spacing="2"
                                     IsVisible="{Binding IsDamageEnabled}"
                                     ToolTip.Tip="Avatar health"
+                                    AutomationProperties.Name="{Binding HealthAccessibleText}"
                                     Margin="0,0,6,0">
-                            <TextBlock Text="♥" Foreground="#CC2222" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="♥" Foreground="#CC2222" FontSize="12" VerticalAlignment="Center" AutomationProperties.Name="" />
                             <TextBlock Text="{Binding Health, StringFormat='{}{0:0}%'}" FontSize="11"
-                                       Foreground="#CC2222" VerticalAlignment="Center" />
+                                       Foreground="#CC2222" VerticalAlignment="Center" AutomationProperties.Name="" />
                         </StackPanel>
 
                         <!-- Fly -->
                         <TextBlock Text="✈" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding CanFly}"
                                    ToolTip.Tip="Flying allowed"
+                                   AutomationProperties.Name="Flying allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="✈" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !CanFly}"
                                    ToolTip.Tip="Flying not allowed"
+                                   AutomationProperties.Name="Flying not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Build -->
                         <TextBlock Text="⚒" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding CanBuild}"
                                    ToolTip.Tip="Building allowed"
+                                   AutomationProperties.Name="Building allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="⚒" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !CanBuild}"
                                    ToolTip.Tip="Building not allowed"
+                                   AutomationProperties.Name="Building not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Scripts -->
                         <TextBlock Text="⚙" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding ScriptsAllowed}"
                                    ToolTip.Tip="Scripts allowed"
+                                   AutomationProperties.Name="Scripts allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="⚙" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !ScriptsAllowed}"
                                    ToolTip.Tip="Scripts not allowed"
+                                   AutomationProperties.Name="Scripts not allowed"
                                    Margin="0,0,6,0" />
 
                         <!-- Push -->
                         <TextBlock Text="↑" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding PushAllowed}"
                                    ToolTip.Tip="Avatar push allowed"
+                                   AutomationProperties.Name="Avatar push allowed"
                                    Margin="0,0,6,0" />
                         <TextBlock Text="↑" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !PushAllowed}"
                                    ToolTip.Tip="Avatar push restricted"
+                                   AutomationProperties.Name="Avatar push restricted"
                                    Margin="0,0,6,0" />
 
                         <!-- Voice -->
                         <TextBlock Text="♪" FontSize="13" Foreground="#44BB44"
                                    IsVisible="{Binding VoiceAllowed}"
-                                   ToolTip.Tip="Voice chat allowed" />
+                                   ToolTip.Tip="Voice chat allowed"
+                                   AutomationProperties.Name="Voice chat allowed" />
                         <TextBlock Text="♪" FontSize="13" Foreground="#CC2222"
                                    IsVisible="{Binding !VoiceAllowed}"
-                                   ToolTip.Tip="Voice chat not allowed" />
+                                   ToolTip.Tip="Voice chat not allowed"
+                                   AutomationProperties.Name="Voice chat not allowed" />
                     </WrapPanel>
 
-                    <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" AutomationProperties.LiveSetting="Polite" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.Styles>
                             <Style Selector="Button.nearbyName">
                                 <Setter Property="Background" Value="Transparent" />
@@ -184,11 +281,45 @@
                         </ListBox.Styles>
                         <ListBox.ItemTemplate>
                             <DataTemplate x:DataType="vm:NearbyAvatar">
-                                <Button Classes="nearbyName" Click="OnNearbyAvatarClick" ContextRequested="OnNearbyContextRequested" Tag="{Binding}"
-                                        IsEnabled="{Binding !IsSelf}"
-                                        AutomationProperties.Name="{Binding DisplayText, StringFormat=Open profile for {0}}">
-                                    <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="{Binding DisplayText}" />
-                                </Button>
+                                <WrapPanel VerticalAlignment="Center"
+                                           AutomationProperties.Name="{Binding AccessibleText}">
+                                    <Button Classes="nearbyName" Click="OnNearbyAvatarClick" ContextRequested="OnNearbyContextRequested" Tag="{Binding}"
+                                            IsEnabled="{Binding !IsSelf}"
+                                            AutomationProperties.Name="{Binding DisplayText, StringFormat=Open profile for {0}}">
+                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="" />
+                                    </Button>
+                                    <!-- Status icons: visible for sighted users, silenced for screen readers (AccessibleText has the combined description) -->
+                                    <TextBlock Text="{Binding VoiceIcon}"
+                                               IsVisible="{Binding ShowVoiceIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="In voice channel"
+                                               AutomationProperties.Name="" />
+                                    <TextBlock Text="{Binding TypingIcon}"
+                                               IsVisible="{Binding ShowTypingIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="Typing"
+                                               AutomationProperties.Name="" />
+                                    <TextBlock Text="{Binding AwayIcon}"
+                                               IsVisible="{Binding ShowAwayIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="Away"
+                                               AutomationProperties.Name="" />
+                                    <TextBlock Text="{Binding BusyIcon}"
+                                               IsVisible="{Binding ShowBusyIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="Busy / Do Not Disturb"
+                                               AutomationProperties.Name="" />
+                                    <TextBlock Text="{Binding FlyingIcon}"
+                                               IsVisible="{Binding ShowFlyingIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="Flying"
+                                               AutomationProperties.Name="" />
+                                    <TextBlock Text="{Binding SittingIcon}"
+                                               IsVisible="{Binding ShowSittingIcon}"
+                                               FontSize="11" VerticalAlignment="Center"
+                                               Margin="3,0,0,0" ToolTip.Tip="Sitting"
+                                               AutomationProperties.Name="" />
+                                </WrapPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>
                     </ListBox>

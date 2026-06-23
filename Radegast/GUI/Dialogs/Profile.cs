@@ -24,8 +24,8 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
-using OpenMetaverse;
-using OpenMetaverse.Messages.Linden;
+using LibreMetaverse;
+using LibreMetaverse.Messages.Linden;
 
 namespace Radegast
 {
@@ -149,7 +149,7 @@ namespace Radegast
 
         private void UpdateMuteButton()
         {
-            bool isMuted = Client.Self.MuteList.Find(me => me.Type == MuteType.Resident && me.ID == AgentID) != null;
+            bool isMuted = Client.Self.MuteList.Values.Any(me => me.Type == MuteType.Resident && me.ID == AgentID);
 
             if (isMuted)
             {
@@ -541,7 +541,11 @@ namespace Radegast
 
             if (Client.Avatars.AgentProfileAvailable())
             {
-                Task profileReq = Client.Avatars.RequestAgentProfile(AgentID, Avatars_AvatarProfileReply);
+                _ = System.Threading.Tasks.Task.Run(async () =>
+                {
+                    var (success, profile) = await Client.Avatars.RequestAgentProfileAsync(AgentID);
+                    Avatars_AvatarProfileReply(success, profile);
+                });
             }
             else
             {
@@ -626,7 +630,7 @@ namespace Radegast
             }
             else if (node.Tag is InventoryFolder folder)
             {
-                Client.Inventory.GiveFolder(folder.UUID, folder.Name, AgentID, true);
+                _ = System.Threading.Tasks.Task.Run(() => Client.Inventory.GiveFolderAsync(folder.UUID, folder.Name, AgentID, true));
                 Instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {fullName}.");
             }
         }
@@ -708,7 +712,7 @@ namespace Radegast
             else if (inv is InventoryFolder)
             {
                 InventoryFolder folder = inv as InventoryFolder;
-                Client.Inventory.GiveFolder(folder.UUID, folder.Name, AgentID, true);
+                _ = System.Threading.Tasks.Task.Run(() => Client.Inventory.GiveFolderAsync(folder.UUID, folder.Name, AgentID, true));
                 Instance.TabConsole.DisplayNotificationInChat($"Offered folder {folder.Name} to {fullName}.");
             }
 
@@ -763,9 +767,9 @@ namespace Radegast
 
         private void btnNewPick_Click(object sender, EventArgs e)
         {
-            ThreadPool.QueueUserWorkItem(sync =>
+            _ = System.Threading.Tasks.Task.Run(async () =>
                 {
-                    UUID parcelID = Client.Parcels.RequestRemoteParcelID(
+                    UUID parcelID = await Client.Parcels.RequestRemoteParcelIDAsync(
                         Client.Self.SimPosition, Client.Network.CurrentSim.Handle, Client.Network.CurrentSim.ID);
                     newPickID = UUID.Random();
 
@@ -830,7 +834,7 @@ namespace Radegast
 
         private void btnUnmute_Click(object sender, EventArgs e)
         {
-            MuteEntry me = Client.Self.MuteList.Find(mle => mle.Type == MuteType.Resident && mle.ID == AgentID);
+            MuteEntry me = Client.Self.MuteList.Values.FirstOrDefault(mle => mle.Type == MuteType.Resident && mle.ID == AgentID);
 
             if (me != null)
             {

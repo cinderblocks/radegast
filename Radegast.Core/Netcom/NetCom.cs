@@ -22,7 +22,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
-using OpenMetaverse;
+using LibreMetaverse;
 
 namespace Radegast
 {
@@ -238,7 +238,7 @@ namespace Radegast
             }
         }
 
-        public void Instance_ClientChanged(object sender, ClientChangedEventArgs e)
+        public void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
         {
             try
             {
@@ -253,6 +253,11 @@ namespace Radegast
 
         public void Login()
         {
+            if (IsLoggingIn)
+            {
+                Client.Network.AbortLogin();
+            }
+
             IsLoggingIn = true;
 
 
@@ -317,6 +322,13 @@ namespace Radegast
             loginParams.Token = LoginOptions.MfaToken!;
 
             Client.Network.BeginLogin(loginParams);
+        }
+
+        public void CancelLogin()
+        {
+            if (!IsLoggingIn) { return; }
+            Client.Network.AbortLogin();
+            IsLoggingIn = false;
         }
 
         public void Logout()
@@ -397,13 +409,13 @@ namespace Radegast
 
         public bool IsLoggedIn { get; private set; } = false;
 
-        private void Self_IM(object sender, InstantMessageEventArgs e)
+        private void Self_IM(object? sender, InstantMessageEventArgs e)
         {
             if (IsDuplicateIM(e)) return;
             OnInstantMessageReceived(e);
         }
 
-        private void Network_LoginProgress(object sender, LoginProgressEventArgs e)
+        private void Network_LoginProgress(object? sender, LoginProgressEventArgs e)
         {
             if (e.Status == LoginStatus.Success)
             {
@@ -423,37 +435,37 @@ namespace Radegast
             }
         }
 
-        private void Network_LoggedOut(object sender, LoggedOutEventArgs e)
+        private void Network_LoggedOut(object? sender, LoggedOutEventArgs e)
         {
             IsLoggedIn = false;
             ClearDuplicateCaches();
             OnClientLoggedOut(EventArgs.Empty);
         }
 
-        private void Self_TeleportProgress(object sender, TeleportEventArgs e)
+        private void Self_TeleportProgress(object? sender, TeleportEventArgs e)
         {
             OnTeleportStatusChanged(e);
         }
 
-        private void Self_ChatFromSimulator(object sender, ChatEventArgs e)
+        private void Self_ChatFromSimulator(object? sender, ChatEventArgs e)
         {
             if (IsDuplicateChat(e)) return;
             OnChatReceived(e);
         }
 
-        private void Network_Disconnected(object sender, DisconnectedEventArgs e)
+        private void Network_Disconnected(object? sender, DisconnectedEventArgs e)
         {
             IsLoggedIn = false;
             ClearDuplicateCaches();
             OnClientDisconnected(e);
         }
 
-        private void Self_MoneyBalance(object sender, BalanceEventArgs e)
+        private void Self_MoneyBalance(object? sender, BalanceEventArgs e)
         {
             OnMoneyBalanceUpdated(e);
         }
 
-        private void Self_AlertMessage(object sender, AlertMessageEventArgs e)
+        private void Self_AlertMessage(object? sender, AlertMessageEventArgs e)
         {
              OnAlertMessageReceived(e);
         }

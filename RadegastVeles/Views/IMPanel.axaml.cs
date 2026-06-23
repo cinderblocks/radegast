@@ -17,10 +17,13 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Specialized;
+using System.Linq;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -32,6 +35,10 @@ namespace Radegast.Veles.Views;
 public partial class IMPanel : UserControl
 {
     private IMViewModel? _vm;
+
+    // Typing-indicator debounce: fires StopTyping ~5 s after the last keystroke
+    private DispatcherTimer? _typingStopTimer;
+    private bool _isSendingTyping;
 
     public IMPanel()
     {
@@ -45,11 +52,12 @@ public partial class IMPanel : UserControl
         _vm = DataContext as IMViewModel;
         if (_vm == null) return;
 
-        // Enter key sends message
+        // Enter key sends message; TextChanged fires typing notifications
         var inputBox = this.FindControl<TextBox>("IMInputBox");
         if (inputBox != null)
         {
             inputBox.KeyDown += InputBox_KeyDown;
+            inputBox.TextChanged += InputBox_TextChanged;
         }
 
         // Auto-scroll IM log when messages arrive
@@ -57,12 +65,13 @@ public partial class IMPanel : UserControl
         if (imLog != null)
         {
             _vm.PropertyChanged += (_, args) =>
-            {
-                if (args.PropertyName == nameof(IMViewModel.SelectedSession))
                 {
-                    WireAutoScroll(imLog);
-                }
-            };
+                    if (args.PropertyName == nameof(IMViewModel.SelectedSession))
+                    {
+                        StopTypingLocally();
+                        WireAutoScroll(imLog);
+                    }
+                };
             WireAutoScroll(imLog);
         }
     }
@@ -108,8 +117,11 @@ public partial class IMPanel : UserControl
         {
             // Don't auto-scroll to bottom when inserting history at the top
             if (_vm?.SelectedSession?.IsLoadingHistory == true) return;
-            if (imLog.ItemCount > 0)
-                imLog.ScrollIntoView(imLog.ItemCount - 1);
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (imLog.ItemCount > 0)
+                    imLog.ScrollIntoView(imLog.ItemCount - 1);
+            }, DispatcherPriority.Background);
         }
     }
 
@@ -119,6 +131,53 @@ public partial class IMPanel : UserControl
         var session = _vm.SelectedSession;
         if (_imScrollViewer.Offset.Y < 10 && !session.IsLoadingHistory && !session.HistoryExhausted)
             _vm.LoadMoreHistory(session);
+    }
+
+    private void InputBox_TextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (_vm == null) return;
+
+        var hasText = sender is TextBox tb && !string.IsNullOrEmpty(tb.Text);
+
+        if (hasText)
+        {
+            if (!_isSendingTyping)
+            {
+                _isSendingTyping = true;
+                _vm.NotifyTypingStarted();
+            }
+
+            // Reset the idle timer every keystroke
+            if (_typingStopTimer == null)
+            {
+                _typingStopTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromSeconds(5)
+                };
+                _typingStopTimer.Tick += TypingStopTimer_Tick;
+            }
+            _typingStopTimer.Stop();
+            _typingStopTimer.Start();
+        }
+        else
+        {
+            StopTypingLocally();
+        }
+    }
+
+    private void TypingStopTimer_Tick(object? sender, EventArgs e)
+    {
+        StopTypingLocally();
+    }
+
+    private void StopTypingLocally()
+    {
+        _typingStopTimer?.Stop();
+        if (_isSendingTyping)
+        {
+            _isSendingTyping = false;
+            _vm?.NotifyTypingStopped();
+        }
     }
 
     private void InputBox_KeyDown(object? sender, KeyEventArgs e)
@@ -159,6 +218,24 @@ public partial class IMPanel : UserControl
                 e.Handled = true;
                 break;
         }
+    }
+
+    private void OnIMLineContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (sender is not WrapPanel panel || panel.DataContext is not ChatLine line) return;
+        var copyItem = new MenuItem { Header = "Copy" };
+        copyItem.Click += async (_, _) =>
+        {
+            var imLog = this.FindControl<ListBox>("IMLog");
+            var lines = imLog?.SelectedItems?.OfType<ChatLine>().Where(l => !l.IsDateSeparator).ToList();
+            if (lines == null || lines.Count == 0) lines = [line];
+            var text = string.Join(Environment.NewLine, lines.Select(l => l.CopyText));
+            IClipboard? clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+            if (clipboard != null) await clipboard.SetTextAsync(text);
+        };
+        var menu = new ContextMenu { Items = { copyItem } };
+        menu.Open(panel);
+        e.Handled = true;
     }
 
     private void OnIMNameClick(object? sender, RoutedEventArgs e)

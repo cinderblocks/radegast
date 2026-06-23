@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
@@ -24,8 +24,8 @@ using System;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 using FMOD;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using System.Threading;
 
 namespace Radegast.Media
@@ -88,11 +88,7 @@ namespace Radegast.Media
                 mode |= MODE.LOOP_NORMAL;
 
             // Fetch the sound data.
-            manager.Instance.Client.Assets.RequestAsset(
-                Id,
-                AssetType.Sound,
-                false,
-                Assets_OnSoundReceived);
+            _ = RequestAndProcessSoundAsync();
         }
 
         public static void Kill(UUID id)
@@ -181,40 +177,25 @@ namespace Radegast.Media
             else
             {
                 // Request from asset system
-                manager.Instance.Client.Assets.RequestAsset(
-                    Id,
-                    AssetType.Sound,
-                    false,
-                    Assets_OnSoundReceived);
+                _ = RequestAndProcessSoundAsync();
             }
         }
 
-        /**
-         * Handle arrival of a sound resource.
-         */
-        private void Assets_OnSoundReceived(AssetDownload transfer, Asset? asset)
+        private async System.Threading.Tasks.Task RequestAndProcessSoundAsync()
         {
-            if (transfer.Success)
-            {
-                //                Logger.Log("Opening sound " + Id.ToString(), Helpers.LogLevel.Debug);
+            var asset = await manager.Instance.Client.Assets.RequestAssetAsync(Id, AssetType.Sound, false);
+            if (asset is not AssetSound s) return;
 
-                // Decode the Ogg Vorbis buffer.
-                if (!(asset is AssetSound s)) return;
+            s.Decode();
+            var data = s.AssetData;
 
-                s.Decode();
-                var data = s.AssetData;
+            // Add to cache
+            manager.Cache?.Add(Id, data);
 
-                // Add to cache
-                manager.Cache?.Add(Id, data);
+            // If this was a Prefetch, just stop here.
+            if (prefetchOnly) return;
 
-                // If this was a Prefetch, just stop here.
-                if (prefetchOnly)
-                {
-                    return;
-                }
-
-                ProcessSoundData(data);
-            }
+            ProcessSoundData(data);
         }
 
         /// <summary>

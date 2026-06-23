@@ -19,12 +19,13 @@
 
 using System;
 using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using OpenMetaverse;
-using OpenMetaverse.Assets;
+using LibreMetaverse;
+using LibreMetaverse.Assets;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -59,22 +60,20 @@ public partial class LandmarkViewModel : ObservableObject, IDisposable
 
         Client.Grid.RegionHandleReply += Grid_RegionHandleReply;
         Client.Parcels.ParcelInfoReply += Parcels_ParcelInfoReply;
-        Client.Assets.RequestAsset(item.AssetUUID, AssetType.Landmark, true, OnAssetReceived);
-    }
-
-    private void OnAssetReceived(AssetDownload transfer, Asset? asset)
-    {
-        if (!transfer.Success || asset is not AssetLandmark landmark)
+        _ = Task.Run(async () =>
         {
-            Dispatcher.UIThread.Post(() => { IsLoading = false; StatusText = "Failed to load landmark."; });
-            return;
-        }
-
-        landmark.Decode();
-        _decodedLandmark = landmark;
-        _position = landmark.Position;
-        Dispatcher.UIThread.Post(() => StatusText = "Resolving region...");
-        Client.Grid.RequestRegionHandle(landmark.RegionID);
+            var asset = await Client.Assets.RequestAssetAsync(item.AssetUUID, AssetType.Landmark, true);
+            if (asset is not AssetLandmark landmark)
+            {
+                Dispatcher.UIThread.Post(() => { IsLoading = false; StatusText = "Failed to load landmark."; });
+                return;
+            }
+            landmark.Decode();
+            _decodedLandmark = landmark;
+            _position = landmark.Position;
+            Dispatcher.UIThread.Post(() => StatusText = "Resolving region...");
+            Client.Grid.RequestRegionHandle(landmark.RegionID);
+        });
     }
 
     private async void Grid_RegionHandleReply(object? sender, RegionHandleReplyEventArgs e)
