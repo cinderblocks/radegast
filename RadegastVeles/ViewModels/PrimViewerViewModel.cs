@@ -161,7 +161,11 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             var progress = new Progress<string>(msg =>
                 Dispatcher.UIThread.Post(() => StatusText = msg));
 
-            var submission = await _builder.BuildAsync(prims, _rootLocalId, ObjectName, progress, ct)
+            var texturePatch = new Progress<SceneTexturePatch>(patch =>
+                _viewport?.PatchSubmissionTexture(patch));
+
+            var submission = await _builder.BuildAsync(prims, _rootLocalId, ObjectName, progress, ct,
+                                                       texturePatch: texturePatch)
                                            .ConfigureAwait(false);
 
             _lastSubmission = submission;
