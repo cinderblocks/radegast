@@ -2355,7 +2355,7 @@ public class GlViewportControl : Panel
         while (_pendingTransformOverrides.TryDequeue(out _)) { }
         // Discard all pending scene-object submissions — they belong to the old scene
         // and must not be uploaded to the new one (object local-IDs may be reused).
-        foreach (var key in _pendingSceneObjects.Keys.ToArray())
+        foreach (var key in _pendingSceneObjects.Keys)
         {
             if (_pendingSceneObjects.TryRemove(key, out var sub) && sub != null)
                 DisposePendingBitmaps(sub);

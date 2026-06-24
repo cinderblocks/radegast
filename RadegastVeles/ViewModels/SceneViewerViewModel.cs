@@ -333,6 +333,15 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_objectStreamer == null || _disposed) return;
         _objectStreamer.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _particleStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
+
+        // A full ObjectUpdate may carry a prim that is already (or will become) a
+        // seat for one or more avatars.  When avatar ObjectUpdates arrive before
+        // the seat prim's first ObjectUpdate (common at initial scene load), the
+        // avatar builder falls back to an incorrect world position.  Nudge seated
+        // avatar transforms here so they are corrected as soon as the prim arrives,
+        // without waiting for a terse update (which may never come for static seats).
+        var rootId = e.Prim.ParentID == 0 ? e.Prim.LocalID : e.Prim.ParentID;
+        _avatarStreamer?.OnSeatPrimMoved(e.Simulator, rootId);
     }
 
     private void OnAvatarUpdate(object? sender, AvatarUpdateEventArgs e)

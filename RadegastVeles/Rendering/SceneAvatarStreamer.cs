@@ -662,6 +662,20 @@ internal sealed class SceneAvatarStreamer : IDisposable
             _viewport.SubmitSceneObject(SceneKey(localId), submission);
             _rendered[localId] = 0;
 
+            // For other-avatars: the world position was resolved before the async build.
+            // If the seat prim arrived during that time, a fresh resolve now returns the
+            // correct position.  Issue a fast transform override so the avatar doesn't
+            // linger at the fallback sit-offset-as-world-position.
+            if (localId != _client.Self.LocalID &&
+                sim.ObjectsAvatars.TryGetValue(localId, out var postBuildAv) &&
+                postBuildAv.ParentID != 0)
+            {
+                var (freshPos, freshRot) = ResolveAvatarWorldTransform(sim, postBuildAv);
+                var freshWorldPos = new Vector3(freshPos.X, freshPos.Y, freshPos.Z);
+                if (Vector3.DistanceSquared(freshWorldPos, worldPos) > 0.01f)
+                    _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(freshWorldPos, freshRot));
+            }
+
             // Record the visual-param hash so OnAvatarUpdate can skip redundant rebuilds
             // when only position/rotation changes (no appearance change).
             _lastVisualParamHash[localId] = ComputeVisualParamHash(
