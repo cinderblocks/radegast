@@ -266,8 +266,12 @@ public class GlViewportControl : Panel
     private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
     // FlexiGpuData for scene objects, parallel to _sceneObjects (only populated when compute is available).
     private readonly Dictionary<ulong, FlexiGpuData[]> _flexiGpuDataMap = new();
-    // Pending scene-object updates: (sceneKey, submission).  null submission means "remove".
-    private readonly ConcurrentQueue<(ulong RootId, PrimRenderSubmission? Sub)> _pendingSceneObjects = new();
+    // Pending scene-object updates keyed by sceneKey.  null value means "remove from GPU".
+    // ConcurrentDictionary ensures at most one pending entry per key: when SceneObjectStreamer
+    // rebuilds the same object multiple times (e.g. from SelectObject-triggered ObjectUpdate
+    // floods from the Objects panel), each new submission atomically replaces the previous one
+    // rather than accumulating duplicate float[] vertex arrays in the LOH.
+    private readonly ConcurrentDictionary<ulong, PrimRenderSubmission?> _pendingSceneObjects = new();
     // Flat draw lists rebuilt from _sceneObjects each time objects are added/removed.
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneOpaque = new();
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneAlpha  = new();
@@ -630,7 +634,13 @@ public class GlViewportControl : Panel
     /// </summary>
     public void SubmitSceneObject(ulong sceneKey, PrimRenderSubmission submission)
     {
-        _pendingSceneObjects.Enqueue((sceneKey, submission));
+        // Atomically replace any previous pending submission for this key.
+        // If an older build was displaced, its embedded bitmaps must be disposed here
+        // since they will never reach UploadSceneObjectNoRebuild on the GL thread.
+        _pendingSceneObjects.AddOrUpdate(
+            sceneKey,
+            submission,
+            (_, displaced) => { if (displaced != null) DisposePendingBitmaps(displaced); return submission; });
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -640,7 +650,11 @@ public class GlViewportControl : Panel
     /// </summary>
     public void RemoveSceneObject(ulong sceneKey)
     {
-        _pendingSceneObjects.Enqueue((sceneKey, null));
+        // null = GPU removal request.  Dispose any displaced pending submission.
+        _pendingSceneObjects.AddOrUpdate(
+            sceneKey,
+            (PrimRenderSubmission?)null,
+            (_, displaced) => { if (displaced != null) DisposePendingBitmaps(displaced); return null; });
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -812,14 +826,21 @@ public class GlViewportControl : Panel
             }
             bool sceneListDirty = false;
             int uploadsThisFrame = 0;
-            while (uploadsThisFrame < MaxSceneUploadsPerFrame && _pendingSceneObjects.TryDequeue(out var entry))
+            if (!_pendingSceneObjects.IsEmpty)
             {
-                if (entry.Sub == null)
-                    RemoveSceneObjectGpuNoRebuild(entry.RootId);
-                else
-                    UploadSceneObjectNoRebuild(entry.RootId, entry.Sub);
-                sceneListDirty = true;
-                uploadsThisFrame++;
+                // Snapshot at most MaxSceneUploadsPerFrame keys so the foreach is bounded.
+                // ConcurrentDictionary.Keys is a snapshot enumerable; TryRemove is safe mid-loop.
+                foreach (var key in _pendingSceneObjects.Keys)
+                {
+                    if (uploadsThisFrame >= MaxSceneUploadsPerFrame) break;
+                    if (!_pendingSceneObjects.TryRemove(key, out var sub)) continue;
+                    if (sub == null)
+                        RemoveSceneObjectGpuNoRebuild(key);
+                    else
+                        UploadSceneObjectNoRebuild(key, sub);
+                    sceneListDirty = true;
+                    uploadsThisFrame++;
+                }
             }
             // If we hit the cap, request another render tick to continue draining.
             if (!_pendingSceneObjects.IsEmpty)
@@ -1248,11 +1269,11 @@ public class GlViewportControl : Panel
         }
         _texturePatchGate.Dispose();
 
-        // Drain scene-object queue and dispose pending bitmaps.
-        while (_pendingSceneObjects.TryDequeue(out var entry))
+        // Drain pending scene-object submissions and dispose embedded bitmaps.
+        foreach (var key in _pendingSceneObjects.Keys)
         {
-            if (entry.Sub != null)
-                DisposePendingBitmaps(entry.Sub);
+            if (_pendingSceneObjects.TryRemove(key, out var sub) && sub != null)
+                DisposePendingBitmaps(sub);
         }
 
         foreach (var kv in _pendingParticleMap)
@@ -2332,6 +2353,14 @@ public class GlViewportControl : Panel
         _sceneObjectTransformOverrides.Clear();
         while (_pendingSceneVertexUpdates.TryDequeue(out _)) { }
         while (_pendingTransformOverrides.TryDequeue(out _)) { }
+        // Discard all pending scene-object submissions — they belong to the old scene
+        // and must not be uploaded to the new one (object local-IDs may be reused).
+        foreach (var key in _pendingSceneObjects.Keys.ToArray())
+        {
+            if (_pendingSceneObjects.TryRemove(key, out var sub) && sub != null)
+                DisposePendingBitmaps(sub);
+        }
+
         // Discard deferred and pending texture patches — they belong to the old scene
         // and must not be applied to new objects that may share the same local IDs.
         foreach (var (patch, _) in _deferredPatches) patch.Bitmap?.Dispose();
