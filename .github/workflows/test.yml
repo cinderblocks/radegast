@@ -98,7 +98,7 @@ jobs:
           path: Radegast.Core.Tests/TestResults/test-results.trx
 
   test-windows:
-    name: Test net48 (Windows)
+    name: Test net481 (Windows)
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -113,11 +113,11 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Run tests (net48)
-        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net48 --configuration Release --logger "trx;LogFileName=test-results-net48.trx" --verbosity normal
+        run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net481 --configuration Release --logger "trx;LogFileName=test-results-net481.trx" --verbosity normal
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results-net48
-          path: Radegast.Core.Tests\TestResults\test-results-net48.trx
+          name: test-results-net481
+          path: Radegast.Core.Tests\TestResults\test-results-net481.trx
