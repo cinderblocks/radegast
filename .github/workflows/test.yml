@@ -61,7 +61,7 @@ jobs:
         run: msbuild radegast.sln /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
       - name: Build solution
-        run: msbuild radegast.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+        run: msbuild radegast.sln /m:1 /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
