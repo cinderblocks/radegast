@@ -121,10 +121,7 @@ namespace Radegast.Rendering
                         
                         using (var canvas = new SKCanvas(converted))
                         {
-                            canvas.DrawBitmap(detailTexture[i], new SKRect(0, 0, targetWidth, targetHeight), new SKPaint
-                            {
-                                // use default sampling options
-                            });
+                            canvas.DrawBitmap(detailTexture[i], new SKRect(0, 0, targetWidth, targetHeight), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
                         }
                         
                         detailTexture[i].Dispose();
@@ -292,7 +289,7 @@ namespace Radegast.Rendering
                 canvas.Translate(outputSize / 2f, outputSize / 2f);
                 canvas.RotateDegrees(270);
                 canvas.Translate(-outputSize / 2f, -outputSize / 2f);
-                canvas.DrawBitmap(output, 0, 0);
+                canvas.DrawBitmap(output, 0f, 0f, new SKSamplingOptions());
             }
             output.Dispose();
 
@@ -306,10 +303,7 @@ namespace Radegast.Rendering
             var result = new SKBitmap(nWidth, nHeight, b.ColorType, b.AlphaType);
             using (var canvas = new SKCanvas(result))
             {
-                canvas.DrawBitmap(b, new SKRect(0, 0, nWidth, nHeight), new SKPaint
-                {
-                    // use default sampling options
-                });
+                canvas.DrawBitmap(b, new SKRect(0, 0, nWidth, nHeight), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
             }
             b.Dispose();
             return result;
@@ -324,7 +318,7 @@ namespace Radegast.Rendering
                 {
                     for (int y = 0; y < tiles; y++)
                     {
-                        canvas.DrawBitmap(b, x * 256, y * 256);
+                        canvas.DrawBitmap(b, x * 256f, y * 256f, new SKSamplingOptions());
                     }
                 }
             }

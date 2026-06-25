@@ -267,7 +267,7 @@ namespace Radegast.Rendering
                     using (var canvas = new SKCanvas(flipped))
                     {
                         canvas.Scale(1, -1, 0, skBitmap.Height / 2f);
-                        canvas.DrawBitmap(skBitmap, 0, 0);
+                        canvas.DrawBitmap(skBitmap, 0f, 0f, new SKSamplingOptions());
                     }
 
                     try { skBitmap.Dispose(); } catch { }

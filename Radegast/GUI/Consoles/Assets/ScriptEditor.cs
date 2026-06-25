@@ -777,7 +777,7 @@ namespace Radegast
             bool uploadSuccess;
             string uploadStatus;
             bool compileSuccess;
-            List<string>? compileMessages;
+            List<string> compileMessages;
             UUID returnedItemID, assetID;
 
             if (taskID.HasValue)

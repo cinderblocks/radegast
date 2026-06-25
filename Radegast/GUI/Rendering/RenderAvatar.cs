@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -68,12 +68,12 @@ namespace Radegast.Rendering
         /// Subclass of LODMesh that adds an index array suitable for pushing
         /// direct to OpenGL
         /// </summary>
-        /// 
+        ///
 
         public int teFaceID;
         public Dictionary<int, VisualParamEx> _evp = new Dictionary<int, VisualParamEx>();
 
-        public new class LODMesh : ReferenceMesh
+        public class LODMesh : ReferenceMesh
         {
             public ushort[] Indices;
 
@@ -375,7 +375,7 @@ namespace Radegast.Rendering
 
         }
 
-        public new void LoadLODMesh(int level, string filename)
+        public void LoadLODMesh(int level, string filename)
         {
             LODMesh lod = new LODMesh();
             lod.LoadMesh(filename);
@@ -385,12 +385,12 @@ namespace Radegast.Rendering
         public void applyjointweights()
         {
 
-            /*Each weight actually contains two pieces of information. 
-             * The number to the left of the decimal point is the index of the joint and also 
-             * implicitly indexes to the following joint. The actual weight is to the right of 
-             * the decimal point and interpolates between these two joints. The index is into an 
-             * "expanded" list of joints, not just a linear array of the joints as defined in the 
-             * skeleton file. In particular, any joint that has more than one child will be repeated 
+            /*Each weight actually contains two pieces of information.
+             * The number to the left of the decimal point is the index of the joint and also
+             * implicitly indexes to the following joint. The actual weight is to the right of
+             * the decimal point and interpolates between these two joints. The index is into an
+             * "expanded" list of joints, not just a linear array of the joints as defined in the
+             * skeleton file. In particular, any joint that has more than one child will be repeated
              * in the list for each of its children.
              */
 
@@ -470,7 +470,7 @@ namespace Radegast.Rendering
                         continue;
 
                     ba = av.skel.mBones[jointname];
-                    
+
                     bb = string.IsNullOrEmpty(jointname2) || !av.skel.mBones.ContainsKey(jointname2) ? null : av.skel.mBones[jointname2];
                 }
 
@@ -962,7 +962,7 @@ namespace Radegast.Rendering
                 int x = 0;
 
                 // We need a lock here as we may get multiple packets thrown at us and we should at least
-                // process them in turn not 1/2 process one then start to process the next. 
+                // process them in turn not 1/2 process one then start to process the next.
                 // That said av might not be the best lock object, but it will do for the moment
                 lock (av)
                 {
@@ -1719,8 +1719,8 @@ namespace Radegast.Rendering
 
                         if (ar.playstate != animationwrapper.animstate.STATE_EASEOUT)
                         {
-                            jointstate.rotation = easeoutset 
-                                ? Quaternion.Slerp(jointstate.rotation, state.easeoutrot, state.easeoutfactor) 
+                            jointstate.rotation = easeoutset
+                                ? Quaternion.Slerp(jointstate.rotation, state.easeoutrot, state.easeoutfactor)
                                 : rotlerp;
                         }
 
@@ -1907,7 +1907,7 @@ namespace Radegast.Rendering
             markdirty();
         }
 
-        // If we deform a bone mark this bone and all its children as dirty.  
+        // If we deform a bone mark this bone and all its children as dirty.
         public void markdirty()
         {
             rotdirty = true;
@@ -2429,7 +2429,7 @@ namespace Radegast.Rendering
         public Dictionary<UUID, Animation> animlist = new Dictionary<UUID, Animation>();
         public Dictionary<WearableType, AppearanceManager.WearableData> Wearables = new Dictionary<WearableType, AppearanceManager.WearableData>();
         public static readonly BoundingVolume AvatarBoundingVolume;
-        
+
         // Track if we've computed size at least once
         private bool sizeComputed = false;
 
@@ -2574,7 +2574,7 @@ namespace Radegast.Rendering
 
             Height = new_body_size.Z;
             PelvisToFoot = mPelvisToFoot;
-            
+
             // Validate calculated values to prevent NaN/Infinity propagation
             if (float.IsNaN(Height) || float.IsInfinity(Height) || Height <= 0f || Height > 10f)
             {
@@ -2584,7 +2584,7 @@ namespace Radegast.Rendering
             {
                 PelvisToFoot = 1.0f;
             }
-            
+
             sizeComputed = true;
         }
 
@@ -2595,16 +2595,16 @@ namespace Radegast.Rendering
             {
                 UpdateSize(); // Try to recalculate
             }
-            
+
             float adjustment = Height - PelvisToFoot;
             if (float.IsNaN(adjustment) || float.IsInfinity(adjustment))
             {
                 return source; // Return unadjusted if calculation failed
             }
-            
+
             return new Vector3(source.X, source.Y, source.Z - adjustment);
         }
-        
+
         /// <summary>
         /// Check if this avatar is ready to be rendered
         /// </summary>
@@ -2612,7 +2612,7 @@ namespace Radegast.Rendering
         {
             if (glavatar == null || glavatar._meshes == null || glavatar._meshes.Count == 0)
                 return false;
-            
+
             // Check if at least one mesh has valid render data
             foreach (var mesh in glavatar._meshes.Values)
             {
@@ -2621,17 +2621,17 @@ namespace Radegast.Rendering
                     return true;
                 }
             }
-            
+
             return false;
         }
-        
+
         /// <summary>
         /// Mark avatar meshes as needing VBO recreation
         /// </summary>
         public void InvalidateVBOs()
         {
             if (glavatar?._meshes == null) return;
-            
+
             foreach (var mesh in glavatar._meshes.Values)
             {
                 // Mark VBOs as failed so they get recreated
@@ -2663,7 +2663,7 @@ namespace Radegast.Rendering
                     }
                 }
             }
-            
+
             // Dispose glavatar
             if (glavatar != null)
             {
@@ -2680,9 +2680,9 @@ namespace Radegast.Rendering
                     glavatar = null;
                 }
             }
-            
+
             sizeComputed = false;
-            
+
             base.Dispose();
         }
 
