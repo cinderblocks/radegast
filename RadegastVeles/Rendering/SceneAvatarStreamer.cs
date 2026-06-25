@@ -696,8 +696,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
         finally
         {
-            if (_inflight.TryRemove(localId, out var current))
-                current.Dispose();
+            // Same reasoning as SceneObjectStreamer: do not TryRemove here.
+            // EnqueueBuild may have installed a newer CTS in _inflight[localId];
+            // disposing that one would corrupt the newer build's texture delivery.
         }
     }
 

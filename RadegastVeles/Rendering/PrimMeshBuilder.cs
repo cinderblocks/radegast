@@ -633,13 +633,24 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// </summary>
     private static bool BitmapHasTransparency(SKBitmap bmp)
     {
+        // 2-component J2K → SKColorType.Rg88: R = luminance, G = alpha.
+        // Skia forces AlphaType = Opaque for no-alpha color types, so the normal
+        // early-out below fires even though the G channel carries real alpha data.
+        if (bmp.ColorType == SKColorType.Rg88)
+        {
+            var px = bmp.GetPixelSpan();
+            for (int i = 1; i < px.Length; i += 2) // G byte = alpha
+                if (px[i] < 250) return true;
+            return false;
+        }
+
         // An opaque alpha type cannot carry transparency — cheap early-out, no scan.
         if (bmp.AlphaType == SKAlphaType.Opaque) return false;
         if (bmp.BytesPerPixel != 4) return false; // unexpected layout: be conservative (treat as opaque)
 
-        var px = bmp.GetPixelSpan();
-        for (int i = 3; i < px.Length; i += 4)
-            if (px[i] < 250) return true;
+        var pixels = bmp.GetPixelSpan();
+        for (int i = 3; i < pixels.Length; i += 4)
+            if (pixels[i] < 250) return true;
         return false;
     }
 
@@ -696,8 +707,16 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
             lock (_materialCacheLock)
             {
+                // Same pattern as PBR cache: never overwrite a successful fetch with null.
+                // Two concurrent builds fetching the same material UUID could otherwise
+                // have the failed fetch poison the cache entry written by the successful one.
                 foreach (var id in needed)
-                    _materialCache[id] = byId.TryGetValue(id, out var m) ? m : null;
+                {
+                    if (byId.TryGetValue(id, out var m))
+                        _materialCache[id] = m;
+                    else
+                        _materialCache.TryAdd(id, null);
+                }
             }
         }
         catch
@@ -752,7 +771,17 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 var result = await client.Assets.RequestAssetAsync(id, AssetType.Material, true, linked.Token)
                     .ConfigureAwait(false) as AssetMaterial;
                 result?.Decode();
-                lock (_pbrCacheLock) _pbrCache[id] = result;
+                lock (_pbrCacheLock)
+                {
+                    // Never overwrite a successful fetch with a failure: two concurrent
+                    // builds for different objects may both need the same material UUID.
+                    // If one fetch times out after the other succeeds, the null result
+                    // must not poison the cache entry and block future PBR texture loads.
+                    if (result != null)
+                        _pbrCache[id] = result;
+                    else
+                        _pbrCache.TryAdd(id, null);
+                }
             }, ct)).ToList();
 
             try { await Task.WhenAll(tasks).ConfigureAwait(false); }

@@ -594,8 +594,14 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
         finally
         {
-            if (_inflight.TryRemove(sceneKey, out var current))
-                current.Dispose();
+            // Do NOT unconditionally TryRemove here: EnqueueBuild may have already
+            // replaced _inflight[sceneKey] with a NEWER build's CTS while this build
+            // was running.  Removing and disposing that CTS would corrupt the newer
+            // build — its texture downloads would observe ODsE from a disposed token.
+            // Lifecycle: each CTS is cancelled+disposed by the NEXT EnqueueBuild for
+            // the same key (or by Dispose() on tear-down), not by the build that owns it.
+            // StreamTexturesAsync is still live in the background and uses this token,
+            // so disposing it here would also corrupt in-flight texture delivery.
         }
     }
 
