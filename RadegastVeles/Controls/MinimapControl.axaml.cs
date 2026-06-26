@@ -354,7 +354,7 @@ public partial class MinimapControl : UserControl
                     IsClosed = false,
                     IsFilled = false
                 };
-                figure.Segments.Add(new ArcSegment
+                figure.Segments!.Add(new ArcSegment
                 {
                     Point = new Point(ex, ey),
                     Size = new Size(arcR, arcR),
@@ -362,7 +362,7 @@ public partial class MinimapControl : UserControl
                     IsLargeArc = false
                 });
                 var pathGeo = new PathGeometry();
-                pathGeo.Figures.Add(figure);
+                pathGeo.Figures!.Add(figure);
                 var arc = new Path
                 {
                     Data = pathGeo,

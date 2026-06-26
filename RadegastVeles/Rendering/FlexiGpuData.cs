@@ -80,7 +80,7 @@ internal sealed class FlexiGpuData : IDisposable
         gl.BindBuffer(BufferTargetARB.ShaderStorageBuffer, spineSSBO);
         gl.BufferData(BufferTargetARB.ShaderStorageBuffer,
             (nuint)((info.PathSegments + 1) * 4 * sizeof(float)),
-            IntPtr.Zero, BufferUsageARB.StreamDraw);
+            null, BufferUsageARB.StreamDraw);
 
         gl.BindBuffer(BufferTargetARB.ShaderStorageBuffer, 0);
 

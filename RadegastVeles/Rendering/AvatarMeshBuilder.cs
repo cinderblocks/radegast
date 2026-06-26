@@ -274,7 +274,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 {
                     var origFace      = attFaces[i];
                     var faceTransform = origFace.Transform;
-                    int nv            = origFace.Vertices.Length / 8;
+                    int nv            = (origFace.Vertices?.Length ?? 0) / 8;
                     var rigged        = attRiggedSkins[i];
 
                     // Attachment vertices are stored in prim-local space by PrimMeshBuilder;
