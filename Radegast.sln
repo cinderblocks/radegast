@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.3.11520.95
@@ -120,8 +120,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veles.Plugin.Email", "plugins\Veles.Plugin.Email\Veles.Plugin.Email.csproj", "{17D1DC5B-6CEE-FF16-3F2D-C95A9140806E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veles.Plugin.OllamaChat", "plugins\Veles.Plugin.OllamaChat\Veles.Plugin.OllamaChat.csproj", "{1E5CB5BD-4542-48E0-8AA5-EC3E89D7A187}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SkeletonGenerator", "libremetaverse\SourceGenerators\SkeletonGenerator\SkeletonGenerator.csproj", "{DED0B0B0-A1CF-4DBE-BC18-77B2203CC65D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
