@@ -530,8 +530,12 @@ internal sealed class SceneObjectStreamer : IDisposable
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
+                    {
                         patch.Bitmap?.Dispose();
-                    else
+                        return;
+                    }
+                    try
+                    {
                         // Stamp the full scene key so the viewport resolves the owning
                         // linkset by direct dictionary lookup. _sceneObjects is keyed by
                         // sceneKey (sim index << 32 | rootLocalId); without this the lookup
@@ -539,6 +543,13 @@ internal sealed class SceneObjectStreamer : IDisposable
                         // linkset faces — which never matches a root sceneKey, so the texture
                         // patch is deferred and ultimately dropped (faces stay untextured).
                         _viewport.PatchSceneObjectTexture(patch with { SceneKey = sceneKey }, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Token cancelled between the IsCancellationRequested check and
+                        // SemaphoreSlim.Wait — bitmap already disposed inside
+                        // PatchSceneObjectTexture; swallow here to avoid crashing the thread pool.
+                    }
                 }))
                 .ConfigureAwait(false);
 
