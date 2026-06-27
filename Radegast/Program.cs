@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -95,7 +95,7 @@ namespace Radegast
             }
 
             // Change current working directory to Radegast install dir
-            Directory.SetCurrentDirectory(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) 
+            Directory.SetCurrentDirectory(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
                                           ?? throw new InvalidOperationException());
 
             Application.EnableVisualStyles();
@@ -136,12 +136,12 @@ namespace Radegast
                 Generated.BugsplatDatabase, "Radegast",
                 Assembly.GetExecutingAssembly().GetName().Version.ToString())
                 {
-                    User = string.IsNullOrWhiteSpace(RadegastInstanceForms.Instance.Client.Self.Name) ? "Unknown" 
+                    User = string.IsNullOrWhiteSpace(RadegastInstanceForms.Instance.Client.Self.Name) ? "Unknown"
                         : RadegastInstanceForms.Instance.Client.Self.Name,
                     ExceptionType = BugSplatDotNetStandard.BugSplat.ExceptionTypeId.DotNetStandard,
                 };
                 s_BugSplat.Attributes.Add("platform", Utils.GetRunningPlatform().ToString());
-                s_BugSplat.Attributes.Add("runtime", Utils.GetRunningRuntime().ToString());
+                s_BugSplat.Attributes.Add("runtime", System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString());
                 s_BugSplat.Attributes.Add("run", (DateTime.Now - RadegastInstanceForms.Instance.StartupTimeUTC).ToString("c"));
                 if (RadegastInstanceForms.Instance.GlobalLogFile != null)
                 {
@@ -193,7 +193,7 @@ namespace Radegast
                                 ex.StackTrace + Environment.NewLine;
 
                 Logger.Critical(errMsg, ex);
-                
+
                 s_BugSplat?.Post(ex);
 
                 Environment.Exit(1);
