@@ -1,4 +1,4 @@
-name: Publish Release
+name: Publish Release Windows Installer and Archives
 
 on:
   push:
@@ -103,7 +103,7 @@ jobs:
             Write-Warning "Radegast Veles Bundle installer not found at: $velesBundlePath"
           }
 
-      
+
 
       - name: Generate NetSparkle Appcast
         shell: pwsh

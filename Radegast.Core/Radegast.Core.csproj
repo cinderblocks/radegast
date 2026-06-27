@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net10.0;net481</TargetFrameworks>
+    <TargetFrameworks>net481;net10.0</TargetFrameworks>
     <AssemblyTitle>Radegast.Core</AssemblyTitle>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
@@ -29,9 +29,9 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.148.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.148.0" />
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.9" />
     <PackageReference Include="System.Threading.RateLimiting" Version="10.0.9" />
   </ItemGroup>

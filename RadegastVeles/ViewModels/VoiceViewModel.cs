@@ -98,7 +98,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     public string PttButtonLabel => IsPushToTalking ? "🎙 Live" : "🎙 Talk";
 
     /// <summary>Tooltip shown on the PTT button including the hotkey hint.</summary>
-    public string PttButtonTooltip => $"Hold to talk  [{_pttKey}]";
+    public string PttButtonTooltip => $"Hold to talk  [{PttKey}]";
 
     /// <summary>True when voice hardware is available AND the user has voice enabled.</summary>
     public bool IsVisibleInUI          => IsAvailable && VoiceEnabled;

@@ -726,7 +726,7 @@ namespace Radegast.Rendering
                 var converted = new SKBitmap(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
                 using (var canvas = new SKCanvas(converted))
                 {
-                    canvas.DrawBitmap(bitmap, 0, 0);
+                    canvas.DrawBitmap(bitmap, 0f, 0f, new SKSamplingOptions());
                 }
                 bitmap = converted;
                 pixels = bitmap.GetPixels();

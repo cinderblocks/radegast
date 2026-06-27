@@ -203,12 +203,12 @@ public partial class MarketplaceViewModel : ClientAwareViewModelBase
 
             if (!_records.TryGetValue(folderId, out var record))
             {
-                record = new MarketplaceListingRecord(folderId, folder.Name);
+                record = new MarketplaceListingRecord(folderId, folder!.Name);
                 _records[folderId] = record;
             }
             else
             {
-                record.FolderName = folder.Name;
+                record.FolderName = folder!.Name;
             }
 
             RevalidateRecord(record);

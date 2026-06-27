@@ -136,7 +136,7 @@ internal static class TerrainSplat
             canvas.Translate(OutputSize / 2f, OutputSize / 2f);
             canvas.RotateDegrees(270);
             canvas.Translate(-OutputSize / 2f, -OutputSize / 2f);
-            canvas.DrawBitmap(output, 0, 0);
+            canvas.DrawBitmap(output, 0f, 0f, new SKSamplingOptions());
         }
         output.Dispose();
         return rotated;
@@ -246,7 +246,7 @@ internal static class TerrainSplat
 
         var dst = new SKBitmap(size, size, SKColorType.Bgra8888, SKAlphaType.Opaque);
         using var canvas = new SKCanvas(dst);
-        canvas.DrawBitmap(src, new SKRect(0, 0, size, size));
+        canvas.DrawBitmap(src, new SKRect(0, 0, size, size), new SKSamplingOptions());
         src.Dispose();
         return dst;
     }

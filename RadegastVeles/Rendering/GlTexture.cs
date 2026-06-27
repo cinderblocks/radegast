@@ -50,6 +50,15 @@ public sealed class GlTexture : IDisposable
             rgba    = source;
             ownRgba = false;
         }
+        else if (source.ColorType == SKColorType.Rg88)
+        {
+            // 2-component J2K (grayscale+alpha) arrives as Rg88: R = luminance, G = alpha.
+            // Copy(Rgba8888) from Rg88 maps G → G and forces A = 255, dropping the alpha.
+            // Remap manually: R=G=B=R_src, A=G_src.
+            rgba    = ConvertRg88ToRgba8888(source);
+            source.Dispose();
+            ownRgba = true;
+        }
         else
         {
             rgba    = source.Copy(SKColorType.Rgba8888)
@@ -75,6 +84,29 @@ public sealed class GlTexture : IDisposable
         }
         if (ownRgba) rgba.Dispose();
         return flipped;
+    }
+
+    private static unsafe SKBitmap ConvertRg88ToRgba8888(SKBitmap src)
+    {
+        int w = src.Width, h = src.Height;
+        var dst = new SKBitmap(w, h, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        byte* s = (byte*)src.GetPixels().ToPointer();
+        byte* d = (byte*)dst.GetPixels().ToPointer();
+        for (int y = 0; y < h; y++)
+        {
+            byte* sRow = s + (nint)y * src.RowBytes;
+            byte* dRow = d + (nint)y * dst.RowBytes;
+            for (int x = 0; x < w; x++)
+            {
+                byte luma  = sRow[x * 2];
+                byte alpha = sRow[x * 2 + 1];
+                dRow[x * 4]     = luma;
+                dRow[x * 4 + 1] = luma;
+                dRow[x * 4 + 2] = luma;
+                dRow[x * 4 + 3] = alpha;
+            }
+        }
+        return dst;
     }
 
     /// <summary>

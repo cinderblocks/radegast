@@ -83,9 +83,10 @@ internal sealed class OllamaClient : IDisposable
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var reader = new System.IO.StreamReader(stream);
 
-        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct);
+            if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             var chunk = JsonSerializer.Deserialize<OllamaChatChunk>(line, OllamaJson.Options);

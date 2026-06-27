@@ -1225,7 +1225,7 @@ namespace Radegast
             _ = client.Groups.RequestBannedAgentsAsync(group.ID);
         }
 
-        private void Groups_BannedAgents(object? sender, BannedAgentsEventArgs e)
+        private void Groups_BannedAgents(object sender, BannedAgentsEventArgs e)
         {
             UpdateBannedAgents(e);
         }

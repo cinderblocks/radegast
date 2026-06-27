@@ -124,10 +124,10 @@ public sealed class FrameStatsTracker : IDisposable
         int readSlot = (_writeIndex + 1) % QueryRing;
         if (_started[readSlot])
         {
-            gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.QueryResultAvailable, out int avail);
+            gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.ResultAvailable, out int avail);
             if (avail != 0)
             {
-                gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.QueryResult, out long ns);
+                gl.GetQueryObject(_queries[readSlot], QueryObjectParameterName.Result, out long ns);
                 _lastGpuMs = ns / 1_000_000.0;
                 _started[readSlot] = false;
             }

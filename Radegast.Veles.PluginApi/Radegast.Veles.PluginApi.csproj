@@ -11,7 +11,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.0.4" />
+    <PackageReference Include="Avalonia" Version="12.0.5" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />

@@ -37,7 +37,7 @@
     <PackageReference Include="NetSparkleUpdater.UI.WinForms.NetFramework" Version="3.1.0" />
     <PackageReference Include="OpenTK" Version="3.3.3" />
     <PackageReference Include="OpenTK.GLControl" Version="3.3.3" />
-    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="3.119.4" />
+    <PackageReference Include="SkiaSharp.Views.WindowsForms" Version="4.148.0" />
     <PackageReference Include="System.Console" Version="4.3.1" />
     <PackageReference Include="System.Resources.Extensions" Version="10.0.9" />
     <PackageReference Include="System.Resources.ResourceManager" Version="4.3.0" />

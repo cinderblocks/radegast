@@ -877,7 +877,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
         _ = Task.Run(async () =>
         {
-            var asset = await Client.Assets.RequestAssetAsync(lm.AssetUUID, AssetType.Landmark, true);
+            var asset = await Client.Assets.RequestAssetAsync(lm!.AssetUUID, AssetType.Landmark, true);
             if (asset is not AssetLandmark decoded) return;
             decoded.Decode();
 
@@ -918,7 +918,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
         _ = Task.Run(async () =>
         {
-            var asset = await Client.Assets.RequestAssetAsync(lm.AssetUUID, AssetType.Landmark, true);
+            var asset = await Client.Assets.RequestAssetAsync(lm!.AssetUUID, AssetType.Landmark, true);
             if (asset is not AssetLandmark decoded) return;
             decoded.Decode();
 

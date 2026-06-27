@@ -126,7 +126,7 @@ namespace Radegast
             }
         }
 
-        private void Assets_OnAssetReceived(Asset? asset)
+        private void Assets_OnAssetReceived(Asset asset)
         {
             if (asset is AssetLandmark lm)
             {
