@@ -85,9 +85,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
         string                  label,
         IProgress<string>?      progress,
         CancellationToken       ct,
-        bool                    isHud               = false,
-        DetailLevel             detailLevel         = DetailLevel.High,
-        IProgress<SceneTexturePatch>? texturePatch  = null)
+        bool                    isHud                  = false,
+        DetailLevel             detailLevel            = DetailLevel.High,
+        IProgress<SceneTexturePatch>? texturePatch     = null,
+        int                     textureResolutionLevel = -1)
     {
         var (rawFaces, bMin, bMax, flexiPrims) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
                                                        .ConfigureAwait(false);
@@ -128,7 +129,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             progress?.Report($"Loading textures (0 / {texCount})…");
             _ = StreamTexturesAsync(rawFaces, faces, rootLocalId, texCount, progress,
-                                    texturePatch, materials, pbrMaterials, ct);
+                                    texturePatch, materials, pbrMaterials, ct,
+                                    textureResolutionLevel: textureResolutionLevel);
         }
 
         return submission;
@@ -485,7 +487,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
         Dictionary<UUID, LegacyMaterial>? materials,
         Dictionary<UUID, AssetMaterial>?  pbrMaterials,
         CancellationToken                 ct,
-        float                             texturePriority = 101300f)
+        float                             texturePriority        = 101300f,
+        int                               textureResolutionLevel = -1)
     {
         // Build a map from UUID → list of (primLocalId, faceIndex, slot) so a single
         // download satisfies every face that shares the same texture.
@@ -544,13 +547,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
-                // Progressive decode callback: report partial bitmaps as they arrive.
-                // Only send the partial preview to the *first* slot that uses this texture.
-                // Fanning out a full SKBitmap copy to every slot on every progress tick
-                // (potentially N×4 MB every 250 ms) creates enormous GC pressure when
-                // many objects load simultaneously.  The first slot is enough to show
-                // progressive feedback; the final delivery below still patches all slots.
-                IProgress<SKBitmap>? progressiveDecode = (texturePatch != null && slots.Count > 0)
+                // Progressive decode callback: report a fast low-res preview before the full
+                // bitmap arrives.  Only sent for full-quality builds (textureResolutionLevel == -1)
+                // because the final result for LOD builds is already low-res — a preview-of-a-preview
+                // adds no visible benefit and doubles the patch traffic.
+                IProgress<SKBitmap>? progressiveDecode = (texturePatch != null && slots.Count > 0
+                                                          && textureResolutionLevel == -1)
                     ? new Progress<SKBitmap>(partial =>
                     {
                         var (primLocalId, faceIndex, slot) = slots[0];
@@ -563,7 +565,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
                 var bmp = await GridTextureHelper.DownloadSkBitmapAsync(
                               client, id, progress: progressiveDecode, ct: linked.Token,
-                              priority: texturePriority)
+                              priority: texturePriority, resolutionLevel: textureResolutionLevel)
                                                   .ConfigureAwait(false);
 
                 int n = Interlocked.Increment(ref loaded);
@@ -599,7 +601,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
                                 if (si == slots.Count - 1) bmpOwned = false; // transfer ownership
                                 texturePatch.Report(new SceneTexturePatch(primLocalId, faceIndex, slot, delivery)
                                 {
-                                    TextureHasAlpha = texHasAlpha,
+                                    TextureHasAlpha    = texHasAlpha,
+                                    ResolutionLevel    = textureResolutionLevel,
                                 });
                             }
                         }

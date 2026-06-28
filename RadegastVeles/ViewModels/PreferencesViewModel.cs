@@ -33,6 +33,7 @@ using LibreMetaverse.Messages.Linden;
 using LibreMetaverse.StructuredData;
 using Radegast.Media;
 using Radegast.Veles.Core;
+using Radegast.Veles.Rendering;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -292,6 +293,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     /// <summary>Scene viewer draw distance in metres (16–512). Default 96.</summary>
     [ObservableProperty]
     private float _sceneViewerDrawDistance = 96f;
+
+    /// <summary>Animate flexible prims (physics simulation at ~30 Hz). Default false to save CPU.</summary>
+    [ObservableProperty]
+    private bool _flexiAnimationEnabled = false;
 
     // Connection
     [ObservableProperty]
@@ -647,6 +652,9 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["water_reflections_enabled"].AsBoolean() : false;
         SceneViewerDrawDistance = s["scene_draw_distance"].Type != OSDType.Unknown
             ? (float)s["scene_draw_distance"].AsReal() : 96f;
+        FlexiAnimationEnabled = s["flexi_animation_enabled"].Type != OSDType.Unknown
+            ? s["flexi_animation_enabled"].AsBoolean() : false;
+        FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
 
         // RLV
         RlvEnabled = _instance.RLV?.Enabled ?? false;
@@ -808,6 +816,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
         s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
+        s["flexi_animation_enabled"] = OSD.FromBoolean(FlexiAnimationEnabled);
+        FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
 
         // RLV
         if (_instance.RLV != null)

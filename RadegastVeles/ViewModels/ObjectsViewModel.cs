@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -39,7 +38,6 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
     private readonly object _refreshLock = new();
     private Timer? _objectUpdateTimer;
     private readonly object _timerLock = new();
-    private readonly ConcurrentDictionary<UUID, string> _groupNameCache = new();
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -333,7 +331,7 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
         ObjectGroupID = value.GroupID;
         if (value.IsGroupOwned && value.GroupID != UUID.Zero)
         {
-            if (_groupNameCache.TryGetValue(value.GroupID, out var cachedName))
+            if (_instance.TryGetCachedGroupName(value.GroupID, out var cachedName))
                 ObjectGroupName = cachedName;
             else
             {
@@ -857,7 +855,7 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
                     var groupId = isGroupOwned ? e.Properties.GroupID : UUID.Zero;
 
                     // Kick off async group name resolution if needed
-                    if (isGroupOwned && !_groupNameCache.TryGetValue(groupId, out _))
+                    if (isGroupOwned && !_instance.TryGetCachedGroupName(groupId, out _))
                         Client.Groups.RequestGroupName(groupId);
 
                     Objects[i] = old with
@@ -909,9 +907,6 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     private void Groups_GroupNamesReply(object? sender, GroupNamesEventArgs e)
     {
-        foreach (var kvp in e.GroupNames)
-            _groupNameCache[kvp.Key] = kvp.Value;
-
         Dispatcher.UIThread.Post(() =>
         {
             // Update any entries whose GroupID was resolved

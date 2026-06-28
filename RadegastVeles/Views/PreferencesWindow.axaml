@@ -464,6 +464,11 @@
                                   AutomationProperties.Name="Enable water reflections" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Renders the scene a second time into a reflection texture sampled by the water surface. Disabled by default due to GPU cost. Takes effect the next time a viewer window is opened." />
+                        <CheckBox Content="Animate flexiprims"
+                                  IsChecked="{Binding FlexiAnimationEnabled}"
+                                  AutomationProperties.Name="Animate flexiprims" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Runs the flexiprim physics simulation (~30 Hz per object). Disabled by default. Flexiprims are still rendered as static geometry when off." />
                         <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
                             <TextBlock Grid.Row="0" Grid.Column="0"
                                        Text="Draw Distance"

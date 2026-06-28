@@ -822,6 +822,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         mv.Camera.Position = pos;
         mv.Camera.LookDirection(atDir, up);
         mv.Camera.Far = DrawDistance;
+
+        // Keep the FMOD audio listener in sync with the scene camera so sounds
+        // pan and attenuate relative to where the player is looking, not where
+        // the avatar body is pointing.
+        _instance.MediaManager?.SetCameraListenerState(pos, atDir);
     }
 
     /// <summary>
@@ -1176,6 +1181,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         _cameraSyncTimer?.Dispose();
         _cameraSyncTimer = null;
+        _instance.MediaManager?.ClearCameraListenerState();
         if (_instance.Client.Network.Connected)
         {
             var mv = _instance.Client.Self.Movement;
