@@ -19,6 +19,8 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -77,6 +79,25 @@ public static class GridTextureHelper
     // Deduplicates concurrent LOD (non-full-resolution) decodes for the same (UUID, level) pair.
     // These results are NOT cached in SkBitmapCache so full-res callers always get full quality.
     private static readonly ConcurrentDictionary<(UUID, int), Task<SKBitmap?>> _inflightLodDecodes = new();
+
+    // Shared HttpClient for HTTP byte-range texture requests.  A single instance is correct for
+    // long-running processes — it reuses connections and avoids socket exhaustion.
+    private static readonly HttpClient _http = new();
+
+    // Approximate J2K byte budget per resolution level, tuned to SL's typical codestream layout
+    // (resolution-progression order, 1-tile per image, ~5 DWT levels).  Requesting only the first
+    // N bytes is enough for CoreJ2K to reconstruct the corresponding resolution tier.  The server
+    // returns HTTP 206 Partial Content; if it ignores the Range header it returns 200 with the full
+    // payload and we decode from that instead.
+    private static int ResolutionLevelToByteTarget(int level) => level switch
+    {
+        0 =>    600, // ~32×32  (just the J2K headers + LL0 subband)
+        1 =>  2_000, // ~64×64
+        2 =>  7_500, // ~128×128
+        3 => 25_000, // ~256×256
+        4 => 60_000, // ~512×512
+        _ => int.MaxValue,
+    };
 
     // Atomic counters — incremented with Interlocked so they are safe to read from
     // any thread at any time.  Zero overhead on the hot path (single interlocked add).
@@ -717,12 +738,50 @@ public static class GridTextureHelper
 
                 if (j2kBytes == null)
                 {
-                    // Network download — also seeds the disk cache for future full-res builds.
-                    var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct)
-                                                   .ConfigureAwait(false);
-                    if (asset?.AssetData == null) { winnerTcs.TrySetResult(null); return null; }
-                    j2kBytes = asset.AssetData;
-                    TextureDiskCache.PutAsync(textureId, j2kBytes);
+                    // Attempt a byte-range HTTP GET against the ViewerAsset/GetTexture capability.
+                    // The SL CDN supports RFC 7233 Range headers; only the first N bytes are needed
+                    // for lower wavelet levels, saving network bandwidth proportional to the LOD gap.
+                    // Partial bytes are NOT written to TextureDiskCache — that cache is full-file only
+                    // to avoid corrupting later full-quality builds.
+                    var capUri = client.Network.CurrentSim?.Caps?.GetTextureCapURI();
+                    if (capUri != null)
+                    {
+                        int byteTarget = ResolutionLevelToByteTarget(resolutionLevel);
+                        try
+                        {
+                            using var req = new HttpRequestMessage(HttpMethod.Get,
+                                $"{capUri}?texture_id={textureId}");
+                            req.Headers.Range = new RangeHeaderValue(0, byteTarget - 1);
+
+                            using var resp = await _http.SendAsync(req,
+                                HttpCompletionOption.ResponseContentRead, ct).ConfigureAwait(false);
+
+                            if (resp.IsSuccessStatusCode) // 200 full or 206 partial
+                            {
+                                j2kBytes = await resp.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+
+                                // If the server ignored the Range header and returned the full file,
+                                // seed the disk cache so a future full-res build avoids a re-download.
+                                if (resp.StatusCode != System.Net.HttpStatusCode.PartialContent
+                                    && j2kBytes.Length > byteTarget * 4)
+                                {
+                                    TextureDiskCache.PutAsync(textureId, j2kBytes);
+                                }
+                            }
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch { /* Range request failed — fall through to full download below. */ }
+                    }
+
+                    if (j2kBytes == null)
+                    {
+                        // Cap unavailable or Range request failed: full download seeds the disk cache.
+                        var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct)
+                                                       .ConfigureAwait(false);
+                        if (asset?.AssetData == null) { winnerTcs.TrySetResult(null); return null; }
+                        j2kBytes = asset.AssetData;
+                        TextureDiskCache.PutAsync(textureId, j2kBytes);
+                    }
                 }
 
                 // Re-check: a concurrent full-res build may have finished while we fetched.
