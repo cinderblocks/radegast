@@ -673,4 +673,12 @@ public sealed record SceneTexturePatch(
     /// render fully opaque. Ignored for non-albedo slots.
     /// </summary>
     public bool TextureHasAlpha { get; init; }
+
+    /// <summary>
+    /// J2K decode resolution level of the delivered bitmap.
+    /// -1 = full quality (default), 0 = lowest preview quality, 1–4 = intermediate LOD levels.
+    /// Used by <see cref="SceneObjectStreamer"/> to track the current texture quality per object
+    /// and schedule upgrades when the object moves closer to the camera.
+    /// </summary>
+    public int ResolutionLevel { get; init; } = -1;
 }

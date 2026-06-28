@@ -74,6 +74,10 @@ public static class GridTextureHelper
     // This turns N × 52 MB of LOH pressure into 1 × 52 MB per unique texture.
     private static readonly ConcurrentDictionary<UUID, Task<SKBitmap?>> _inflightDecodes = new();
 
+    // Deduplicates concurrent LOD (non-full-resolution) decodes for the same (UUID, level) pair.
+    // These results are NOT cached in SkBitmapCache so full-res callers always get full quality.
+    private static readonly ConcurrentDictionary<(UUID, int), Task<SKBitmap?>> _inflightLodDecodes = new();
+
     // Atomic counters — incremented with Interlocked so they are safe to read from
     // any thread at any time.  Zero overhead on the hot path (single interlocked add).
     private static long _cacheMisses;
@@ -565,7 +569,7 @@ public static class GridTextureHelper
     /// </summary>
     /// <param name="client">The grid client used to request the texture asset.</param>
     /// <param name="textureId">UUID of the texture to download.</param>
-    /// <param name="progress">Optional progress callback for partial/preview bitmaps.</param>
+    /// <param name="progress">Optional progress callback for partial/preview bitmaps. Ignored when <paramref name="resolutionLevel"/> != -1.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="priority">
     /// Asset pipeline priority passed to <c>RequestImage</c>.
@@ -574,12 +578,22 @@ public static class GridTextureHelper
     /// Use a higher value (e.g. <c>200000f</c>) for attachment textures that should
     /// appear before background scene objects.
     /// </param>
+    /// <param name="resolutionLevel">
+    /// J2K decode resolution level. -1 (default) = full resolution, cached in <see cref="SkBitmapCache"/>.
+    /// 0 = lowest (preview), 1–4 = intermediate LOD levels. Non-full results are not cached so the
+    /// caller always receives a quality appropriate for its distance, without polluting the full-res cache.
+    /// </param>
     public static Task<SKBitmap?> DownloadSkBitmapAsync(
         GridClient client, UUID textureId, IProgress<SKBitmap>? progress = null, CancellationToken ct = default,
-        float priority = 101300f)
+        float priority = 101300f, int resolutionLevel = -1)
     {
         if (textureId == UUID.Zero)
             return Task.FromResult<SKBitmap?>(null);
+
+        // LOD path: caller wants a reduced-resolution version.
+        // Does not use SkBitmapCache for storage so full-res callers remain unaffected.
+        if (resolutionLevel != -1)
+            return DownloadSkBitmapLodAsync(client, textureId, resolutionLevel, ct, priority);
 
         // Fast path: return a copy of the already-decoded bitmap — avoids a 43 ms J2K
         // decode and pays only the ~1.6 ms SKBitmap.Copy cost per cache hit.
@@ -639,6 +653,119 @@ public static class GridTextureHelper
         });
 
         return tcs.Task;
+    }
+
+    // Approximate pixel divisor for each J2K resolution level, assuming 5 DWT levels
+    // (common for SL 512² and 1024² textures).  Level 0 → 1/32, 1 → 1/16, 2 → 1/8, etc.
+    // Used only for the fast downscale path (cache-hit → resize) where exact sizing matters
+    // less than avoiding a full J2K re-decode.
+    private static int ResolutionLevelToDivisor(int level) => level switch
+    {
+        0 => 32, 1 => 16, 2 => 8, 3 => 4, 4 => 2, _ => 1
+    };
+
+    /// <summary>
+    /// Downloads and decodes a texture at a reduced J2K resolution level.
+    /// Results are NOT stored in <see cref="SkBitmapCache"/> so the full-quality cache entry
+    /// is unaffected.  Concurrent calls for the same <c>(UUID, level)</c> are deduplicated
+    /// via <c>_inflightLodDecodes</c>.
+    /// </summary>
+    private static Task<SKBitmap?> DownloadSkBitmapLodAsync(
+        GridClient client, UUID textureId, int resolutionLevel, CancellationToken ct, float priority)
+    {
+        // If full-res is already cached, downscale cheaply — one pixel-copy instead of a J2K decode.
+        if (SkBitmapCache.TryGetValue(textureId, out var fullRes))
+        {
+            Interlocked.Increment(ref _cacheHits);
+            int divisor = ResolutionLevelToDivisor(resolutionLevel);
+            int w = Math.Max(1, fullRes.Width  / divisor);
+            int h = Math.Max(1, fullRes.Height / divisor);
+            var thumb = new SKBitmap(w, h, fullRes.ColorType, fullRes.AlphaType);
+            fullRes.ScalePixels(thumb, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+            return Task.FromResult<SKBitmap?>(thumb);
+        }
+
+        var lodKey = (textureId, resolutionLevel);
+
+        // Dedup: if another task is already decoding at this level, join it.
+        TaskCompletionSource<SKBitmap?>? winnerTcs = null;
+        Task<SKBitmap?> sharedTask;
+        while (true)
+        {
+            if (_inflightLodDecodes.TryGetValue(lodKey, out sharedTask!)) break;
+            winnerTcs = new TaskCompletionSource<SKBitmap?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (_inflightLodDecodes.TryAdd(lodKey, winnerTcs.Task)) { sharedTask = winnerTcs.Task; break; }
+        }
+
+        if (winnerTcs == null)
+        {
+            // Late-joiner: copy the winner's result.
+            return sharedTask.ContinueWith(t =>
+            {
+                var src = t.Result;
+                if (src == null || src.Handle == IntPtr.Zero) return null;
+                return src.Copy(src.ColorType);
+            }, ct, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        }
+
+        // Winner: fetch bytes and decode at the requested level.
+        return Task.Run(async () =>
+        {
+            try
+            {
+                byte[]? j2kBytes = TextureDiskCache.TryGet(textureId);
+
+                if (j2kBytes == null)
+                {
+                    // Network download — also seeds the disk cache for future full-res builds.
+                    var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct)
+                                                   .ConfigureAwait(false);
+                    if (asset?.AssetData == null) { winnerTcs.TrySetResult(null); return null; }
+                    j2kBytes = asset.AssetData;
+                    TextureDiskCache.PutAsync(textureId, j2kBytes);
+                }
+
+                // Re-check: a concurrent full-res build may have finished while we fetched.
+                if (SkBitmapCache.TryGetValue(textureId, out var raceHit))
+                {
+                    int divisor = ResolutionLevelToDivisor(resolutionLevel);
+                    int w = Math.Max(1, raceHit.Width  / divisor);
+                    int h = Math.Max(1, raceHit.Height / divisor);
+                    var thumb = new SKBitmap(w, h, raceHit.ColorType, raceHit.AlphaType);
+                    raceHit.ScalePixels(thumb, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None));
+                    var thumbCopy = thumb.Copy(thumb.ColorType);
+                    winnerTcs.TrySetResult(thumb); // shared with late-joiners; they copy
+                    return thumbCopy;              // winner's own copy
+                }
+
+                // Decode at the requested LOD level — pays only for the wavelet levels needed.
+                await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    var cfg = new J2KDecoderConfiguration { ResolutionLevel = resolutionLevel };
+                    var raw = J2kImage.FromBytes(j2kBytes, cfg).As<SKBitmap>();
+                    if (raw == null) { winnerTcs.TrySetResult(null); return null; }
+                    var shared = raw.Copy(raw.ColorType); // late-joiners copy from this
+                    winnerTcs.TrySetResult(shared);
+                    using (raw) return raw.Copy(raw.ColorType); // winner's own copy
+                }
+                finally { DecodeGate.Release(); }
+            }
+            catch (OperationCanceledException)
+            {
+                winnerTcs.TrySetResult(null);
+                return null;
+            }
+            catch
+            {
+                winnerTcs.TrySetResult(null);
+                return null;
+            }
+            finally
+            {
+                _inflightLodDecodes.TryRemove(lodKey, out _);
+            }
+        }, CancellationToken.None);
     }
 
     /// <summary>

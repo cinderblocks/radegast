@@ -57,6 +57,11 @@ internal sealed class SceneObjectStreamer : IDisposable
     // Scene keys that currently have a live scene-object submission.
     private readonly ConcurrentDictionary<ulong, byte> _rendered = new();
 
+    // Tracks the J2K resolution level of the textures currently applied to each rendered object.
+    // -1 = full quality, 0 = preview, 1-4 = LOD levels.  Updated each time a texture patch arrives.
+    // Used to detect when an object moved close enough to deserve a texture quality upgrade.
+    private readonly ConcurrentDictionary<ulong, int> _textureLodLevel = new();
+
     // Reverse parent index: rootSceneKey → set of child scene keys.
     private readonly ConcurrentDictionary<ulong, ConcurrentDictionary<ulong, byte>> _childrenByParent = new();
 
@@ -73,6 +78,8 @@ internal sealed class SceneObjectStreamer : IDisposable
     private const int DebounceMs = 50;
 
     private readonly Timer  _debounceTimer;
+    // Fires every 10 s to upgrade textures on objects that the avatar walked closer to.
+    private readonly Timer  _textureLodTimer;
     private bool            _disposed;
 
     private float _maxStreamRadius = 96f;
@@ -96,8 +103,10 @@ internal sealed class SceneObjectStreamer : IDisposable
         _builder   = new PrimMeshBuilder(client);
         _scheduler = scheduler;
 
-        _debounceTimer = new Timer(_ => ProcessDirty(), null,
+        _debounceTimer   = new Timer(_ => ProcessDirty(), null,
             Timeout.Infinite, Timeout.Infinite);
+        _textureLodTimer = new Timer(_ => CheckTextureLodUpgrades(), null,
+            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
     }
 
     // ── Public API ────────────────────────────────────────────────────────────────
@@ -183,6 +192,18 @@ internal sealed class SceneObjectStreamer : IDisposable
                 bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
                 if (!isSinglePrim)
                     EnqueueDirty(sceneKey);
+
+                // Check whether the object moved close enough to deserve a texture quality upgrade.
+                // Use the world-space distance already computed above.
+                var dx = worldPos.X - avatarPos.X;
+                var dy = worldPos.Y - avatarPos.Y;
+                float dist = MathF.Sqrt(dx * dx + dy * dy + (worldPos.Z - avatarPos.Z) * (worldPos.Z - avatarPos.Z));
+                if (_textureLodLevel.TryGetValue(sceneKey, out int curTexLod))
+                {
+                    int desiredTexLod = TextureLodLevelForDistance(dist);
+                    if (IsTextureLodHigherQuality(desiredTexLod, curTexLod))
+                        EnqueueDirty(sceneKey);
+                }
             }
         }
         else
@@ -274,6 +295,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (_disposed) return;
         _dirty.Clear();
         _rendered.Clear();
+        _textureLodLevel.Clear();
         _childrenByParent.Clear();
         _neighborSimIndex.Clear();
         _simByIndex.Clear();
@@ -295,6 +317,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (_disposed) return;
         _disposed = true;
         _debounceTimer.Dispose();
+        _textureLodTimer.Dispose();
         foreach (var cts in _inflight.Values) { cts.Cancel(); cts.Dispose(); }
         _inflight.Clear();
     }
@@ -366,6 +389,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
         _dirty.TryRemove(sceneKey, out _);
         _rendered.TryRemove(sceneKey, out _);
+        _textureLodLevel.TryRemove(sceneKey, out _);
         _viewport.RemoveSceneObject(sceneKey);
     }
 
@@ -518,15 +542,17 @@ internal sealed class SceneObjectStreamer : IDisposable
             }
 
             var rootPrimForLod = prims.Find(p => p.LocalID == rootLocalId) ?? prims[0];
-            float dist = OmVector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
-            var   lod  = LodForDistance(dist);
+            float dist    = OmVector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
+            var   lod     = LodForDistance(dist);
+            int   texLod  = TextureLodLevelForDistance(dist);
 
             var submission = await _builder.BuildAsync(
                 prims, rootLocalId,
-                label:        $"prim:{rootLocalId}",
-                progress:     null,
-                ct:           token,
-                detailLevel:  lod,
+                label:                 $"prim:{rootLocalId}",
+                progress:              null,
+                ct:                    token,
+                detailLevel:           lod,
+                textureResolutionLevel: texLod,
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
@@ -536,6 +562,8 @@ internal sealed class SceneObjectStreamer : IDisposable
                     }
                     try
                     {
+                        // Record the quality level so we can detect upgrade opportunities later.
+                        _textureLodLevel[sceneKey] = patch.ResolutionLevel;
                         // Stamp the full scene key so the viewport resolves the owning
                         // linkset by direct dictionary lookup. _sceneObjects is keyed by
                         // sceneKey (sim index << 32 | rootLocalId); without this the lookup
@@ -623,6 +651,56 @@ internal sealed class SceneObjectStreamer : IDisposable
         < 80f  => DetailLevel.Medium,
         _      => DetailLevel.Low,
     };
+
+    // Maps avatar–object distance to a J2K resolution level for texture LOD.
+    // Mirrors the mesh LOD thresholds so both switch quality bands at the same distances.
+    // -1 = full, 0 = preview (~1/32 linear), 1/2 = intermediate.
+    private static int TextureLodLevelForDistance(float distance) => distance switch
+    {
+        < 20f => -1, // full quality
+        < 40f =>  2, // ~1/8 linear
+        < 80f =>  1, // ~1/16 linear
+        _     =>  0, // preview
+    };
+
+    // Returns true when the desired level is higher quality than the current.
+    // -1 (full) is the highest; 0 (preview) is the lowest.
+    private static bool IsTextureLodHigherQuality(int desired, int current)
+    {
+        // Normalise -1 (full) to a large positive so comparison is straightforward.
+        int d = desired == -1 ? int.MaxValue : desired;
+        int c = current == -1 ? int.MaxValue : current;
+        return d > c;
+    }
+
+    // Scans rendered objects for texture quality upgrades needed because the avatar
+    // walked closer since the last build.  Rate-limited to 10 objects per tick so a
+    // teleport into a dense region doesn't flood the build scheduler all at once.
+    private void CheckTextureLodUpgrades()
+    {
+        if (_disposed) return;
+        var avatarPos  = _client.Self.SimPosition;
+        var currentSim = _client.Network.CurrentSim;
+        if (currentSim == null) return;
+
+        int upgraded = 0;
+        foreach (var sceneKey in _rendered.Keys)
+        {
+            if (upgraded >= 10) break;
+            if (!_textureLodLevel.TryGetValue(sceneKey, out int curLod)) continue;
+            if (curLod == -1) continue; // already at full quality
+
+            float distSq  = DistanceSq(sceneKey, avatarPos);
+            float dist    = MathF.Sqrt(distSq);
+            int   desired = TextureLodLevelForDistance(dist);
+
+            if (IsTextureLodHigherQuality(desired, curLod))
+            {
+                EnqueueDirty(sceneKey);
+                upgraded++;
+            }
+        }
+    }
 
     private List<Primitive>? CollectLinkset(Simulator sim, uint rootLocalId)
     {
