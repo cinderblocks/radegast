@@ -60,6 +60,12 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
     private const float SimTickRate = 1f / 30f;  // ~30 Hz
 
+    /// <summary>
+    /// When false the physics loop still runs but skips all simulation and GPU upload work,
+    /// leaving flexi prims frozen in their last-computed (or bind) pose.
+    /// </summary>
+    public static volatile bool AnimationEnabled = false;
+
     // ── Per-flexi-prim state ──────────────────────────────────────────────────────
 
     private sealed class FlexiState
@@ -189,6 +195,8 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
+
+                if (!AnimationEnabled) continue;
 
                 foreach (var state in states)
                     TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute);
