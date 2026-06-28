@@ -109,6 +109,24 @@ namespace Radegast.Media
         /// </summary>
         public SoundCache Cache { get; private set; }
 
+        // When the 3D scene viewer is open it pushes its camera state here so the FMOD
+        // listener tracks the camera rather than the avatar body rotation.
+        private volatile CameraListenerState? _cameraListener;
+        private sealed record CameraListenerState(Vector3 EyePosition, Vector3 Forward);
+
+        /// <summary>
+        /// Override the FMOD listener with the scene camera's eye position and look
+        /// direction.  Call this ~10 Hz while the 3D scene viewer is active.
+        /// </summary>
+        public void SetCameraListenerState(Vector3 eyePosition, Vector3 forward)
+            => _cameraListener = new CameraListenerState(eyePosition, forward);
+
+        /// <summary>
+        /// Revert the FMOD listener to avatar-body-rotation tracking.
+        /// Call this when the 3D scene viewer is closed.
+        /// </summary>
+        public void ClearCameraListenerState() => _cameraListener = null;
+
         private float m_masterVolume = 1.0f;
         /// <summary>
         /// Master volume - affects all audio output (0.0 to 1.0)
@@ -833,7 +851,7 @@ namespace Radegast.Media
         /// </summary>
         private void ListenerUpdate(CancellationToken token)
         {
-            // Notice changes in position or direction.
+            // Avatar-tracking state (used when no camera override is active).
             Vector3 lastpos = new Vector3(0.0f, 0.0f, 0.0f);
             double lastAngle = 0.0;
 
@@ -844,56 +862,63 @@ namespace Radegast.Media
 
                 if (!SoundSystemAvailable || !system.hasHandle()) continue;
 
-                var my = Instance.Client.Self;
-                Vector3 newPosition = new Vector3(my.SimPosition);
+                var camState = _cameraListener;
+                VECTOR listenerpos;
+                VECTOR forward;
 
-                // Derive the full signed yaw angle from the facing quaternion using atan2
-                // so that all four compass quadrants are correctly represented.
-                // SimRotation is a unit quaternion; for a pure yaw rotation about the world
-                // Z axis:  q = (0, 0, sin(θ/2), cos(θ/2))  ⟹  θ = 2·atan2(qZ, qW).
-                // Using only Acos(W) loses the sign and mirrors any southward-facing direction.
-                double newAngle = 2.0 * Math.Atan2(
-                    (double)my.SimRotation.Z,
-                    (double)my.SimRotation.W);
-
-                // If we are standing still, nothing to update now, but
-                // FMOD needs a 'tick' anyway for callbacks, etc.  In looping
-                // 'game' programs, the loop is the 'tick'.  Since Radegast
-                // uses events and has no loop, we use this position-update
-                // thread to drive the FMOD tick.  Update only when the avatar
-                // has moved more than 500 mm or turned more than ~6 degrees.
-                double angleDelta = newAngle - lastAngle;
-                // Normalise delta to [-π, π] to handle wrap-around at ±π.
-                angleDelta -= Math.Round(angleDelta / (2.0 * Math.PI)) * (2.0 * Math.PI);
-                if (newPosition.ApproxEquals(lastpos, 0.5f) && Math.Abs(angleDelta) < 0.1)
+                if (camState != null)
                 {
-                    invoke(delegate
+                    // Scene viewer is open: use its camera eye position and look direction.
+                    // The camera can orbit without the avatar moving, so always update.
+                    // OMV → FMOD axis mapping: x_fmod = −y_omv, y_fmod = z_omv, z_fmod = x_omv
+                    listenerpos = FromOMVSpace(camState.EyePosition);
+                    var f = camState.Forward;
+                    forward = new VECTOR { x = -f.Y, y = f.Z, z = f.X };
+                }
+                else
+                {
+                    // Fall back to avatar body orientation.
+                    var my = Instance.Client.Self;
+                    Vector3 newPosition = new Vector3(my.SimPosition);
+
+                    // Derive the full signed yaw angle from the facing quaternion using atan2
+                    // so that all four compass quadrants are correctly represented.
+                    // SimRotation is a unit quaternion; for a pure yaw rotation about the world
+                    // Z axis:  q = (0, 0, sin(θ/2), cos(θ/2))  ⟹  θ = 2·atan2(qZ, qW).
+                    double newAngle = 2.0 * Math.Atan2(
+                        (double)my.SimRotation.Z,
+                        (double)my.SimRotation.W);
+
+                    // FMOD needs a periodic 'tick' even when the avatar is stationary.
+                    // Skip the full listener update when position and yaw are unchanged
+                    // (moved < 500 mm or turned < ~6 degrees).
+                    double angleDelta = newAngle - lastAngle;
+                    angleDelta -= Math.Round(angleDelta / (2.0 * Math.PI)) * (2.0 * Math.PI);
+                    if (newPosition.ApproxEquals(lastpos, 0.5f) && Math.Abs(angleDelta) < 0.1)
                     {
-                        FMODExec(system.update());
-                    });
-                    continue;
+                        invoke(delegate { FMODExec(system.update()); });
+                        continue;
+                    }
+
+                    lastpos = newPosition;
+                    lastAngle = newAngle;
+
+                    // Convert coordinate spaces.
+                    listenerpos = FromOMVSpace(newPosition);
+
+                    // Build the facing unit vector in FMOD coordinate space.
+                    // FMOD convention: Z = East, X = South, Y = Up.
+                    // SL/OMV forward direction for yaw θ: (cos θ, sin θ, 0).
+                    // OMV → FMOD mapping: x_fmod = −y_omv, z_fmod = x_omv.
+                    // Therefore: x_fmod = −sin θ, z_fmod = cos θ.
+                    forward = new VECTOR
+                    {
+                        x = -(float)Math.Sin(newAngle),  // South component (−OMV Y)
+                        y = 0.0f,
+                        z =  (float)Math.Cos(newAngle)   // East  component ( OMV X)
+                    };
                 }
 
-                // We have moved or turned.  Remember new position and yaw.
-                lastpos = newPosition;
-                lastAngle = newAngle;
-
-                // Convert coordinate spaces.
-                VECTOR listenerpos = FromOMVSpace(newPosition);
-
-                // Build the facing unit vector in FMOD coordinate space.
-                // FMOD convention: Z = East, X = South, Y = Up.
-                // SL/OMV forward direction for yaw θ: (cos θ, sin θ, 0).
-                // OMV → FMOD mapping (see FromOMVSpace): x_fmod = −y_omv, z_fmod = x_omv.
-                // Therefore: x_fmod = −sin θ, z_fmod = cos θ.
-                VECTOR forward = new VECTOR
-                {
-                    x = -(float)Math.Sin(newAngle),  // South component (−OMV Y)
-                    y = 0.0f,
-                    z =  (float)Math.Cos(newAngle)   // East  component ( OMV X)
-                };
-
-                // Tell FMOD the new orientation.
                 invoke(delegate
                 {
                     FMODExec(system.set3DListenerAttributes(
