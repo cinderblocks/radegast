@@ -173,7 +173,7 @@ namespace Radegast
             return ret;
         }
 
-        public ImmutableDictionary<UUID, string> KnownAnimations = null!;
+        public IReadOnlyDictionary<UUID, string> KnownAnimations = null!;
         public bool CameraTracksOwnAvatar = true;
         public Vector3 DefaultCameraOffset = new Vector3(-5, 0, 0);
 
