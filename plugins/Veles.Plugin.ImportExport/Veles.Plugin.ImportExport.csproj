@@ -20,6 +20,13 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </ProjectReference>
   </ItemGroup>
+  <ItemGroup>
+    <!-- NVorbis is deployed by Veles; reference here for compile-time only -->
+    <PackageReference Include="NVorbis" Version="0.10.5">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
   <!-- Remove transitive project reference DLLs before _CopyFilesMarkedCopyLocal writes them -->
   <Target Name="RemoveSharedReferences" BeforeTargets="_CopyFilesMarkedCopyLocal">
     <ItemGroup>

@@ -26,6 +26,8 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
+using LibreMetaverse.Assets;
+using NVorbis;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -83,33 +85,136 @@ public partial class UploadSoundViewModel : ObservableObject, IDisposable
 
         AppendLog($"Loading {Path.GetFileName(filePath)}...");
 
-        try
+        Task.Run(() =>
         {
-            var data = File.ReadAllBytes(filePath);
-            var info = new FileInfo(filePath);
-            _uploadData = data;
+            try
+            {
+                var raw  = File.ReadAllBytes(filePath);
+                var data = PrepareForUpload(raw, filePath);
 
-            Dispatcher.UIThread.Post(() =>
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _uploadData = data;
+                    SoundName   = Path.GetFileNameWithoutExtension(filePath);
+                    FileInfo    = $"{raw.Length / 1024.0:F1} KB source → {data.Length / 1024.0:F1} KB OGG";
+                    AssetId     = UUID.Zero.ToString();
+                    AppendLog("File loaded.");
+                    IsLoading = false;
+                    UpdateCanUpload();
+                    RefreshUploadButtonText();
+                });
+            }
+            catch (Exception ex)
             {
-                SoundName = Path.GetFileNameWithoutExtension(filePath);
-                FileInfo = $"{info.Length / 1024.0:F1} KB";
-                AssetId = UUID.Zero.ToString();
-                AppendLog("File loaded.");
-                IsLoading = false;
-                UpdateCanUpload();
-                RefreshUploadButtonText();
-            });
-        }
-        catch (Exception ex)
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _uploadData = null;
+                    AppendLog($"Failed to load file: {ex.Message}");
+                    IsLoading = false;
+                    UpdateCanUpload();
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Returns OGG bytes ready for upload.
+    /// OGG files are passed through unchanged.
+    /// WAV files are decoded and re-encoded to OGG (mono 44100 Hz).
+    /// </summary>
+    private byte[] PrepareForUpload(byte[] raw, string filePath)
+    {
+        // OGG Vorbis: already in SL's native format
+        if (raw.Length >= 4 &&
+            raw[0] == 0x4F && raw[1] == 0x67 && raw[2] == 0x67 && raw[3] == 0x53)
         {
-            _uploadData = null;
-            Dispatcher.UIThread.Post(() =>
-            {
-                AppendLog($"Failed to load file: {ex.Message}");
-                IsLoading = false;
-                UpdateCanUpload();
-            });
+            AppendLog("Detected OGG Vorbis — using directly.");
+            return raw;
         }
+
+        // WAV (RIFF/WAVE)
+        if (raw.Length >= 12 &&
+            raw[0] == 0x52 && raw[1] == 0x49 && raw[2] == 0x46 && raw[3] == 0x46 &&
+            raw[8] == 0x57 && raw[9] == 0x41 && raw[10] == 0x56 && raw[11] == 0x45)
+        {
+            AppendLog("Detected WAV — converting to OGG Vorbis (mono 44100 Hz)…");
+            var (pcm, rate, channels) = ParseWavPcm(raw);
+            AppendLog($"  WAV: {channels}ch {rate}Hz 16-bit → encoding…");
+            var ogg = AssetSound.PcmToOgg(pcm, rate, channels);
+            if (channels > 1)
+                AppendLog("  Note: downmixed to mono (SL plays all sounds in 3D mono).");
+            return ogg;
+        }
+
+        // Try treating as raw OGG anyway — some files lack the right magic
+        AppendLog($"Warning: unrecognised format for '{Path.GetFileName(filePath)}'. " +
+                  "Attempting upload as-is (expected OGG Vorbis).");
+        return raw;
+    }
+
+    // Minimal RIFF/WAV parser — returns raw interleaved PCM bytes (16-bit LE).
+    private static (byte[] pcm, int sampleRate, int channels) ParseWavPcm(byte[] data)
+    {
+        using var ms = new MemoryStream(data);
+        using var br = new BinaryReader(ms);
+
+        br.ReadUInt32(); // "RIFF"
+        br.ReadUInt32(); // file size - 8
+        br.ReadUInt32(); // "WAVE"
+
+        int sampleRate    = 0;
+        int channels      = 0;
+        int bitsPerSample = 16;
+        byte[]? pcm       = null;
+
+        while (ms.Position < ms.Length - 8)
+        {
+            uint chunkId   = br.ReadUInt32();
+            int  chunkSize = (int)br.ReadUInt32();
+            long nextChunk = ms.Position + chunkSize;
+
+            if (chunkId == 0x20746D66u) // "fmt "
+            {
+                int fmt = br.ReadUInt16();
+                if (fmt != 1) throw new InvalidDataException(
+                    $"WAV audioFormat {fmt} is not PCM. Only uncompressed PCM WAV is supported.");
+                channels      = br.ReadUInt16();
+                sampleRate    = (int)br.ReadUInt32();
+                br.ReadUInt32(); // byteRate
+                br.ReadUInt16(); // blockAlign
+                bitsPerSample = br.ReadUInt16();
+            }
+            else if (chunkId == 0x61746164u) // "data"
+            {
+                pcm = br.ReadBytes(chunkSize);
+            }
+
+            ms.Position = Math.Min(nextChunk + (chunkSize & 1), ms.Length);
+            if (pcm != null && sampleRate > 0) break;
+        }
+
+        if (pcm == null || sampleRate == 0)
+            throw new InvalidDataException("WAV file is missing required fmt or data chunks.");
+
+        // Normalise to 16-bit LE
+        if (bitsPerSample == 8)
+        {
+            var pcm16 = new byte[pcm.Length * 2];
+            for (int i = 0; i < pcm.Length; i++)
+            {
+                short s = (short)((pcm[i] - 128) << 8);
+                pcm16[i * 2]     = (byte)(s & 0xFF);
+                pcm16[i * 2 + 1] = (byte)((s >> 8) & 0xFF);
+            }
+            pcm = pcm16;
+        }
+        else if (bitsPerSample != 16)
+        {
+            throw new InvalidDataException(
+                $"WAV bit depth {bitsPerSample} is not supported. Use 8-bit or 16-bit PCM WAV.");
+        }
+
+        return (pcm, sampleRate, channels);
     }
 
     [RelayCommand(CanExecute = nameof(CanUpload))]

@@ -94,6 +94,13 @@ public sealed class ImportExportPlugin : IVelesPlugin
             "  name defaults to the filename without extension.",
             OnImportNoteCommand);
 
+        _ctx.RegisterCommand("exportsound", "Export a sound asset to an OGG or WAV file",
+            "exportsound <assetUUID> [path]  — downloads the sound and writes it to disk.\n" +
+            "  Extension determines format: .ogg (default, lossless copy) or .wav (decoded).",
+            OnExportSoundCommand);
+
+        _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_exportsound",
+            "Import/Export: Export Sound…", OnExportSoundMenuClick));
         _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_exportscript",
             "Import/Export: Export Script…", OnExportScriptMenuClick));
         _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_importscript",
@@ -109,6 +116,7 @@ public sealed class ImportExportPlugin : IVelesPlugin
     public void Detach()
     {
         _ctx.RemoveMenuItem("importexport_exportanim");
+        _ctx.RemoveMenuItem("importexport_exportsound");
         _ctx.RemoveMenuItem("importexport_exportscript");
         _ctx.RemoveMenuItem("importexport_importscript");
         _ctx.RemoveMenuItem("importexport_exportnote");
@@ -393,6 +401,79 @@ public sealed class ImportExportPlugin : IVelesPlugin
         catch (Exception ex)
         {
             write($"[Import/Export] Export animation error: {ex.Message}");
+        }
+    }
+
+    // ── Sound export ──────────────────────────────────────────────────────
+
+    private void OnExportSoundCommand(string[] args, Action<string> write)
+    {
+        if (args.Length < 1 || !UUID.TryParse(args[0], out UUID assetUUID))
+        {
+            write("Usage: exportsound <assetUUID> [path]");
+            write("  path extension determines format: .ogg (default) or .wav");
+            return;
+        }
+        string path = args.Length >= 2 ? args[1]
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                           "VelesExports", $"{assetUUID}.ogg");
+        write($"[Import/Export] Downloading sound {assetUUID} …");
+        _ = ExportSoundAsync(assetUUID, path, write);
+    }
+
+    private void OnExportSoundMenuClick()
+    {
+        _ = Task.Run(async () =>
+        {
+            IStorageFile? file = null;
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                file = await _ctx.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Export Sound — paste asset UUID as filename",
+                    SuggestedFileName = "sound.ogg",
+                    DefaultExtension = ".ogg",
+                    FileTypeChoices =
+                    [
+                        new FilePickerFileType("OGG Vorbis") { Patterns = ["*.ogg"] },
+                        new FilePickerFileType("WAV Audio")  { Patterns = ["*.wav"] },
+                    ]
+                });
+            });
+            if (file == null) return;
+
+            string path      = file.Path.LocalPath;
+            string nameNoExt = Path.GetFileNameWithoutExtension(path);
+            if (!UUID.TryParse(nameNoExt, out UUID assetUUID))
+            {
+                _ctx.LogToChat("[Import/Export] Export Sound cancelled: filename must be the asset UUID " +
+                               "(e.g. 12345678-1234-1234-1234-123456789abc.ogg).");
+                return;
+            }
+            _ctx.LogToChat($"[Import/Export] Downloading sound {assetUUID} …");
+            await ExportSoundAsync(assetUUID, path, _ctx.LogToChat).ConfigureAwait(false);
+        });
+    }
+
+    private async Task ExportSoundAsync(UUID assetUUID, string path, Action<string> write)
+    {
+        try
+        {
+            var asset = await _ctx.Client.Assets
+                .RequestAssetAsync(assetUUID, AssetType.Sound, priority: true)
+                .ConfigureAwait(false);
+            if (asset?.AssetData == null)
+            {
+                write($"[Import/Export] Sound {assetUUID} not found or download failed.");
+                return;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            SoundConverter.SaveAs(asset.AssetData, path);
+            write($"[Import/Export] Sound written: {path}  ({asset.AssetData.Length} bytes)");
+        }
+        catch (Exception ex)
+        {
+            write($"[Import/Export] Export sound error: {ex.Message}");
         }
     }
 
