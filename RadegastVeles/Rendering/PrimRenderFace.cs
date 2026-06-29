@@ -614,6 +614,13 @@ public sealed class PrimRenderSubmission
     /// Populated by AvatarMeshBuilder; empty for non-avatar submissions.
     /// </summary>
     internal        AvatarFaceSkinData[] SkinData   { get; init; } = [];
+
+    /// <summary>
+    /// Per-face skinning data for animesh (standalone rigged mesh) LBS animation.
+    /// Populated by PrimMeshBuilder for objects with <see cref="LibreMetaverse.Rendering.MeshSkinData"/>;
+    /// empty for all other submissions.
+    /// </summary>
+    internal        AnimeshFaceSkinData[] AnimeshSkinData { get; init; } = [];
 }
 
 /// <summary>

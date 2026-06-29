@@ -90,8 +90,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
         IProgress<SceneTexturePatch>? texturePatch     = null,
         int                     textureResolutionLevel = -1)
     {
-        var (rawFaces, bMin, bMax, flexiPrims) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
-                                                       .ConfigureAwait(false);
+        var (rawFaces, bMin, bMax, flexiPrims, animeshSkins) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
+                                                                   .ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
 
@@ -115,11 +115,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
         var submission = new PrimRenderSubmission
         {
-            Label      = label,
-            Faces      = faces.ToArray(),
-            BoundsMin  = bMin,
-            BoundsMax  = bMax,
-            FlexiPrims = flexiPrims.ToArray(),
+            Label          = label,
+            Faces          = faces.ToArray(),
+            BoundsMin      = bMin,
+            BoundsMax      = bMax,
+            FlexiPrims     = flexiPrims.ToArray(),
+            AnimeshSkinData = animeshSkins.Count > 0 ? animeshSkins.ToArray() : [],
         };
 
         // Stream textures asynchronously in the background — report each patch as it
@@ -138,7 +139,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     // ── Tessellation ──────────────────────────────────────────────────────────────
 
-    private async Task<(List<RawFace> faces, Vector3 bMin, Vector3 bMax, List<FlexiPrimInfo> flexiPrims)> TessellateAsync(
+    private async Task<(List<RawFace> faces, Vector3 bMin, Vector3 bMax, List<FlexiPrimInfo> flexiPrims, List<AnimeshFaceSkinData> animeshSkins)> TessellateAsync(
         IReadOnlyList<Primitive> prims,
         uint                    rootLocalId,
         IProgress<string>?      progress,
@@ -146,10 +147,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
         bool                    isHud       = false,
         DetailLevel             detailLevel = DetailLevel.High)
     {
-        var faces      = new List<RawFace>();
-        var flexiPrims = new List<FlexiPrimInfo>();
-        var bMin       = new Vector3(float.MaxValue);
-        var bMax       = new Vector3(float.MinValue);
+        var faces        = new List<RawFace>();
+        var flexiPrims   = new List<FlexiPrimInfo>();
+        var animeshSkins = new List<AnimeshFaceSkinData>();
+        var bMin         = new Vector3(float.MaxValue);
+        var bMax         = new Vector3(float.MinValue);
 
         var rootPrim = prims.FirstOrDefault(p => p.LocalID == rootLocalId) ?? prims[0];
         var rootRot = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
@@ -223,6 +225,60 @@ internal sealed class PrimMeshBuilder(GridClient client)
             AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax,
                         faceTransformOverride: flexiBaseVerts != null ? Matrix4x4.Identity : (Matrix4x4?)null);
 
+            // Extract bind-space skinning data for standalone rigged mesh prims so that
+            // SceneAnimeshStreamer can drive LBS animation each tick.
+            if (mesh.SkinData?.JointNames?.Length > 0 && flexiBaseVerts == null)
+            {
+                var bindShape = FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
+                for (int gi = faceStart; gi < faces.Count; gi++)
+                {
+                    int fi = faces[gi].FaceIndex;
+                    var mf = mesh.Faces[fi];
+                    if (mf.Weights == null || mf.Weights.Count == 0) continue;
+
+                    int nv         = mf.Vertices.Count;
+                    var bindVerts  = new float[nv * 8];
+                    var skinJoints = new int  [nv * 4];
+                    var skinWts    = new float[nv * 4];
+
+                    for (int vi = 0; vi < nv; vi++)
+                    {
+                        var v  = mf.Vertices[vi];
+                        var bp = Vector4.Transform(
+                            new Vector4(v.Position.X, v.Position.Y, v.Position.Z, 1f), bindShape);
+                        var bn = Vector4.Transform(
+                            new Vector4(v.Normal.X,   v.Normal.Y,   v.Normal.Z,   0f), bindShape);
+                        int o = vi * 8;
+                        bindVerts[o    ] = bp.X; bindVerts[o + 1] = bp.Y; bindVerts[o + 2] = bp.Z;
+                        bindVerts[o + 3] = bn.X; bindVerts[o + 4] = bn.Y; bindVerts[o + 5] = bn.Z;
+                        bindVerts[o + 6] = v.TexCoord.X;
+                        bindVerts[o + 7] = v.TexCoord.Y;
+
+                        var vw = vi < mf.Weights.Count ? mf.Weights[vi] : default;
+                        int si = vi * 4;
+                        skinJoints[si]     = vw.Joint0; skinWts[si]     = vw.Weight0;
+                        skinJoints[si + 1] = vw.Joint1; skinWts[si + 1] = vw.Weight1;
+                        skinJoints[si + 2] = vw.Joint2; skinWts[si + 2] = vw.Weight2;
+                        skinJoints[si + 3] = vw.Joint3; skinWts[si + 3] = vw.Weight3;
+
+                        NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
+                            ref skinJoints[si],     ref skinWts[si],
+                            ref skinJoints[si + 1], ref skinWts[si + 1],
+                            ref skinJoints[si + 2], ref skinWts[si + 2],
+                            ref skinJoints[si + 3], ref skinWts[si + 3]);
+                    }
+
+                    animeshSkins.Add(new AnimeshFaceSkinData
+                    {
+                        FaceIndex = gi,
+                        BindVerts = bindVerts,
+                        SkinData  = mesh.SkinData,
+                        Joints    = skinJoints,
+                        Weights   = skinWts,
+                    });
+                }
+            }
+
             if (flexiBaseVerts != null)
             {
                 int faceCount = faces.Count - faceStart;
@@ -254,7 +310,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             bMax = new Vector3( 0.5f);
         }
 
-        return (faces, bMin, bMax, flexiPrims);
+        return (faces, bMin, bMax, flexiPrims, animeshSkins);
     }
 
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct)

@@ -66,6 +66,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private SceneParticleStreamer?           _particleStreamer;
     private SceneFlexiStreamer?              _flexiStreamer;
     private SceneAvatarAnimationStreamer?    _avatarAnimStreamer;
+    private SceneAnimeshStreamer?            _animeshStreamer;
     private SceneNameTagService?             _nameTagService;
     private SceneBuildScheduler?             _buildScheduler;
     private SceneEnvironmentService?         _envService;
@@ -223,6 +224,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _avatarAnimStreamer  = new SceneAvatarAnimationStreamer(_instance.Client, viewport, _avatarStreamer);
         _flexiStreamer.SetAnimationStreamer(_avatarAnimStreamer);
         _avatarStreamer.SetAnimationStreamer(_avatarAnimStreamer);
+        _animeshStreamer     = new SceneAnimeshStreamer(_instance.Client, viewport, _objectStreamer);
 
         // Apply current draw distance to freshly created streamers.
         _objectStreamer.DrawDistance = DrawDistance;
@@ -447,6 +449,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _particleStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _flexiStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _avatarAnimStreamer?.OnKillAvatar(e.Simulator, e.ObjectLocalID);
+        _animeshStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
     }
 
     private void OnLandPatchReceived(object? sender, LandPatchReceivedEventArgs e)
@@ -474,6 +477,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _particleStreamer?.Clear();
             _flexiStreamer?.Clear();
             _avatarAnimStreamer?.Clear();
+            _animeshStreamer?.Clear();
             NameTags.Clear();
             SelectedLocalId = 0;
             SelectedInfo    = string.Empty;
@@ -1215,6 +1219,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         _avatarAnimStreamer?.Dispose();
         _avatarAnimStreamer = null;
+
+        _animeshStreamer?.Dispose();
+        _animeshStreamer = null;
 
         _nameTagService?.Dispose();
         _nameTagService = null;
