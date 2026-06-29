@@ -82,23 +82,27 @@ internal sealed class SceneAnimeshAnimator
                 matCache[face.SkinData] = skinMats;
             }
 
-            int nv      = face.BindVerts.Length / 8;
+            int nv      = face.BindVerts.Length / 12;
             int needed  = face.BindVerts.Length;
             var nvBuf   = ArrayPool<float>.Shared.Rent(needed);
             int jCount  = skinMats.Length;
 
             for (int vi = 0; vi < nv; vi++)
             {
-                int o  = vi * 8;
+                int o  = vi * 12;
                 var bp = new Vector4(
                     face.BindVerts[o],     face.BindVerts[o + 1],
                     face.BindVerts[o + 2], 1f);
                 var bn = new Vector4(
                     face.BindVerts[o + 3], face.BindVerts[o + 4],
                     face.BindVerts[o + 5], 0f);
+                var bt = new Vector4(
+                    face.BindVerts[o + 8], face.BindVerts[o + 9],
+                    face.BindVerts[o + 10], 0f);
 
                 var ap = Vector4.Zero;
                 var an = Vector4.Zero;
+                var at = Vector4.Zero;
                 float tw = 0f;
 
                 for (int infl = 0; infl < 4; infl++)
@@ -109,16 +113,19 @@ internal sealed class SceneAnimeshAnimator
                     ref var m = ref skinMats[ji];
                     ap += w * Vector4.Transform(bp, m);
                     an += w * Vector4.Transform(bn, m);
+                    at += w * Vector4.Transform(bt, m);
                     tw += w;
                 }
 
                 // Fallback for degenerate weights: leave vertex at bind position.
-                if (tw <= 1e-4f) { ap = bp; an = bn; }
+                if (tw <= 1e-4f) { ap = bp; an = bn; at = bt; }
 
-                nvBuf[o    ] = ap.X; nvBuf[o + 1] = ap.Y; nvBuf[o + 2] = ap.Z;
-                nvBuf[o + 3] = an.X; nvBuf[o + 4] = an.Y; nvBuf[o + 5] = an.Z;
-                nvBuf[o + 6] = face.BindVerts[o + 6];
-                nvBuf[o + 7] = face.BindVerts[o + 7];
+                nvBuf[o    ]  = ap.X; nvBuf[o + 1]  = ap.Y; nvBuf[o + 2]  = ap.Z;
+                nvBuf[o + 3]  = an.X; nvBuf[o + 4]  = an.Y; nvBuf[o + 5]  = an.Z;
+                nvBuf[o + 6]  = face.BindVerts[o + 6];
+                nvBuf[o + 7]  = face.BindVerts[o + 7];
+                nvBuf[o + 8]  = at.X; nvBuf[o + 9]  = at.Y; nvBuf[o + 10] = at.Z;
+                nvBuf[o + 11] = face.BindVerts[o + 11];
             }
 
             _viewport.ScheduleSceneVertexUpdate(

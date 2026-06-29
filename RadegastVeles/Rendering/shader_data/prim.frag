@@ -95,6 +95,8 @@ vec3 acesFilmic(vec3 x)
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
+in vec4 vTangent;  // view-space tangent xyz + handedness w (0 = no tangent data)
+
 out vec4 fragColor;
 
 vec2 transformUv(vec2 uv, vec4 st, float rot)
@@ -254,23 +256,29 @@ void main()
         vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
         vec3 v = normalize(-vViewPos);
 
-        // TBN from screen-space derivatives
-        vec3 posDx = dFdx(vViewPos);
-        vec3 posDy = dFdy(vViewPos);
-        vec2 texDx = dFdx(vTexCoord);
-        vec2 texDy = dFdy(vTexCoord);
-        float det = texDx.x * texDy.y - texDy.x * texDx.y;
-        bool hasTBN = abs(det) > 1e-5;
+        // Per-vertex tangent basis. Fall back to screen-space derivatives only when no
+        // tangent data was supplied (w == 0, e.g. placeholder meshes).
         vec3 T, B;
+        bool hasTBN = abs(vTangent.w) > 0.1;
         if (hasTBN)
         {
-            T = normalize( texDy.y * posDx - texDx.y * posDy);
-            B = normalize(-texDy.x * posDx + texDx.x * posDy);
+            T = normalize(vTangent.xyz);
+            B = vTangent.w * cross(n, T);
         }
         else
         {
-            T = vec3(1.0, 0.0, 0.0);
-            B = vec3(0.0, 1.0, 0.0);
+            vec3 posDx = dFdx(vViewPos);
+            vec3 posDy = dFdy(vViewPos);
+            vec2 texDx = dFdx(vTexCoord);
+            vec2 texDy = dFdy(vTexCoord);
+            float det = texDx.x * texDy.y - texDy.x * texDx.y;
+            if (abs(det) > 1e-5) {
+                T = normalize( texDy.y * posDx - texDx.y * posDy);
+                B = normalize(-texDy.x * posDx + texDx.x * posDy);
+            } else {
+                T = vec3(1.0, 0.0, 0.0);
+                B = vec3(0.0, 1.0, 0.0);
+            }
         }
 
         if (uHasNormalMap != 0 && hasTBN)
@@ -341,23 +349,29 @@ void main()
     vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
     vec3 v = normalize(-vViewPos);
 
-    // Build TBN from screen-space derivatives (used by both bump and normal map).
-    vec3 posDx = dFdx(vViewPos);
-    vec3 posDy = dFdy(vViewPos);
-    vec2 texDx = dFdx(vTexCoord);
-    vec2 texDy = dFdy(vTexCoord);
-    float det = texDx.x * texDy.y - texDy.x * texDx.y;
-    bool hasTBN = abs(det) > 1e-5;
+    // Per-vertex tangent basis. Fall back to screen-space derivatives for meshes
+    // without tangent data (w == 0, e.g. placeholder avatars).
     vec3 T, B;
+    bool hasTBN = abs(vTangent.w) > 0.1;
     if (hasTBN)
     {
-        T = normalize( texDy.y * posDx - texDx.y * posDy);
-        B = normalize(-texDy.x * posDx + texDx.x * posDy);
+        T = normalize(vTangent.xyz);
+        B = vTangent.w * cross(n, T);
     }
     else
     {
-        T = vec3(1.0, 0.0, 0.0);
-        B = vec3(0.0, 1.0, 0.0);
+        vec3 posDx = dFdx(vViewPos);
+        vec3 posDy = dFdy(vViewPos);
+        vec2 texDx = dFdx(vTexCoord);
+        vec2 texDy = dFdy(vTexCoord);
+        float det = texDx.x * texDy.y - texDy.x * texDx.y;
+        if (abs(det) > 1e-5) {
+            T = normalize( texDy.y * posDx - texDx.y * posDy);
+            B = normalize(-texDy.x * posDx + texDx.x * posDy);
+        } else {
+            T = vec3(1.0, 0.0, 0.0);
+            B = vec3(0.0, 1.0, 0.0);
+        }
     }
 
     // Material normal map: perturb normal using tangent-space sample.

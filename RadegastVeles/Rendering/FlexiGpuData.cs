@@ -65,7 +65,7 @@ internal sealed class FlexiGpuData : IDisposable
         for (int fi = 0; fi < fc; fi++)
         {
             float[] bp = info.BaseVertices[fi];
-            vCounts[fi] = bp.Length / 8;
+            vCounts[fi] = bp.Length / 12;
 
             uint ssbo = gl.GenBuffer();
             gl.BindBuffer(BufferTargetARB.ShaderStorageBuffer, ssbo);

@@ -139,6 +139,11 @@ internal sealed class GlInstanceDrawer : IDisposable
         gl.EnableVertexAttribArray(2);
         gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, stride, (void*)24);
         gl.VertexAttribDivisor(2, 0);
+
+        // Tangent (location 14) — per-vertex from mesh VBO, divisor 0
+        gl.EnableVertexAttribArray(14);
+        gl.VertexAttribPointer(14, 4, VertexAttribPointerType.Float, false, stride, (void*)32);
+        gl.VertexAttribDivisor(14, 0);
     }
 
     private unsafe void SetupInstanceAttribs()

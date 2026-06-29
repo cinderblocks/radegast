@@ -1322,22 +1322,22 @@ public class GlViewportControl : Panel
     /// 2. Möller–Trumbore intersection against every triangle of the face.
     /// 3. Barycentric interpolation of vertex UV and normal; binormal from cross(tangent, normal).
     ///
-    /// Vertex layout (8 floats per vertex): pos(3) normal(3) uv(2).
+    /// Vertex layout (12 floats per vertex): pos(3) normal(3) uv(2) tangent(4).
     /// </summary>
     /// <summary>
     /// Extracts a positions-only buffer (3 floats per vertex) from an interleaved
-    /// Position(3)+Normal(3)+TexCoord(2) buffer. Used to slim the CPU-side picker
+    /// Position(3)+Normal(3)+TexCoord(2)+Tangent(4) buffer. Used to slim the CPU-side picker
     /// data after the full interleaved buffer has been uploaded to the GPU,
-    /// reducing LOH retention by ~62%.
+    /// reducing LOH retention by ~75%.
     /// </summary>
     private static float[] PickerFromInterleaved(float[]? interleaved, int length = 0)
     {
         if (interleaved == null || interleaved.Length < 3)
             return Array.Empty<float>();
         int len    = length > 0 ? length : interleaved.Length;
-        int vCount = len / 8;
+        int vCount = len / 12;
         var pos = new float[vCount * 3];
-        for (int i = 0, j = 0; i < len; i += 8, j += 3)
+        for (int i = 0, j = 0; i < len; i += 12, j += 3)
         {
             pos[j]     = interleaved[i];
             pos[j + 1] = interleaved[i + 1];
@@ -1347,16 +1347,16 @@ public class GlViewportControl : Panel
     }
 
     // Extracts a compact normal+UV buffer (5 floats/vertex: nx,ny,nz,u,v) from the full
-    // interleaved buffer (8 floats/vertex: px,py,pz,nx,ny,nz,u,v).
-    // Stored alongside PickerVertices so the full 8-wide buffer can be released post-upload.
+    // interleaved buffer (12 floats/vertex: px,py,pz,nx,ny,nz,u,v,tx,ty,tz,tw).
+    // Stored alongside PickerVertices so the full 12-wide buffer can be released post-upload.
     private static float[] NormalUvFromInterleaved(float[]? interleaved, int length = 0)
     {
-        if (interleaved == null || interleaved.Length < 8)
+        if (interleaved == null || interleaved.Length < 12)
             return Array.Empty<float>();
         int len    = length > 0 ? length : interleaved.Length;
-        int vCount = len / 8;
+        int vCount = len / 12;
         var nuv = new float[vCount * 5];
-        for (int i = 0, j = 0; i < len; i += 8, j += 5)
+        for (int i = 0, j = 0; i < len; i += 12, j += 5)
         {
             nuv[j]     = interleaved[i + 3]; // nx
             nuv[j + 1] = interleaved[i + 4]; // ny
@@ -2204,7 +2204,7 @@ public class GlViewportControl : Panel
             }
             _faceMeshes.Add(mesh); // indexed by face position for animation updates
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
-            // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
+            // interleaved float[] (12 floats/vertex) so the LOH array can be collected.
             // PickerVertices (3 floats/vertex) is used for ray–triangle intersection;
             // NormalUvVertices (5 floats/vertex: nx,ny,nz,u,v) is used by ComputeHitInfo.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
@@ -2500,7 +2500,7 @@ public class GlViewportControl : Panel
                 mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
             }
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
-            // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
+            // interleaved float[] (12 floats/vertex) so the LOH array can be collected.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
             face.NormalUvVertices = NormalUvFromInterleaved(face.Vertices, vLen);
             if (face.VerticesLength > 0)

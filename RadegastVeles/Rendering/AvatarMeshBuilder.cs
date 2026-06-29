@@ -274,7 +274,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 {
                     var origFace      = attFaces[i];
                     var faceTransform = origFace.Transform;
-                    int nv            = (origFace.Vertices?.Length ?? 0) / 8;
+                    int nv            = (origFace.Vertices?.Length ?? 0) / 12;
                     var rigged        = attRiggedSkins[i];
 
                     // Attachment vertices are stored in prim-local space by PrimMeshBuilder;
@@ -289,17 +289,22 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     var worldVerts = GC.AllocateUninitializedArray<float>(origFace.Vertices.Length);
                     for (int vi = 0; vi < nv; vi++)
                     {
-                        int o  = vi * 8;
+                        int o  = vi * 12;
                         var wp = Vector4.Transform(
                             new Vector4(origFace.Vertices[o],     origFace.Vertices[o + 1],
                                         origFace.Vertices[o + 2], 1f), faceTransform);
                         var wn = Vector4.Transform(
                             new Vector4(origFace.Vertices[o + 3], origFace.Vertices[o + 4],
                                         origFace.Vertices[o + 5], 0f), faceTransform);
-                        worldVerts[o]     = wp.X; worldVerts[o + 1] = wp.Y; worldVerts[o + 2] = wp.Z;
-                        worldVerts[o + 3] = wn.X; worldVerts[o + 4] = wn.Y; worldVerts[o + 5] = wn.Z;
-                        worldVerts[o + 6] = origFace.Vertices[o + 6];
-                        worldVerts[o + 7] = origFace.Vertices[o + 7];
+                        var wt = Vector4.Transform(
+                            new Vector4(origFace.Vertices[o + 8], origFace.Vertices[o + 9],
+                                        origFace.Vertices[o + 10], 0f), faceTransform);
+                        worldVerts[o]      = wp.X; worldVerts[o + 1]  = wp.Y; worldVerts[o + 2]  = wp.Z;
+                        worldVerts[o + 3]  = wn.X; worldVerts[o + 4]  = wn.Y; worldVerts[o + 5]  = wn.Z;
+                        worldVerts[o + 6]  = origFace.Vertices[o + 6];
+                        worldVerts[o + 7]  = origFace.Vertices[o + 7];
+                        worldVerts[o + 8]  = wt.X; worldVerts[o + 9]  = wt.Y; worldVerts[o + 10] = wt.Z;
+                        worldVerts[o + 11] = origFace.Vertices[o + 11]; // handedness invariant
                     }
 
                     attFaces[i] = new PrimRenderFace
@@ -465,7 +470,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         FaceCount          = faceCount,
                         BaseVertices       = baseVerts,
                         PathSegments       = segments,
-                        ProfileVertexCount = baseVerts[0].Length / 8 / Math.Max(1, segments),
+                        ProfileVertexCount = baseVerts[0].Length / 12 / Math.Max(1, segments),
                         Scale              = flexPrim.Scale,
                         AttachTransform    = attachTx,
                         PrimLocalMatrix    = primLocalMatrix,
@@ -743,7 +748,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
         for (int vi = 0; vi < vertexCount; vi++)
         {
-            int o  = vi * 8;
+            int o  = vi * 12;
             int si = vi * 4;
             var bp = new Vector4(bindVerts[o], bindVerts[o + 1], bindVerts[o + 2], 1f);
 
@@ -999,9 +1004,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             if ((uint)dom >= (uint)jointNames.Length) continue;
 
             var vPos = new Vector3(
-                verts[vi * 8 + 0],
-                verts[vi * 8 + 1],
-                verts[vi * 8 + 2]);
+                verts[vi * 12 + 0],
+                verts[vi * 12 + 1],
+                verts[vi * 12 + 2]);
 
             // Find the geometrically nearest mobile (non-static) bone in T-pose world space.
             // That bone's group defines the "correct" kinematic group for this vertex.
@@ -1424,11 +1429,11 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                              && boneWorldMatrices.TryGetValue(boneName, out var bm))
             eyeBoneMat = bm;
 
-        float[] verts = GC.AllocateUninitializedArray<float>(mesh.NumVertices * 8);
+        float[] verts = GC.AllocateUninitializedArray<float>(mesh.NumVertices * 12);
         for (int vi = 0; vi < mesh.NumVertices; vi++)
         {
             var v = mesh.Vertices[vi];
-            int o = vi * 8;
+            int o = vi * 12;
             if (eyeBoneMat.HasValue)
             {
                 var wp = Vector4.Transform(
@@ -1445,6 +1450,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             }
             verts[o + 6] = v.TexCoord.X;
             verts[o + 7] = v.TexCoord.Y;
+            // tangents 8-11 computed after index array is built
         }
 
         ushort[] indices = GC.AllocateUninitializedArray<ushort>(mesh.NumFaces * 3);
@@ -1455,10 +1461,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             indices[fi * 3 + 2] = (ushort)mesh.Faces[fi].Indices[2];
         }
 
+        PrimMeshBuilder.ComputeTangents(verts, mesh.NumVertices, indices);
+
         var centroidSum = Vector3.Zero;
         for (int vi = 0; vi < mesh.NumVertices; vi++)
         {
-            int o  = vi * 8;
+            int o  = vi * 12;
             var wp = new Vector3(verts[o], verts[o + 1], verts[o + 2]);
             bMin         = Vector3.Min(bMin, wp);
             bMax         = Vector3.Max(bMax, wp);
