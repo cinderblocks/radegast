@@ -94,6 +94,15 @@ public sealed class ImportExportPlugin : IVelesPlugin
             "  name defaults to the filename without extension.",
             OnImportNoteCommand);
 
+        _ctx.RegisterCommand("exporttex", "Export a texture asset to an image file",
+            "exporttex <assetUUID> [path]  — downloads the texture and writes it to disk.\n" +
+            "  Extension sets format: .png .jpg .webp .bmp .tga (decoded)  |  .j2k .j2c .jp2 (raw).\n" +
+            "  Default: <uuid>.png in ~/VelesExports/",
+            OnExportTexCommand);
+
+        _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_exporttex",
+            "Import/Export: Export Texture…", OnExportTexMenuClick));
+
         _ctx.RegisterCommand("exportsound", "Export a sound asset to an OGG or WAV file",
             "exportsound <assetUUID> [path]  — downloads the sound and writes it to disk.\n" +
             "  Extension determines format: .ogg (default, lossless copy) or .wav (decoded).",
@@ -115,6 +124,7 @@ public sealed class ImportExportPlugin : IVelesPlugin
 
     public void Detach()
     {
+        _ctx.RemoveMenuItem("importexport_exporttex");
         _ctx.RemoveMenuItem("importexport_exportanim");
         _ctx.RemoveMenuItem("importexport_exportsound");
         _ctx.RemoveMenuItem("importexport_exportscript");
@@ -401,6 +411,90 @@ public sealed class ImportExportPlugin : IVelesPlugin
         catch (Exception ex)
         {
             write($"[Import/Export] Export animation error: {ex.Message}");
+        }
+    }
+
+    // ── Texture export ────────────────────────────────────────────────────
+
+    private static readonly FilePickerFileType[] s_texPickerTypes =
+    [
+        new FilePickerFileType("PNG Image")       { Patterns = ["*.png"]  },
+        new FilePickerFileType("JPEG Image")      { Patterns = ["*.jpg"]  },
+        new FilePickerFileType("WebP Image")      { Patterns = ["*.webp"] },
+        new FilePickerFileType("Targa Image")     { Patterns = ["*.tga"]  },
+        new FilePickerFileType("BMP Image")       { Patterns = ["*.bmp"]  },
+        new FilePickerFileType("JPEG 2000 (raw)") { Patterns = ["*.j2k", "*.j2c", "*.jp2"] },
+    ];
+
+    private void OnExportTexCommand(string[] args, Action<string> write)
+    {
+        if (args.Length < 1 || !UUID.TryParse(args[0], out UUID assetUUID))
+        {
+            write("Usage: exporttex <assetUUID> [path]");
+            write("  Supported extensions: .png .jpg .webp .bmp .tga .j2k .j2c .jp2");
+            return;
+        }
+        string path = args.Length >= 2 ? args[1]
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                           "VelesExports", $"{assetUUID}.png");
+        write($"[Import/Export] Downloading texture {assetUUID} …");
+        _ = ExportTextureAsync(assetUUID, path, write);
+    }
+
+    private void OnExportTexMenuClick()
+    {
+        _ = Task.Run(async () =>
+        {
+            IStorageFile? file = null;
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                file = await _ctx.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Export Texture — paste asset UUID as filename",
+                    SuggestedFileName = "texture.png",
+                    DefaultExtension = ".png",
+                    FileTypeChoices = s_texPickerTypes,
+                });
+            });
+            if (file == null) return;
+
+            string path      = file.Path.LocalPath;
+            string nameNoExt = Path.GetFileNameWithoutExtension(path);
+            if (!UUID.TryParse(nameNoExt, out UUID assetUUID))
+            {
+                _ctx.LogToChat("[Import/Export] Export Texture cancelled: filename must be the " +
+                               "asset UUID (e.g. 89556747-24cb-43ed-920b-47caed15465f.png).");
+                return;
+            }
+            _ctx.LogToChat($"[Import/Export] Downloading texture {assetUUID} …");
+            await ExportTextureAsync(assetUUID, path, _ctx.LogToChat).ConfigureAwait(false);
+        });
+    }
+
+    private async Task ExportTextureAsync(UUID assetUUID, string path, Action<string> write)
+    {
+        try
+        {
+            var asset = await _ctx.Client.Assets
+                .RequestImageAsync(assetUUID, ImageType.Normal)
+                .ConfigureAwait(false);
+
+            if (asset?.AssetData == null)
+            {
+                write($"[Import/Export] Texture {assetUUID} not found or download failed.");
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            TextureConverter.SaveAs(asset.AssetData, path);
+
+            var ext = Path.GetExtension(path).TrimStart('.').ToUpperInvariant();
+            write($"[Import/Export] Texture written: {path}  " +
+                  $"({asset.AssetData.Length / 1024.0:F1} KB J2K → {ext})");
+        }
+        catch (Exception ex)
+        {
+            write($"[Import/Export] Export texture error: {ex.Message}");
         }
     }
 
