@@ -38,6 +38,7 @@
                     <Button Content="IM" Command="{Binding GroupIMCommand}" Margin="0,0,4,4" AutomationProperties.Name="Group IM" />
                     <Button Content="Invite…" Command="{Binding InviteMemberCommand}" Margin="0,0,4,4" AutomationProperties.Name="Invite member to group" />
                     <Button Content="Leave" Command="{Binding LeaveGroupCommand}" Margin="0,0,4,4" AutomationProperties.Name="Leave group" />
+                    <Button Content="Notice Archive" Command="{Binding ShowNoticeArchiveCommand}" Margin="0,0,4,4" AutomationProperties.Name="Open group notice archive" />
                 </WrapPanel>
             </StackPanel>
         </ScrollViewer>

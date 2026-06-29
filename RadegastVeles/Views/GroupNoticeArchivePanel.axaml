@@ -1,0 +1,104 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.GroupNoticeArchivePanel"
+             x:DataType="vm:GroupNoticeArchiveViewModel"
+             AutomationProperties.Name="Group Notice Archive">
+    <Grid RowDefinitions="Auto,*" Margin="8">
+
+        <!-- Filter bar -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="6" Margin="0,0,0,6">
+            <TextBox Text="{Binding SearchText}"
+                     PlaceholderText="Search subject, sender, body…"
+                     Width="200"
+                     AutomationProperties.Name="Search notices" />
+            <ComboBox ItemsSource="{Binding GroupFilters}"
+                      SelectedItem="{Binding SelectedGroupFilter}"
+                      MinWidth="160"
+                      AutomationProperties.Name="Filter by group" />
+            <Button Content="Refresh" Command="{Binding RefreshCommand}"
+                    AutomationProperties.Name="Refresh archive" />
+            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"
+                       Opacity="0.6" FontSize="11" />
+        </StackPanel>
+
+        <!-- List + detail -->
+        <Grid Grid.Row="1" ColumnDefinitions="280,6,*">
+
+            <!-- Notice list -->
+            <ListBox Grid.Column="0"
+                     ItemsSource="{Binding Notices}"
+                     SelectedItem="{Binding SelectedNotice}"
+                     AutomationProperties.Name="Archived notices list">
+                <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ArchivedNoticeItem">
+                        <StackPanel Margin="2" Spacing="1">
+                            <TextBlock Text="{Binding Subject}"
+                                       FontWeight="SemiBold"
+                                       TextTrimming="CharacterEllipsis"
+                                       AutomationProperties.Name="{Binding Subject}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6" Opacity="0.65">
+                                <TextBlock Text="{Binding GroupName}" FontSize="10"
+                                           TextTrimming="CharacterEllipsis" MaxWidth="110" />
+                                <TextBlock Text="{Binding FromName}" FontSize="10"
+                                           TextTrimming="CharacterEllipsis" MaxWidth="80" />
+                                <TextBlock Text="{Binding Date}" FontSize="10" />
+                            </StackPanel>
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+
+            <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="Transparent"
+                          AutomationProperties.Name="Resize archive splitter" />
+
+            <!-- Notice detail -->
+            <ScrollViewer Grid.Column="2"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto"
+                          Padding="4,0,0,0">
+                <StackPanel Spacing="8">
+
+                    <TextBlock Text="Select a notice to read it."
+                               Opacity="0.4" FontStyle="Italic"
+                               IsVisible="{Binding SelectedNotice, Converter={x:Static ObjectConverters.IsNull}}" />
+
+                    <StackPanel IsVisible="{Binding SelectedNotice, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                Spacing="6">
+                        <TextBlock Text="{Binding SelectedNotice.Subject}"
+                                   FontWeight="SemiBold" FontSize="15"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="Notice subject" />
+                        <StackPanel Orientation="Horizontal" Spacing="10" Opacity="0.65">
+                            <TextBlock Text="{Binding SelectedNotice.GroupName}" FontSize="11"
+                                       AutomationProperties.Name="Group name" />
+                            <TextBlock Text="·" FontSize="11" />
+                            <TextBlock Text="{Binding SelectedNotice.FromName}" FontSize="11"
+                                       AutomationProperties.Name="From name" />
+                            <TextBlock Text="·" FontSize="11" />
+                            <TextBlock Text="{Binding SelectedNotice.Date}" FontSize="11"
+                                       AutomationProperties.Name="Notice date" />
+                        </StackPanel>
+                        <Separator />
+                        <TextBlock Text="{Binding SelectedBody}"
+                                   TextWrapping="Wrap"
+                                   AutomationProperties.Name="Notice body" />
+                        <Border Background="#14FFFFFF" CornerRadius="4" Padding="8"
+                                IsVisible="{Binding SelectedNotice.HasAttachment}"
+                                AutomationProperties.Name="Attachment info">
+                            <TextBlock Text="{Binding SelectedNotice.AttachmentInfo}"
+                                       FontSize="12" Opacity="0.7" />
+                        </Border>
+                    </StackPanel>
+
+                </StackPanel>
+            </ScrollViewer>
+
+        </Grid>
+    </Grid>
+</UserControl>
