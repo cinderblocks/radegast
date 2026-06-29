@@ -61,18 +61,28 @@ public sealed class ImportExportPlugin : IVelesPlugin
             "Useful when the original asset UUIDs are no longer in the asset server.",
             OnImportTexCommand);
 
+        _ctx.RegisterCommand("exportanim", "Export a SL animation asset to a BVH file",
+            "exportanim <assetUUID> [path]  — downloads the animation and writes a BVH file.\n" +
+            "  assetUUID : UUID of the animation asset in inventory or the asset server\n" +
+            "  path      : optional output path (default: ~/VelesExports/<uuid>.bvh)\n" +
+            "Coordinate system: X-forward Y-left Z-up (SL native). In Blender: Forward=Y, Up=Z.",
+            OnExportAnimCommand);
+
         _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_export",
             "Import/Export: Export Object…", OnExportMenuClick));
         _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_import",
             "Import/Export: Import Object…", OnImportMenuClick));
         _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_importtex",
             "Import/Export: Import Object (Re-upload Textures)…", OnImportTexMenuClick));
+        _ctx.AddMenuItem(new PluginMenuItemInfo("importexport_exportanim",
+            "Import/Export: Export Animation (BVH)…", OnExportAnimMenuClick));
 
-        _ctx.LogToChat("[Import/Export] Plugin attached. Commands: export, import, importtex");
+        _ctx.LogToChat("[Import/Export] Plugin attached. Commands: export, import, importtex, exportanim");
     }
 
     public void Detach()
     {
+        _ctx.RemoveMenuItem("importexport_exportanim");
         _ctx.LogToChat("[Import/Export] Plugin detached.");
     }
 
@@ -265,5 +275,95 @@ public sealed class ImportExportPlugin : IVelesPlugin
                 write($"[Import/Export] Import error: {ex.Message}");
             }
         });
+    }
+
+    // ── Animation BVH export ───────────────────────────────────────────────
+
+    private void OnExportAnimCommand(string[] args, Action<string> write)
+    {
+        if (args.Length < 1 || !UUID.TryParse(args[0], out UUID assetUUID))
+        {
+            write("Usage: exportanim <assetUUID> [path]");
+            return;
+        }
+
+        string bvhPath = args.Length >= 2
+            ? args[1]
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "VelesExports",
+                $"{assetUUID}.bvh");
+
+        if (!bvhPath.EndsWith(".bvh", StringComparison.OrdinalIgnoreCase))
+            bvhPath += ".bvh";
+
+        write($"[Import/Export] Downloading animation {assetUUID} …");
+        _ = ExportAnimAsync(assetUUID, bvhPath, write);
+    }
+
+    private void OnExportAnimMenuClick()
+    {
+        _ = Task.Run(async () =>
+        {
+            IStorageFile? file = null;
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                file = await _ctx.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = "Export Animation — paste asset UUID as filename",
+                    SuggestedFileName = "animation.bvh",
+                    DefaultExtension = ".bvh",
+                    FileTypeChoices =
+                    [
+                        new FilePickerFileType("BVH Animation") { Patterns = ["*.bvh"] }
+                    ]
+                });
+            });
+
+            if (file == null) return;
+
+            string bvhPath    = file.Path.LocalPath;
+            string nameNoExt  = Path.GetFileNameWithoutExtension(bvhPath);
+
+            if (!UUID.TryParse(nameNoExt, out UUID assetUUID))
+            {
+                _ctx.LogToChat("[Import/Export] Export Animation cancelled: filename must be the asset UUID " +
+                               "(e.g. 550f97d3-7b31-4d85-a3c3-07b14cf43c74.bvh).");
+                return;
+            }
+
+            _ctx.LogToChat($"[Import/Export] Downloading animation {assetUUID} …");
+            await ExportAnimAsync(assetUUID, bvhPath, _ctx.LogToChat).ConfigureAwait(false);
+        });
+    }
+
+    private async Task ExportAnimAsync(UUID assetUUID, string bvhPath, Action<string> write)
+    {
+        try
+        {
+            var asset = await _ctx.Client.Assets
+                .RequestAssetAsync(assetUUID, AssetType.Animation, priority: true)
+                .ConfigureAwait(false);
+
+            if (asset?.AssetData == null)
+            {
+                write($"[Import/Export] Animation {assetUUID} not found or download failed.");
+                return;
+            }
+
+            var anim = new BinBVHAnimationReader(asset.AssetData);
+            Directory.CreateDirectory(Path.GetDirectoryName(bvhPath)!);
+
+            using var sw = new StreamWriter(bvhPath, append: false,
+                System.Text.Encoding.ASCII);
+            BvhExporter.Export(anim, sw);
+
+            write($"[Import/Export] BVH written: {bvhPath}  " +
+                  $"({anim.joints.Length} joints, {anim.OutPoint - anim.InPoint:F2}s)");
+        }
+        catch (Exception ex)
+        {
+            write($"[Import/Export] Export animation error: {ex.Message}");
+        }
     }
 }
