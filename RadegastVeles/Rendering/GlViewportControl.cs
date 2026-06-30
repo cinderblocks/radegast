@@ -1380,7 +1380,8 @@ public class GlViewportControl : Panel
     {
         if (interleaved == null || interleaved.Length < 3)
             return Array.Empty<float>();
-        int len    = length > 0 ? length : interleaved.Length;
+        int len    = length > 0 ? Math.Min(length, interleaved.Length) : interleaved.Length;
+        len       -= len % 12; // align down to a whole-vertex boundary
         int vCount = len / 12;
         var pos = new float[vCount * 3];
         for (int i = 0, j = 0; i < len; i += 12, j += 3)
@@ -1399,7 +1400,8 @@ public class GlViewportControl : Panel
     {
         if (interleaved == null || interleaved.Length < 12)
             return Array.Empty<float>();
-        int len    = length > 0 ? length : interleaved.Length;
+        int len    = length > 0 ? Math.Min(length, interleaved.Length) : interleaved.Length;
+        len       -= len % 12;
         int vCount = len / 12;
         var nuv = new float[vCount * 5];
         for (int i = 0, j = 0; i < len; i += 12, j += 5)

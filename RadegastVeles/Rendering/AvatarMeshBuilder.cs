@@ -274,7 +274,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 {
                     var origFace      = attFaces[i];
                     var faceTransform = origFace.Transform;
-                    int nv            = (origFace.Vertices?.Length ?? 0) / 12;
+                    // Use VerticesLength (logical count) rather than Vertices.Length (pool-rented
+                    // size, which may not be a multiple of 12 and would corrupt PickerFromInterleaved).
+                    int vFloats       = origFace.VerticesLength > 0
+                                        ? origFace.VerticesLength
+                                        : (origFace.Vertices?.Length ?? 0);
+                    int nv            = vFloats / 12;
                     var rigged        = attRiggedSkins[i];
 
                     // Attachment vertices are stored in prim-local space by PrimMeshBuilder;
@@ -286,7 +291,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     // Rigged faces arrive with Transform=Identity and bind-space vertices
                     // already — the TransformRow calls below become no-ops but we still run
                     // them to keep one code path.
-                    var worldVerts = GC.AllocateUninitializedArray<float>(origFace.Vertices.Length);
+                    var worldVerts = GC.AllocateUninitializedArray<float>(vFloats);
                     for (int vi = 0; vi < nv; vi++)
                     {
                         int o  = vi * 12;
