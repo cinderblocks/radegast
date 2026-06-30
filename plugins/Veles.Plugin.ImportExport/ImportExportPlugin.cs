@@ -20,7 +20,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -94,6 +96,45 @@ public sealed class ImportExportPlugin : IVelesPlugin
             "  name defaults to the filename without extension.",
             OnImportNoteCommand);
 
+        _ctx.RegisterCommand("exportshape", "Export avatar shape wearable to a .llw file",
+            "exportshape                    — export currently worn shape\n" +
+            "exportshape <path>             — export current shape to specified path\n" +
+            "exportshape <assetUUID> [path] — export shape asset by UUID",
+            OnExportShapeCommand);
+        _ctx.RegisterCommand("importshape", "Upload a .llw shape wearable and wear it",
+            "importshape <path> [name]  — uploads the shape to inventory and wears it.",
+            OnImportShapeCommand);
+        _ctx.RegisterCommand("exportphysics", "Export avatar physics wearable to a .llw file",
+            "exportphysics                    — export currently worn physics\n" +
+            "exportphysics <path>             — export current physics to specified path\n" +
+            "exportphysics <assetUUID> [path] — export physics asset by UUID",
+            OnExportPhysicsCommand);
+        _ctx.RegisterCommand("importphysics", "Upload a .llw physics wearable and wear it",
+            "importphysics <path> [name]  — uploads the physics to inventory and wears it.",
+            OnImportPhysicsCommand);
+        _ctx.RegisterCommand("exportwearable", "Export any currently worn wearable to a .llw file",
+            "exportwearable <type> [uuid] [path]\n" +
+            "  type: shape skin hair eyes shirt pants shoes socks jacket gloves\n" +
+            "        undershirt underpants skirt alpha tattoo physics universal",
+            OnExportWearableCommand);
+        _ctx.RegisterCommand("importwearable", "Upload a .llw wearable and wear it (type auto-detected)",
+            "importwearable <path> [name]  — wearable type is read from the file content.",
+            OnImportWearableCommand);
+
+        foreach (var (wt, at) in s_wearableTable)
+        {
+            WearableType wearType  = wt;
+            AssetType    assetType = at;
+            string       id        = wt.ToString().ToLowerInvariant();
+            string       label     = wt.ToString();
+            _ctx.AddMenuItem(new PluginMenuItemInfo($"importexport_wear_export_{id}",
+                $"Import/Export: Export {label}…",
+                () => OnExportWearableMenuClick(wearType, assetType)));
+            _ctx.AddMenuItem(new PluginMenuItemInfo($"importexport_wear_import_{id}",
+                $"Import/Export: Import {label}…",
+                () => OnImportWearableMenuClick(wearType)));
+        }
+
         _ctx.RegisterCommand("exporttex", "Export a texture asset to an image file",
             "exporttex <assetUUID> [path]  — downloads the texture and writes it to disk.\n" +
             "  Extension sets format: .png .jpg .webp .bmp .tga (decoded)  |  .j2k .j2c .jp2 (raw).\n" +
@@ -124,6 +165,12 @@ public sealed class ImportExportPlugin : IVelesPlugin
 
     public void Detach()
     {
+        foreach (var (wt, _) in s_wearableTable)
+        {
+            string id = wt.ToString().ToLowerInvariant();
+            _ctx.RemoveMenuItem($"importexport_wear_export_{id}");
+            _ctx.RemoveMenuItem($"importexport_wear_import_{id}");
+        }
         _ctx.RemoveMenuItem("importexport_exporttex");
         _ctx.RemoveMenuItem("importexport_exportanim");
         _ctx.RemoveMenuItem("importexport_exportsound");
@@ -568,6 +615,262 @@ public sealed class ImportExportPlugin : IVelesPlugin
         catch (Exception ex)
         {
             write($"[Import/Export] Export sound error: {ex.Message}");
+        }
+    }
+
+    // ── Wearable type table ────────────────────────────────────────────────
+
+    private static readonly (WearableType Type, AssetType Asset)[] s_wearableTable =
+    [
+        (WearableType.Shape,      AssetType.Bodypart),
+        (WearableType.Skin,       AssetType.Bodypart),
+        (WearableType.Hair,       AssetType.Bodypart),
+        (WearableType.Eyes,       AssetType.Bodypart),
+        (WearableType.Shirt,      AssetType.Clothing),
+        (WearableType.Pants,      AssetType.Clothing),
+        (WearableType.Shoes,      AssetType.Clothing),
+        (WearableType.Socks,      AssetType.Clothing),
+        (WearableType.Jacket,     AssetType.Clothing),
+        (WearableType.Gloves,     AssetType.Clothing),
+        (WearableType.Undershirt, AssetType.Clothing),
+        (WearableType.Underpants, AssetType.Clothing),
+        (WearableType.Skirt,      AssetType.Clothing),
+        (WearableType.Alpha,      AssetType.Clothing),
+        (WearableType.Tattoo,     AssetType.Clothing),
+        (WearableType.Physics,    AssetType.Clothing),
+        (WearableType.Universal,  AssetType.Clothing),
+    ];
+
+    private static AssetType GetAssetTypeForWearable(WearableType wt)
+    {
+        foreach (var (type, asset) in s_wearableTable)
+            if (type == wt) return asset;
+        return AssetType.Clothing;
+    }
+
+    // ── Generic wearable commands ──────────────────────────────────────────
+
+    private void OnExportWearableCommand(string[] args, Action<string> write)
+    {
+        if (args.Length < 1)
+        {
+            write("Usage: exportwearable <type> [uuid] [path]");
+            write("  Types: shape skin hair eyes shirt pants shoes socks jacket gloves");
+            write("         undershirt underpants skirt alpha tattoo physics universal");
+            return;
+        }
+        if (!Enum.TryParse<WearableType>(args[0], ignoreCase: true, out var wearType)
+            || wearType == WearableType.Invalid)
+        {
+            write($"[Import/Export] Unknown wearable type: {args[0]}");
+            return;
+        }
+        int idx = 1;
+        UUID explicitUUID = UUID.Zero;
+        if (args.Length > idx && UUID.TryParse(args[idx], out var u)) { explicitUUID = u; idx++; }
+        string path = args.Length > idx
+            ? args[idx]
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                           "VelesExports", $"{wearType.ToString().ToLowerInvariant()}.llw");
+        if (!path.EndsWith(".llw", StringComparison.OrdinalIgnoreCase)) path += ".llw";
+        write($"[Import/Export] Exporting {wearType}…");
+        _ = ExportWearableAsync(wearType, GetAssetTypeForWearable(wearType), explicitUUID, path, write);
+    }
+
+    private void OnImportWearableCommand(string[] args, Action<string> write)
+    {
+        if (args.Length < 1) { write("Usage: importwearable <path> [name]"); return; }
+        string path = args[0];
+        if (!File.Exists(path)) { write($"[Import/Export] File not found: {path}"); return; }
+        string name = args.Length >= 2
+            ? string.Join(" ", args[1..])
+            : Path.GetFileNameWithoutExtension(path);
+        write($"[Import/Export] Uploading wearable \"{name}\" …");
+        _ = ImportWearableAutoAsync(path, name, write);
+    }
+
+    private void OnExportWearableMenuClick(WearableType wearType, AssetType assetType)
+    {
+        _ = Task.Run(async () =>
+        {
+            IStorageFile? file = null;
+            string label = wearType.ToString();
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                file = await _ctx.SaveFilePickerAsync(new FilePickerSaveOptions
+                {
+                    Title = $"Export {label}",
+                    SuggestedFileName = $"{label.ToLowerInvariant()}.llw",
+                    DefaultExtension = ".llw",
+                    FileTypeChoices = [new FilePickerFileType("Linden Lab Wearable") { Patterns = ["*.llw"] }]
+                });
+            });
+            if (file == null) return;
+            _ctx.LogToChat($"[Import/Export] Exporting current {label}…");
+            await ExportWearableAsync(wearType, assetType, UUID.Zero,
+                file.Path.LocalPath, _ctx.LogToChat).ConfigureAwait(false);
+        });
+    }
+
+    private void OnImportWearableMenuClick(WearableType wearType)
+    {
+        _ = Task.Run(async () =>
+        {
+            IReadOnlyList<IStorageFile> files = [];
+            string label = wearType.ToString();
+            await Dispatcher.UIThread.InvokeAsync(async () =>
+            {
+                files = await _ctx.OpenFilePickerAsync(new FilePickerOpenOptions
+                {
+                    Title = $"Import {label}",
+                    AllowMultiple = false,
+                    FileTypeFilter =
+                    [
+                        new FilePickerFileType("Linden Lab Wearable") { Patterns = ["*.llw"] },
+                        new FilePickerFileType("All Files") { Patterns = ["*.*"] },
+                    ]
+                });
+            });
+            if (files is not [var file]) return;
+            string name = Path.GetFileNameWithoutExtension(file.Path.LocalPath);
+            _ctx.LogToChat($"[Import/Export] Uploading {label} \"{name}\" …");
+            await ImportWearableAutoAsync(file.Path.LocalPath, name,
+                _ctx.LogToChat, enforceType: wearType).ConfigureAwait(false);
+        });
+    }
+
+    // ── Named wearable command aliases ────────────────────────────────────
+
+    private void OnExportShapeCommand(string[] args, Action<string> write)
+        => DispatchWearableExport(WearableType.Shape, "shape.llw", args, write);
+
+    private void OnImportShapeCommand(string[] args, Action<string> write)
+        => DispatchWearableImport(WearableType.Shape, "importshape", args, write);
+
+    private void OnExportPhysicsCommand(string[] args, Action<string> write)
+        => DispatchWearableExport(WearableType.Physics, "physics.llw", args, write);
+
+    private void OnImportPhysicsCommand(string[] args, Action<string> write)
+        => DispatchWearableImport(WearableType.Physics, "importphysics", args, write);
+
+    private void DispatchWearableExport(WearableType wearType, string defaultFile,
+        string[] args, Action<string> write)
+    {
+        UUID explicitUUID = UUID.Zero;
+        int pathIdx = 0;
+        if (args.Length >= 1 && UUID.TryParse(args[0], out UUID u)) { explicitUUID = u; pathIdx = 1; }
+        string path = args.Length > pathIdx
+            ? args[pathIdx]
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                           "VelesExports", defaultFile);
+        if (!path.EndsWith(".llw", StringComparison.OrdinalIgnoreCase)) path += ".llw";
+        write($"[Import/Export] Exporting {wearType}…");
+        _ = ExportWearableAsync(wearType, GetAssetTypeForWearable(wearType), explicitUUID, path, write);
+    }
+
+    private void DispatchWearableImport(WearableType wearType, string usage,
+        string[] args, Action<string> write)
+    {
+        if (args.Length < 1) { write($"Usage: {usage} <path> [name]"); return; }
+        string path = args[0];
+        if (!File.Exists(path)) { write($"[Import/Export] File not found: {path}"); return; }
+        string name = args.Length >= 2
+            ? string.Join(" ", args[1..])
+            : Path.GetFileNameWithoutExtension(path);
+        write($"[Import/Export] Uploading {wearType} \"{name}\" …");
+        _ = ImportWearableAutoAsync(path, name, write, enforceType: wearType);
+    }
+
+    // ── Shared wearable async helpers ─────────────────────────────────────
+
+    private async Task ExportWearableAsync(WearableType wearType, AssetType assetType,
+        UUID explicitUUID, string path, Action<string> write)
+    {
+        try
+        {
+            UUID assetUUID = explicitUUID;
+            if (assetUUID == UUID.Zero)
+            {
+                assetUUID = _ctx.Client.Appearance
+                    .GetWearableAssets(wearType)
+                    .FirstOrDefault();
+                if (assetUUID == UUID.Zero)
+                {
+                    write($"[Import/Export] No {wearType} is currently worn.");
+                    return;
+                }
+            }
+
+            var asset = await _ctx.Client.Assets
+                .RequestAssetAsync(assetUUID, assetType, priority: true)
+                .ConfigureAwait(false);
+
+            if (asset?.AssetData == null)
+            {
+                write($"[Import/Export] {wearType} asset {assetUUID} not found or download failed.");
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, asset.AssetData).ConfigureAwait(false);
+            write($"[Import/Export] {wearType} written: {path}  ({asset.AssetData.Length} bytes)");
+        }
+        catch (Exception ex)
+        {
+            write($"[Import/Export] Export {wearType} error: {ex.Message}");
+        }
+    }
+
+    // AssetBodypart.Decode() reads the same LLWearable text format as AssetClothing.Decode();
+    // the embedded "type" field determines the actual WearableType.
+    private async Task ImportWearableAutoAsync(string filePath, string name, Action<string> write,
+        WearableType? enforceType = null)
+    {
+        try
+        {
+            var bytes = await File.ReadAllBytesAsync(filePath).ConfigureAwait(false);
+
+            var probe = new AssetBodypart(UUID.Zero, bytes);
+            if (!probe.Decode())
+                throw new InvalidDataException("File is not a valid LLWearable (decode failed).");
+
+            if (enforceType.HasValue && probe.WearableType != enforceType.Value)
+                throw new InvalidDataException(
+                    $"File contains a {probe.WearableType} wearable, expected {enforceType.Value}.");
+
+            var wearType  = probe.WearableType;
+            var assetType = GetAssetTypeForWearable(wearType);
+            var folder    = _ctx.Client.Inventory.FindFolderForType(assetType);
+
+            var (ok, status, itemID, _) = await _ctx.Client.Inventory
+                .RequestCreateItemFromAssetAsync(
+                    bytes, name, "Imported with Veles",
+                    assetType, InventoryType.Wearable,
+                    folder, Permissions.FullPermissions)
+                .ConfigureAwait(false);
+
+            if (!ok) { write($"[Import/Export] {wearType} upload failed: {status}"); return; }
+
+            write($"[Import/Export] {wearType} \"{name}\" created ({itemID}). Wearing…");
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var item = await _ctx.Client.Inventory
+                .FetchItemAsync(itemID, _ctx.Client.Self.AgentID, cts.Token)
+                .ConfigureAwait(false);
+
+            if (item != null)
+            {
+                _ctx.Client.Appearance.AddToOutfit(item, replace: true);
+                write($"[Import/Export] {wearType} applied.");
+            }
+            else
+            {
+                write($"[Import/Export] {wearType} created but item fetch timed out — wear from inventory.");
+            }
+        }
+        catch (Exception ex)
+        {
+            write($"[Import/Export] Import wearable error: {ex.Message}");
         }
     }
 
