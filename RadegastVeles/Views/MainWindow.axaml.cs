@@ -171,6 +171,10 @@ public partial class MainWindow : Window
 
     private void OnCloseSceneViewerClick(object? sender, RoutedEventArgs e) => _vm.CloseSceneViewer();
 
+    private void OnShowRegionClick(object? sender, RoutedEventArgs e) => _vm.OpenRegionTab();
+
+    private void OnCloseRegionClick(object? sender, RoutedEventArgs e) => _vm.CloseRegionTab();
+
     public void OpenOrActivateMarketplace()
     {
         if (_marketplaceWindow == null)

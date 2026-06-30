@@ -54,6 +54,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public InventoryViewModel Inventory { get; }
     public FriendsViewModel Friends { get; }
     public GroupsViewModel Groups { get; }
+    public RegionViewModel Region { get; }
     public MediaViewModel Media { get; }
     public NotificationQueueViewModel Notifications { get; }
     public VoiceViewModel Voice { get; }
@@ -71,8 +72,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public bool IsSceneViewerOpen => SceneViewer != null;
 
+    [ObservableProperty]
+    private bool _isRegionTabOpen;
+
+    /// <summary>Tab index of the Region Performance tab (always present, hidden when closed).</summary>
+    public const int RegionTabIndex = 7;
+
     /// <summary>Tab index of the Scene Viewer tab when it is visible.</summary>
-    public const int SceneViewerTabIndex = 7;
+    public const int SceneViewerTabIndex = 8;
 
     [ObservableProperty]
     private int _selectedTabIndex;
@@ -86,6 +93,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         InventoryViewModel inventory,
         FriendsViewModel friends,
         GroupsViewModel groups,
+        RegionViewModel region,
         MediaViewModel media,
         NotificationQueueViewModel notifications,
         VoiceViewModel voice,
@@ -100,6 +108,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Inventory = inventory;
         Friends = friends;
         Groups = groups;
+        Region = region;
         Media = media;
         Notifications = notifications;
         Voice = voice;
@@ -155,6 +164,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Inventory.Dispose();
         Friends.Dispose();
         Groups.Dispose();
+        Region.Dispose();
         Media.Dispose();
         Voice.Dispose();
         Marketplace.Dispose();
@@ -248,6 +258,19 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var vm = SceneViewer;
         SceneViewer = null;
         vm.Dispose();
+    }
+
+    public void OpenRegionTab()
+    {
+        IsRegionTabOpen = true;
+        ShowTab(RegionTabIndex);
+    }
+
+    public void CloseRegionTab()
+    {
+        if (SelectedTabIndex == RegionTabIndex)
+            SelectedTabIndex = 0;
+        IsRegionTabOpen = false;
     }
 
     partial void OnSelectedTabIndexChanged(int value)

@@ -1,0 +1,248 @@
+<!--
+  Radegast Metaverse Client
+  Copyright (c) 2026, Sjofn LLC
+  All rights reserved.
+-->
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Radegast.Veles.ViewModels"
+             x:Class="Radegast.Veles.Views.RegionPanel"
+             x:DataType="vm:RegionViewModel"
+             AutomationProperties.Name="Region performance dashboard">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="12,8,12,12" Spacing="0">
+
+            <!-- Region header -->
+            <TextBlock Text="{Binding RegionName}"
+                       FontSize="15" FontWeight="SemiBold"
+                       Margin="0,0,0,2"
+                       AutomationProperties.Name="Region name" />
+            <TextBlock Text="{Binding RegionType}"
+                       FontSize="11"
+                       Foreground="{DynamicResource VelesMutedForeground}"
+                       Margin="0,0,0,10"
+                       AutomationProperties.Name="Region type" />
+
+            <!-- Headline metrics: FPS · Dilation · Physics FPS -->
+            <Border Background="#12FFFFFF" CornerRadius="6" Padding="8,10" Margin="0,0,0,10">
+                <Grid ColumnDefinitions="*,*,*">
+                    <StackPanel Grid.Column="0" HorizontalAlignment="Center" Spacing="1">
+                        <TextBlock Text="{Binding Fps}"
+                                   FontSize="28" FontWeight="Bold"
+                                   Foreground="{Binding FpsBrush}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="{Binding Fps, StringFormat=Simulator FPS: {0}}" />
+                        <TextBlock Text="Sim FPS"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="" />
+                        <TextBlock Text="(max 45)"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   Opacity="0.6"
+                                   AutomationProperties.Name="" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" HorizontalAlignment="Center" Spacing="1">
+                        <TextBlock Text="{Binding Dilation, StringFormat='{}{0:0.000}'}"
+                                   FontSize="28" FontWeight="Bold"
+                                   Foreground="{Binding DilationBrush}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="{Binding Dilation, StringFormat=Time dilation: {0:0.000}}" />
+                        <TextBlock Text="Dilation"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="" />
+                        <TextBlock Text="(ideal: 1.0)"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   Opacity="0.6"
+                                   AutomationProperties.Name="" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Center" Spacing="1">
+                        <TextBlock Text="{Binding PhysicsFps, StringFormat='{}{0:0.0}'}"
+                                   FontSize="28" FontWeight="Bold"
+                                   Foreground="{Binding PhysicsFpsBrush}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="{Binding PhysicsFps, StringFormat=Physics FPS: {0:0.0}}" />
+                        <TextBlock Text="Physics FPS"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   AutomationProperties.Name="" />
+                        <TextBlock Text="(max 45)"
+                                   FontSize="10"
+                                   Foreground="{DynamicResource VelesMutedForeground}"
+                                   HorizontalAlignment="Center"
+                                   Opacity="0.6"
+                                   AutomationProperties.Name="" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- Frame Time Breakdown -->
+            <TextBlock Text="Frame Time" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4" />
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Total" Padding="0,0,8,2" FontWeight="SemiBold" FontSize="12" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding FrameTime, StringFormat='{}{0:0.0} ms'}" FontSize="12" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="  Network" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Network time" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding NetTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="  Physics" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Physics time" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding PhysicsTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="  Scripts" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Script time" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding ScriptTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="  Agents" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Agent time" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding AgentTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="  Images" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Image time" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding ImageTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="6" Grid.Column="0" Text="  Other" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" AutomationProperties.Name="Other time" />
+                <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding OtherTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="7" Grid.Column="0" Text="Spare" Padding="0,0,8,2" FontSize="12" FontWeight="SemiBold"
+                           AutomationProperties.Name="Spare time" />
+                <TextBlock Grid.Row="7" Grid.Column="1" Text="{Binding SpareTime, StringFormat='{}{0:0.0} ms'}" FontSize="12"
+                           Foreground="{Binding SpareTimeBrush}" FontWeight="SemiBold" />
+            </Grid>
+
+            <Separator Margin="0,0,0,10" />
+
+            <!-- Population -->
+            <TextBlock Text="Population" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4" />
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Avatars" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Agents}" FontSize="12" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Child Agents" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ChildAgents}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Objects" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Objects}" FontSize="12" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Scripted" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding ScriptedObjects}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Active Scripts" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding ActiveScripts}" FontSize="12" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="LSL IPS" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}"
+                           ToolTip.Tip="LSL instructions per second" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding LslIps}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+            </Grid>
+
+            <Separator Margin="0,0,0,10" />
+
+            <!-- Network -->
+            <TextBlock Text="Network" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4" />
+            <Grid ColumnDefinitions="*,Auto" Margin="0,0,0,10">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="↓ Incoming" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding IncomingBps}" FontSize="12" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="↑ Outgoing" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding OutgoingBps}" FontSize="12" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Ping" Padding="0,0,8,2" FontSize="12" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Lag, StringFormat='{}{0} ms'}" FontSize="12" />
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Missed Pings" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding MissedPings}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Pending Downloads" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding PendingDownloads}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Pending Uploads" Padding="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding PendingUploads}" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+            </Grid>
+
+            <Separator Margin="0,0,0,10" />
+
+            <!-- Region info -->
+            <TextBlock Text="Region Info" FontWeight="SemiBold" FontSize="12" Margin="0,0,0,4" />
+            <Grid ColumnDefinitions="Auto,*" Margin="0,0,0,4">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Type" Margin="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding RegionType}" FontSize="12" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Version" Margin="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SimVersion}" FontSize="12"
+                           TextTrimming="CharacterEllipsis" />
+
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Data Center" Margin="0,0,8,2" FontSize="12"
+                           Foreground="{DynamicResource VelesMutedForeground}" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding DataCenter}" FontSize="12" />
+            </Grid>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

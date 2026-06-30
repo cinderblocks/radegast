@@ -36,7 +36,7 @@ public sealed class AgentSession : IDisposable
     /// so tests can swap implementations without touching call sites.
     ///
     /// Registered singletons: RadegastInstanceAvalonia, INetCom, ChatLogger,
-    /// PluginManager, all 11 tab ViewModels, and MainViewModel.
+    /// PluginManager, all 12 tab ViewModels, and MainViewModel.
     /// </summary>
     public IServiceProvider Services { get; }
 
@@ -65,6 +65,7 @@ public sealed class AgentSession : IDisposable
         sc.AddSingleton<InventoryViewModel>();
         sc.AddSingleton<FriendsViewModel>();
         sc.AddSingleton<GroupsViewModel>();
+        sc.AddSingleton<RegionViewModel>();
         sc.AddSingleton<MediaViewModel>();
         sc.AddSingleton<NotificationQueueViewModel>();
         sc.AddSingleton<VoiceViewModel>();
