@@ -260,69 +260,113 @@
                                    AutomationProperties.Name="Voice chat not allowed" />
                     </WrapPanel>
 
-                    <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" AutomationProperties.LiveSetting="Polite" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.Styles>
-                            <Style Selector="Button.nearbyName">
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Setter Property="Padding" Value="2,1" />
-                                <Setter Property="Cursor" Value="Hand" />
-                                <Setter Property="MinWidth" Value="0" />
-                                <Setter Property="MinHeight" Value="0" />
-                                <Setter Property="HorizontalAlignment" Value="Stretch" />
-                                <Setter Property="HorizontalContentAlignment" Value="Left" />
-                            </Style>
-                            <Style Selector="Button.nearbyName:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-                                <Setter Property="Background" Value="Transparent" />
-                            </Style>
-                            <Style Selector="Button.nearbyName TextBlock">
-                                <Setter Property="TextDecorations" Value="Underline" />
-                            </Style>
-                        </ListBox.Styles>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate x:DataType="vm:NearbyAvatar">
-                                <WrapPanel VerticalAlignment="Center"
-                                           AutomationProperties.Name="{Binding AccessibleText}">
-                                    <Button Classes="nearbyName" Click="OnNearbyAvatarClick" ContextRequested="OnNearbyContextRequested" Tag="{Binding}"
-                                            IsEnabled="{Binding !IsSelf}"
-                                            AutomationProperties.Name="{Binding DisplayText, StringFormat=Open profile for {0}}">
-                                        <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="" />
-                                    </Button>
-                                    <!-- Status icons: visible for sighted users, silenced for screen readers (AccessibleText has the combined description) -->
-                                    <TextBlock Text="{Binding VoiceIcon}"
-                                               IsVisible="{Binding ShowVoiceIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="In voice channel"
-                                               AutomationProperties.Name="" />
-                                    <TextBlock Text="{Binding TypingIcon}"
-                                               IsVisible="{Binding ShowTypingIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Typing"
-                                               AutomationProperties.Name="" />
-                                    <TextBlock Text="{Binding AwayIcon}"
-                                               IsVisible="{Binding ShowAwayIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Away"
-                                               AutomationProperties.Name="" />
-                                    <TextBlock Text="{Binding BusyIcon}"
-                                               IsVisible="{Binding ShowBusyIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Busy / Do Not Disturb"
-                                               AutomationProperties.Name="" />
-                                    <TextBlock Text="{Binding FlyingIcon}"
-                                               IsVisible="{Binding ShowFlyingIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Flying"
-                                               AutomationProperties.Name="" />
-                                    <TextBlock Text="{Binding SittingIcon}"
-                                               IsVisible="{Binding ShowSittingIcon}"
-                                               FontSize="11" VerticalAlignment="Center"
-                                               Margin="3,0,0,0" ToolTip.Tip="Sitting"
-                                               AutomationProperties.Name="" />
-                                </WrapPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                    <TabControl AutomationProperties.Name="Nearby and radar history tabs">
+                        <TabItem Header="Nearby" AutomationProperties.Name="Nearby avatars">
+                            <ListBox ItemsSource="{Binding NearbyAvatars}" SelectedItem="{Binding SelectedNearbyAvatar, Mode=TwoWay}" AutomationProperties.Name="Nearby avatars list" AutomationProperties.LiveSetting="Polite" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.Styles>
+                                    <Style Selector="Button.nearbyName">
+                                        <Setter Property="Background" Value="Transparent" />
+                                        <Setter Property="BorderThickness" Value="0" />
+                                        <Setter Property="Padding" Value="2,1" />
+                                        <Setter Property="Cursor" Value="Hand" />
+                                        <Setter Property="MinWidth" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Left" />
+                                    </Style>
+                                    <Style Selector="Button.nearbyName:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                                        <Setter Property="Background" Value="Transparent" />
+                                    </Style>
+                                    <Style Selector="Button.nearbyName TextBlock">
+                                        <Setter Property="TextDecorations" Value="Underline" />
+                                    </Style>
+                                </ListBox.Styles>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:NearbyAvatar">
+                                        <WrapPanel VerticalAlignment="Center"
+                                                   AutomationProperties.Name="{Binding AccessibleText}">
+                                            <Button Classes="nearbyName" Click="OnNearbyAvatarClick" ContextRequested="OnNearbyContextRequested" Tag="{Binding}"
+                                                    IsEnabled="{Binding !IsSelf}"
+                                                    AutomationProperties.Name="{Binding DisplayText, StringFormat=Open profile for {0}}">
+                                                <TextBlock Text="{Binding DisplayText}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" AutomationProperties.Name="" />
+                                            </Button>
+                                            <!-- Status icons: visible for sighted users, silenced for screen readers (AccessibleText has the combined description) -->
+                                            <TextBlock Text="{Binding VoiceIcon}"
+                                                       IsVisible="{Binding ShowVoiceIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="In voice channel"
+                                                       AutomationProperties.Name="" />
+                                            <TextBlock Text="{Binding TypingIcon}"
+                                                       IsVisible="{Binding ShowTypingIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="Typing"
+                                                       AutomationProperties.Name="" />
+                                            <TextBlock Text="{Binding AwayIcon}"
+                                                       IsVisible="{Binding ShowAwayIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="Away"
+                                                       AutomationProperties.Name="" />
+                                            <TextBlock Text="{Binding BusyIcon}"
+                                                       IsVisible="{Binding ShowBusyIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="Busy / Do Not Disturb"
+                                                       AutomationProperties.Name="" />
+                                            <TextBlock Text="{Binding FlyingIcon}"
+                                                       IsVisible="{Binding ShowFlyingIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="Flying"
+                                                       AutomationProperties.Name="" />
+                                            <TextBlock Text="{Binding SittingIcon}"
+                                                       IsVisible="{Binding ShowSittingIcon}"
+                                                       FontSize="11" VerticalAlignment="Center"
+                                                       Margin="3,0,0,0" ToolTip.Tip="Sitting"
+                                                       AutomationProperties.Name="" />
+                                        </WrapPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </TabItem>
+                        <TabItem Header="History" AutomationProperties.Name="Radar history">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Bottom"
+                                        Content="Clear"
+                                        Command="{Binding ClearRadarHistoryCommand}"
+                                        HorizontalAlignment="Right"
+                                        Margin="0,4,0,0"
+                                        Padding="8,2"
+                                        AutomationProperties.Name="Clear radar history" />
+                                <ListBox ItemsSource="{Binding RadarHistory}"
+                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         AutomationProperties.Name="Radar history list">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:RadarHistoryEntry">
+                                            <Grid ColumnDefinitions="*,Auto" ToolTip.Tip="{Binding Name}">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding Name}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           FontSize="11"
+                                                           AutomationProperties.Name="{Binding Name}" />
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" Margin="4,0,0,0">
+                                                    <TextBlock Text="{Binding ClosestDistanceText}"
+                                                               FontSize="10"
+                                                               Foreground="{DynamicResource VelesMutedForeground}"
+                                                               VerticalAlignment="Center"
+                                                               ToolTip.Tip="Closest distance"
+                                                               AutomationProperties.Name="" />
+                                                    <TextBlock Text="{Binding LastSeenText}"
+                                                               FontSize="10"
+                                                               Foreground="{DynamicResource VelesMutedForeground}"
+                                                               VerticalAlignment="Center"
+                                                               ToolTip.Tip="Last seen"
+                                                               AutomationProperties.Name="" />
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </DockPanel>
+                        </TabItem>
+                    </TabControl>
                 </DockPanel>
             </Border>
         </DockPanel>

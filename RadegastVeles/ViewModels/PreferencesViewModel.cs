@@ -314,6 +314,13 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _disableLookAt;
 
+    // Radar history
+    [ObservableProperty]
+    private bool _radarHistoryEnabled = true;
+
+    [ObservableProperty]
+    private int _radarHistoryMaxEntries = 500;
+
     // Chat
     [ObservableProperty]
     private bool _muEmotes;
@@ -667,6 +674,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Privacy
         DisableLookAt = s["disable_look_at"].Type != OSDType.Unknown ? s["disable_look_at"].AsBoolean() : false;
 
+        // Radar history
+        RadarHistoryEnabled = s["radar_history_enabled"].Type != OSDType.Unknown ? s["radar_history_enabled"].AsBoolean() : true;
+        RadarHistoryMaxEntries = s["radar_history_max_entries"].Type != OSDType.Unknown ? s["radar_history_max_entries"].AsInteger() : 500;
+
         // Chat
         MuEmotes = s["mu_emotes"].Type != OSDType.Unknown ? s["mu_emotes"].AsBoolean() : false;
         NoTypingAnim = s["no_typing_anim"].Type != OSDType.Unknown ? s["no_typing_anim"].AsBoolean() : false;
@@ -832,6 +843,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
 
         // Privacy
         s["disable_look_at"] = OSD.FromBoolean(DisableLookAt);
+
+        // Radar history
+        s["radar_history_enabled"]     = OSD.FromBoolean(RadarHistoryEnabled);
+        s["radar_history_max_entries"] = OSD.FromInteger(RadarHistoryMaxEntries);
 
         // Chat
         s["mu_emotes"] = OSD.FromBoolean(MuEmotes);
