@@ -57,7 +57,7 @@ public sealed class AgentSession : IDisposable
         sc.AddSingleton(instance.PluginManager);
 
         // Session-scoped ViewModels — each resolved automatically because
-        // RadegastInstanceAvalonia is registered above.
+        // RadegastInstanceAvalonia is registered above.  All 13 tab VMs.
         sc.AddSingleton<NearbyViewModel>();
         sc.AddSingleton<IMViewModel>();
         sc.AddSingleton<MapViewModel>();
@@ -66,6 +66,7 @@ public sealed class AgentSession : IDisposable
         sc.AddSingleton<FriendsViewModel>();
         sc.AddSingleton<GroupsViewModel>();
         sc.AddSingleton<RegionViewModel>();
+        sc.AddSingleton<AppearanceViewModel>();
         sc.AddSingleton<MediaViewModel>();
         sc.AddSingleton<NotificationQueueViewModel>();
         sc.AddSingleton<VoiceViewModel>();

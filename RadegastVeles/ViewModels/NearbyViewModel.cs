@@ -1041,7 +1041,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
             RebuildHistoryIndex();
         }
         _historyIndex[id] = RadarHistory.Count;
-        RadarHistory.Add(new RadarHistoryEntry(id, name, DateTimeOffset.Now, DateTimeOffset.Now, int.MaxValue));
+        RadarHistory.Add(new RadarHistoryEntry(id, name, DateTimeOffset.Now, DateTimeOffset.Now, int.MaxValue, IsNearby: true));
     }
 
     private void RadarHistoryOnUpdate(UUID id, string name, int distance)
@@ -1049,13 +1049,13 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         if (!_historyIndex.TryGetValue(id, out var idx)) return;
         var e = RadarHistory[idx];
         var closest = e.ClosestDistance == int.MaxValue ? distance : Math.Min(e.ClosestDistance, distance);
-        RadarHistory[idx] = e with { Name = name, LastSeen = DateTimeOffset.Now, ClosestDistance = closest };
+        RadarHistory[idx] = e with { Name = name, LastSeen = DateTimeOffset.Now, ClosestDistance = closest, IsNearby = true };
     }
 
     private void RadarHistoryOnDeparted(UUID id)
     {
         if (!_historyIndex.TryGetValue(id, out var idx)) return;
-        RadarHistory[idx] = RadarHistory[idx] with { LastSeen = DateTimeOffset.Now };
+        RadarHistory[idx] = RadarHistory[idx] with { LastSeen = DateTimeOffset.Now, IsNearby = false };
     }
 
     private void RebuildHistoryIndex()
@@ -1483,7 +1483,8 @@ public record RadarHistoryEntry(
     string Name,
     DateTimeOffset FirstSeen,
     DateTimeOffset LastSeen,
-    int ClosestDistance)
+    int ClosestDistance,
+    bool IsNearby)
 {
     public string FirstSeenText       => FirstSeen.LocalDateTime.ToString("HH:mm:ss");
     public string LastSeenText        => LastSeen.LocalDateTime.ToString("HH:mm:ss");

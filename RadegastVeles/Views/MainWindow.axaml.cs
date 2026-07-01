@@ -134,9 +134,6 @@ public partial class MainWindow : Window
     private void OnChangeDisplayNameClick(object? sender, RoutedEventArgs e)
         => _session.Instance.ShowChangeDisplayName();
 
-    private void OnAppearanceClick(object? sender, RoutedEventArgs e)
-        => _session.Instance.ShowAppearance();
-
     private void OnAwayClick(object? sender, RoutedEventArgs e)
     {
         var newState = !_session.Instance.State.IsAway;
@@ -174,6 +171,10 @@ public partial class MainWindow : Window
     private void OnShowRegionClick(object? sender, RoutedEventArgs e) => _vm.OpenRegionTab();
 
     private void OnCloseRegionClick(object? sender, RoutedEventArgs e) => _vm.CloseRegionTab();
+
+    private void OnShowAppearanceClick(object? sender, RoutedEventArgs e) => _vm.OpenAppearance();
+
+    private void OnCloseAppearanceClick(object? sender, RoutedEventArgs e) => _vm.CloseAppearance();
 
     public void OpenOrActivateMarketplace()
     {

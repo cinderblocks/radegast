@@ -10,109 +10,159 @@
              x:DataType="vm:AppearanceViewModel"
              AutomationProperties.Name="Appearance panel">
 
-    <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" Padding="12">
-        <StackPanel Spacing="12" MaxWidth="640" HorizontalAlignment="Left">
+    <DockPanel>
+        <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" IsVisible="{Binding IsLoading}" Height="3" />
 
-            <!-- Current Outfit -->
-            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
-                <StackPanel Spacing="8">
-                    <Grid ColumnDefinitions="*,Auto">
-                        <TextBlock Grid.Column="0"
-                                   Text="Current Outfit"
-                                   FontSize="14" FontWeight="SemiBold"
-                                   VerticalAlignment="Center"
-                                   AutomationProperties.Name="Current outfit heading" />
-                        <Button Grid.Column="1"
-                                Content="&#x21BB; Refresh"
-                                Command="{Binding RefreshOutfitCommand}"
-                                MinWidth="72"
-                                AutomationProperties.Name="Refresh outfit" />
-                    </Grid>
-
-                    <TextBlock Text="No wearables found."
-                               IsVisible="{Binding !HasWornItems}"
-                               Opacity="0.6" FontStyle="Italic"
-                               AutomationProperties.Name="No wearables indicator" />
-
-                    <ItemsControl ItemsSource="{Binding WornItems}" IsVisible="{Binding HasWornItems}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:WornItemEntry">
-                                <Grid ColumnDefinitions="24,120,*" Margin="0,2">
-                                    <TextBlock Grid.Column="0"
-                                               Text="{Binding Icon}"
-                                               FontSize="14" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="1"
-                                               Text="{Binding TypeLabel}"
-                                               FontWeight="SemiBold"
-                                               VerticalAlignment="Center"
-                                               Margin="4,0" />
-                                    <TextBlock Grid.Column="2"
-                                               Text="{Binding ItemName}"
-                                               VerticalAlignment="Center"
-                                               TextTrimming="CharacterEllipsis"
-                                               Opacity="0.8" />
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Border>
-
-            <!-- Hover Height -->
-            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Hover Height"
-                               FontSize="14" FontWeight="SemiBold"
-                               AutomationProperties.Name="Hover height heading" />
-                    <TextBlock Text="Adjust how high or low your avatar hovers above the ground."
-                               Opacity="0.7" TextWrapping="Wrap" FontSize="12" />
-                    <Grid ColumnDefinitions="*,8,56,8,Auto" VerticalAlignment="Center">
-                        <Slider Grid.Column="0"
-                                Minimum="-2" Maximum="2"
-                                Value="{Binding HoverHeight}"
-                                TickFrequency="0.5"
-                                IsSnapToTickEnabled="False"
-                                AutomationProperties.Name="Hover height slider" />
-                        <TextBlock Grid.Column="2"
-                                   Text="{Binding HoverHeightText}"
-                                   HorizontalAlignment="Right"
-                                   VerticalAlignment="Center"
-                                   FontFamily="Monospace"
-                                   AutomationProperties.Name="Hover height value" />
-                        <Button Grid.Column="4"
-                                Content="Apply"
-                                Command="{Binding ApplyHoverHeightCommand}"
-                                IsEnabled="{Binding !IsBusy}"
-                                MinWidth="64"
-                                AutomationProperties.Name="Apply hover height" />
-                    </Grid>
-                    <TextBlock Text="Range: -2.0 (lower) to +2.0 (higher)"
-                               FontSize="11" Opacity="0.5" />
-                </StackPanel>
-            </Border>
-
-            <!-- Appearance Actions -->
-            <Border Background="#18FFFFFF" CornerRadius="6" Padding="12">
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Appearance"
-                               FontSize="14" FontWeight="SemiBold"
-                               AutomationProperties.Name="Appearance actions heading" />
-                    <TextBlock Text="Rebake textures if your avatar appears gray or blurry to you or others."
-                               Opacity="0.7" TextWrapping="Wrap" FontSize="12" />
-                    <Button Content="Rebake Textures"
-                            Command="{Binding RebakeTexturesCommand}"
-                            IsEnabled="{Binding !IsBusy}"
-                            MinWidth="140"
+        <!-- Hover height + action bar -->
+        <Border DockPanel.Dock="Bottom" Padding="6,6,6,4">
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="Auto,*,8,52,8,Auto" VerticalAlignment="Center"
+                      AutomationProperties.Name="Hover height">
+                    <TextBlock Grid.Column="0" Text="Hover Height"
+                               VerticalAlignment="Center" Margin="0,0,8,0"
+                               FontSize="12" />
+                    <Slider Grid.Column="1"
+                            Minimum="-2" Maximum="2"
+                            Value="{Binding HoverHeight}"
+                            IsSnapToTickEnabled="False"
+                            AutomationProperties.Name="Hover height slider" />
+                    <TextBlock Grid.Column="3"
+                               Text="{Binding HoverHeightText}"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               FontFamily="Monospace" FontSize="12"
+                               AutomationProperties.Name="Hover height value" />
+                    <Button Grid.Column="5"
+                            Content="Apply"
+                            Command="{Binding ApplyHoverHeightCommand}"
+                            IsEnabled="{Binding !IsHoverBusy}"
+                            MinWidth="52"
+                            AutomationProperties.Name="Apply hover height" />
+                </Grid>
+                <Grid ColumnDefinitions="Auto,Auto,*">
+                    <Button Grid.Column="0" Content="⟳ Refresh" Command="{Binding RefreshCommand}"
+                            Margin="0,0,4,0" AutomationProperties.Name="Refresh appearance" />
+                    <Button Grid.Column="1" Content="Rebake" Command="{Binding RebakeTexturesCommand}"
+                            ToolTip.Tip="Rebake avatar textures"
                             AutomationProperties.Name="Rebake textures" />
-                </StackPanel>
-            </Border>
+                    <TextBlock Grid.Column="2" Text="{Binding StatusText}"
+                               VerticalAlignment="Center" Margin="8,0,0,0"
+                               FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
+                               TextTrimming="CharacterEllipsis"
+                               AutomationProperties.Name="Appearance status" />
+                </Grid>
+            </StackPanel>
+        </Border>
 
-            <!-- Status -->
-            <TextBlock Text="{Binding StatusText}"
-                       IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                       Opacity="0.7" FontSize="12" Margin="4,0,4,4"
-                       AutomationProperties.Name="Status" />
+        <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="6" Margin="6">
 
-        </StackPanel>
-    </ScrollViewer>
+                <!-- Body Parts -->
+                <Border IsVisible="{Binding HasBodyParts}"
+                        Background="#12FFFFFF" CornerRadius="6" Padding="8">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="BODY PARTS"
+                                   FontSize="11" FontWeight="SemiBold" Opacity="0.6"
+                                   AutomationProperties.Name="Body parts section" />
+                        <ItemsControl ItemsSource="{Binding BodyParts}"
+                                      AutomationProperties.Name="Body parts list">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:AppearanceItem">
+                                    <Grid ColumnDefinitions="22,*,28" VerticalAlignment="Center" Margin="0,2">
+                                        <TextBlock Grid.Column="0" Text="{Binding Icon}"
+                                                   FontSize="13" VerticalAlignment="Center"
+                                                   AutomationProperties.Name="{Binding SlotLabel}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                                            <TextBlock Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.Name="{Binding Name}" />
+                                            <TextBlock Text="{Binding SlotLabel}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource VelesMutedForeground}"
+                                                       AutomationProperties.Name="{Binding SlotLabel}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- Clothing -->
+                <Border IsVisible="{Binding HasClothing}"
+                        Background="#12FFFFFF" CornerRadius="6" Padding="8">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="CLOTHING"
+                                   FontSize="11" FontWeight="SemiBold" Opacity="0.6"
+                                   AutomationProperties.Name="Clothing section" />
+                        <ItemsControl ItemsSource="{Binding Clothing}"
+                                      AutomationProperties.Name="Clothing list">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:AppearanceItem">
+                                    <Grid ColumnDefinitions="22,*,28" VerticalAlignment="Center" Margin="0,2">
+                                        <TextBlock Grid.Column="0" Text="{Binding Icon}"
+                                                   FontSize="13" VerticalAlignment="Center"
+                                                   AutomationProperties.Name="{Binding SlotLabel}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                                            <TextBlock Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.Name="{Binding Name}" />
+                                            <TextBlock Text="{Binding SlotLabel}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource VelesMutedForeground}"
+                                                       AutomationProperties.Name="{Binding SlotLabel}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2"
+                                                Content="x"
+                                                IsVisible="{Binding CanRemove}"
+                                                Command="{Binding RemoveCommand}"
+                                                Width="24" Height="24" Padding="0"
+                                                ToolTip.Tip="Remove from outfit"
+                                                AutomationProperties.Name="Remove from outfit" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- Attachments -->
+                <Border IsVisible="{Binding HasAttachments}"
+                        Background="#12FFFFFF" CornerRadius="6" Padding="8">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="ATTACHMENTS"
+                                   FontSize="11" FontWeight="SemiBold" Opacity="0.6"
+                                   AutomationProperties.Name="Attachments section" />
+                        <ItemsControl ItemsSource="{Binding Attachments}"
+                                      AutomationProperties.Name="Attachments list">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:AppearanceItem">
+                                    <Grid ColumnDefinitions="22,*,28" VerticalAlignment="Center" Margin="0,2">
+                                        <TextBlock Grid.Column="0" Text="{Binding Icon}"
+                                                   FontSize="13" VerticalAlignment="Center"
+                                                   AutomationProperties.Name="{Binding SlotLabel}" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0">
+                                            <TextBlock Text="{Binding Name}"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       AutomationProperties.Name="{Binding Name}" />
+                                            <TextBlock Text="{Binding SlotLabel}"
+                                                       FontSize="10"
+                                                       Foreground="{DynamicResource VelesMutedForeground}"
+                                                       AutomationProperties.Name="{Binding SlotLabel}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="2"
+                                                Content="x"
+                                                Command="{Binding RemoveCommand}"
+                                                Width="24" Height="24" Padding="0"
+                                                ToolTip.Tip="Detach from avatar"
+                                                AutomationProperties.Name="Detach from avatar" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </UserControl>

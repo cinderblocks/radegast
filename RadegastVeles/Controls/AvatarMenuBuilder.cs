@@ -37,7 +37,7 @@ public static class AvatarMenuBuilder
     /// Always includes View Profile. When the agent is not the local user, also includes
     /// Send IM, Pay, Offer Teleport, Request Teleport, Add Friend, and Mute.
     /// </summary>
-    public static ContextMenu Build(RadegastInstanceAvalonia instance, UUID agentId, string agentName)
+    public static ContextMenu Build(RadegastInstanceAvalonia instance, UUID agentId, string agentName, bool isNearby = true)
     {
         var menu = new ContextMenu();
         bool isSelf = agentId == instance.Client.Self.AgentID;
@@ -83,6 +83,7 @@ public static class AvatarMenuBuilder
             menu.Items.Add(new MenuItem
             {
                 Header = "Turn To",
+                IsEnabled = isNearby,
                 Command = new RelayCommand(() =>
                 {
                     var sim = instance.Client.Network.CurrentSim;
@@ -93,6 +94,7 @@ public static class AvatarMenuBuilder
             menu.Items.Add(new MenuItem
             {
                 Header = "Walk To",
+                IsEnabled = isNearby,
                 Command = new RelayCommand(() =>
                 {
                     var sim = instance.Client.Network.CurrentSim;

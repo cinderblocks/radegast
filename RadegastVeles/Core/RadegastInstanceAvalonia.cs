@@ -505,18 +505,6 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         });
     }
 
-    public void ShowAppearance()
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            var vm = new AppearanceViewModel(this);
-            var panel = new AppearancePanel { DataContext = vm };
-            var window = new ProfileWindow("Appearance", panel);
-            window.Width = 520;
-            window.Height = 620;
-            window.Show();
-        });
-    }
 
     public void ShowObjectContents(UUID objectId, uint localId, string objectName)
     {
