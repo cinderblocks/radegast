@@ -8,7 +8,7 @@
         x:Class="Radegast.Veles.Views.PanelHostWindow"
         Width="800" Height="600"
         MinWidth="400" MinHeight="300"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Detached panel window">
 
     <DockPanel>

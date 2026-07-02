@@ -49,7 +49,7 @@ public static class BadgeService
         _baseWindowIcon = window.Icon;
         try
         {
-            using var stream = AssetLoader.Open(new Uri("avares://RadegastVeles/Assets/radegast.ico"));
+            using var stream = AssetLoader.Open(new Uri("avares://RadegastVeles/Assets/veles.ico"));
             _baseIconBitmap = new Bitmap(stream);
         }
         catch { /* non-fatal — badge will render without a base image */ }

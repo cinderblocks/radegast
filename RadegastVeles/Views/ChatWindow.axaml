@@ -13,7 +13,7 @@
         Width="900" Height="620"
         MinWidth="700" MinHeight="450"
         WindowStartupLocation="CenterScreen"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Radegast Veles main chat window">
 
     <DockPanel>

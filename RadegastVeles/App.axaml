@@ -56,7 +56,7 @@
 
     <TrayIcon.Icons>
         <TrayIcons>
-            <TrayIcon Icon="/Assets/radegast.ico"
+            <TrayIcon Icon="/Assets/veles.ico"
                       ToolTipText="Radegast Veles"
                       IsVisible="True" />
         </TrayIcons>

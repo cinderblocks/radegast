@@ -9,7 +9,7 @@
         Width="420" Height="640"
         CanResize="False"
         WindowStartupLocation="CenterScreen"
-        Icon="/Assets/radegast.ico">
+        Icon="/Assets/veles.ico">
 
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -31,6 +31,13 @@
         <ScrollViewer>
             <Border Padding="24">
                 <StackPanel Spacing="12">
+
+            <!-- Splash logo -->
+            <Image Source="/Assets/veles.png"
+                   MaxHeight="120"
+                   HorizontalAlignment="Center"
+                   Stretch="Uniform"
+                   AutomationProperties.Name="Veles logo" />
 
             <!-- Title -->
             <TextBlock Text="Radegast Veles"

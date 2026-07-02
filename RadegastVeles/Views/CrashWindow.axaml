@@ -10,7 +10,7 @@
         Width="620" Height="480"
         MinWidth="480" MinHeight="360"
         WindowStartupLocation="CenterScreen"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Crash error window">
 
     <DockPanel Margin="16">

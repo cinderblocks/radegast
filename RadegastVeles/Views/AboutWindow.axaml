@@ -10,7 +10,7 @@
         Width="520" Height="460"
         MinWidth="400" MinHeight="360"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="About Radegast Veles">
 
     <Window.Styles>

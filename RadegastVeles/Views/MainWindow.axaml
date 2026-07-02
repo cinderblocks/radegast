@@ -10,6 +10,7 @@
         x:Class="Radegast.Veles.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
+        Icon="/Assets/veles.ico"
         Width="1200" Height="768"
         AutomationProperties.Name="Radegast Veles main window">
 

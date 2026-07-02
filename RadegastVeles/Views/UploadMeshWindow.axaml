@@ -12,7 +12,7 @@
         Width="550" Height="480"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Upload mesh window">
     <DockPanel LastChildFill="True">
 

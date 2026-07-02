@@ -12,7 +12,7 @@
         Width="480" Height="360"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Upload sound window">
     <DockPanel LastChildFill="True">
 

@@ -11,7 +11,7 @@
     <Platforms>AnyCPU;x64;x86;ARM64</Platforms>
     <OutputPath>..\bin\Veles\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <ApplicationIcon>..\Radegast\radegast.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\veles.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
@@ -64,7 +64,8 @@
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.Voice.WebRTC\LibreMetaverse.Voice.WebRTC.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <AvaloniaResource Include="Assets\radegast.ico" />
+    <AvaloniaResource Include="Assets\veles.ico" />
+    <AvaloniaResource Include="Assets\veles.png" />
     <AvaloniaResource Include="Rendering\shader_data\*" />
   </ItemGroup>
   <Import Project="AutogenerateFiles.targets" />
