@@ -3,7 +3,7 @@ name: Publish Release Windows Installer and Archives
 on:
   push:
     tags:
-      - 'v*'
+      - 'Veles/*'
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
-          $tagVersion = $tag -replace '^v',''
+          $tagVersion = $tag -replace '^Veles/',''
           $buildVersion = "$tagVersion.${{ github.run_number }}"
           Write-Host "Tag: $tag"
           Write-Host "Tag Version: $tagVersion"
@@ -469,7 +469,7 @@ jobs:
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
-          $tagVersion = $tag -replace '^v',''
+          $tagVersion = $tag -replace '^Veles/',''
           echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
@@ -638,7 +638,7 @@ jobs:
           $version = "${{ env.TAG_VERSION }}"
 
           # Get previous tag
-          $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          $previousTag = git describe --tags --abbrev=0 --match 'Veles/*' "$tag^" 2>$null
           if (-not $previousTag) {
             $previousTag = git rev-list --max-parents=0 HEAD
           }

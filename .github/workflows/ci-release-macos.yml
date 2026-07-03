@@ -1,12 +1,13 @@
 name: CI Release macOS DMG
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'Veles/*'
 
 env:
   REPO_NAME: ${{ github.event.repository.name }}
-  TAG_NAME: ${{ github.event.release.tag_name }}
+  TAG_NAME: ${{ github.ref_name }}
   PUBLISH_DIR: publish
   VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
   DOTNET_VERSION: '10.0.x'
@@ -89,8 +90,8 @@ jobs:
               /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${REPO_NAME}" \
                 -c "Add :CFBundleExecutable string RadegastVeles" \
                 -c "Add :CFBundleIdentifier string com.${{ github.repository_owner }}.${REPO_NAME}" \
-                -c "Add :CFBundleVersion string ${TAG_NAME}" \
-                -c "Add :CFBundleShortVersionString string ${TAG_NAME}" \
+                -c "Add :CFBundleVersion string ${TAG_NAME#Veles/}" \
+                -c "Add :CFBundleShortVersionString string ${TAG_NAME#Veles/}" \
                 -c "Add :CFBundlePackageType string APPL" \
                 -c "Add :CFBundleIconFile string veles" \
                 "$PLIST"
@@ -125,7 +126,7 @@ jobs:
             echo "DMG created for $RID"
           else
             echo "create-dmg failed for $RID; creating fallback tar.gz"
-            tar -czf "$DIST_DIR/${REPO_NAME}-${TAG_NAME}-$RID.tar.gz" -C "$PUBLISH_DIR/$RID" .
+            tar -czf "$DIST_DIR/${REPO_NAME}-${TAG_NAME#Veles/}-$RID.tar.gz" -C "$PUBLISH_DIR/$RID" .
           fi
 
       - name: Upload per-arch DMG artifact
@@ -138,6 +139,8 @@ jobs:
     name: Build universal macOS DMG
     needs: build-macos
     runs-on: macos-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -146,6 +149,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Compute version
+        run: echo "VERSION=${TAG_NAME#Veles/}" >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -203,6 +209,15 @@ jobs:
           mkdir -p dist
           npx --yes create-dmg "$UNIVERSAL_APP" dist
 
+      - name: Ensure GitHub Release exists
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME not found yet; creating draft release"
+            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload universal DMG to GitHub Release
         run: |
           DMG=$(ls dist/*.dmg | head -n 1)
@@ -213,7 +228,7 @@ jobs:
       - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-universal-debug-${{ env.TAG_NAME }}
+          name: macos-universal-debug-${{ env.VERSION }}
           path: |
             universal/**
             dist/**
