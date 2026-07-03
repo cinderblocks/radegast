@@ -31,7 +31,7 @@ internal sealed class AvatarFaceSkinData
     public int FaceIndex;
 
     /// <summary>
-    /// T-pose vertex data (stride 8 floats: X,Y,Z, NX,NY,NZ, U,V).
+    /// T-pose vertex data (stride 12 floats: X,Y,Z, NX,NY,NZ, U,V, TX,TY,TZ, TW).
     /// These are world-space positions frozen at build time — the bind pose.
     /// </summary>
     public float[] BindVerts = [];

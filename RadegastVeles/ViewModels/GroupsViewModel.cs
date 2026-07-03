@@ -153,6 +153,9 @@ public partial class GroupsViewModel : InstanceViewModelBase, IDisposable
             _instance.ShowNotificationInChat($"Invited {entry.Name} to {groupName}.");
         });
     }
+
+    [RelayCommand]
+    private void ShowNoticeArchive() => _instance.ShowGroupNoticeArchive();
 }
 
 public record GroupEntry(UUID Id, string Name, bool IsActive)

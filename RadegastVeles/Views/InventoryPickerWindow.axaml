@@ -13,7 +13,7 @@
         MinWidth="280" MinHeight="300"
         CanResize="True"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Inventory picker window">
 
     <DockPanel>

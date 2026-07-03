@@ -9,7 +9,7 @@ env:
   TAG_NAME: ${{ github.event.release.tag_name }}
   PUBLISH_DIR: publish
   VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '10.0.x'
 
 jobs:
   build-macos:
@@ -87,10 +87,15 @@ jobs:
               mkdir -p "$APP_DIR/Contents/MacOS"
               PLIST="$APP_DIR/Contents/Info.plist"
               /usr/libexec/PlistBuddy -c "Add :CFBundleName string ${REPO_NAME}" \
-                -c "Add :CFBundleExecutable string ${REPO_NAME}" \
+                -c "Add :CFBundleExecutable string RadegastVeles" \
                 -c "Add :CFBundleIdentifier string com.${{ github.repository_owner }}.${REPO_NAME}" \
                 -c "Add :CFBundleVersion string ${TAG_NAME}" \
+                -c "Add :CFBundleShortVersionString string ${TAG_NAME}" \
+                -c "Add :CFBundlePackageType string APPL" \
+                -c "Add :CFBundleIconFile string veles" \
                 "$PLIST"
+              mkdir -p "$APP_DIR/Contents/Resources"
+              cp "RadegastVeles/Assets/veles.icns" "$APP_DIR/Contents/Resources/veles.icns"
               # Exclude the .app dir itself to avoid a self-referential copy
               rsync -a --exclude="$APP_NAME" "$PUB_DIR/" "$APP_DIR/Contents/MacOS/"
               chmod -R +x "$APP_DIR/Contents/MacOS" || true

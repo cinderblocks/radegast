@@ -49,7 +49,7 @@ public sealed class GlMesh : IDisposable
     internal uint Vbo        => _vbo;
     internal uint Ebo        => _ebo;
     internal int  IndexCount => _indexCount;
-    internal const int VertexStride = 32; // 8 floats × 4 bytes
+    internal const int VertexStride = 48; // 12 floats × 4 bytes
 
     public GlMesh(float[] vertices, ushort[] indices)
         : this(vertices, vertices.Length, indices) { }
@@ -93,6 +93,10 @@ public sealed class GlMesh : IDisposable
         // TexCoord (location 2)
         gl.EnableVertexAttribArray(2);
         gl.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, VertexStride, (void*)24);
+
+        // Tangent (location 14) — vec4: xyz = tangent direction (view space), w = handedness ±1
+        gl.EnableVertexAttribArray(14);
+        gl.VertexAttribPointer(14, 4, VertexAttribPointerType.Float, false, VertexStride, (void*)32);
 
         gl.BindVertexArray(0);
     }

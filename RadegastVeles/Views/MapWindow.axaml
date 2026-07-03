@@ -13,7 +13,7 @@
         Width="850" Height="550"
         MinWidth="600" MinHeight="400"
         WindowStartupLocation="CenterScreen"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Radegast Veles world map window">
 
     <Grid ColumnDefinitions="*,8,220">

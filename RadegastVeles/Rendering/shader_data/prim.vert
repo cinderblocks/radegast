@@ -11,6 +11,7 @@ layout(location = 7)  in mat4  aInstMv;        // locations 7–10
 layout(location = 11) in vec4  aInstColor;     // location 11
 layout(location = 12) in vec4  aInstMisc;      // location 12: fullbright01, glow, shiny, alphaCutoff
 layout(location = 13) in float aInstAlphaMode; // location 13
+layout(location = 14) in vec4  aTangent;       // object-space tangent xyz + handedness w
 
 uniform mat4 uMvp;
 uniform mat4 uModelView;
@@ -34,6 +35,7 @@ flat out int  vInstAlphaMode;
 out vec3 vNormal;
 out vec3 vViewPos;
 out vec2 vTexCoord;
+out vec4 vTangent;  // view-space tangent xyz + handedness w
 
 void main()
 {
@@ -46,6 +48,7 @@ void main()
         vInstColor     = aInstColor;
         vInstMisc      = aInstMisc;
         vInstAlphaMode = int(round(aInstAlphaMode));
+        vTangent = vec4(normalize(mat3(aInstMv) * aTangent.xyz), aTangent.w);
     }
     else
     {
@@ -56,6 +59,7 @@ void main()
         vInstColor     = uColor;
         vInstMisc      = vec4(float(uFullbright), uGlow, uShiny, uAlphaCutoff);
         vInstAlphaMode = uAlphaMode;
+        vTangent = vec4(normalize(mat3(uModelView) * aTangent.xyz), aTangent.w);
     }
     vTexCoord = aTexCoord;
 }

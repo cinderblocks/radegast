@@ -1,0 +1,274 @@
+name: Publish Legacy Radegast
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 2.54)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x86, x64, ARM64]
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-legacy-${{ hashFiles('**/*.csproj', '**/*.sln') }}
+          restore-keys: nuget-legacy-
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v1
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install WiX Toolset
+        run: |
+          dotnet tool install --global wix --version 6.0.2
+          wix --version
+
+      - name: Set version variables
+        run: |
+          $version = '${{ inputs.version }}'
+          $buildVersion = "$version.${{ github.run_number }}"
+          Write-Host "Version: $version"
+          Write-Host "Build Version: $buildVersion"
+          echo "BUILD_VERSION=$buildVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Restore
+        run: |
+          Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
+          msbuild Radegast\Radegast.csproj /t:Restore /p:Configuration=Release /p:Platform=${{ matrix.platform }}
+
+      - name: Build
+        run: |
+          Write-Host "Building Legacy Radegast for ${{ matrix.platform }}..."
+          msbuild Radegast\Radegast.csproj `
+            /m `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            /p:FileVersion=${{ env.BUILD_VERSION }} `
+            /p:InformationalVersion=${{ env.VERSION }} `
+            /v:minimal
+
+      - name: Build installer
+        run: |
+          Write-Host "Building Radegast MSI installer for ${{ matrix.platform }}"
+          msbuild Install\RadegastSetup\RadegastSetup.wixproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /p:ProductVersion=${{ env.VERSION }}
+
+          Write-Host "Building Radegast Bundle (bootstrapper) for ${{ matrix.platform }}"
+          msbuild Install\RadegastBundle\RadegastBundle.wixproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.platform }} `
+            /p:ProductVersion=${{ env.VERSION }}
+
+      - name: Collect artifacts
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+
+          Write-Host "Copying application binaries..."
+          Copy-Item -Path "bin\Radegast\Release\*" -Destination "$artifactDir\" -Recurse -Force `
+            -Exclude @("*.pdb", "*.xml", "*.vshost.*")
+
+          Write-Host "Collecting PDB files..."
+          $pdbDir = "$artifactDir\symbols"
+          New-Item -ItemType Directory -Path $pdbDir -Force | Out-Null
+          Get-ChildItem -Path "bin\Radegast\Release" -Filter "*.pdb" -Recurse |
+            Copy-Item -Destination $pdbDir -Force
+
+          $msiPath = "bin\Packages\en-US\RadegastSetup_$platform.msi"
+          if (Test-Path $msiPath) {
+            Write-Host "Copying MSI installer: $msiPath"
+            Copy-Item -Path $msiPath -Destination "$artifactDir\RadegastSetup_${platform}_${version}.msi" -Force
+          } else {
+            Write-Warning "MSI not found at: $msiPath"
+          }
+
+          $bundlePath = "bin\Packages\RadegastBundle_$platform.exe"
+          if (Test-Path $bundlePath) {
+            Write-Host "Copying Bundle installer: $bundlePath"
+            Copy-Item -Path $bundlePath -Destination "$artifactDir\RadegastBundle_${platform}_${version}.exe" -Force
+          } else {
+            Write-Warning "Bundle not found at: $bundlePath"
+          }
+
+      - name: Create compressed archive
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          Push-Location "$artifactDir"
+
+          $tarName = "..\Radegast_${platform}_${version}.tar"
+          $tbzName = "..\Radegast_${platform}_${version}.tbz"
+
+          try {
+            Write-Host "Creating tar: $tarName"
+            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastBundle_*" -mx=0
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tarName)) { Throw "7z tar failed (exit $LASTEXITCODE)" }
+
+            Write-Host "Compressing to tbz: $tbzName"
+            & 7z a $tbzName -tbzip2 -mx=9 $tarName
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tbzName)) { Throw "7z bzip2 failed (exit $LASTEXITCODE)" }
+
+            Remove-Item $tarName -Force -ErrorAction SilentlyContinue
+          } catch {
+            Write-Warning "7z failed: $_. Falling back to native tar."
+            & tar -cjf "..\Radegast_${platform}_${version}.tbz" --exclude="symbols" --exclude="*.msi" --exclude="RadegastBundle_*" *
+          }
+
+          Pop-Location
+
+          if (Test-Path "$artifactDir\symbols") {
+            Write-Host "Creating symbols zip..."
+            Compress-Archive -Path "$artifactDir\symbols\*" `
+              -DestinationPath "artifacts\Radegast_${platform}_${version}_symbols.zip" -Force
+          }
+
+      - name: Generate SHA256 checksums
+        run: |
+          $platform = "${{ matrix.platform }}"
+          $version = "${{ env.VERSION }}"
+          $artifactDir = "artifacts\$platform"
+
+          $checksumFile = "$artifactDir\SHA256SUMS.txt"
+          $files = Get-ChildItem -Path $artifactDir -File |
+            Where-Object { $_.Extension -in '.msi', '.exe', '.tbz' }
+
+          if ($files.Count -eq 0) {
+            Write-Warning "No MSI/EXE/TBZ files found to checksum in $artifactDir"
+          } else {
+            foreach ($f in $files) {
+              $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+              "${hash}  $($f.Name)" | Out-File -FilePath $checksumFile -Encoding utf8 -Append
+              Write-Host "$hash  $($f.Name)"
+            }
+          }
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: radegast-legacy-${{ matrix.platform }}-${{ env.VERSION }}-${{ github.run_id }}
+          path: |
+            artifacts\Radegast_${{ matrix.platform }}_${{ env.VERSION }}.tbz
+            artifacts\Radegast_${{ matrix.platform }}_${{ env.VERSION }}_symbols.zip
+            artifacts\${{ matrix.platform }}\RadegastSetup_${{ matrix.platform }}_${{ env.VERSION }}.msi
+            artifacts\${{ matrix.platform }}\RadegastBundle_${{ matrix.platform }}_${{ env.VERSION }}.exe
+            artifacts\${{ matrix.platform }}\SHA256SUMS.txt
+          if-no-files-found: warn
+
+  release:
+    name: Create Release Draft
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize release files
+        run: |
+          New-Item -ItemType Directory -Path "release-files" -Force | Out-Null
+          Get-ChildItem -Path "release-artifacts" -Recurse -File | ForEach-Object {
+            $dest = "release-files\$($_.Name)"
+            Write-Host "  $($_.FullName) -> $dest"
+            Move-Item -Path $_.FullName -Destination $dest -Force
+          }
+          Write-Host "`nRelease files:"
+          Get-ChildItem -Path "release-files" | ForEach-Object {
+            Write-Host "  $($_.Name) ($([math]::Round($_.Length / 1MB, 2)) MB)"
+          }
+
+      - name: Generate release notes
+        run: |
+          $version = "${{ inputs.version }}"
+          $tag = "v$version"
+
+          $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          if (-not $previousTag) { $previousTag = git rev-list --max-parents=0 HEAD }
+
+          $commits = git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges 2>$null
+          if (-not $commits) { $commits = "_No changelog available._" }
+
+          @"
+          # Radegast $version
+
+          ## Downloads
+
+          | Platform | Installer | Portable |
+          |----------|-----------|---------|
+          | 64-bit   | RadegastSetup_x64_${version}.msi | Radegast_x64_${version}.tbz |
+          | 32-bit   | RadegastSetup_x86_${version}.msi | Radegast_x86_${version}.tbz |
+          | ARM64    | RadegastSetup_ARM64_${version}.msi | Radegast_ARM64_${version}.tbz |
+
+          ## Changes
+
+          $commits
+
+          ## Requirements
+
+          - Windows 7 or later
+          - .NET Framework 4.8.1
+          "@ | Out-File -FilePath "release-notes.md" -Encoding utf8
+
+      - name: Create GitHub Release Draft
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          prerelease: ${{ inputs.prerelease }}
+          tag_name: v${{ inputs.version }}
+          name: Radegast ${{ inputs.version }}
+          body_path: release-notes.md
+          files: |
+            release-files/*.msi
+            release-files/*.exe
+            release-files/*.tbz
+            release-files/*.zip
+            release-files/SHA256SUMS*.txt
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

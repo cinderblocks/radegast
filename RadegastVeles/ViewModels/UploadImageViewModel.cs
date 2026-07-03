@@ -156,7 +156,7 @@ public partial class UploadImageViewModel : ObservableObject, IDisposable
 
         SKBitmap skBitmap;
 
-        if (ext is ".jp2" or ".j2c")
+        if (ext is ".jp2" or ".j2c" or ".j2k")
         {
             var raw = File.ReadAllBytes(filePath);
             skBitmap = J2kImage.DecodeToImage<SKBitmap>(raw);

@@ -64,6 +64,23 @@
                                   AutomationProperties.Name="Disable look-at targets" />
 
                         <Separator />
+                        <TextBlock Text="Radar History" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Tracks all avatars seen on radar during this login session, even after they leave the area. History is cleared on logout." />
+                        <CheckBox Content="Enable session radar history"
+                                  IsChecked="{Binding RadarHistoryEnabled}"
+                                  AutomationProperties.Name="Enable session radar history" />
+                        <Grid ColumnDefinitions="Auto,*" IsEnabled="{Binding RadarHistoryEnabled}">
+                            <TextBlock Grid.Column="0" Text="Maximum entries:" VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <NumericUpDown Grid.Column="1"
+                                          Value="{Binding RadarHistoryMaxEntries}"
+                                          Minimum="50" Maximum="5000" Increment="50"
+                                          FormatString="0"
+                                          HorizontalAlignment="Left" MinWidth="90"
+                                          AutomationProperties.Name="Maximum radar history entries" />
+                        </Grid>
+
+                        <Separator />
                         <TextBlock Text="Restrained Life / RLVa" FontWeight="SemiBold" FontSize="14" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Allows in-world scripted objects to control certain viewer behaviours. Only enable if you trust the objects you interact with." />

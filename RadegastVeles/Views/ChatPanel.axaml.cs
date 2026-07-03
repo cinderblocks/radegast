@@ -215,4 +215,17 @@ public partial class ChatPanel : UserControl
         AvatarMenuBuilder.Build(_vm.Instance, avatar.Id, avatar.Name).Open(btn);
         e.Handled = true;
     }
+
+    private void OnHistoryAvatarClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm == null || sender is not Button { Tag: RadarHistoryEntry entry }) return;
+        _vm.ShowAgentProfile(entry.Id, entry.Name);
+    }
+
+    private void OnHistoryContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (_vm == null || sender is not Button btn || btn.Tag is not RadarHistoryEntry entry) return;
+        AvatarMenuBuilder.Build(_vm.Instance, entry.Id, entry.Name, isNearby: entry.IsNearby).Open(btn);
+        e.Handled = true;
+    }
 }

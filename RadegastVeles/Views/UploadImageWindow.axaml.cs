@@ -46,7 +46,7 @@ public partial class UploadImageWindow : Window
                 [
                     new FilePickerFileType("Image files")
                     {
-                        Patterns = ["*.jp2", "*.j2c", "*.png", "*.jpg", "*.jpeg", "*.bmp", "*.gif", "*.tga", "*.tif", "*.tiff"]
+                        Patterns = ["*.jp2", "*.j2c", "*.j2k", "*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp", "*.gif", "*.tga", "*.tif", "*.tiff"]
                     },
                     new FilePickerFileType("All files") { Patterns = ["*.*"] }
                 ]

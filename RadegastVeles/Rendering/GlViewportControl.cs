@@ -118,10 +118,20 @@ public class GlViewportControl : Panel
         set => SetValue(WireframeProperty, value);
     }
 
+    public static readonly StyledProperty<bool> NavMeshOverlayEnabledProperty =
+        AvaloniaProperty.Register<GlViewportControl, bool>(nameof(NavMeshOverlayEnabled));
+
+    /// <summary>When true, scene objects are tinted by their navmesh walkability type.</summary>
+    public bool NavMeshOverlayEnabled
+    {
+        get => GetValue(NavMeshOverlayEnabledProperty);
+        set => SetValue(NavMeshOverlayEnabledProperty, value);
+    }
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == WireframeProperty)
+        if (change.Property == WireframeProperty || change.Property == NavMeshOverlayEnabledProperty)
             _core.RequestNextFrameRendering();
         // When the control becomes visible again (tab switched back in), the
         // OpenGlControlBase won't repaint unless we explicitly request a frame.
@@ -140,6 +150,10 @@ public class GlViewportControl : Panel
     private GlShader? _pickShader;
     private GlShader? _particleShader;
     private GlShader? _gnormShader;    // G-buffer normal pass
+    private GlShader? _navMeshOverlayShader;
+
+    // Navmesh walkability types, updated via UpdateNavMeshTypes from any thread.
+    private readonly ConcurrentDictionary<uint, NavMeshWalkabilityType> _navMeshTypes = new();
     private GlShader? _ssaoShader;     // SSAO pass
     private GlShader? _ssaoBlurShader; // SSAO blur pass
     private string?   _initError;
@@ -659,6 +673,19 @@ public class GlViewportControl : Panel
     }
 
     /// <summary>
+    /// Replace the navmesh walkability table used by the overlay pass.
+    /// Call this after <see cref="NavMeshManager.RefreshAsync"/> completes.
+    /// Safe to call from any thread; takes effect on the next rendered frame.
+    /// </summary>
+    public void UpdateNavMeshTypes(IReadOnlyDictionary<uint, NavMeshWalkabilityType> types)
+    {
+        _navMeshTypes.Clear();
+        foreach (var kvp in types)
+            _navMeshTypes[kvp.Key] = kvp.Value;
+        Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
+    }
+
+    /// <summary>
     /// Remove all scene objects (e.g. on sim change).
     /// Safe to call from any thread.
     /// </summary>
@@ -716,6 +743,9 @@ public class GlViewportControl : Panel
             _particleShader = GlShader.Compile(
                 ShaderLoader.Load("particle.vert"),
                 ShaderLoader.Load("particle.frag"));
+            _navMeshOverlayShader = GlShader.Compile(
+                ShaderLoader.Load("navmesh_overlay.vert"),
+                ShaderLoader.Load("navmesh_overlay.frag"));
             _particleBuf    = new GlParticleBuffer();
             _instanceDrawer = new GlInstanceDrawer();
             // GL ES (ANGLE) doesn't expose PolygonMode; check version string.
@@ -1089,6 +1119,22 @@ public class GlViewportControl : Panel
             GlApi.Gl.Disable(EnableCap.Blend);
         }
 
+        // NavMesh walkability overlay — semi-transparent tint by pathfinding type.
+        if (NavMeshOverlayEnabled && _navMeshOverlayShader != null && !_navMeshTypes.IsEmpty)
+        {
+            GlApi.Gl.Enable(EnableCap.Blend);
+            GlApi.Gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+            GlApi.Gl.Disable(EnableCap.CullFace);
+            GlApi.Gl.DepthMask(false);
+            GlApi.Gl.DepthFunc(DepthFunction.Lequal);
+            DrawFacesNavMeshOverlay(_sceneOpaque, _navMeshOverlayShader, ref view, ref proj, _navMeshTypes);
+            DrawFacesNavMeshOverlay(_sceneAlpha,  _navMeshOverlayShader, ref view, ref proj, _navMeshTypes);
+            GlApi.Gl.DepthFunc(DepthFunction.Less);
+            GlApi.Gl.DepthMask(true);
+            GlApi.Gl.Enable(EnableCap.CullFace);
+            GlApi.Gl.Disable(EnableCap.Blend);
+        }
+
         // Wireframe overlay.
         // On desktop GL: use PolygonMode for true wireframe.
         // On ES/ANGLE: re-draw with the wireframe shader as solid triangles at slightly
@@ -1322,22 +1368,23 @@ public class GlViewportControl : Panel
     /// 2. Möller–Trumbore intersection against every triangle of the face.
     /// 3. Barycentric interpolation of vertex UV and normal; binormal from cross(tangent, normal).
     ///
-    /// Vertex layout (8 floats per vertex): pos(3) normal(3) uv(2).
+    /// Vertex layout (12 floats per vertex): pos(3) normal(3) uv(2) tangent(4).
     /// </summary>
     /// <summary>
     /// Extracts a positions-only buffer (3 floats per vertex) from an interleaved
-    /// Position(3)+Normal(3)+TexCoord(2) buffer. Used to slim the CPU-side picker
+    /// Position(3)+Normal(3)+TexCoord(2)+Tangent(4) buffer. Used to slim the CPU-side picker
     /// data after the full interleaved buffer has been uploaded to the GPU,
-    /// reducing LOH retention by ~62%.
+    /// reducing LOH retention by ~75%.
     /// </summary>
     private static float[] PickerFromInterleaved(float[]? interleaved, int length = 0)
     {
         if (interleaved == null || interleaved.Length < 3)
             return Array.Empty<float>();
-        int len    = length > 0 ? length : interleaved.Length;
-        int vCount = len / 8;
+        int len    = length > 0 ? Math.Min(length, interleaved.Length) : interleaved.Length;
+        len       -= len % 12; // align down to a whole-vertex boundary
+        int vCount = len / 12;
         var pos = new float[vCount * 3];
-        for (int i = 0, j = 0; i < len; i += 8, j += 3)
+        for (int i = 0, j = 0; i < len; i += 12, j += 3)
         {
             pos[j]     = interleaved[i];
             pos[j + 1] = interleaved[i + 1];
@@ -1347,16 +1394,17 @@ public class GlViewportControl : Panel
     }
 
     // Extracts a compact normal+UV buffer (5 floats/vertex: nx,ny,nz,u,v) from the full
-    // interleaved buffer (8 floats/vertex: px,py,pz,nx,ny,nz,u,v).
-    // Stored alongside PickerVertices so the full 8-wide buffer can be released post-upload.
+    // interleaved buffer (12 floats/vertex: px,py,pz,nx,ny,nz,u,v,tx,ty,tz,tw).
+    // Stored alongside PickerVertices so the full 12-wide buffer can be released post-upload.
     private static float[] NormalUvFromInterleaved(float[]? interleaved, int length = 0)
     {
-        if (interleaved == null || interleaved.Length < 8)
+        if (interleaved == null || interleaved.Length < 12)
             return Array.Empty<float>();
-        int len    = length > 0 ? length : interleaved.Length;
-        int vCount = len / 8;
+        int len    = length > 0 ? Math.Min(length, interleaved.Length) : interleaved.Length;
+        len       -= len % 12;
+        int vCount = len / 12;
         var nuv = new float[vCount * 5];
-        for (int i = 0, j = 0; i < len; i += 8, j += 5)
+        for (int i = 0, j = 0; i < len; i += 12, j += 5)
         {
             nuv[j]     = interleaved[i + 3]; // nx
             nuv[j + 1] = interleaved[i + 4]; // ny
@@ -2204,7 +2252,7 @@ public class GlViewportControl : Panel
             }
             _faceMeshes.Add(mesh); // indexed by face position for animation updates
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
-            // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
+            // interleaved float[] (12 floats/vertex) so the LOH array can be collected.
             // PickerVertices (3 floats/vertex) is used for ray–triangle intersection;
             // NormalUvVertices (5 floats/vertex: nx,ny,nz,u,v) is used by ComputeHitInfo.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
@@ -2500,7 +2548,7 @@ public class GlViewportControl : Panel
                 mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
             }
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
-            // interleaved float[] (8 floats/vertex) so the LOH array can be collected.
+            // interleaved float[] (12 floats/vertex) so the LOH array can be collected.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
             face.NormalUvVertices = NormalUvFromInterleaved(face.Vertices, vLen);
             if (face.VerticesLength > 0)
@@ -3409,6 +3457,39 @@ public class GlViewportControl : Panel
             shader.Set("uMvp",       ref mvp);
             shader.Set("uModelView", ref mv);
             shader.Set("uNormalMat", ref normalMat, transpose: true);
+            mesh.Draw();
+        }
+        shader.Unuse();
+    }
+
+    private static readonly Vector4 s_navColorWalkable        = new(0.00f, 0.80f, 0.00f, 0.50f);
+    private static readonly Vector4 s_navColorStaticObstacle  = new(0.80f, 0.00f, 0.00f, 0.50f);
+    private static readonly Vector4 s_navColorDynamicObstacle = new(0.80f, 0.50f, 0.00f, 0.50f);
+    private static readonly Vector4 s_navColorExclusion       = new(0.00f, 0.00f, 0.80f, 0.50f);
+
+    private static void DrawFacesNavMeshOverlay(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
+        GlShader shader,
+        ref Matrix4x4 view,
+        ref Matrix4x4 proj,
+        ConcurrentDictionary<uint, NavMeshWalkabilityType> types)
+    {
+        shader.Use();
+        foreach (var (mesh, _, _, _, _, _, face) in list)
+        {
+            if (!types.TryGetValue(face.PrimLocalId, out var navType)) continue;
+            var color = navType switch
+            {
+                NavMeshWalkabilityType.Walkable        => s_navColorWalkable,
+                NavMeshWalkabilityType.StaticObstacle  => s_navColorStaticObstacle,
+                NavMeshWalkabilityType.DynamicObstacle => s_navColorDynamicObstacle,
+                NavMeshWalkabilityType.ExclusionZone   => s_navColorExclusion,
+                _                                      => Vector4.Zero,
+            };
+            if (color == Vector4.Zero) continue;
+            var mvp = face.Transform * view * proj;
+            shader.Set("uMvp", ref mvp);
+            shader.Set("uColor", color);
             mesh.Draw();
         }
         shader.Unuse();

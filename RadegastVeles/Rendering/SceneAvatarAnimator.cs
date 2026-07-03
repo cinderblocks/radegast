@@ -269,18 +269,21 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     continue;
                 }
 
-                int     nvR    = skin.BindVerts.Length / 8;
+                int     nvR    = skin.BindVerts.Length / 12;
                 float[] nvBufR = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
 
                 for (int vi = 0; vi < nvR; vi++)
                 {
-                    int o  = vi * 8;
+                    int o  = vi * 12;
                     var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
                                          skin.BindVerts[o + 2], 1f);
                     var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
                                          skin.BindVerts[o + 5], 0f);
+                    var bt = new Vector4(skin.BindVerts[o + 8], skin.BindVerts[o + 9],
+                                         skin.BindVerts[o + 10], 0f);
                     var ap = Vector4.Zero;
                     var an = Vector4.Zero;
+                    var at = Vector4.Zero;
                     float totalW = 0f;
 
                     for (int infl = 0; infl < 4; infl++)
@@ -289,17 +292,20 @@ internal sealed class SceneAvatarAnimator : IDisposable
                         float w  = skin.Weights![vi * 4 + infl];
                         if (w <= 1e-4f) continue;
                         if ((uint)ji >= (uint)jointCount) continue;
-                        if (!hasSkin[ji]) { ap += w * bp; an += w * bn; totalW += w; continue; }
-                        var sp = Vector4.Transform(bp, skinMats[ji]);
-                        var sn = Vector4.Transform(bn, skinMats[ji]);
-                        ap += w * sp; an += w * sn; totalW += w;
+                        if (!hasSkin[ji]) { ap += w * bp; an += w * bn; at += w * bt; totalW += w; continue; }
+                        ap += w * Vector4.Transform(bp, skinMats[ji]);
+                        an += w * Vector4.Transform(bn, skinMats[ji]);
+                        at += w * Vector4.Transform(bt, skinMats[ji]);
+                        totalW += w;
                     }
 
-                    if (totalW <= 1e-4f) { ap = bp; an = bn; }
-                    nvBufR[o]     = ap.X; nvBufR[o + 1] = ap.Y; nvBufR[o + 2] = ap.Z;
-                    nvBufR[o + 3] = an.X; nvBufR[o + 4] = an.Y; nvBufR[o + 5] = an.Z;
-                    nvBufR[o + 6] = skin.BindVerts[o + 6];
-                    nvBufR[o + 7] = skin.BindVerts[o + 7];
+                    if (totalW <= 1e-4f) { ap = bp; an = bn; at = bt; }
+                    nvBufR[o]      = ap.X; nvBufR[o + 1]  = ap.Y; nvBufR[o + 2]  = ap.Z;
+                    nvBufR[o + 3]  = an.X; nvBufR[o + 4]  = an.Y; nvBufR[o + 5]  = an.Z;
+                    nvBufR[o + 6]  = skin.BindVerts[o + 6];
+                    nvBufR[o + 7]  = skin.BindVerts[o + 7];
+                    nvBufR[o + 8]  = at.X; nvBufR[o + 9]  = at.Y; nvBufR[o + 10] = at.Z;
+                    nvBufR[o + 11] = skin.BindVerts[o + 11];
                 }
 
                 _viewport.ScheduleSceneVertexUpdate(_sceneKey, skin.FaceIndex, nvBufR, skin.BindVerts.Length, isPoolRented: true);
@@ -329,18 +335,21 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 continue;
             }
 
-            int     nv    = skin.BindVerts.Length / 8;
+            int     nv    = skin.BindVerts.Length / 12;
             float[] nvBuf = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
 
             for (int vi = 0; vi < nv; vi++)
             {
-                int o  = vi * 8;
+                int o  = vi * 12;
                 var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
                                      skin.BindVerts[o + 2], 1f);
                 var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
                                      skin.BindVerts[o + 5], 0f);
+                var bt = new Vector4(skin.BindVerts[o + 8], skin.BindVerts[o + 9],
+                                     skin.BindVerts[o + 10], 0f);
                 var ap = Vector4.Zero;
                 var an = Vector4.Zero;
+                var at = Vector4.Zero;
 
                 var   b1 = skin.Bone1[vi];
                 float w1 = skin.Weight1[vi];
@@ -349,8 +358,9 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 {
                     ap += w1 * Vector4.Transform(bp, sm1);
                     an += w1 * Vector4.Transform(bn, sm1);
+                    at += w1 * Vector4.Transform(bt, sm1);
                 }
-                else { ap += w1 * bp; an += w1 * bn; }
+                else { ap += w1 * bp; an += w1 * bn; at += w1 * bt; }
 
                 float w2 = skin.Weight2[vi];
                 if (w2 > 1e-4f)
@@ -360,14 +370,17 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     {
                         ap += w2 * Vector4.Transform(bp, sm2);
                         an += w2 * Vector4.Transform(bn, sm2);
+                        at += w2 * Vector4.Transform(bt, sm2);
                     }
-                    else { ap += w2 * bp; an += w2 * bn; }
+                    else { ap += w2 * bp; an += w2 * bn; at += w2 * bt; }
                 }
 
-                nvBuf[o]     = ap.X; nvBuf[o + 1] = ap.Y; nvBuf[o + 2] = ap.Z;
-                nvBuf[o + 3] = an.X; nvBuf[o + 4] = an.Y; nvBuf[o + 5] = an.Z;
-                nvBuf[o + 6] = skin.BindVerts[o + 6];
-                nvBuf[o + 7] = skin.BindVerts[o + 7];
+                nvBuf[o]      = ap.X; nvBuf[o + 1]  = ap.Y; nvBuf[o + 2]  = ap.Z;
+                nvBuf[o + 3]  = an.X; nvBuf[o + 4]  = an.Y; nvBuf[o + 5]  = an.Z;
+                nvBuf[o + 6]  = skin.BindVerts[o + 6];
+                nvBuf[o + 7]  = skin.BindVerts[o + 7];
+                nvBuf[o + 8]  = at.X; nvBuf[o + 9]  = at.Y; nvBuf[o + 10] = at.Z;
+                nvBuf[o + 11] = skin.BindVerts[o + 11];
             }
 
             _viewport.ScheduleSceneVertexUpdate(_sceneKey, skin.FaceIndex, nvBuf, skin.BindVerts.Length, isPoolRented: true);

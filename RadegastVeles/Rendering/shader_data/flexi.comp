@@ -7,11 +7,11 @@
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
-// Bind-pose (rest) vertices: pos(3)+normal(3)+uv(2) per vertex, 8 floats each.
+// Bind-pose (rest) vertices: pos(3)+normal(3)+uv(2)+tangent(4) per vertex, 12 floats each.
 layout(std430, binding = 0) readonly  buffer BaseVerts { float b[]; };
 // Spine positions: N+1 entries as vec4 (xyz = position metres, w unused).
 layout(std430, binding = 1) readonly  buffer SpineData { vec4 s[];  };
-// Output mesh VBO: same 8-float interleaved layout as BaseVerts.
+// Output mesh VBO: same 12-float interleaved layout as BaseVerts.
 layout(std430, binding = 2) writeonly buffer OutVerts  { float v[]; };
 
 uniform highp int   uVertexCount;
@@ -49,12 +49,14 @@ void main() {
     highp uint vi = gl_GlobalInvocationID.x;
     if (int(vi) >= uVertexCount) return;
 
-    highp int o = int(vi) * 8;
+    highp int o = int(vi) * 12;
 
     // Read bind-pose vertex
     highp float bxN = b[o],     byN = b[o+1], bzN = b[o+2];
     highp float nx  = b[o+3],   ny  = b[o+4], nz  = b[o+5];
     highp float tu  = b[o+6],   tv  = b[o+7];
+    highp float ttx = b[o+8],   tty = b[o+9], ttz = b[o+10];
+    highp float ttw = b[o+11];
 
     highp float sx = uScale.x, sy = uScale.y, sz = uScale.z;
 
@@ -81,6 +83,7 @@ void main() {
     // Rotate cross-section offset and accumulate with spine position
     highp vec3 rotCross = rot * vec3(bxM, byM, 0.0);
     highp vec3 rotNorm  = rot * vec3(nx, ny, nz);
+    highp vec3 rotTang  = rot * vec3(ttx, tty, ttz);
 
     highp float pxM = spine.x + rotCross.x;
     highp float pyM = spine.y + rotCross.y;
@@ -96,7 +99,11 @@ void main() {
     highp vec4 p4 = uAttachTransform * vec4(pxN, pyN, pzN, 1.0);
     highp vec4 n4 = uAttachTransform * vec4(rotNorm, 0.0);
 
-    v[o]   = p4.x; v[o+1] = p4.y; v[o+2] = p4.z;
-    v[o+3] = n4.x; v[o+4] = n4.y; v[o+5] = n4.z;
-    v[o+6] = tu;   v[o+7] = tv;
+    highp vec4 t4 = uAttachTransform * vec4(rotTang, 0.0);
+
+    v[o]    = p4.x; v[o+1]  = p4.y;  v[o+2]  = p4.z;
+    v[o+3]  = n4.x; v[o+4]  = n4.y;  v[o+5]  = n4.z;
+    v[o+6]  = tu;   v[o+7]  = tv;
+    v[o+8]  = t4.x; v[o+9]  = t4.y;  v[o+10] = t4.z;
+    v[o+11] = ttw;
 }

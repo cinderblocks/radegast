@@ -385,11 +385,11 @@ internal sealed class FlexiPrimAnimator : IDisposable
             // (next power-of-two bucket); a larger buffer triggers GL_INVALID_VALUE,
             // silently dropping the update and freezing the attachment in its bind pose.
             var dst    = new float[src.Length];
-            int vCount = src.Length / 8;
+            int vCount = src.Length / 12;
 
             for (int vi = 0; vi < vCount; vi++)
             {
-                int o = vi * 8;
+                int o = vi * 12;
 
                 float bxN = src[o];
                 float byN = src[o + 1];
@@ -408,9 +408,9 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 var spineB = state.Positions[segI + 1];
                 var spine  = Vector3.Lerp(spineA, spineB, segT);
 
-                var d       = spineB - spineA;
-                var tangent = d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.UnitZ;
-                var rot     = RotationFromTo(Vector3.UnitZ, tangent);
+                var d          = spineB - spineA;
+                var splineTang = d.LengthSquared() > 1e-12f ? Vector3.Normalize(d) : Vector3.UnitZ;
+                var rot        = RotationFromTo(Vector3.UnitZ, splineTang);
 
                 var crossM   = new Vector3(bxM, byM, 0f);
                 var rotCross = Vector3.TransformNormal(crossM, rot);
@@ -422,13 +422,21 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 var normal    = new Vector3(src[o + 3], src[o + 4], src[o + 5]);
                 var rotNormal = Vector3.TransformNormal(normal, rot);
 
+                var tangentXyz  = new Vector3(src[o + 8], src[o + 9], src[o + 10]);
+                var rotTangent  = Vector3.TransformNormal(tangentXyz, rot);
+
                 float pxN = (sx > 1e-6f) ? pxM / sx : pxM;
                 float pyN = (sy > 1e-6f) ? pyM / sy : pyM;
                 float pzN = (sz > 1e-6f) ? pzM / sz : pzM;
                 var p4 = Vector4.Transform(new Vector4(pxN, pyN, pzN, 1f), attachTx);
                 var n4 = Vector4.Transform(new Vector4(rotNormal.X, rotNormal.Y, rotNormal.Z, 0f), attachTx);
-                dst[o]     = p4.X; dst[o + 1] = p4.Y; dst[o + 2] = p4.Z;
-                dst[o + 3] = n4.X; dst[o + 4] = n4.Y; dst[o + 5] = n4.Z;
+                var t4 = Vector4.Transform(new Vector4(rotTangent.X, rotTangent.Y, rotTangent.Z, 0f), attachTx);
+                dst[o]      = p4.X; dst[o + 1]  = p4.Y;        dst[o + 2]  = p4.Z;
+                dst[o + 3]  = n4.X; dst[o + 4]  = n4.Y;        dst[o + 5]  = n4.Z;
+                dst[o + 6]  = src[o + 6];                       // UV pass-through
+                dst[o + 7]  = src[o + 7];
+                dst[o + 8]  = t4.X; dst[o + 9]  = t4.Y;        dst[o + 10] = t4.Z;
+                dst[o + 11] = src[o + 11];                      // handedness invariant
             }
 
             scheduleUpdate(info.FaceStart + fi, dst);

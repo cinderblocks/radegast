@@ -70,9 +70,11 @@ internal static class AvatarPlaceholderFactory
         uint       avatarLocalId)
     {
         // ── Build UV-sphere vertices ──────────────────────────────────────────
-        // Vertex layout: Position(3) + Normal(3) + TexCoord(2) = 8 floats each.
+        // Vertex layout: Position(3) + Normal(3) + TexCoord(2) + Tangent(4) = 12 floats each.
+        // Tangent is left as zero (w=0) — the placeholder has no material so the screen-space
+        // TBN fallback in prim.frag is never actually invoked for it.
         int vertCount = (Stacks + 1) * (Slices + 1);
-        var verts     = new float[vertCount * 8];
+        var verts     = new float[vertCount * 12];
         int vi        = 0;
 
         for (int stack = 0; stack <= Stacks; stack++)
@@ -108,6 +110,10 @@ internal static class AvatarPlaceholderFactory
                 verts[vi++] = nz;
                 verts[vi++] = u;
                 verts[vi++] = v;
+                verts[vi++] = 0f; // tangent x (no tangent data for placeholder)
+                verts[vi++] = 0f; // tangent y
+                verts[vi++] = 0f; // tangent z
+                verts[vi++] = 0f; // handedness 0 = no tangent
             }
         }
 

@@ -12,7 +12,7 @@
         Width="340" Height="400"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Group picker window">
 
     <DockPanel>

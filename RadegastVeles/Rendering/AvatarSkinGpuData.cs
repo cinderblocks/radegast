@@ -70,7 +70,7 @@ internal sealed class AvatarSkinGpuData : IDisposable
     {
         var gl = GlApi.Gl;
 
-        int   nv          = skin.BindVerts.Length / 8;
+        int   nv          = skin.BindVerts.Length / 12;
         int[] joints4;
         float[] weights4;
         int   jointCount;

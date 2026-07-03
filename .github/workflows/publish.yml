@@ -25,6 +25,11 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
       - name: Install WiX Toolset
         shell: pwsh
         run: |
@@ -44,26 +49,30 @@ jobs:
           echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "BUILD_VERSION=$buildVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Restore NuGet packages
+      - name: Restore
         shell: pwsh
-        run: |
-          Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
-          msbuild radegast.sln /t:Restore /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }}
+        run: dotnet restore RadegastVeles\RadegastVeles.csproj
 
-      - name: Build solution
+      - name: Build
         shell: pwsh
         run: |
           Write-Host "Building Radegast Veles for ${{ matrix.platform }}..."
-          msbuild radegast.sln /m /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /v:minimal
+          dotnet build RadegastVeles\RadegastVeles.csproj `
+            -c Release `
+            -p:Platform=${{ matrix.platform }} `
+            -p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            -p:FileVersion=${{ env.BUILD_VERSION }} `
+            -p:InformationalVersion=${{ env.TAG_VERSION }} `
+            --no-restore
 
       - name: Build installer
         shell: pwsh
         run: |
           Write-Host "Building Radegast Veles MSI installer for ${{ matrix.platform }}"
-          msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
           Write-Host "Building Radegast Veles Bundle (bootstrapper) for ${{ matrix.platform }}"
-          msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=RadegastWindows /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
       - name: Collect artifacts
         shell: pwsh
@@ -183,7 +192,7 @@ jobs:
 
           try {
             Write-Host "Creating intermediate tar: $tarName"
-            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!*.exe -mx=0
+            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastVelesBundle_*" -mx=0
             $code = $LASTEXITCODE
             if ($code -ne 0 -or -not (Test-Path $tarName)) {
               Throw "7z failed to create tar (exit $code)"

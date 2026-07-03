@@ -82,13 +82,13 @@ internal static class PlaceholderMeshFactory
         {
             var (a, b, c, d, normal) = s_facesDef[fi];
 
-            // 4 verts × 8 floats (pos3 + norm3 + uv2).
-            var verts = new float[4 * 8];
+            // 4 verts × 12 floats (pos3 + norm3 + uv2 + tangent4).
+            var verts = new float[4 * 12];
             int[] ci = [a, b, c, d];
             for (int vi = 0; vi < 4; vi++)
             {
                 var corner = s_corners[ci[vi]] * scale;
-                int o = vi * 8;
+                int o = vi * 12;
                 verts[o    ] = corner.X;
                 verts[o + 1] = corner.Y;
                 verts[o + 2] = corner.Z;
@@ -98,6 +98,7 @@ internal static class PlaceholderMeshFactory
                 // UVs — simple planar mapping, not critical for a placeholder.
                 verts[o + 6] = vi == 0 || vi == 3 ? 0f : 1f;
                 verts[o + 7] = vi < 2 ? 0f : 1f;
+                // Tangent — zero signals no tangent data (no normal maps on placeholders).
             }
 
             // Two triangles: 0-1-2 and 0-2-3.

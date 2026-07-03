@@ -12,7 +12,7 @@
         Width="310" Height="270"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Pay window">
     <Border Padding="16">
         <StackPanel Spacing="10">

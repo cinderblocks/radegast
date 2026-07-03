@@ -10,6 +10,7 @@
         x:Class="Radegast.Veles.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="{Binding Title}"
+        Icon="/Assets/veles.ico"
         Width="1200" Height="768"
         AutomationProperties.Name="Radegast Veles main window">
 
@@ -36,8 +37,8 @@
                 <MenuItem Header="My 3D _Avatar..." AutomationProperties.Name="Open 3D avatar viewer"
                           Click="OnShowMyAvatarViewerClick" />
                 <Separator />
-                <MenuItem Header="_Appearance..." AutomationProperties.Name="Open appearance editor"
-                          Click="OnAppearanceClick" />
+                <MenuItem Header="_Appearance..." AutomationProperties.Name="Show appearance tab"
+                          Click="OnShowAppearanceClick" />
                 <MenuItem Header="Change _Display Name..." AutomationProperties.Name="Change display name"
                           Click="OnChangeDisplayNameClick" />
                 <Separator />
@@ -85,6 +86,8 @@
                           Click="OnShowLandHoldingsClick" />
                 <MenuItem Header="_Region Info..." AutomationProperties.Name="Show region info"
                           Click="OnShowEstateInfoClick" />
+                <MenuItem Header="Region _Performance..." AutomationProperties.Name="Show region performance dashboard"
+                          Click="OnShowRegionClick" />
             </MenuItem>
             <MenuItem Header="_Create" AutomationProperties.Name="Create menu">
                 <MenuItem Header="Upload _Image..." AutomationProperties.Name="Upload image"
@@ -396,6 +399,44 @@
                     <ContentControl.ContentTemplate>
                         <DataTemplate x:DataType="vm:GroupsViewModel">
                             <views:GroupsPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Region performance tab"
+                     IsVisible="{Binding IsRegionTabOpen}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Region" VerticalAlignment="Center" />
+                        <Button Content="✕" FontSize="10" Padding="2"
+                                Click="OnCloseRegionClick"
+                                ToolTip.Tip="Close region performance dashboard"
+                                AutomationProperties.Name="Close region performance tab" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Region}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:RegionViewModel">
+                            <views:RegionPanel />
+                        </DataTemplate>
+                    </ContentControl.ContentTemplate>
+                </ContentControl>
+            </TabItem>
+            <TabItem AutomationProperties.Name="Appearance tab"
+                     IsVisible="{Binding IsAppearanceOpen}">
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Appearance" VerticalAlignment="Center" />
+                        <Button Content="✕" FontSize="10" Padding="2"
+                                Click="OnCloseAppearanceClick"
+                                ToolTip.Tip="Close appearance panel"
+                                AutomationProperties.Name="Close appearance tab" />
+                    </StackPanel>
+                </TabItem.Header>
+                <ContentControl Content="{Binding Appearance}">
+                    <ContentControl.ContentTemplate>
+                        <DataTemplate x:DataType="vm:AppearanceViewModel">
+                            <views:AppearancePanel />
                         </DataTemplate>
                     </ContentControl.ContentTemplate>
                 </ContentControl>

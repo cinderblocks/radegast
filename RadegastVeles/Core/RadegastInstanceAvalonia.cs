@@ -122,9 +122,14 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         PluginManager = new PluginManager(this);
     }
 
+    /// <summary>Persistent group-notice archive for this session.</summary>
+    public GroupNoticeArchiveService NoticeArchive { get; }
+
     internal RadegastInstanceAvalonia(string appName, GridClient client)
         : base(appName, client, new NetComAvalonia(client))
     {
+        NoticeArchive = new GroupNoticeArchiveService(this);
+
         // Honour a user-configured texture-cache path stored by Preferences.
         var customCacheDir = GlobalSettings["texture_cache_dir"]?.AsString();
         if (!string.IsNullOrWhiteSpace(customCacheDir))
@@ -378,6 +383,21 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         });
     }
 
+    public void ShowGroupNoticeArchive()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            var vm = new GroupNoticeArchiveViewModel(this);
+            var panel = new GroupNoticeArchivePanel { DataContext = vm };
+            var window = new ProfileWindow("Group Notice Archive", panel)
+            {
+                Width = 750,
+                Height = 550
+            };
+            window.Show();
+        });
+    }
+
     public void ShowAvatarPicker(string title, Action<AvatarPickerEntry> onSelected)
     {
         Dispatcher.UIThread.Post(() =>
@@ -485,18 +505,6 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         });
     }
 
-    public void ShowAppearance()
-    {
-        Dispatcher.UIThread.Post(() =>
-        {
-            var vm = new AppearanceViewModel(this);
-            var panel = new AppearancePanel { DataContext = vm };
-            var window = new ProfileWindow("Appearance", panel);
-            window.Width = 520;
-            window.Height = 620;
-            window.Show();
-        });
-    }
 
     public void ShowObjectContents(UUID objectId, uint localId, string objectName)
     {
@@ -679,6 +687,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
 
     public override void CleanUp()
     {
+        NoticeArchive.Dispose();
         PluginManager?.Dispose();
         _renderInfoTimer?.Dispose();
         _renderInfoTimer = null;

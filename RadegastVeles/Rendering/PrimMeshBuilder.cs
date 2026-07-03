@@ -90,8 +90,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
         IProgress<SceneTexturePatch>? texturePatch     = null,
         int                     textureResolutionLevel = -1)
     {
-        var (rawFaces, bMin, bMax, flexiPrims) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
-                                                       .ConfigureAwait(false);
+        var (rawFaces, bMin, bMax, flexiPrims, animeshSkins) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
+                                                                   .ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
 
@@ -115,11 +115,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
         var submission = new PrimRenderSubmission
         {
-            Label      = label,
-            Faces      = faces.ToArray(),
-            BoundsMin  = bMin,
-            BoundsMax  = bMax,
-            FlexiPrims = flexiPrims.ToArray(),
+            Label          = label,
+            Faces          = faces.ToArray(),
+            BoundsMin      = bMin,
+            BoundsMax      = bMax,
+            FlexiPrims     = flexiPrims.ToArray(),
+            AnimeshSkinData = animeshSkins.Count > 0 ? animeshSkins.ToArray() : [],
         };
 
         // Stream textures asynchronously in the background — report each patch as it
@@ -138,7 +139,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     // ── Tessellation ──────────────────────────────────────────────────────────────
 
-    private async Task<(List<RawFace> faces, Vector3 bMin, Vector3 bMax, List<FlexiPrimInfo> flexiPrims)> TessellateAsync(
+    private async Task<(List<RawFace> faces, Vector3 bMin, Vector3 bMax, List<FlexiPrimInfo> flexiPrims, List<AnimeshFaceSkinData> animeshSkins)> TessellateAsync(
         IReadOnlyList<Primitive> prims,
         uint                    rootLocalId,
         IProgress<string>?      progress,
@@ -146,10 +147,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
         bool                    isHud       = false,
         DetailLevel             detailLevel = DetailLevel.High)
     {
-        var faces      = new List<RawFace>();
-        var flexiPrims = new List<FlexiPrimInfo>();
-        var bMin       = new Vector3(float.MaxValue);
-        var bMax       = new Vector3(float.MinValue);
+        var faces        = new List<RawFace>();
+        var flexiPrims   = new List<FlexiPrimInfo>();
+        var animeshSkins = new List<AnimeshFaceSkinData>();
+        var bMin         = new Vector3(float.MaxValue);
+        var bMax         = new Vector3(float.MinValue);
 
         var rootPrim = prims.FirstOrDefault(p => p.LocalID == rootLocalId) ?? prims[0];
         var rootRot = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
@@ -203,14 +205,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     {
                         var mf = mesh.Faces[fi];
                         if (mf.Vertices.Count == 0) continue;
-                        var raw = new float[mf.Vertices.Count * 8];
+                        var raw = new float[mf.Vertices.Count * 12];
                         for (int vi = 0; vi < mf.Vertices.Count; vi++)
                         {
                             var v = mf.Vertices[vi];
-                            int o = vi * 8;
+                            int o = vi * 12;
                             raw[o]     = v.Position.X; raw[o + 1] = v.Position.Y; raw[o + 2] = v.Position.Z;
                             raw[o + 3] = v.Normal.X;   raw[o + 4] = v.Normal.Y;   raw[o + 5] = v.Normal.Z;
                             raw[o + 6] = v.TexCoord.X; raw[o + 7] = v.TexCoord.Y;
+                            // tangents 8-11 left as zero; flexi prims rarely use normal maps
                         }
                         flexiBaseVerts[bfi++] = raw;
                     }
@@ -222,6 +225,64 @@ internal sealed class PrimMeshBuilder(GridClient client)
             // the GPU must NOT apply the rest-pose prim transform on top of the deformed verts.
             AppendFaces(mesh, prim, transform, faces, ref bMin, ref bMax,
                         faceTransformOverride: flexiBaseVerts != null ? Matrix4x4.Identity : (Matrix4x4?)null);
+
+            // Extract bind-space skinning data for standalone rigged mesh prims so that
+            // SceneAnimeshStreamer can drive LBS animation each tick.
+            if (mesh.SkinData?.JointNames?.Length > 0 && flexiBaseVerts == null)
+            {
+                var bindShape = FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
+                for (int gi = faceStart; gi < faces.Count; gi++)
+                {
+                    int fi = faces[gi].FaceIndex;
+                    var mf = mesh.Faces[fi];
+                    if (mf.Weights == null || mf.Weights.Count == 0) continue;
+
+                    int nv         = mf.Vertices.Count;
+                    var bindVerts  = new float[nv * 12];
+                    var skinJoints = new int  [nv * 4];
+                    var skinWts    = new float[nv * 4];
+
+                    for (int vi = 0; vi < nv; vi++)
+                    {
+                        var v  = mf.Vertices[vi];
+                        var bp = Vector4.Transform(
+                            new Vector4(v.Position.X, v.Position.Y, v.Position.Z, 1f), bindShape);
+                        var bn = Vector4.Transform(
+                            new Vector4(v.Normal.X,   v.Normal.Y,   v.Normal.Z,   0f), bindShape);
+                        int o = vi * 12;
+                        bindVerts[o    ] = bp.X; bindVerts[o + 1] = bp.Y; bindVerts[o + 2] = bp.Z;
+                        bindVerts[o + 3] = bn.X; bindVerts[o + 4] = bn.Y; bindVerts[o + 5] = bn.Z;
+                        bindVerts[o + 6] = v.TexCoord.X;
+                        bindVerts[o + 7] = v.TexCoord.Y;
+                        // tangents 8-11 computed after this loop
+
+                        var vw = vi < mf.Weights.Count ? mf.Weights[vi] : default;
+                        int si = vi * 4;
+                        skinJoints[si]     = vw.Joint0; skinWts[si]     = vw.Weight0;
+                        skinJoints[si + 1] = vw.Joint1; skinWts[si + 1] = vw.Weight1;
+                        skinJoints[si + 2] = vw.Joint2; skinWts[si + 2] = vw.Weight2;
+                        skinJoints[si + 3] = vw.Joint3; skinWts[si + 3] = vw.Weight3;
+
+                        NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
+                            ref skinJoints[si],     ref skinWts[si],
+                            ref skinJoints[si + 1], ref skinWts[si + 1],
+                            ref skinJoints[si + 2], ref skinWts[si + 2],
+                            ref skinJoints[si + 3], ref skinWts[si + 3]);
+                    }
+
+                    var faceIndices = mf.Indices.Select(idx => (ushort)idx).ToArray();
+                    ComputeTangents(bindVerts, nv, faceIndices);
+
+                    animeshSkins.Add(new AnimeshFaceSkinData
+                    {
+                        FaceIndex = gi,
+                        BindVerts = bindVerts,
+                        SkinData  = mesh.SkinData,
+                        Joints    = skinJoints,
+                        Weights   = skinWts,
+                    });
+                }
+            }
 
             if (flexiBaseVerts != null)
             {
@@ -254,7 +315,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             bMax = new Vector3( 0.5f);
         }
 
-        return (faces, bMin, bMax, flexiPrims);
+        return (faces, bMin, bMax, flexiPrims, animeshSkins);
     }
 
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct)
@@ -863,23 +924,27 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (texFace != null)
                 _mesher.TransformTexCoords(face.Vertices, face.Center, texFace, prim.Scale);
 
-            // Pack into interleaved float array: position(3) + normal(3) + uv(2) = 8 floats.
+            // Pack into interleaved float array: position(3) + normal(3) + uv(2) + tangent(4) = 12 floats.
             // Rent from the shared pool to avoid LOH pressure; return after faces.Add.
-            int needed = face.Vertices.Count * 8;
+            int needed = face.Vertices.Count * 12;
             float[] verts = ArrayPool<float>.Shared.Rent(needed);
             var centroidSum = Vector3.Zero;
             for (int vi = 0; vi < face.Vertices.Count; vi++)
             {
                 var v = face.Vertices[vi];
-                int o = vi * 8;
-                verts[o + 0] = v.Position.X;
-                verts[o + 1] = v.Position.Y;
-                verts[o + 2] = v.Position.Z;
-                verts[o + 3] = v.Normal.X;
-                verts[o + 4] = v.Normal.Y;
-                verts[o + 5] = v.Normal.Z;
-                verts[o + 6] = v.TexCoord.X;
-                verts[o + 7] = v.TexCoord.Y;
+                int o = vi * 12;
+                verts[o + 0]  = v.Position.X;
+                verts[o + 1]  = v.Position.Y;
+                verts[o + 2]  = v.Position.Z;
+                verts[o + 3]  = v.Normal.X;
+                verts[o + 4]  = v.Normal.Y;
+                verts[o + 5]  = v.Normal.Z;
+                verts[o + 6]  = v.TexCoord.X;
+                verts[o + 7]  = v.TexCoord.Y;
+                verts[o + 8]  = 0f; // tangent — filled in by ComputeTangents below
+                verts[o + 9]  = 0f;
+                verts[o + 10] = 0f;
+                verts[o + 11] = 0f;
 
                 // Accumulate world-space AABB for camera framing.
                 var wp = Vector3.Transform(
@@ -893,6 +958,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 : Vector3.Zero;
 
             ushort[] indices = face.Indices.ToArray();
+            ComputeTangents(verts, face.Vertices.Count, indices);
 
             float         r          = 1f, g = 1f, b = 1f, a = 1f;
             bool          fullbright = false;
@@ -938,6 +1004,66 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 prim.LocalID, fi, centroid,
                 Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
                 MaterialId: materialId, RenderMaterialId: renderMaterialId));
+        }
+    }
+
+    /// <summary>
+    /// Computes per-vertex tangents (vec4: xyz = tangent, w = handedness ±1) and writes
+    /// them into slots 8-11 of the interleaved vertex buffer (stride 12 floats per vertex).
+    /// Uses the UV-based Lengyel method so tangents are consistent with the surface's UV mapping,
+    /// including mirrored UV islands where screen-space derivatives give the wrong handedness.
+    /// </summary>
+    internal static void ComputeTangents(float[] verts, int vertCount, ushort[] indices)
+    {
+        var tanAccum = new Vector3[vertCount];
+        var bitAccum = new Vector3[vertCount];
+
+        for (int i = 0; i < indices.Length; i += 3)
+        {
+            int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+            int o0 = i0 * 12, o1 = i1 * 12, o2 = i2 * 12;
+
+            var p0 = new Vector3(verts[o0], verts[o0 + 1], verts[o0 + 2]);
+            var p1 = new Vector3(verts[o1], verts[o1 + 1], verts[o1 + 2]);
+            var p2 = new Vector3(verts[o2], verts[o2 + 1], verts[o2 + 2]);
+
+            float du1 = verts[o1 + 6] - verts[o0 + 6];
+            float dv1 = verts[o1 + 7] - verts[o0 + 7];
+            float du2 = verts[o2 + 6] - verts[o0 + 6];
+            float dv2 = verts[o2 + 7] - verts[o0 + 7];
+
+            float r = du1 * dv2 - du2 * dv1;
+            if (MathF.Abs(r) < 1e-8f) continue;
+            float inv = 1f / r;
+
+            var e1  = p1 - p0;
+            var e2  = p2 - p0;
+            var tan = (e1 * dv2 - e2 * dv1) * inv;
+            var bit = (e2 * du1 - e1 * du2) * inv;
+
+            tanAccum[i0] += tan; tanAccum[i1] += tan; tanAccum[i2] += tan;
+            bitAccum[i0] += bit; bitAccum[i1] += bit; bitAccum[i2] += bit;
+        }
+
+        for (int vi = 0; vi < vertCount; vi++)
+        {
+            int o = vi * 12;
+            var n = new Vector3(verts[o + 3], verts[o + 4], verts[o + 5]);
+            var t = tanAccum[vi];
+            var b = bitAccum[vi];
+
+            var tOrth = t - n * Vector3.Dot(n, t);
+            float len  = tOrth.Length();
+            if (len < 1e-6f) continue; // degenerate — leave as zero (fallback to screen-space)
+            tOrth /= len;
+
+            float w = MathF.Sign(Vector3.Dot(Vector3.Cross(n, tOrth), b));
+            if (w == 0f) w = 1f;
+
+            verts[o + 8]  = tOrth.X;
+            verts[o + 9]  = tOrth.Y;
+            verts[o + 10] = tOrth.Z;
+            verts[o + 11] = w;
         }
     }
 
@@ -1151,7 +1277,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             // Rigged face: bake BindShapeMatrix into the vertex so v_bind is in the
             // mesh's bind-space (matches the SL viewer's applyBindShape step).
             int      nv      = face.Vertices.Count;
-            int      nv8     = nv * 8;
+            int      nv8     = nv * 12;
             float[]  verts   = ArrayPool<float>.Shared.Rent(nv8);
             var      centSum = Vector3.Zero;
             int      nv4     = nv * 4;
@@ -1166,11 +1292,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 var bn = Vector4.Transform(
                     new Vector4(v.Normal.X, v.Normal.Y, v.Normal.Z, 0f), bindShape);
 
-                int o = vi * 8;
+                int o = vi * 12;
                 verts[o    ] = bp.X; verts[o + 1] = bp.Y; verts[o + 2] = bp.Z;
                 verts[o + 3] = bn.X; verts[o + 4] = bn.Y; verts[o + 5] = bn.Z;
                 verts[o + 6] = v.TexCoord.X;
                 verts[o + 7] = v.TexCoord.Y;
+                // tangents 8-11 computed after this loop via ComputeTangents
 
                 // Bind-space AABB (rigged faces don't use a prim transform, so the bind-space
                 // position IS the avatar-local resting position — good enough for framing).
@@ -1194,6 +1321,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             }
             var centroid = centSum * (1f / nv);
             ushort[] indices = face.Indices.ToArray();
+            ComputeTangents(verts, nv, indices);
 
             // Extract TE colour / material / alpha — same logic as AppendFaces.
             float r = 1f, g = 1f, b = 1f, a = 1f;

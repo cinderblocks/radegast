@@ -164,11 +164,11 @@ internal sealed class SceneTerrainBuilder
 
     private static float[] PackVertices(Face face)
     {
-        var verts = new float[face.Vertices.Count * 8];
+        var verts = new float[face.Vertices.Count * 12];
         for (int i = 0; i < face.Vertices.Count; i++)
         {
             var v = face.Vertices[i];
-            int o = i * 8;
+            int o = i * 12;
             verts[o + 0] = v.Position.X;
             verts[o + 1] = v.Position.Y;
             verts[o + 2] = v.Position.Z;
@@ -177,6 +177,7 @@ internal sealed class SceneTerrainBuilder
             verts[o + 5] = v.Normal.Z;
             verts[o + 6] = v.TexCoord.X;
             verts[o + 7] = v.TexCoord.Y;
+            // Tangent left as zero — terrain uses no normal maps.
         }
         return verts;
     }

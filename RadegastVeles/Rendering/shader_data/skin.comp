@@ -20,7 +20,7 @@
 #version 310 es
 layout(local_size_x = 64) in;
 
-// Binding 0: T-pose vertex data (8 floats per vertex: X,Y,Z, NX,NY,NZ, U,V).
+// Binding 0: T-pose vertex data (12 floats per vertex: X,Y,Z, NX,NY,NZ, U,V, TX,TY,TZ, TW).
 layout(std430, binding = 0) readonly buffer BindVerts { highp float bv[]; };
 
 // Binding 1: Joint indices (4 ints per vertex, matching Joints[] in AvatarFaceSkinData).
@@ -55,12 +55,14 @@ void main()
     uint vi = gl_GlobalInvocationID.x;
     if (vi >= uint(uVertexCount)) return;
 
-    int b = int(vi) * 8;
+    int b = int(vi) * 12;
     highp vec4 bp = vec4(bv[b],     bv[b + 1], bv[b + 2], 1.0);
     highp vec4 bn = vec4(bv[b + 3], bv[b + 4], bv[b + 5], 0.0);
+    highp vec4 bt = vec4(bv[b + 8], bv[b + 9], bv[b + 10], 0.0);
 
     highp vec4  ap     = vec4(0.0);
     highp vec4  an     = vec4(0.0);
+    highp vec4  at     = vec4(0.0);
     highp float totalW = 0.0;
 
     for (int k = 0; k < 4; k++)
@@ -72,17 +74,22 @@ void main()
         highp mat4 m = readSkinMat(j);
         ap     += w * (m * bp);
         an     += w * (m * bn);
+        at     += w * (m * bt);
         totalW += w;
     }
 
-    if (totalW <= 1e-4) { ap = bp; an = bn; }
+    if (totalW <= 1e-4) { ap = bp; an = bn; at = bt; }
 
-    ov[b]     = ap.x;
-    ov[b + 1] = ap.y;
-    ov[b + 2] = ap.z;
-    ov[b + 3] = an.x;
-    ov[b + 4] = an.y;
-    ov[b + 5] = an.z;
-    ov[b + 6] = bv[b + 6];
-    ov[b + 7] = bv[b + 7];
+    ov[b]      = ap.x;
+    ov[b + 1]  = ap.y;
+    ov[b + 2]  = ap.z;
+    ov[b + 3]  = an.x;
+    ov[b + 4]  = an.y;
+    ov[b + 5]  = an.z;
+    ov[b + 6]  = bv[b + 6];
+    ov[b + 7]  = bv[b + 7];
+    ov[b + 8]  = at.x;
+    ov[b + 9]  = at.y;
+    ov[b + 10] = at.z;
+    ov[b + 11] = bv[b + 11];
 }

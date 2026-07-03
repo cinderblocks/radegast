@@ -12,7 +12,7 @@
         Width="420" Height="500"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
-        Icon="/Assets/radegast.ico"
+        Icon="/Assets/veles.ico"
         AutomationProperties.Name="Avatar picker window">
 
     <DockPanel>

@@ -59,7 +59,7 @@ internal sealed class AvatarFaceMorphData
 
     /// <summary>
     /// Vertex buffer after static (shape-wearable) VP morphs, before any animation-driven
-    /// morphs.  Stride 8 floats per vertex: X,Y,Z, NX,NY,NZ, U,V.
+    /// morphs.  Stride 12 floats per vertex: X,Y,Z, NX,NY,NZ, U,V, TX,TY,TZ, TW.
     /// </summary>
     public float[] BaseVerts = [];
 

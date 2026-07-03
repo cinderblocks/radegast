@@ -28,6 +28,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
+using LibreMetaverse.StructuredData;
 using Radegast.Veles.Core;
 
 namespace Radegast.Veles.ViewModels;
@@ -110,6 +111,9 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     public ObservableCollection<ChatLine> ChatLines { get; } = [];
     public ObservableCollection<NearbyAvatar> NearbyAvatars { get; } = [];
     public ObservableCollection<MinimapEntry> MinimapEntries { get; } = [];
+    public ObservableCollection<RadarHistoryEntry> RadarHistory { get; } = [];
+
+    private readonly Dictionary<UUID, int> _historyIndex = [];
 
     // Voice participant tracking (updated from VoiceViewModel events)
     private readonly HashSet<UUID> _voiceParticipantIds = [];
@@ -607,6 +611,11 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     private void NetCom_ClientLoggedOut(object? sender, EventArgs e)
     {
         VelesNotificationService.Show("Session", "Logged out.", Avalonia.Controls.Notifications.NotificationType.Information);
+        Dispatcher.UIThread.Post(() =>
+        {
+            RadarHistory.Clear();
+            _historyIndex.Clear();
+        });
     }
 
     private void NetCom_ClientDisconnected(object? sender, DisconnectedEventArgs e)
@@ -868,6 +877,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
                 IsFlying: _flyingIds.Contains(avatarPos.Key),
                 IsSitting: _sittingIds.Contains(avatarPos.Key)));
             _agentSimHandle[avatarPos.Key] = e.Simulator.Handle;
+            RadarHistoryOnSeen(avatarPos.Key, name ?? string.Empty);
             changed = true;
         }
 
@@ -937,12 +947,14 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
                 IsBusy: _busyIds.Contains(entry.Id),
                 IsFlying: _flyingIds.Contains(entry.Id),
                 IsSitting: _sittingIds.Contains(entry.Id));
+            RadarHistoryOnUpdate(entry.Id, newName, d);
             changed = true;
         }
 
         // Remove departed avatars
         foreach (var key in removed)
         {
+            RadarHistoryOnDeparted(key);
             _agentSimHandle.Remove(key);
             for (int i = NearbyAvatars.Count - 1; i >= 0; i--)
             {
@@ -1006,6 +1018,58 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
             MinimapEntries.Add(new MinimapEntry(av.Id, av.Name, pos.X, pos.Y, pos.Z, av.IsSelf, heading));
         }
+    }
+
+    // ── Radar history ────────────────────────────────────────────────────────
+
+    private bool RadarHistoryEnabled =>
+        _instance.GlobalSettings["radar_history_enabled"].Type == OSDType.Unknown ||
+        _instance.GlobalSettings["radar_history_enabled"].AsBoolean();
+
+    private int RadarHistoryMax =>
+        _instance.GlobalSettings["radar_history_max_entries"].Type != OSDType.Unknown
+        ? Math.Max(10, _instance.GlobalSettings["radar_history_max_entries"].AsInteger()) : 500;
+
+    private void RadarHistoryOnSeen(UUID id, string name)
+    {
+        if (!RadarHistoryEnabled || _historyIndex.ContainsKey(id)) return;
+        if (id == Client.Self.AgentID) return;
+        var max = RadarHistoryMax;
+        if (RadarHistory.Count >= max)
+        {
+            RadarHistory.RemoveAt(0);
+            RebuildHistoryIndex();
+        }
+        _historyIndex[id] = RadarHistory.Count;
+        RadarHistory.Add(new RadarHistoryEntry(id, name, DateTimeOffset.Now, DateTimeOffset.Now, int.MaxValue, IsNearby: true));
+    }
+
+    private void RadarHistoryOnUpdate(UUID id, string name, int distance)
+    {
+        if (!_historyIndex.TryGetValue(id, out var idx)) return;
+        var e = RadarHistory[idx];
+        var closest = e.ClosestDistance == int.MaxValue ? distance : Math.Min(e.ClosestDistance, distance);
+        RadarHistory[idx] = e with { Name = name, LastSeen = DateTimeOffset.Now, ClosestDistance = closest, IsNearby = true };
+    }
+
+    private void RadarHistoryOnDeparted(UUID id)
+    {
+        if (!_historyIndex.TryGetValue(id, out var idx)) return;
+        RadarHistory[idx] = RadarHistory[idx] with { LastSeen = DateTimeOffset.Now, IsNearby = false };
+    }
+
+    private void RebuildHistoryIndex()
+    {
+        _historyIndex.Clear();
+        for (int i = 0; i < RadarHistory.Count; i++)
+            _historyIndex[RadarHistory[i].Id] = i;
+    }
+
+    [RelayCommand]
+    private void ClearRadarHistory()
+    {
+        RadarHistory.Clear();
+        _historyIndex.Clear();
     }
 
     // Avatar faces +X at rest; this extracts the yaw (CCW from east, in radians).
@@ -1413,5 +1477,18 @@ public record NearbyAvatar(UUID Id, string Name, int Distance, bool IsSelf, stri
 }
 
 public record MinimapEntry(UUID Id, string Name, float X, float Y, float Z, bool IsSelf, float? Heading = null);
+
+public record RadarHistoryEntry(
+    UUID Id,
+    string Name,
+    DateTimeOffset FirstSeen,
+    DateTimeOffset LastSeen,
+    int ClosestDistance,
+    bool IsNearby)
+{
+    public string FirstSeenText       => FirstSeen.LocalDateTime.ToString("HH:mm:ss");
+    public string LastSeenText        => LastSeen.LocalDateTime.ToString("HH:mm:ss");
+    public string ClosestDistanceText => ClosestDistance == int.MaxValue ? "?" : $"{ClosestDistance}m";
+}
 
 #endregion
