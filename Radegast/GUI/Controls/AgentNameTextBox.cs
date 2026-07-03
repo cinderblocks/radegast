@@ -31,6 +31,7 @@ namespace Radegast
         private static RadegastInstance Instance => RadegastInstanceForms.Instance;
 
         [Browsable(false)]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public UUID AgentID
         {
             get => agentID;

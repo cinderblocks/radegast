@@ -841,4 +841,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
   </ItemGroup>
+  <Target Name="CopyNativeAssemblies" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x64&quot; &quot;$(OutDir)dll\x64\&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x86&quot; &quot;$(OutDir)dll\x86\&quot; /E/I" />
+    <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\arm64&quot; &quot;$(OutDir)dll\arm64\&quot; /E/I" />
+  </Target>
 </Project>

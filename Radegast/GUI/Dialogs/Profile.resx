@@ -117,24 +117,6 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="txtFullName.AgentID" mimetype="application/x-microsoft.net.object.binary.base64">
-    <value>
-        AAEAAAD/////AQAAAAAAAAAMAgAAAE1MaWJyZU1ldGF2ZXJzZS5UeXBlcywgVmVyc2lvbj0xLjguNy4y
-        MzYsIEN1bHR1cmU9bmV1dHJhbCwgUHVibGljS2V5VG9rZW49bnVsbAUBAAAAEk9wZW5NZXRhdmVyc2Uu
-        VVVJRAEAAAAVPEd1aWQ+a19fQmFja2luZ0ZpZWxkAwtTeXN0ZW0uR3VpZAIAAAAE/f///wtTeXN0ZW0u
-        R3VpZAsAAAACX2ECX2ICX2MCX2QCX2UCX2YCX2cCX2gCX2kCX2oCX2sAAAAAAAAAAAAAAAgHBwICAgIC
-        AgICAAAAAAAAAAAAAAAAAAAAAAs=
-</value>
-  </data>
-  <data name="anPartner.AgentID" mimetype="application/x-microsoft.net.object.binary.base64">
-    <value>
-        AAEAAAD/////AQAAAAAAAAAMAgAAAE1MaWJyZU1ldGF2ZXJzZS5UeXBlcywgVmVyc2lvbj0xLjguNy4y
-        MzYsIEN1bHR1cmU9bmV1dHJhbCwgUHVibGljS2V5VG9rZW49bnVsbAUBAAAAEk9wZW5NZXRhdmVyc2Uu
-        VVVJRAEAAAAVPEd1aWQ+a19fQmFja2luZ0ZpZWxkAwtTeXN0ZW0uR3VpZAIAAAAE/f///wtTeXN0ZW0u
-        R3VpZAsAAAACX2ECX2ICX2MCX2QCX2UCX2YCX2cCX2gCX2kCX2oCX2sAAAAAAAAAAAAAAAgHBwICAgIC
-        AgICAAAAAAAAAAAAAAAAAAAAAAs=
-</value>
-  </data>
   <metadata name="tbpPicks.Locked" type="System.Boolean, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089">
     <value>True</value>
   </metadata>
