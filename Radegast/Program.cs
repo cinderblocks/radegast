@@ -21,6 +21,7 @@
 using System;
 using System.Windows.Forms;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using CommandLine;
 using CommandLine.Text;
@@ -77,6 +78,12 @@ namespace Radegast
         /// <summary>BugSplat error reporting instance</summary>
         public static BugSplatDotNetStandard.BugSplat s_BugSplat;
 
+        // Baked in at build time via the BugsplatDatabase MSBuild property (see Radegast.csproj).
+        private static string BugsplatDatabase =>
+            Assembly.GetExecutingAssembly()
+                .GetCustomAttributes<AssemblyMetadataAttribute>()
+                .FirstOrDefault(a => a.Key == "BugsplatDatabase")?.Value ?? string.Empty;
+
         public static ILoggerFactory LoggerFactory { get; private set; }
 
         private static void RunRadegast(CommandLineOptions args)
@@ -130,10 +137,10 @@ namespace Radegast
             // Create main Radegast instance
             var client = new GridClient();
 
-            if (!string.IsNullOrEmpty(Generated.BugsplatDatabase))
+            if (!string.IsNullOrEmpty(BugsplatDatabase))
             {
                 s_BugSplat = new BugSplatDotNetStandard.BugSplat(
-                Generated.BugsplatDatabase, "Radegast",
+                BugsplatDatabase, "Radegast",
                 Assembly.GetExecutingAssembly().GetName().Version.ToString())
                 {
                     User = string.IsNullOrWhiteSpace(RadegastInstanceForms.Instance.Client.Self.Name) ? "Unknown"

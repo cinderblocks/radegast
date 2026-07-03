@@ -31,8 +31,9 @@
     <BugsplatDatabase Condition="'$(BugsplatDatabase)' == ''"></BugsplatDatabase>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Exclude any stale files from the Generated/ subdirectory -->
-    <Compile Remove="Generated\**\*.cs" />
+    <!-- Baked into the assembly's metadata attributes; read at runtime via
+         Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>() -->
+    <AssemblyMetadata Include="BugsplatDatabase" Value="$(BugsplatDatabase)" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="12.0.5" />
@@ -67,10 +68,6 @@
     <AvaloniaResource Include="Assets\sidebar.png" />
     <AvaloniaResource Include="Rendering\shader_data\*" />
   </ItemGroup>
-  <Import Project="AutogenerateFiles.targets" />
-  <Target Name="GenerateVelesFiles" BeforeTargets="BeforeBuild">
-    <GenerateFile Filename="$(ProjectDir)Generated.cs" />
-  </Target>
   <Target Name="CopyNativeAssemblies" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x64&quot; &quot;$(OutDir)dll\x64\&quot; /E/I" />
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x86&quot; &quot;$(OutDir)dll\x86\&quot; /E/I" />

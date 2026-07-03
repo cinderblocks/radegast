@@ -19,6 +19,7 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Avalonia;
@@ -33,6 +34,12 @@ namespace Radegast.Veles;
 internal static class Program
 {
     internal static BugSplat? BugSplat { get; private set; }
+
+    // Baked in at build time via the BugsplatDatabase MSBuild property (see RadegastVeles.csproj).
+    private static string? BugsplatDatabase =>
+        Assembly.GetExecutingAssembly()
+            .GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "BugsplatDatabase")?.Value;
 
     [STAThread]
     public static void Main(string[] args)
@@ -87,10 +94,10 @@ internal static class Program
             LogLevel.Information);
 
         // Initialize BugSplat if a database has been configured at build time
-        if (!string.IsNullOrEmpty(Generated.BugsplatDatabase))
+        if (!string.IsNullOrEmpty(BugsplatDatabase))
         {
             var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
-            BugSplat = new BugSplat(Generated.BugsplatDatabase, "RadegastVeles", version)
+            BugSplat = new BugSplat(BugsplatDatabase, "RadegastVeles", version)
             {
                 ExceptionType = BugSplat.ExceptionTypeId.DotNetStandard,
             };
