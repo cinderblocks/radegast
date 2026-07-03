@@ -1,6 +1,9 @@
 name: Publish Legacy Radegast
 
 on:
+  push:
+    tags:
+      - 'Legacy/*'
   workflow_dispatch:
     inputs:
       version:
@@ -12,9 +15,6 @@ on:
         required: false
         type: boolean
         default: false
-
-env:
-  VERSION: ${{ inputs.version }}
 
 jobs:
   build:
@@ -54,10 +54,15 @@ jobs:
 
       - name: Set version variables
         run: |
-          $version = '${{ inputs.version }}'
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $version = "${{ github.ref_name }}" -replace '^Legacy/', ''
+          }
           $buildVersion = "$version.${{ github.run_number }}"
           Write-Host "Version: $version"
           Write-Host "Build Version: $buildVersion"
+          echo "VERSION=$version" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "BUILD_VERSION=$buildVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Restore
@@ -204,6 +209,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -225,10 +232,19 @@ jobs:
 
       - name: Generate release notes
         run: |
-          $version = "${{ inputs.version }}"
-          $tag = "v$version"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+            $prerelease = "${{ inputs.prerelease }}"
+          } else {
+            $version = "${{ github.ref_name }}" -replace '^Legacy/', ''
+            $prerelease = "false"
+          }
+          $tag = "Legacy/$version"
+          echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "VERSION=$version" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "PRERELEASE=$prerelease" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
-          $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          $previousTag = git describe --tags --abbrev=0 --match 'Legacy/*' "$tag^" 2>$null
           if (-not $previousTag) { $previousTag = git rev-list --max-parents=0 HEAD }
 
           $commits = git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges 2>$null
@@ -259,9 +275,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          prerelease: ${{ inputs.prerelease }}
-          tag_name: v${{ inputs.version }}
-          name: Radegast ${{ inputs.version }}
+          prerelease: ${{ env.PRERELEASE }}
+          tag_name: ${{ env.TAG }}
+          name: Radegast ${{ env.VERSION }}
           body_path: release-notes.md
           files: |
             release-files/*.msi

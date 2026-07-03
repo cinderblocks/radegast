@@ -1,12 +1,13 @@
 name: CI Release Linux Flatpak
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'Veles/*'
 
 env:
   APP_ID: life.radegast.RadegastVeles
-  TAG_NAME: ${{ github.event.release.tag_name }}
+  TAG_NAME: ${{ github.ref_name }}
   REPO_NAME: ${{ github.event.repository.name }}
   VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
   DOTNET_VERSION: '10.0.x'
@@ -15,6 +16,8 @@ jobs:
   build-flatpak:
     name: Build Linux Flatpak (x86_64)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         shell: bash
@@ -24,6 +27,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Compute version
+        run: echo "VERSION=${TAG_NAME#Veles/}" >> "$GITHUB_ENV"
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -94,8 +100,17 @@ jobs:
           mkdir -p dist
           flatpak build-bundle \
             flatpak-repo \
-            "dist/${REPO_NAME}-${TAG_NAME}-x86_64.flatpak" \
+            "dist/${REPO_NAME}-${TAG_NAME#Veles/}-x86_64.flatpak" \
             "$APP_ID"
+
+      - name: Ensure GitHub Release exists
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Release $TAG_NAME not found yet; creating draft release"
+            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Flatpak to GitHub Release
         run: gh release upload "$TAG_NAME" dist/*.flatpak --clobber
@@ -105,5 +120,5 @@ jobs:
       - name: Upload debug artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flatpak-x86_64-${{ env.TAG_NAME }}
+          name: flatpak-x86_64-${{ env.VERSION }}
           path: dist/*.flatpak
