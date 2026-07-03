@@ -66,6 +66,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\veles.ico" />
     <AvaloniaResource Include="Assets\veles.png" />
+    <AvaloniaResource Include="Assets\sidebar.png" />
     <AvaloniaResource Include="Rendering\shader_data\*" />
   </ItemGroup>
   <Import Project="AutogenerateFiles.targets" />
