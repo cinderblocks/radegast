@@ -85,7 +85,7 @@
         <Feature Id="Plugin.Automation" Title="Automation Plugin" Description="Provides scripting and automation capabilities." Level="1">
           <ComponentGroupRef Id="Plugin.Automation" />
         </Feature>
-        <Feature Id="Plugin.Discord"
+        <Feature Id="Plugin.Discord" Title="Discord Plugin" Description="Discord chat relay integration." Level="1">
           <ComponentGroupRef Id="Plugin.Discord" />
         </Feature>
         <Feature Id="Plugin.Email" Title="Email Plugin" Description="Email functionality." Level="1">
