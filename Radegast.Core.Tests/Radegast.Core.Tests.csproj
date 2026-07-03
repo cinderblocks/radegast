@@ -15,7 +15,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="3.0.2" />
+    <PackageReference Include="LibreMetaverse" Version="3.0.3" />
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
   </ItemGroup>
 </Project>
