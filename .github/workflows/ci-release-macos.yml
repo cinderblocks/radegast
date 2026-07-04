@@ -106,6 +106,19 @@ jobs:
             exit 1
           fi
 
+      - name: Ad-hoc code sign .app (osx-${{ matrix.arch }})
+        run: |
+          set -e
+          RID=osx-${{ matrix.arch }}
+          APP=$(ls $PUBLISH_DIR/$RID/*.app 2>/dev/null | head -n 1)
+          # No Apple Developer ID certificate is available, so this is an ad-hoc signature
+          # (identity "-": no certificate, no notarization). It's still required for arm64
+          # builds to launch at all under macOS's kernel-level code-signing enforcement.
+          # Gatekeeper will still show an "unidentified developer" prompt on first launch —
+          # see README for the right-click > Open workaround.
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose "$APP"
+
       - name: Upload publish artifact
         uses: actions/upload-artifact@v4
         with:
@@ -197,6 +210,22 @@ jobs:
             cp -R publish-x64/* "$WORK/${REPO_NAME}.app/Contents/MacOS/" || true
             chmod -R +x "$WORK/${REPO_NAME}.app/Contents/MacOS" || true
           fi
+
+      - name: Ad-hoc code sign universal .app
+        run: |
+          set -e
+          UNIVERSAL_APP="universal/${REPO_NAME}.app"
+          if [ ! -d "$UNIVERSAL_APP" ]; then
+            echo "Universal app not found: $UNIVERSAL_APP"
+            exit 1
+          fi
+          # lipo rewrites individual binaries in place, which invalidates whatever signature
+          # they had going in — re-sign the assembled universal bundle from scratch. Ad-hoc
+          # only (no Apple Developer ID certificate available): satisfies the arm64 launch
+          # requirement but Gatekeeper still shows an "unidentified developer" prompt on
+          # first run — see README for the right-click > Open workaround.
+          codesign --force --deep --sign - "$UNIVERSAL_APP"
+          codesign --verify --verbose "$UNIVERSAL_APP"
 
       - name: Create universal DMG
         run: |

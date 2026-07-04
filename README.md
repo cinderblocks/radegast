@@ -31,6 +31,14 @@ Radegast (Legacy) requires .NET Framework 4.8 or compatible Mono version to buil
 
 RadegastVeles (Veles) requires the .NET 10 runtime and builds/runs on Windows, macOS, and Linux.
 
+### macOS notes
+
+The macOS build of Veles is ad-hoc signed (no Apple Developer ID certificate, no notarization),
+since a signing certificate isn't currently available for this project. macOS will still show a
+"cannot verify the developer" / "unidentified developer" warning on first launch. To run the app:
+right-click (or Control-click) the app in Finder and choose **Open**, then confirm in the dialog
+that appears. You only need to do this once per download.
+
 ### Contributing
 
 Pull requests are nice. Try not to be a dick, and we will all get along just fine.
