@@ -30,7 +30,8 @@ public static class VelesUpdateManager
     // .github/workflows/publish-veles-appcast.yml (was https://cinderblocks.github.io/Radegast/veles/appcast/).
     private const string AppcastBaseUrl = "https://update.radegast.life/veles/appcast/";
 
-    // Dedicated Ed25519 public key for Veles appcast signature verification (separate from Legacy's key).
+    // Ed25519 public key for appcast signature verification. Shares its signing key with Legacy
+    // (see MainForm.cs, SparklePublicKey) - both appcast workflows sign with VELES_SPARKLE_PRIVATE_KEY.
     private const string PublicKey = "VVHLysN7aQZgDQ0lt44ojBUX+quPOP/NOeQaJGaCZ6Q=";
 
     private static SparkleUpdater? _updater;

@@ -1,4 +1,4 @@
-<Project Sdk="WixToolset.Sdk/7.0.0">
+<Project>
   <Import Project="Sdk.props" Sdk="WixToolset.Sdk" Version="7.0.0" Condition="'$(Configuration)' != 'Disabled'" />
   <PropertyGroup>
     <AcceptEula>wix7</AcceptEula>
