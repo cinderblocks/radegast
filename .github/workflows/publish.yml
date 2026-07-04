@@ -114,67 +114,6 @@ jobs:
 
 
 
-      - name: Generate NetSparkle Appcast
-        shell: pwsh
-        env:
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
-        run: |
-          $platform = "${{ matrix.platform }}"
-          $version = "${{ env.TAG_VERSION }}"
-          $artifactDir = "artifacts\$platform"
-
-          # Skip if SPARKLE_PRIVATE_KEY is not configured
-          if ([string]::IsNullOrEmpty($env:SPARKLE_PRIVATE_KEY)) {
-            Write-Host "NetSparkle private key not configured, skipping appcast generation"
-            exit 0
-          }
-
-          Write-Host "Generating NetSparkle appcast for $platform..."
-
-          # Install NetSparkle CLI tool
-          dotnet tool install --global NetSparkleUpdater.Tools.AppCastGenerator --version 2.0.0 2>$null
-
-          # Create temporary directory for appcast generation
-          $tempDir = "appcast_temp_$platform"
-          New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
-
-          # Copy MSI to temp directory for appcast generation
-          $msi = "$artifactDir\RadegastVelesSetup_${platform}_${version}.msi"
-          if (Test-Path $msi) {
-            Copy-Item $msi -Destination $tempDir -Force
-
-            # Generate appcast (matching AppVeyor configuration)
-            try {
-              netsparkle-generate-appcast `
-                -n RadegastVeles `
-                -e msi `
-                -a $tempDir `
-                --output-type json `
-                -o "windows-$platform" `
-                --file-version $version `
-                -u "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
-
-              # Copy appcast files to artifacts
-              if (Test-Path "windows-$platform.json") {
-                Copy-Item "windows-$platform.json" "$artifactDir\appcast.json" -Force
-                Write-Host "✓ Generated appcast.json"
-              }
-              if (Test-Path "windows-$platform.json.signature") {
-                Copy-Item "windows-$platform.json.signature" "$artifactDir\appcast.json.signature" -Force
-                Write-Host "✓ Generated appcast.json.signature"
-              }
-            } catch {
-              Write-Warning "Failed to generate appcast: $_"
-              Write-Host "Continuing without appcast files..."
-            }
-          } else {
-            Write-Warning "MSI not found, skipping appcast generation"
-          }
-
-          # Cleanup temp directory
-          Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-        continue-on-error: true
-
       - name: Create compressed archives
         shell: pwsh
         run: |
@@ -269,8 +208,6 @@ jobs:
           )
 
           $optional = @(
-            "appcast.json",
-            "appcast.json.signature",
             "sbom.spdx.json"
           )
 
@@ -331,8 +268,6 @@ jobs:
             artifacts\${{ matrix.platform }}\RadegastVelesSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
             artifacts\${{ matrix.platform }}\RadegastVelesBundle_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
             artifacts\${{ matrix.platform }}\SHA256SUMS.txt
-            artifacts\${{ matrix.platform }}\appcast.json
-            artifacts\${{ matrix.platform }}\appcast.json.signature
             artifacts\${{ matrix.platform }}\sbom.spdx.json
           if-no-files-found: warn
 

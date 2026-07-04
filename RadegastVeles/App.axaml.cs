@@ -57,6 +57,8 @@ public class App : Application
                 RebuildTrayMenu();
             }
 
+            VelesUpdateManager.Start();
+
             ShowLogin();
         }
 
@@ -159,6 +161,12 @@ public class App : Application
         var loginItem = new NativeMenuItem("New Login");
         loginItem.Click += (_, _) => ShowLogin();
         menu.Items.Add(loginItem);
+
+        menu.Items.Add(new NativeMenuItemSeparator());
+
+        var checkForUpdatesItem = new NativeMenuItem("Check for Updates...");
+        checkForUpdatesItem.Click += (_, _) => VelesUpdateManager.CheckForUpdatesAtUserRequest();
+        menu.Items.Add(checkForUpdatesItem);
 
         menu.Items.Add(new NativeMenuItemSeparator());
 

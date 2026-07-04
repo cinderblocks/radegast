@@ -1757,16 +1757,25 @@ namespace Radegast
             miniMapControl.Show();
         }
 
+        // update.radegast.life is CNAME'd to the gh-pages site published by
+        // .github/workflows/publish-legacy-appcast.yml. Shares its Ed25519 signing key with Veles.
+        private const string SparkleAppcastBaseUrl = "https://update.radegast.life/legacy/appcast/";
+        private const string SparklePublicKey = "VVHLysN7aQZgDQ0lt44ojBUX+quPOP/NOeQaJGaCZ6Q=";
+
         private void InitUpdater()
         {
-            var appcastUrl = "https://update.radegast.life/appcast.json";
+            var appcastUrl = GetAppcastUrl();
+            if (appcastUrl == null)
+            {
+                return;
+            }
+
             var manifestModuleName = System.Reflection.Assembly.GetEntryAssembly()?.ManifestModule.FullyQualifiedName;
             if (manifestModuleName != null)
             {
                 var icon = Icon.ExtractAssociatedIcon(manifestModuleName);
                 SparkleUpdater = new NetSparkleUpdater.SparkleUpdater(appcastUrl,
-                    new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, 
-                        "euvj+Uut3Nt3BVIu+aqJ02++Jflh8VjzBUzMgb7EnP8="))
+                    new Ed25519Checker(NetSparkleUpdater.Enums.SecurityMode.Strict, SparklePublicKey))
                 {
                     UIFactory = new NetSparkleUpdater.UI.WinForms.UIFactory(icon),
                     RelaunchAfterUpdate = true,
@@ -1776,9 +1785,20 @@ namespace Radegast
             }
         }
 
+        private static string GetAppcastUrl()
+        {
+            return RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.X86 => SparkleAppcastBaseUrl + "windows-x86.json",
+                Architecture.X64 => SparkleAppcastBaseUrl + "windows-x64.json",
+                Architecture.Arm64 => SparkleAppcastBaseUrl + "windows-arm64.json",
+                _ => null
+            };
+        }
+
         private void ctxCheckForUpdates_Click(object sender, EventArgs e)
         {
-            SparkleUpdater.CheckForUpdatesAtUserRequest();
+            SparkleUpdater?.CheckForUpdatesAtUserRequest();
         }
     }
 }
