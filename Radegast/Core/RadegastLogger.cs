@@ -73,7 +73,12 @@ namespace Radegast
             EventHandler<LogEventArgs> handler = m_Log;
             if (handler == null) { return; }
             try { handler(sender, e); }
-            catch { }
+            catch (Exception ex)
+            {
+                // Don't route through Logger/RadegastAppender here: this guards a subscriber
+                // callback of this same logging pipeline and could recurse back into OnLog.
+                System.Diagnostics.Debug.WriteLine($"RadegastAppender: log event subscriber threw: {ex}");
+            }
         }
 
         private static readonly object m_LogLock = new object();
@@ -178,7 +183,10 @@ namespace Radegast
                     }
                     System.Diagnostics.Debug.WriteLine(dbgMsg);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"RadegastAppender: failed to write to debug output: {ex.Message}");
+                }
 
                 // Write to file using background writer to avoid blocking UI threads
                 try
@@ -192,9 +200,18 @@ namespace Radegast
                         FileLogWriter.Instance?.Enqueue(RadegastInstanceForms.Instance.GlobalLogFile, line);
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine($"RadegastAppender: failed to enqueue log line to file: {ex.Message}");
+                }
             }
-            catch (Exception) { }
+            catch (Exception ex)
+            {
+                // Last-resort fallback for ProcessLogEntry itself (e.g. Console unavailable);
+                // never let a logging failure throw further.
+                try { System.Diagnostics.Debug.WriteLine($"RadegastAppender: ProcessLogEntry failed: {ex}"); }
+                catch { /* truly nothing more we can do */ }
+            }
         }
 
         private static void WriteColorText(ConsoleColor color, string sender)
@@ -255,7 +272,10 @@ namespace Radegast
 
                 ProcessLogEntry(entry);
             }
-            catch { }
+            catch (Exception logEx)
+            {
+                System.Diagnostics.Debug.WriteLine($"RadegastAppender.LogDirect failed: {logEx}");
+            }
         }
 
         // Helper null scope implementation
@@ -287,7 +307,11 @@ namespace Radegast
                 {
                     _queue.Add((path, line));
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    // Expected during shutdown if CompleteAdding() already ran.
+                    System.Diagnostics.Debug.WriteLine($"RadegastAppender.FileLogWriter: failed to enqueue line: {ex.Message}");
+                }
             }
 
             private void ProcessQueue()
@@ -311,8 +335,10 @@ namespace Radegast
                                     var sw = new StreamWriter(fs) { AutoFlush = true };
                                     return sw;
                                 }
-                                catch
+                                catch (Exception openEx)
                                 {
+                                    System.Diagnostics.Debug.WriteLine(
+                                        $"RadegastAppender.FileLogWriter: failed to open log file '{p}': {openEx.Message}. Log-to-file is disabled for this path.");
                                     return null;
                                 }
                             });
@@ -322,7 +348,10 @@ namespace Radegast
                                 writer.Write(item.line);
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"RadegastAppender.FileLogWriter: failed to write log line: {ex.Message}");
+                        }
                     }
                 }
                 catch (OperationCanceledException) { }
@@ -343,7 +372,10 @@ namespace Radegast
                     _cts.Cancel();
                     _writerTask?.Wait(2000);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"RadegastAppender.FileLogWriter: shutdown failed: {ex.Message}");
+                }
             }
         }
     }

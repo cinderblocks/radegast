@@ -63,7 +63,10 @@ namespace Radegast
                 _recentChatHashes.Clear();
                 _recentIMHashes.Clear();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Debug("NetComForms: failed to clear duplicate-message caches.", ex);
+            }
         }
 
         private bool IsDuplicateChat(ChatEventArgs e)
@@ -76,7 +79,10 @@ namespace Radegast
                 if (_recentChatHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
                 _recentChatHashes[key] = now;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Debug("NetComForms: chat dedup check failed.", ex);
+            }
             return false;
         }
 
@@ -91,7 +97,10 @@ namespace Radegast
                 if (_recentIMHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
                 _recentIMHashes[key] = now;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Debug("NetComForms: IM dedup check failed.", ex);
+            }
             return false;
         }
 
@@ -274,7 +283,10 @@ namespace Radegast
                 var key = $"out:{Client.Self.AgentID}:{chat}";
                 _recentChatHashes[key] = DateTime.UtcNow;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Debug("NetComForms: failed to record outgoing chat for dedup.", ex);
+            }
             OnChatSent(new ChatSentEventArgs(chat, type, channel));
         }
 
@@ -292,7 +304,10 @@ namespace Radegast
                 var key = $"outim:{ev.FromAgentID}:{ev.SessionID}:{ev.Message}";
                 _recentIMHashes[key] = DateTime.UtcNow;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Debug("NetComForms: failed to record outgoing IM for dedup.", ex);
+            }
 
             OnInstantMessageSent(ev);
         }

@@ -23,6 +23,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using LibreMetaverse;
 using Radegast.Veles.Models;
 
 namespace Radegast.Veles.Core;
@@ -65,7 +66,11 @@ public sealed class CredentialManager : IDisposable
                 if (keyBytes.Length == KeySize)
                     return keyBytes;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn($"CredentialManager: failed to read encryption key from {_keyFilePath}, " +
+                            "a new key will be generated and existing saved credentials will become unreadable.", ex);
+            }
         }
 
         var key = RandomNumberGenerator.GetBytes(KeySize);
@@ -82,9 +87,10 @@ public sealed class CredentialManager : IDisposable
                 LoadAllSecrets();
                 return;
             }
-            catch
+            catch (Exception ex)
             {
-                // Corrupted store, recreate
+                Logger.Warn($"CredentialManager: credential store at {_storeFilePath} is unreadable " +
+                            "(corrupted or key mismatch); recreating it. Saved accounts/passwords are lost.", ex);
             }
         }
 
@@ -138,7 +144,10 @@ public sealed class CredentialManager : IDisposable
             if (secrets.TryGetValue(AccountListKey, out var json))
                 return JsonSerializer.Deserialize<List<SavedAccount>>(json) ?? [];
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn("CredentialManager: failed to load saved accounts.", ex);
+        }
         return [];
     }
 
@@ -150,7 +159,10 @@ public sealed class CredentialManager : IDisposable
             if (secrets.TryGetValue(PasswordKey(username, gridId), out var pwd))
                 return string.IsNullOrEmpty(pwd) ? null : pwd;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: failed to load saved password for {username}.", ex);
+        }
         return null;
     }
 
@@ -214,7 +226,10 @@ public sealed class CredentialManager : IDisposable
             if (secrets.TryGetValue(MfaHashKey(username, gridId), out var hash))
                 return string.IsNullOrEmpty(hash) ? null : hash;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: failed to load saved MFA hash for {username}.", ex);
+        }
         return null;
     }
 
@@ -226,7 +241,10 @@ public sealed class CredentialManager : IDisposable
             secrets[MfaHashKey(username, gridId)] = mfaHash;
             SaveAllSecrets(secrets);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: failed to save MFA hash for {username}.", ex);
+        }
     }
 
     private static string PasswordKey(string username, string gridId)
@@ -256,7 +274,11 @@ public sealed class CredentialManager : IDisposable
                 custom = loc ?? string.Empty;
             return (idx, custom);
         }
-        catch { return (0, string.Empty); }
+        catch (Exception ex)
+        {
+            Logger.Warn("CredentialManager: failed to load saved login preferences.", ex);
+            return (0, string.Empty);
+        }
     }
 
     public void SaveFavoriteLocations(string accountKey, List<(string Name, string Location)> locations)
@@ -268,7 +290,10 @@ public sealed class CredentialManager : IDisposable
                 locations.ConvertAll(l => new FavoriteLocationEntry { Name = l.Name, Location = l.Location }));
             SaveAllSecrets(secrets);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: failed to save favorite locations for {accountKey}.", ex);
+        }
     }
 
     public List<(string Name, string Location)> GetFavoriteLocations(string accountKey)
@@ -282,7 +307,10 @@ public sealed class CredentialManager : IDisposable
                 return entries.ConvertAll(e => (e.Name, e.Location));
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: failed to load favorite locations for {accountKey}.", ex);
+        }
         return [];
     }
 
