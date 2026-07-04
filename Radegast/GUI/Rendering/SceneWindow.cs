@@ -476,7 +476,7 @@ namespace Radegast.Rendering
                 catch (Exception ex)
                 {
                     RenderingEnabled = false;
-                    Logger.Log("Exception in 3D scene viewer", LogLevel.Error, ex);
+                    Logger.Log("Exception in 3D scene viewer", Microsoft.Extensions.Logging.LogLevel.Error, ex);
                     Dispose();
                 }
 #endif
