@@ -114,6 +114,44 @@ jobs:
 
 
 
+      # Signs the MSI and bundle exe via SignPath (https://signpath.io), which holds the actual
+      # certificate on our behalf. Requires org/project/policy configured as repo variables
+      # (Settings > Secrets and variables > Actions > Variables) and the API token as a repo
+      # secret; skipped entirely (no-op) until SIGNPATH_ORGANIZATION_ID is set, so this stays
+      # dormant and harmless while SignPath Foundation onboarding is still in progress.
+      - name: Upload unsigned installer for signing
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-veles-${{ matrix.platform }}
+          path: |
+            artifacts\${{ matrix.platform }}\RadegastVelesSetup_${{ matrix.platform }}_${{ env.TAG_VERSION }}.msi
+            artifacts\${{ matrix.platform }}\RadegastVelesBundle_${{ matrix.platform }}_${{ env.TAG_VERSION }}.exe
+          retention-days: 1
+
+      - name: Submit SignPath signing request
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: '${{ secrets.SIGNPATH_API_TOKEN }}'
+          organization-id: '${{ vars.SIGNPATH_ORGANIZATION_ID }}'
+          project-slug: '${{ vars.SIGNPATH_PROJECT_SLUG_VELES }}'
+          signing-policy-slug: '${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}'
+          github-artifact-id: '${{ steps.upload-unsigned.outputs.artifact-id }}'
+          wait-for-completion: true
+          output-artifact-directory: 'artifacts\${{ matrix.platform }}\signed'
+
+      - name: Replace unsigned installer with signed copy
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        shell: pwsh
+        run: |
+          $signedDir = "artifacts\${{ matrix.platform }}\signed"
+          Get-ChildItem -Path $signedDir -Recurse -File | ForEach-Object {
+            Write-Host "Signed: $($_.Name)"
+            Copy-Item -Path $_.FullName -Destination "artifacts\${{ matrix.platform }}\$($_.Name)" -Force
+          }
+
       - name: Create compressed archives
         shell: pwsh
         run: |
