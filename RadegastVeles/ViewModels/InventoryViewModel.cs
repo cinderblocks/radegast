@@ -612,8 +612,32 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     [RelayCommand]
     private void GiveItem()
     {
-        if (SelectedNode == null || SelectedNode.IsFolder) return;
-        _instance.ShowNotificationInChat("Give item is not yet implemented.");
+        if (SelectedNode == null) return;
+        if (!Inventory.TryGetValue(SelectedNode.ItemId, out InventoryBase? invItem)) return;
+
+        _instance.ShowAvatarPicker("Give Item To", entry =>
+        {
+            if (invItem is InventoryFolder folder)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await Client.Inventory.GiveFolderAsync(folder.UUID, folder.Name, entry.Id, true);
+                        _instance.ShowNotificationInChat($"Offered folder '{folder.Name}' to {entry.Name}.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _instance.ShowNotificationInChat($"Failed to give '{folder.Name}': {ex.Message}");
+                    }
+                });
+            }
+            else if (invItem is InventoryItem item)
+            {
+                Client.Inventory.GiveItem(item.UUID, item.Name, item.AssetType, entry.Id, true);
+                _instance.ShowNotificationInChat($"Offered '{item.Name}' to {entry.Name}.");
+            }
+        });
     }
 
     [RelayCommand]
@@ -1216,12 +1240,50 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         else if (InvClipboard.Mode == InvClipboardMode.Copy)
         {
             if (InvClipboard.IsFolder)
-                _instance.ShowNotificationInChat("Folder copy is not supported by the server.");
+            {
+                var srcFolderId = InvClipboard.ItemId;
+                var srcFolderName = InvClipboard.ItemName;
+                var destFolderId = destFolder.UUID;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await CopyFolderRecursiveAsync(srcFolderId, destFolderId, srcFolderName);
+                        _instance.ShowNotificationInChat($"Copied folder '{srcFolderName}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _instance.ShowNotificationInChat($"Failed to copy folder '{srcFolderName}': {ex.Message}");
+                    }
+                });
+            }
             else
                 _ = Task.Run(async () =>
                     await Client.Inventory.RequestCopyItemAsync(
                         InvClipboard.ItemId, destFolder.UUID,
                         InvClipboard.ItemName, Client.Self.AgentID));
+        }
+    }
+
+    /// <summary>
+    /// Copies a folder server-side. The inventory protocol has no folder-copy operation, so this
+    /// creates a new folder at the destination and recursively copies each child item/subfolder
+    /// into it via RequestCopyItemAsync (matches Legacy Radegast's PerformClipboardOperation, extended
+    /// to recurse into subfolders).
+    /// </summary>
+    private async Task CopyFolderRecursiveAsync(UUID sourceFolderId, UUID destParentId, string folderName)
+    {
+        var newFolderId = Client.Inventory.CreateFolder(destParentId, folderName, FolderType.None);
+        await Task.Delay(500).ConfigureAwait(false);
+
+        if (!Inventory.TryGetValue<InventoryFolder>(sourceFolderId, out var sourceFolder)) return;
+
+        foreach (var child in Inventory.GetContents(sourceFolder))
+        {
+            if (child is InventoryFolder childFolder)
+                await CopyFolderRecursiveAsync(childFolder.UUID, newFolderId, childFolder.Name);
+            else
+                await Client.Inventory.RequestCopyItemAsync(child.UUID, newFolderId, child.Name, child.OwnerID);
         }
     }
 
