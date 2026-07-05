@@ -23,7 +23,7 @@
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.StructuredData\LibreMetaverse.StructuredData.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.Utilities\LibreMetaverse.Utilities.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse.Types\LibreMetaverse.Types.csproj" />
-    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Voice.Vivox\LibreMetaverse.Voice.Vivox.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Voice.WebRTC\LibreMetaverse.Voice.WebRTC.csproj" />
     <ProjectReference Include="..\libremetaverse\LibreMetaverse\LibreMetaverse.csproj" />
     <ProjectReference Include="..\libremetaverse\PrimMesher\LibreMetaverse.PrimMesher.csproj" />
   </ItemGroup>
