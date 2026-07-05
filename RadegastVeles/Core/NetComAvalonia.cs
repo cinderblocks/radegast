@@ -205,7 +205,10 @@ public sealed class NetComAvalonia : INetCom
         {
             _recentChatHashes[$"out:{Client.Self.AgentID}:{chat}"] = DateTime.UtcNow;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Debug("NetComAvalonia: failed to record outgoing chat for dedup.", ex);
+        }
         ChatSent?.Invoke(this, new ChatSentEventArgs(chat, type, channel));
     }
 
@@ -225,7 +228,10 @@ public sealed class NetComAvalonia : INetCom
         {
             _recentIMHashes[$"outim:{ev.FromAgentID}:{ev.SessionID}:{ev.Message}"] = DateTime.UtcNow;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Debug("NetComAvalonia: failed to record outgoing IM for dedup.", ex);
+        }
         InstantMessageSent?.Invoke(this, ev);
     }
 
@@ -256,7 +262,10 @@ public sealed class NetComAvalonia : INetCom
             _recentChatHashes.Clear();
             _recentIMHashes.Clear();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Debug("NetComAvalonia: failed to clear duplicate-message caches.", ex);
+        }
     }
 
     private void CleanupRecentCaches()
@@ -278,7 +287,10 @@ public sealed class NetComAvalonia : INetCom
             if (_recentChatHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
             _recentChatHashes[key] = now;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Debug("NetComAvalonia: chat dedup check failed.", ex);
+        }
         return false;
     }
 
@@ -293,7 +305,10 @@ public sealed class NetComAvalonia : INetCom
             if (_recentIMHashes.TryGetValue(key, out var t) && now - t <= _duplicateWindow) return true;
             _recentIMHashes[key] = now;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Debug("NetComAvalonia: IM dedup check failed.", ex);
+        }
         return false;
     }
 

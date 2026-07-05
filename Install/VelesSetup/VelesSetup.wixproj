@@ -1,9 +1,10 @@
-<Project Sdk="WixToolset.Sdk/7.0.0">
+<Project>
   <Import Project="Sdk.props" Sdk="WixToolset.Sdk" Version="7.0.0" Condition="'$(Configuration)' != 'Disabled'" />
   <PropertyGroup>
     <AcceptEula>wix7</AcceptEula>
     <Configuration Condition=" '$(Configuration)' == '' ">Release</Configuration>
     <ProductVersion Condition=" '$(ProductVersion)' == '' ">1.0.0</ProductVersion>
+    <IsRestoreEnabled>false</IsRestoreEnabled>
     <OutputName>RadegastVelesSetup_$(Platform)</OutputName>
     <OutputPath>..\..\bin\Packages\</OutputPath>
     <Name>VelesSetup</Name>
@@ -50,7 +51,4 @@
   </Target>
   <Import Project="Sdk.targets" Sdk="WixToolset.Sdk" Version="7.0.0" Condition="'$(Configuration)' != 'Disabled'" />
   <Import Project="..\DisabledBuild.targets" Condition="'$(Configuration)' == 'Disabled'" />
-  <PropertyGroup>
-    <IsRestoreEnabled>false</IsRestoreEnabled>
-  </PropertyGroup>
 </Project>

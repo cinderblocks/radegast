@@ -1,0 +1,126 @@
+name: Publish Veles Appcast
+
+# Fires once a Veles/* draft release is manually published (all three build workflows -
+# Windows, macOS, Linux flatpak - attach their assets to the same draft release before that
+# happens). Waiting for "released" avoids advertising a version whose assets 404 because the
+# release is still a draft.
+on:
+  release:
+    types: [released]
+
+jobs:
+  appcast:
+    name: Generate and publish NetSparkle appcast
+    if: startsWith(github.event.release.tag_name, 'Veles/') && github.event.release.draft == false
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version variables
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event.release.tag_name }}'
+          $tagVersion = $tag -replace '^Veles/',''
+          echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install NetSparkle AppCastGenerator
+        shell: pwsh
+        run: dotnet tool install --global NetSparkleUpdater.Tools.AppCastGenerator --version 2.9.0
+
+      - name: Download release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          New-Item -ItemType Directory -Path assets -Force | Out-Null
+          gh release download "${{ env.TAG }}" --repo "${{ github.repository }}" -D assets -p "*.msi" -p "*.dmg"
+          Write-Host "Downloaded assets:"
+          Get-ChildItem assets
+
+      # NetSparkle does not filter appcast items by CPU architecture (only OS), so each
+      # Windows arch needs its own appcast file; the client picks the right URL for its
+      # own OS+arch (see RadegastVeles/Core/VelesUpdateManager.cs).
+      - name: Generate per-platform appcasts
+        shell: pwsh
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.VELES_SPARKLE_PRIVATE_KEY }}
+        run: |
+          if ([string]::IsNullOrEmpty($env:SPARKLE_PRIVATE_KEY)) {
+            Write-Error "VELES_SPARKLE_PRIVATE_KEY secret is not configured"
+            exit 1
+          }
+
+          $version = "${{ env.TAG_VERSION }}"
+          $downloadBase = "https://github.com/${{ github.repository }}/releases/download/${{ env.TAG }}"
+          New-Item -ItemType Directory -Path out\veles\appcast -Force | Out-Null
+
+          $targets = @(
+            @{ Name = "windows-x86";   Pattern = "*_x86_*.msi";   Os = "windows-x86" },
+            @{ Name = "windows-x64";   Pattern = "*_x64_*.msi";   Os = "windows-x64" },
+            @{ Name = "windows-arm64"; Pattern = "*_ARM64_*.msi"; Os = "windows-arm64" },
+            @{ Name = "macos";         Pattern = "*.dmg";         Os = "macos" }
+          )
+
+          $anyGenerated = $false
+
+          foreach ($t in $targets) {
+            $match = Get-ChildItem -Path assets -Filter $t.Pattern -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $match) {
+              Write-Warning "No asset found for $($t.Name) (pattern '$($t.Pattern)'), skipping"
+              continue
+            }
+
+            Write-Host "Generating appcast for $($t.Name) from $($match.Name)"
+
+            $ext = $match.Extension.TrimStart('.')
+            $temp = "temp_$($t.Name)"
+            New-Item -ItemType Directory -Path $temp -Force | Out-Null
+            Copy-Item $match.FullName -Destination $temp -Force
+
+            netsparkle-generate-appcast `
+              -n RadegastVeles `
+              -e $ext `
+              -a $temp `
+              --output-type json `
+              --output-file-name "$($t.Name)" `
+              -o "$($t.Os)" `
+              --file-version $version `
+              -u $downloadBase
+
+            if (Test-Path "$($t.Name).json") {
+              Move-Item "$($t.Name).json" "out\veles\appcast\$($t.Name).json" -Force
+              $anyGenerated = $true
+              Write-Host "  Generated $($t.Name).json"
+            } else {
+              Write-Error "Failed to generate appcast for $($t.Name)"
+              exit 1
+            }
+
+            if (Test-Path "$($t.Name).json.signature") {
+              Move-Item "$($t.Name).json.signature" "out\veles\appcast\$($t.Name).json.signature" -Force
+            }
+
+            Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          if (-not $anyGenerated) {
+            Write-Error "No appcast files were generated - no matching release assets found"
+            exit 1
+          }
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: out
+          keep_files: true

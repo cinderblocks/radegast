@@ -1,26 +1,25 @@
-﻿/**
+/**
  * Radegast Metaverse Client
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
 
 using System;
 using Radegast;
-using LibreMetaverse.Voice.Vivox;
 
 namespace RadegastSpeech.Conversation
 {
@@ -28,8 +27,8 @@ namespace RadegastSpeech.Conversation
     {
         private readonly VoiceConsole vTab;
         private System.Windows.Forms.ListView participants;
-        private VoiceSession session;
- 
+        private bool connected;
+
         #region State Change
         internal Voice(PluginControl pc)
             : base(pc)
@@ -42,46 +41,39 @@ namespace RadegastSpeech.Conversation
 
         internal override void Start()
         {
-            vTab.gateway.OnSessionCreate +=OnSessionCreate;
-            vTab.gateway.OnSessionRemove += gateway_OnSessionRemove;
+            vTab.VoiceConnected += Vtab_VoiceConnected;
+            vTab.VoiceDisconnected += Vtab_VoiceDisconnected;
+            vTab.ParticipantJoined += Vtab_ParticipantJoined;
             vTab.chkVoiceEnable.CheckStateChanged += chkVoiceEnable_CheckStateChanged;
             SayEnabled();
         }
 
         internal override void Stop()
         {
-            if (vTab.gateway != null)
-            {
-                vTab.gateway.OnSessionCreate -= OnSessionCreate;
-                vTab.gateway.OnSessionRemove -= gateway_OnSessionRemove;
-            }
+            vTab.VoiceConnected -= Vtab_VoiceConnected;
+            vTab.VoiceDisconnected -= Vtab_VoiceDisconnected;
+            vTab.ParticipantJoined -= Vtab_ParticipantJoined;
             vTab.chkVoiceEnable.CheckStateChanged -= chkVoiceEnable_CheckStateChanged;
         }
-#endregion
+        #endregion
 
-#region Sessions
+        #region Sessions
 
-private void OnSessionCreate(object sender, EventArgs e)
+        private void Vtab_VoiceConnected()
         {
-            session = sender as VoiceSession;
-            if (session != null) { control.talker.Say("Voice started in " + session.RegionName); }
-            //            session.OnParticipantAdded += new EventHandler(session_OnParticipantAdded);
+            connected = true;
+            control.talker.Say("Voice connected.");
         }
 
-        private void gateway_OnSessionRemove(object sender, EventArgs e)
+        private void Vtab_VoiceDisconnected()
         {
-            VoiceSession session = sender as VoiceSession;
+            connected = false;
             control.talker.Say("Voice session closed.");
-//            session.OnParticipantAdded -= new EventHandler(session_OnParticipantAdded);
         }
 
-        private void session_OnParticipantAdded(object sender, EventArgs e)
+        private void Vtab_ParticipantJoined(string name)
         {
-            if (sender is VoiceParticipant p)
-            {
-                string pName = p.Name ?? control.instance.Names.Get(p.ID);
-                control.talker.SayMore(pName + " is in voice range.");
-            }
+            control.talker.SayMore(name + " is in voice range.");
         }
 
         #endregion
@@ -96,9 +88,7 @@ private void OnSessionCreate(object sender, EventArgs e)
             string msg = "Voice is ";
             if (vTab.chkVoiceEnable.Checked)
             {
-                msg += "enabled";
-                if (session != null)
-                    msg += " in " + session.RegionName;
+                msg += connected ? "enabled and connected" : "enabled";
                 Talker.SayMore(msg);
             }
             else

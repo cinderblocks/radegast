@@ -103,7 +103,7 @@ namespace Radegast
             this.txtMessage.Name = "txtMessage";
             this.txtMessage.Size = new System.Drawing.Size(256, 49);
             this.txtMessage.TabIndex = 3;
-            this.txtMessage.Text = "Join me in TODO";
+            this.txtMessage.Text = "Join me in [LOCATION]!";
             // 
             // ntfSendLureOffer
             // 

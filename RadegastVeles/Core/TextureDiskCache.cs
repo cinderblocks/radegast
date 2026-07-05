@@ -71,7 +71,10 @@ internal static class TextureDiskCache
             var dir = string.IsNullOrWhiteSpace(value) ? DefaultCacheDir : value;
             _cacheDir = dir;
             try { Directory.CreateDirectory(dir); }
-            catch { }
+            catch (Exception ex)
+            {
+                Logger.Warn($"TextureDiskCache: failed to create cache directory '{dir}'; texture caching will silently fail.", ex);
+            }
         }
     }
 
@@ -89,7 +92,11 @@ internal static class TextureDiskCache
     static TextureDiskCache()
     {
         try { Directory.CreateDirectory(_cacheDir); }
-        catch { /* non-fatal; cache writes will silently fail */ }
+        catch (Exception ex)
+        {
+            // non-fatal; cache writes will silently fail
+            Logger.Warn($"TextureDiskCache: failed to create default cache directory '{_cacheDir}'.", ex);
+        }
     }
 
     private static string FilePath(UUID textureId) =>
@@ -114,7 +121,11 @@ internal static class TextureDiskCache
 
             return File.ReadAllBytes(path);
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            Logger.Debug($"TextureDiskCache: failed to read cached texture {textureId}.", ex);
+            return null;
+        }
     }
 
     /// <summary>
@@ -144,7 +155,10 @@ internal static class TextureDiskCache
                 File.WriteAllBytes(tmp, j2kData);
                 File.Move(tmp, path, overwrite: false);
             }
-            catch { /* non-fatal */ }
+            catch (Exception ex)
+            {
+                Logger.Debug($"TextureDiskCache: failed to cache texture {textureId}.", ex);
+            }
         });
     }
 
@@ -163,7 +177,11 @@ internal static class TextureDiskCache
                 total += f.Length;
             return total;
         }
-        catch { return 0L; }
+        catch (Exception ex)
+        {
+            Logger.Debug("TextureDiskCache: failed to compute cache size.", ex);
+            return 0L;
+        }
     }
 
     /// <summary>
@@ -179,7 +197,11 @@ internal static class TextureDiskCache
             foreach (var _ in di.EnumerateFiles("*.j2k")) count++;
             return count;
         }
-        catch { return 0; }
+        catch (Exception ex)
+        {
+            Logger.Debug("TextureDiskCache: failed to count cache files.", ex);
+            return 0;
+        }
     }
 
     /// <summary>
@@ -190,7 +212,10 @@ internal static class TextureDiskCache
     public static void Evict(UUID textureId)
     {
         try { File.Delete(FilePath(textureId)); }
-        catch { /* non-fatal */ }
+        catch (Exception ex)
+        {
+            Logger.Debug($"TextureDiskCache: failed to evict cached texture {textureId}.", ex);
+        }
     }
 
     /// <summary>
@@ -204,11 +229,14 @@ internal static class TextureDiskCache
             var di = new DirectoryInfo(_cacheDir);
             if (!di.Exists) return;
             foreach (var f in di.EnumerateFiles("*.j2k"))
-                try { f.Delete(); } catch { }
+                try { f.Delete(); } catch (Exception ex) { Logger.Debug($"TextureDiskCache: failed to delete '{f.Name}'.", ex); }
             foreach (var f in di.EnumerateFiles("*.png"))  // sweep legacy files
-                try { f.Delete(); } catch { }
+                try { f.Delete(); } catch (Exception ex) { Logger.Debug($"TextureDiskCache: failed to delete legacy file '{f.Name}'.", ex); }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn("TextureDiskCache: failed to clear cache directory.", ex);
+        }
     }
 
     // ── LRU eviction ─────────────────────────────────────────────────────────────
@@ -226,8 +254,11 @@ internal static class TextureDiskCache
                 a.LastAccessTimeUtc.CompareTo(b.LastAccessTimeUtc));
 
             for (int i = 0; i < toDelete && i < files.Length; i++)
-                try { files[i].Delete(); } catch { }
+                try { files[i].Delete(); } catch (Exception ex) { Logger.Debug($"TextureDiskCache: eviction failed to delete '{files[i].Name}'.", ex); }
         }
-        catch { /* non-fatal */ }
+        catch (Exception ex)
+        {
+            Logger.Debug("TextureDiskCache: eviction pass failed.", ex);
+        }
     }
 }

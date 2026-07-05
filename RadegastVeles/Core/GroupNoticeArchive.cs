@@ -23,6 +23,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using LibreMetaverse;
 
 namespace Radegast.Veles.Core;
 
@@ -108,7 +109,10 @@ public class GroupNoticeArchive
             Directory.CreateDirectory(Path.GetDirectoryName(_filePath)!);
             File.WriteAllText(_filePath, JsonSerializer.Serialize(snapshot, s_options));
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"GroupNoticeArchive: failed to save archive to '{_filePath}'.", ex);
+        }
     }
 
     private void Load()
@@ -125,6 +129,9 @@ public class GroupNoticeArchive
                         _notices.Add(n);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn($"GroupNoticeArchive: failed to load archive from '{_filePath}'.", ex);
+        }
     }
 }

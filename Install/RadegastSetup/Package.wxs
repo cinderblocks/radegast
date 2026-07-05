@@ -96,17 +96,6 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
                Level="1">
         <MergeRef Id="VC_Redist140" />
       </Feature>
-      <Feature Id="VoiceFeature" Title="VoicePack" Level="1">
-        <ComponentGroupRef Id="VoicePackComponentGroup" />
-        <Feature Id="VCRedist120"
-                 Title="Visual C++ 2013 Runtime"
-                 AllowAdvertise="no"
-                 Display="hidden"
-                 InstallDefault="followParent"
-                 Level="1">
-          <MergeRef Id="VC_Redist120" />
-        </Feature>
-      </Feature>
     </Feature>
 
     <PropertyRef Id="WIX_IS_NETFRAMEWORK_48_OR_LATER_INSTALLED" />

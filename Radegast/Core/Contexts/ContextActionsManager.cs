@@ -280,7 +280,10 @@ namespace Radegast
                     {
                         handler.Dispose();
                     }
-                    catch (Exception) { }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"ContextActionsManager: {handler.GetType()}.Dispose() threw: {ex.Message}", ex);
+                    }
                 }
                 contextEventHandlers.Clear();
             }

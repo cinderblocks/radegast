@@ -10,7 +10,7 @@ Radegast Metaverse Client (http://radegast.life/)
 
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL%20v3-blue.svg)](https://github.com/cinderblocks/radegast/blob/master/LICENSE.txt)
 [![Latest version downloads](https://img.shields.io/github/downloads-pre/cinderblocks/radegast/latest/total)](https://radegast.life/downloads/)  
-[![Tests](https://github.com/cinderblocks/radegast/actions/workflows/ci.yml/badge.svg)](https://github.com/cinderblocks/radegast/actions/workflows/ci.yml)  
+[![Tests](https://github.com/cinderblocks/radegast/actions/workflows/test.yml/badge.svg)](https://github.com/cinderblocks/radegast/actions/workflows/test.yml)  
 [![Commits per month](https://img.shields.io/github/commit-activity/m/cinderblocks/radegast)](https://www.github.com/cinderblocks/radegast/)  
 [![ZEC](https://img.shields.io/keybase/zec/cinder)](https://keybase.io/cinder) [![BTC](https://img.shields.io/keybase/btc/cinder)](https://keybase.io/cinder) 
 
@@ -20,9 +20,24 @@ Radegast is a virtual world client compatible with Second Life and OpenSimulator
 Its main purpose is to provide an alternative client to Linden Lab derived virtual world viewers.
 There is a strong focus on accessability and non-3D interaction.
 
+This repository builds two clients:
+
+* **Radegast** (aka "Legacy") - the original WinForms client, Windows-only.
+* **RadegastVeles** (aka "Veles") - a cross-platform Avalonia-based rewrite, for Windows, macOS, and Linux.
+
 ### Prerequisites
 
-Radegast requires .NET Framework 4.8 or compatible Mono version to build and run.
+Radegast (Legacy) requires .NET Framework 4.8 or compatible Mono version to build and run.
+
+RadegastVeles (Veles) requires the .NET 10 runtime and builds/runs on Windows, macOS, and Linux.
+
+### macOS notes
+
+The macOS build of Veles is ad-hoc signed (no Apple Developer ID certificate, no notarization),
+since a signing certificate isn't currently available for this project. macOS will still show a
+"cannot verify the developer" / "unidentified developer" warning on first launch. To run the app:
+right-click (or Control-click) the app in Finder and choose **Open**, then confirm in the dialog
+that appears. You only need to do this once per download.
 
 ### Contributing
 

@@ -3,17 +3,17 @@
  * Copyright(c) 2009-2014, Radegast Development Team
  * Copyright(c) 2016-2025, Sjofn, LLC
  * All rights reserved.
- *  
+ *
  * Radegast is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published
  * by the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.See the
  * GNU General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program.If not, see<https://www.gnu.org/licenses/>.
  */
@@ -21,10 +21,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using LibreMetaverse;
 using LibreMetaverse.StructuredData;
-using LibreMetaverse.Voice.Vivox;
+using LibreMetaverse.Voice.WebRTC;
 
 namespace Radegast
 {
@@ -38,132 +39,486 @@ namespace Radegast
             Muted
         };
 
+        // Ordinal values for progressBar1 (Maximum=2 in the Designer).
+        private enum VoiceStatus
+        {
+            Disconnected = 0,
+            Connecting = 1,
+            Connected = 2
+        };
+
+        // Wraps a Keys value with a friendly display name for the PTT key combo box.
+        private sealed class PttKeyChoice
+        {
+            public readonly Keys Key;
+            private readonly string _label;
+            public PttKeyChoice(Keys key, string label) { Key = key; _label = label; }
+            public override string ToString() => _label;
+        }
+
+        // The Keyboard message filter only sees generic virtual-key codes (WM_KEYDOWN/WM_SYSKEYDOWN
+        // report VK_MENU/VK_CONTROL/VK_SHIFT, not the left/right variants), so PTT key choices are
+        // restricted to keys that are unambiguous without inspecting the extended-key bit.
+        private static readonly PttKeyChoice[] PttKeyOptions =
+        {
+            new PttKeyChoice(Keys.Menu, "Alt"),
+            new PttKeyChoice(Keys.ControlKey, "Ctrl"),
+            new PttKeyChoice(Keys.ShiftKey, "Shift"),
+            new PttKeyChoice(Keys.F1, "F1"),
+            new PttKeyChoice(Keys.F2, "F2"),
+            new PttKeyChoice(Keys.F3, "F3"),
+            new PttKeyChoice(Keys.F4, "F4"),
+            new PttKeyChoice(Keys.F5, "F5"),
+            new PttKeyChoice(Keys.F6, "F6"),
+            new PttKeyChoice(Keys.F7, "F7"),
+            new PttKeyChoice(Keys.F8, "F8"),
+            new PttKeyChoice(Keys.F9, "F9"),
+            new PttKeyChoice(Keys.F10, "F10"),
+            new PttKeyChoice(Keys.CapsLock, "Caps Lock"),
+            new PttKeyChoice(Keys.Tab, "Tab"),
+            new PttKeyChoice(Keys.Insert, "Insert"),
+            new PttKeyChoice(Keys.Home, "Home"),
+            new PttKeyChoice(Keys.End, "End"),
+            new PttKeyChoice(Keys.PageUp, "Page Up"),
+            new PttKeyChoice(Keys.PageDown, "Page Down"),
+            new PttKeyChoice(Keys.Oemtilde, "` (tilde)"),
+            new PttKeyChoice(Keys.Back, "Backspace"),
+        };
+
         private readonly RadegastInstanceForms Instance;
         private INetCom NetCom => Instance.NetCom;
         private GridClient Client => Instance.Client;
         private TabsConsole tabConsole;
-        private readonly OSDMap config;
-        public VoiceGateway gateway = null;
-        public VoiceSession session;
-        private VoiceParticipant selected;
+
+        internal VoiceManager voice;
+        private readonly Dictionary<UUID, ListViewItem> participantItems = new Dictionary<UUID, ListViewItem>();
+        private readonly System.Windows.Forms.Timer pttTimer;
+        private bool pttKeyHeld;
+        private bool isConnected;
+        private string selectedInputDevice = string.Empty;
+        private Keys pttKey = Keys.Menu;
+        private float micLevelSmooth;
+        private int lastMicLevelTick;
+
+        /// <summary>Raised when the primary voice session becomes connected. Used by RadSpeech.</summary>
+        public event Action VoiceConnected;
+        /// <summary>Raised when the primary voice session disconnects. Used by RadSpeech.</summary>
+        public event Action VoiceDisconnected;
+        /// <summary>Raised (with the resolved display name) when a participant joins voice range. Used by RadSpeech.</summary>
+        public event Action<string> ParticipantJoined;
 
         public VoiceConsole(RadegastInstanceForms instance)
         {
             InitializeComponent();
             Disposed += VoiceConsole_Disposed;
 
-            this.Instance = instance;
+            Instance = instance;
 
-            // Callbacks
             NetCom.ClientLoginStatus += NetComClientLoginStatus;
+            Instance.MainForm.Load += MainForm_Load;
 
-            this.Instance.MainForm.Load += MainForm_Load;
+            foreach (var choice in PttKeyOptions)
+                pttKeyCombo.Items.Add(choice);
 
-            config = instance.GlobalSettings["voice"] as OSDMap;
-            if (config == null)
-            {
-                config = new OSDMap {["enabled"] = new OSDBoolean(false)};
-                instance.GlobalSettings["voice"] = config;
-                instance.GlobalSettings.Save();
-            }
+            pttTimer = new System.Windows.Forms.Timer { Interval = 40 };
+            pttTimer.Tick += PttTimer_Tick;
 
-            chkVoiceEnable.Checked = config["enabled"].AsBoolean();
+            LoadSettings();
+
             if (chkVoiceEnable.Checked)
                 Start();
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
         }
 
+        #region Lifecycle
+
         private void Start()
         {
-            if (gateway == null)
+            if (voice == null)
             {
-                gateway = new VoiceGateway(Instance.Client);
+                var candidate = new VoiceManager(Instance.Client);
+                if (!candidate.AudioDevice.IsAvailable)
+                {
+                    // Leave voice null so the next Start() (e.g. next login, or the
+                    // user re-toggling chkVoiceEnable) retries from scratch instead of
+                    // being stuck thinking voice is already (half-)initialized.
+                    SetStatus(VoiceStatus.Disconnected);
+                    return;
+                }
+                voice = candidate;
+                RegisterVoiceEvents();
+                RefreshDevices();
             }
 
-            // Initialize progress bar
-            progressBar1.Maximum = (int)VoiceGateway.ConnectionState.SessionRunning;
-            SetProgress(0);
-            RegisterClientEvents();
+            SetStatus(VoiceStatus.Disconnected);
 
-            gateway.Start();
+            if (chkAutoConnect.Checked)
+                _ = ConnectAsync();
         }
 
         private void Stop()
         {
-            participants.Clear();
-            gateway.Stop();
-            UnregisterClientEvents();
-            session = null;
-            gateway = null;
-            SetProgress(VoiceGateway.ConnectionState.None);
-            GC.Collect();
+            pttTimer.Stop();
+            pttKeyHeld = false;
+            ClearParticipants();
+
+            if (voice != null)
+            {
+                UnregisterVoiceEvents();
+                voice.Disconnect();
+            }
+            voice = null;
+            isConnected = false;
+            SetStatus(VoiceStatus.Disconnected);
         }
 
-        /// <summary>
-        /// Open context menu for voice items
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
-        private void RadegastContextMenuStrip_OnContentMenuOpened(object sender, RadegastContextMenuStrip.ContextMenuEventArgs e)
+        private async Task ConnectAsync()
         {
-            lock (e.Menu)
+            if (voice == null) return;
+            SetStatus(VoiceStatus.Connecting);
+            try
             {
-                // Figure out what this menu applies to.
-                ListViewItem item = e.Menu.Selection as ListViewItem;
-                if (item?.Tag is VoiceParticipant tag)
-                {
-                    selected = tag;
-                    ToolStripButton muteButton;
-                    muteButton = selected.IsMuted 
-                        ? new ToolStripButton("Unmute", null, OnUnMuteClick)
-                        : new ToolStripButton("Mute", null, OnMuteClick);
-                    e.Menu.Items.Add(muteButton);
-                }
+                bool ok = await voice.ConnectPrimaryRegionAsync();
+                if (!ok) SetStatus(VoiceStatus.Disconnected);
+            }
+            catch
+            {
+                SetStatus(VoiceStatus.Disconnected);
             }
         }
 
-        private void OnMuteClick(object sender, EventArgs e)
-        {
-            selected.IsMuted = true;
-        }
-
-        private void OnUnMuteClick(object sender, EventArgs e)
-        {
-            selected.IsMuted = false;
-        }
-
-        private void RegisterClientEvents()
+        private void RegisterVoiceEvents()
         {
             Instance.Names.NameUpdated += Names_NameUpdated;
-
-            // Voice hooks
-            gateway.OnSessionCreate +=
-                gateway_OnSessionCreate;
-            gateway.OnSessionRemove +=
-                gateway_OnSessionRemove;
-            gateway.OnVoiceConnectionChange +=
-                gateway_OnVoiceConnectionChange;
-            gateway.OnAuxGetCaptureDevicesResponse +=
-                gateway_OnAuxGetCaptureDevicesResponse;
-            gateway.OnAuxGetRenderDevicesResponse +=
-                gateway_OnAuxGetRenderDevicesResponse;
+            voice.PeerConnectionReady += Voice_PeerConnectionReady;
+            voice.PeerConnectionClosed += Voice_PeerConnectionClosed;
+            voice.OnRegionTransitionCompleted += Voice_OnRegionTransitionCompleted;
+            voice.OnRegionTransitionFailed += Voice_OnRegionTransitionFailed;
+            voice.PeerJoined += Voice_PeerJoined;
+            voice.PeerLeft += Voice_PeerLeft;
+            voice.PeerAudioUpdated += Voice_PeerAudioUpdated;
+            voice.AudioDevice.OnAudioSourceEncodedSample += Voice_OnAudioSourceEncodedSample;
         }
 
-        private void UnregisterClientEvents()
+        private void UnregisterVoiceEvents()
         {
             Instance.Names.NameUpdated -= Names_NameUpdated;
+            voice.PeerConnectionReady -= Voice_PeerConnectionReady;
+            voice.PeerConnectionClosed -= Voice_PeerConnectionClosed;
+            voice.OnRegionTransitionCompleted -= Voice_OnRegionTransitionCompleted;
+            voice.OnRegionTransitionFailed -= Voice_OnRegionTransitionFailed;
+            voice.PeerJoined -= Voice_PeerJoined;
+            voice.PeerLeft -= Voice_PeerLeft;
+            voice.PeerAudioUpdated -= Voice_PeerAudioUpdated;
+            voice.AudioDevice.OnAudioSourceEncodedSample -= Voice_OnAudioSourceEncodedSample;
+        }
 
-            gateway.OnSessionCreate -=
-               gateway_OnSessionCreate;
-            gateway.OnSessionRemove -=
-                gateway_OnSessionRemove;
-            gateway.OnVoiceConnectionChange -=
-                gateway_OnVoiceConnectionChange;
-            gateway.OnAuxGetCaptureDevicesResponse -=
-                gateway_OnAuxGetCaptureDevicesResponse;
-            gateway.OnAuxGetRenderDevicesResponse -=
-                gateway_OnAuxGetRenderDevicesResponse;
+        #endregion
+
+        #region Settings
+
+        private void LoadSettings()
+        {
+            var s = Instance.GlobalSettings;
+            chkVoiceEnable.Checked = s["voice_enabled"].Type == OSDType.Unknown || s["voice_enabled"].AsBoolean();
+            // Default true-if-unset: preserves the historical Legacy behavior where enabling
+            // voice always reconnected automatically on every login.
+            chkAutoConnect.Checked = s["voice_auto_connect"].Type == OSDType.Unknown || s["voice_auto_connect"].AsBoolean();
+            chkPushToTalk.Checked = s["voice_push_to_talk"].Type == OSDType.Unknown || s["voice_push_to_talk"].AsBoolean();
+
+            int savedVolume = s["voice_output_volume"].Type != OSDType.Unknown ? s["voice_output_volume"].AsInteger() : 80;
+            spkrLevel.Value = Math.Max(spkrLevel.Minimum, Math.Min(spkrLevel.Maximum, savedVolume));
+
+            selectedInputDevice = s["voice_input_device"].AsString();
+
+            if (s["voice_ptt_key"].Type != OSDType.Unknown &&
+                Enum.TryParse(s["voice_ptt_key"].AsString(), out Keys savedKey))
+            {
+                pttKey = savedKey;
+            }
+            pttKeyCombo.SelectedItem = Array.Find(PttKeyOptions, c => c.Key == pttKey) ?? PttKeyOptions[0];
+            pttKeyCombo.Enabled = chkPushToTalk.Checked;
+        }
+
+        private void SaveSettings()
+        {
+            var s = Instance.GlobalSettings;
+            s["voice_enabled"] = OSD.FromBoolean(chkVoiceEnable.Checked);
+            s["voice_auto_connect"] = OSD.FromBoolean(chkAutoConnect.Checked);
+            s["voice_push_to_talk"] = OSD.FromBoolean(chkPushToTalk.Checked);
+            s["voice_output_volume"] = OSD.FromInteger(spkrLevel.Value);
+            s["voice_input_device"] = OSD.FromString(selectedInputDevice ?? string.Empty);
+            s["voice_ptt_key"] = OSD.FromString(pttKey.ToString());
+        }
+
+        #endregion
+
+        #region Devices
+
+        private void RefreshDevices()
+        {
+            if (voice == null) return;
+
+            micDevice.Items.Clear();
+            micDevice.Items.Add("(Default)");
+            foreach (var kv in voice.AudioDevice.GetRecordingDevices())
+                micDevice.Items.Add(kv.Value);
+            micDevice.SelectedItem = string.IsNullOrEmpty(selectedInputDevice) ? "(Default)" : selectedInputDevice;
+            if (!string.IsNullOrEmpty(selectedInputDevice))
+                voice.AudioDevice.SetRecordingDevice(selectedInputDevice);
+
+            spkrDevice.Items.Clear();
+            spkrDevice.Items.Add("(Default)");
+            foreach (var kv in voice.AudioDevice.GetPlaybackDevices())
+                spkrDevice.Items.Add(kv.Value);
+            spkrDevice.SelectedItem = "(Default)";
+
+            voice.AudioDevice.SpeakerLevel = spkrLevel.Value / 100f;
+        }
+
+        private void micDevice_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            var sel = micDevice.SelectedItem as string;
+            selectedInputDevice = (sel == null || sel == "(Default)") ? string.Empty : sel;
+            voice?.AudioDevice.SetRecordingDevice(string.IsNullOrEmpty(selectedInputDevice) ? null : selectedInputDevice);
+            SaveSettings();
+        }
+
+        private void spkrDevice_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            var sel = spkrDevice.SelectedItem as string;
+            voice?.AudioDevice.SetPlaybackDevice((sel == null || sel == "(Default)") ? null : sel);
+        }
+
+        private void spkrLevel_ValueChanged(object sender, EventArgs e)
+        {
+            if (voice != null)
+                voice.AudioDevice.SpeakerLevel = spkrLevel.Value / 100f;
+            SaveSettings();
+        }
+
+        private async void spkrMute_CheckedChanged(object sender, EventArgs e)
+        {
+            if (voice == null) return;
+            try
+            {
+                if (spkrMute.Checked)
+                    await voice.AudioDevice.StopPlaybackAsync();
+                else
+                    await voice.AudioDevice.StartPlaybackAsync();
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Mute / Talk control
+
+        private void micMute_CheckedChanged(object sender, EventArgs e)
+        {
+            if (voice == null) return;
+            voice.AudioDevice.MicMute = micMute.Checked;
+        }
+
+        private void OnMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) StartPushToTalk();
+        }
+
+        private void OnMouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) StopPushToTalk();
+        }
+
+        private void StartPushToTalk()
+        {
+            if (voice == null || !isConnected) return;
+            voice.AudioDevice.MicMute = false;
+            micMute.Checked = false;
+        }
+
+        private void StopPushToTalk()
+        {
+            if (voice == null) return;
+            voice.AudioDevice.MicMute = true;
+            micMute.Checked = true;
+        }
+
+        private void chkPushToTalk_CheckedChanged(object sender, EventArgs e)
+        {
+            pttKeyCombo.Enabled = chkPushToTalk.Checked;
+            SaveSettings();
+            if (voice != null && isConnected)
+            {
+                // Mirrors the "join in whichever mode is selected" behavior on (re)connect:
+                // PTT on -> muted until held; PTT off -> open mic.
+                voice.AudioDevice.MicMute = chkPushToTalk.Checked;
+                micMute.Checked = chkPushToTalk.Checked;
+            }
+        }
+
+        private void pttKeyCombo_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (pttKeyCombo.SelectedItem is PttKeyChoice choice)
+            {
+                pttKey = choice.Key;
+                SaveSettings();
+            }
+        }
+
+        private void PttTimer_Tick(object sender, EventArgs e)
+        {
+            if (voice == null || !isConnected || !chkPushToTalk.Checked)
+            {
+                if (pttKeyHeld)
+                {
+                    pttKeyHeld = false;
+                    StopPushToTalk();
+                }
+                return;
+            }
+
+            bool down = Instance.Keyboard.IsKeyDown(pttKey) && !IsTypingFocused();
+
+            if (down && !pttKeyHeld)
+            {
+                pttKeyHeld = true;
+                StartPushToTalk();
+            }
+            else if (!down && pttKeyHeld)
+            {
+                pttKeyHeld = false;
+                StopPushToTalk();
+            }
+        }
+
+        private bool IsTypingFocused()
+        {
+            Control c = Instance.MainForm.ActiveControl;
+            while (c is ContainerControl cc && cc.ActiveControl != null)
+                c = cc.ActiveControl;
+            return c is TextBoxBase;
+        }
+
+        #endregion
+
+        #region Voice events
+
+        private void Voice_PeerConnectionReady()
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                isConnected = true;
+                SetStatus(VoiceStatus.Connected);
+                pttTimer.Start();
+
+                bool muted = chkPushToTalk.Checked;
+                voice.AudioDevice.MicMute = muted;
+                micMute.Checked = muted;
+                spkrMute.Checked = false;
+                voice.AudioDevice.SpeakerLevel = spkrLevel.Value / 100f;
+
+                VoiceConnected?.Invoke();
+            }));
+        }
+
+        private void Voice_PeerConnectionClosed()
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                isConnected = false;
+                pttTimer.Stop();
+                pttKeyHeld = false;
+                ClearParticipants();
+                micMute.Checked = true;
+                SetStatus(VoiceStatus.Disconnected);
+                VoiceDisconnected?.Invoke();
+            }));
+        }
+
+        private void Voice_OnRegionTransitionCompleted()
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                ClearParticipants();
+                isConnected = false;
+                SetStatus(VoiceStatus.Connecting);
+            }));
+        }
+
+        private void Voice_OnRegionTransitionFailed(Exception ex)
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                isConnected = false;
+                SetStatus(VoiceStatus.Disconnected);
+            }));
+        }
+
+        private void Voice_OnAudioSourceEncodedSample(uint durationRtpUnits, byte[] sample)
+        {
+            // Opus VBR: encoded frame size loosely correlates with audio amplitude.
+            const float maxExpected = 80f;
+            float level = Math.Min(1f, sample.Length / maxExpected);
+            micLevelSmooth = micLevelSmooth * 0.6f + level * 0.4f;
+            var now = Environment.TickCount;
+            if (unchecked(now - lastMicLevelTick) < 50) return;
+            lastMicLevelTick = now;
+            int value = Math.Max(micLevel.Minimum, Math.Min(micLevel.Maximum, (int)(micLevelSmooth * 100)));
+            BeginInvoke(new MethodInvoker(() => micLevel.Value = value));
+        }
+
+        #endregion
+
+        #region Participants
+
+        private void Voice_PeerJoined(UUID id)
+        {
+            string name = Instance.Names.Get(id);
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                if (participantItems.ContainsKey(id)) return;
+
+                ListViewItem item = new ListViewItem(name)
+                {
+                    Name = id.ToString(),
+                    Tag = id,
+                    StateImageIndex = (int)TalkState.Idle
+                };
+
+                participantItems[id] = item;
+                lock (participants)
+                    participants.Items.Add(item);
+
+                ParticipantJoined?.Invoke(name);
+            }));
+        }
+
+        private void Voice_PeerLeft(UUID id)
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                if (!participantItems.TryGetValue(id, out ListViewItem item)) return;
+                lock (participants)
+                    participants.Items.Remove(item);
+                participantItems.Remove(id);
+            }));
+        }
+
+        private void Voice_PeerAudioUpdated(UUID id, VoiceSession.PeerAudioState state)
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                if (!participantItems.TryGetValue(id, out ListViewItem item)) return;
+
+                if (state.ModeratorMuted == true)
+                    item.StateImageIndex = (int)TalkState.Muted;
+                else if (state.VoiceActive == true)
+                    item.StateImageIndex = (int)TalkState.Talking;
+                else
+                    item.StateImageIndex = (int)TalkState.Idle;
+            }));
         }
 
         private void Names_NameUpdated(object sender, UUIDNameReplyEventArgs e)
@@ -179,178 +534,48 @@ namespace Radegast
             {
                 foreach (var name in e.Names)
                 {
-                    if (participants.Items.ContainsKey(name.Key.ToString()))
-                    {
-                        participants.Items[name.Key.ToString()].Text = name.Value;
-                        ((VoiceParticipant)participants.Items[name.Key.ToString()].Tag).Name = name.Value;
-                    }
+                    if (participantItems.TryGetValue(name.Key, out ListViewItem item))
+                        item.Text = name.Value;
                 }
             }
         }
 
-        #region Connection Status
-
-        private void gateway_OnAuxGetRenderDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
+        private void ClearParticipants()
         {
-            BeginInvoke(new MethodInvoker(() => LoadSpkrDevices(e.Devices, e.CurrentDevice)));
+            lock (participants)
+                participants.Items.Clear();
+            participantItems.Clear();
         }
 
-        private void gateway_OnAuxGetCaptureDevicesResponse(object sender, VoiceGateway.VoiceDevicesEventArgs e)
+        /// <summary>
+        /// Open context menu for voice items
+        /// </summary>
+        private void RadegastContextMenuStrip_OnContentMenuOpened(object sender, RadegastContextMenuStrip.ContextMenuEventArgs e)
         {
-            BeginInvoke(new MethodInvoker(() => LoadMicDevices(e.Devices, e.CurrentDevice)));
-        }
-
-        private void gateway_OnVoiceConnectionChange(VoiceGateway.ConnectionState state)
-        {
-            BeginInvoke(new MethodInvoker(() => SetProgress(state)));
-        }
-
-        private void SetProgress(VoiceGateway.ConnectionState s)
-        {
-            int value = (int)s;
-            if (value == progressBar1.Maximum)
+            lock (e.Menu)
             {
-                progressBar1.ForeColor = Color.Green;
-                LoadConfigVolume();
-            }
-            else if (value > (progressBar1.Maximum / 2))
-                progressBar1.ForeColor = Color.Yellow;
-            else
-                progressBar1.ForeColor = Color.Red;
-
-            progressBar1.Value = value;
-        }
-        #endregion
-
-        #region Sessions
-
-        private bool queriedDevices = false;
-
-        private void gateway_OnSessionCreate(object sender, EventArgs e)
-        {
-            if (!queriedDevices)
-            {
-                queriedDevices = true;
-                Logger.Debug("Voice session started, asking for device info");
-                gateway.AuxGetCaptureDevices();
-                gateway.AuxGetRenderDevices();
-            }
-
-            VoiceSession s = sender as VoiceSession;
-
-            BeginInvoke(new MethodInvoker(delegate()
-             {
-                 // There could theoretically be more than one session active
-                 // at a time, but the current implementation in SL seems to be limited to one.
-                 session = s;
-                 session.OnParticipantAdded += session_OnParticipantAdded;
-                 session.OnParticipantRemoved += session_OnParticipantRemoved;
-                 session.OnParticipantUpdate += session_OnParticipantUpdate;
-                 participants.Clear();
-
-                 // Default Mic off and Spkr on
-                 gateway.MicMute = true;
-                 gateway.SpkrMute = false;
-                 gateway.SpkrLevel = 64;
-                 gateway.MicLevel = 64;
-
-                 SetProgress(VoiceGateway.ConnectionState.SessionRunning);
-             }));
-        }
-
-        private void gateway_OnSessionRemove(object sender, EventArgs e)
-        {
-            VoiceSession s = sender as VoiceSession;
-            if (s == null) return;
-
-            s.OnParticipantAdded -= session_OnParticipantAdded;
-            s.OnParticipantRemoved -= session_OnParticipantRemoved;
-            s.OnParticipantUpdate -= session_OnParticipantUpdate;
-
-            if (session != s) return;
-
-            BeginInvoke(new MethodInvoker(delegate()
-             {
-                 participants.Clear();
-
-                 if (gateway != null)
-                 {
-                     gateway.MicMute = true;
-                 }
-                 micMute.Checked = true;
-
-                 session = null;
-             }));
-        }
-
-
-        #endregion
-        #region Participants
-
-        private void session_OnParticipantAdded(object sender, EventArgs e)
-        {
-            VoiceParticipant p = sender as VoiceParticipant;
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-                // Supply the name based on the UUID.
-                if (p == null) return;
-                p.Name = Instance.Names.Get(p.ID);
-
-                if (participants.Items.ContainsKey(p.ID.ToString()))
-                    return;
-
-                ListViewItem item = new ListViewItem(p.Name)
+                ListViewItem item = e.Menu.Selection as ListViewItem;
+                if (item?.Tag is UUID peerId)
                 {
-                    Name = p.ID.ToString(), Tag = p, StateImageIndex = (int)TalkState.Idle
-                };
-
-                lock (participants)
-                    participants.Items.Add(item);
-            }));
-        }
-
-        private void session_OnParticipantRemoved(object sender, EventArgs e)
-        {
-            VoiceParticipant p = sender as VoiceParticipant;
-            if (p?.Name == null) return;
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-                lock (participants)
-                {
-                    ListViewItem item = FindParticipantItem(p);
-                    if (item != null)
-                        participants.Items.Remove(item);
+                    bool currentlyMuted = item.StateImageIndex == (int)TalkState.Muted;
+                    ToolStripButton muteButton = currentlyMuted
+                        ? new ToolStripButton("Unmute", null, (s, ev) => SetPeerMuted(peerId, false))
+                        : new ToolStripButton("Mute", null, (s, ev) => SetPeerMuted(peerId, true));
+                    e.Menu.Items.Add(muteButton);
                 }
-            }));
+            }
         }
 
-        private void session_OnParticipantUpdate(object sender, EventArgs e)
+        private void SetPeerMuted(UUID peerId, bool mute)
         {
-            VoiceParticipant p = sender as VoiceParticipant;
-            if (p?.Name == null) return;
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-                lock (participants)
-                {
-                    ListViewItem item = FindParticipantItem(p);
-                    if (item != null)
-                    {
-                        if (p.IsMuted)
-                            item.StateImageIndex = (int)TalkState.Muted;
-                        else if (p.IsSpeaking)
-                            item.StateImageIndex = (int)TalkState.Talking;
-                        else
-                            item.StateImageIndex = (int)TalkState.Idle;
-                    }
-                }
-            }));
+            voice?.SetPeerMute(peerId, mute);
+            if (participantItems.TryGetValue(peerId, out ListViewItem item))
+                item.StateImageIndex = (int)(mute ? TalkState.Muted : TalkState.Idle);
         }
 
         /// <summary>
         /// Right-clicks on participants beings up Mute, etc menu
         /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private void participants_MouseUp(object sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Right) return;
@@ -360,62 +585,50 @@ namespace Radegast
             cms.Show((Control)sender, new Point(e.X, e.Y));
         }
 
-        /// <summary>
-        /// UnMute all participants
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private void btnUnmuteAll_Click(object sender, EventArgs e)
         {
-            foreach (ListViewItem i in participants.Items)
+            foreach (var kvp in participantItems)
             {
-                if (i.Tag is VoiceParticipant p && p.ID != Instance.Client.Self.AgentID)
-                {
-                    p.IsMuted = false;
-                    i.StateImageIndex = (int)TalkState.Idle;
-                }
+                if (kvp.Key == Instance.Client.Self.AgentID) continue;
+                SetPeerMuted(kvp.Key, false);
             }
         }
 
-        /// <summary>
-        /// Mute all participants
-        /// </summary>
-        /// <param name="sender"></param>
-        /// <param name="e"></param>
         private void btnMuteAll_Click(object sender, EventArgs e)
         {
-            foreach (ListViewItem i in participants.Items)
+            foreach (var kvp in participantItems)
             {
-                if (i.Tag is VoiceParticipant p && p.ID != Instance.Client.Self.AgentID)
-                {
-                    p.IsMuted = true;
-                    i.StateImageIndex = (int)TalkState.Muted;
-                }
+                if (kvp.Key == Instance.Client.Self.AgentID) continue;
+                SetPeerMuted(kvp.Key, true);
             }
-        }
-
-        private ListViewItem FindParticipantItem(VoiceParticipant p)
-        {
-            foreach (ListViewItem item in participants.Items)
-            {
-                if (item.Tag == p)
-                    return item;
-            }
-            return null;
         }
 
         #endregion
+
         #region Console control
+
+        private void SetStatus(VoiceStatus status)
+        {
+            progressBar1.Value = (int)status;
+            progressBar1.ForeColor = status switch
+            {
+                VoiceStatus.Connected => Color.Green,
+                VoiceStatus.Connecting => Color.Yellow,
+                _ => Color.Red
+            };
+        }
 
         private void VoiceConsole_Disposed(object sender, EventArgs e)
         {
             try
             {
                 NetCom.ClientLoginStatus -= NetComClientLoginStatus;
-                if (gateway != null)
+                pttTimer?.Stop();
+                pttTimer?.Dispose();
+                if (voice != null)
                 {
-                    UnregisterClientEvents();
-                    gateway.Stop();
+                    UnregisterVoiceEvents();
+                    voice.Disconnect();
                 }
             }
             catch { }
@@ -430,144 +643,33 @@ namespace Radegast
         {
             if (e.Status != LoginStatus.Success) return;
 
-            BeginInvoke(new MethodInvoker(delegate()
+            BeginInvoke(new MethodInvoker(delegate ()
             {
                 if (chkVoiceEnable.Checked)
-                    gateway.Start();
-            }));
-
-        }
-        #endregion
-
-        #region Talk control
-
-        private void OnMouseUp(object sender, MouseEventArgs e)
-        {
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-                if (e.Button == MouseButtons.Left)
-                {
-                    micMute.Checked = true;
-                    gateway.MicMute = true;
-                }
+                    Start();
             }));
         }
 
-        private void OnMouseDown(object sender, MouseEventArgs e)
-        {
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-
-                if (e.Button == MouseButtons.Left)
-                {
-                    micMute.Checked = false;
-                    gateway.MicMute = false;
-                }
-            }));
-        }
-        #endregion
-
-        #region Audio Settings
-
-        private void LoadMicDevices(List<string> available, string current)
-        {
-            if (available == null) return;
-
-            micDevice.Items.Clear();
-            foreach (string name in available)
-                micDevice.Items.Add(name);
-            micDevice.SelectedItem = current;
-        }
-
-        private void LoadSpkrDevices(List<string> available, string current)
-        {
-            if (available == null) return;
-
-            spkrDevice.Items.Clear();
-            foreach (string name in available)
-                spkrDevice.Items.Add(name);
-            spkrDevice.SelectedItem = current;
-        }
-
-        private void spkrDevice_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            gateway.PlaybackDevice = (string)spkrDevice.SelectedItem;
-            config["playback.device"] = new OSDString((string)spkrDevice.SelectedItem);
-            Instance.GlobalSettings.Save();
-        }
-
-        private void micDevice_SelectedIndexChanged(object sender, EventArgs e)
-        {
-            gateway.CurrentCaptureDevice = (string)micDevice.SelectedItem;
-            config["capture.device"] = new OSDString((string)micDevice.SelectedItem);
-            Instance.GlobalSettings.Save();
-        }
-
-        private void micLevel_ValueChanged(object sender, EventArgs e)
-        {
-            if (gateway != null)
-            {
-                gateway.MicLevel = micLevel.Value;
-            }
-            Instance.GlobalSettings["voice_mic_level"] = micLevel.Value;
-        }
-
-        private void spkrLevel_ValueChanged(object sender, EventArgs e)
-        {
-            if (gateway != null)
-            {
-                gateway.SpkrLevel = spkrLevel.Value;
-            }
-            Instance.GlobalSettings["voice_speaker_level"] = spkrLevel.Value;
-        }
-        #endregion
-
-        /// <summary>
-        /// Start and stop the voice functions.
-        /// </summary>
         private void chkVoiceEnable_Click(object sender, EventArgs e)
         {
-            BeginInvoke(new MethodInvoker(delegate()
-            {
-                config["enabled"] = new OSDBoolean(chkVoiceEnable.Checked);
-                Instance.GlobalSettings.Save();
-
-                if (chkVoiceEnable.Checked)
-                {
-                    Start();
-                }
-                else
-                {
-                    Stop();
-                }
-            }));
+            SaveSettings();
+            if (chkVoiceEnable.Checked)
+                Start();
+            else
+                Stop();
         }
 
-        private void micMute_CheckedChanged(object sender, EventArgs e)
+        private void chkAutoConnect_CheckedChanged(object sender, EventArgs e)
         {
-            if (gateway != null)
-            {
-                gateway.MicMute = micMute.Checked;
-            }
-        }
-
-        private void LoadConfigVolume()
-        {
-            if (Instance.GlobalSettings.ContainsKey("voice_mic_level"))
-            {
-                micLevel.Value = Instance.GlobalSettings["voice_mic_level"];
-            }
-
-            if (Instance.GlobalSettings.ContainsKey("voice_speaker_level"))
-            {
-                spkrLevel.Value = Instance.GlobalSettings["voice_speaker_level"];
-            }
+            SaveSettings();
         }
 
         private void VoiceConsole_Load(object sender, EventArgs e)
         {
-            LoadConfigVolume();
+            if (voice != null)
+                RefreshDevices();
         }
+
+        #endregion
     }
 }
-
