@@ -83,8 +83,81 @@ public sealed class VelesLogProvider : ILoggerProvider
             catch { /* swallow exceptions from handlers */ }
         }
 
+        WriteToConsoleAndDebug(entry);
         WriteToFile(entry);
     }
+
+    private static void WriteToConsoleAndDebug(VelesLogEntry entry)
+    {
+        try
+        {
+            Console.Write("{0:HH:mm:ss} [", entry.TimeStamp);
+            WriteColorText(ConsoleColor.Cyan, entry.Category);
+            Console.Write("] [");
+            WriteColorText(DeriveColor(entry.Level), entry.Level.ToString());
+            Console.Write("]: - ");
+
+            if (entry.Level == LogLevel.Error || entry.Level == LogLevel.Critical)
+            {
+                WriteColorText(ConsoleColor.Red, entry.Message);
+            }
+            else if (entry.Level == LogLevel.Warning)
+            {
+                WriteColorText(ConsoleColor.Yellow, entry.Message);
+            }
+            else
+            {
+                Console.Write(entry.Message);
+            }
+
+            if (entry.Exception != null)
+            {
+                Console.Write(" - ");
+                WriteColorText(ConsoleColor.Red, entry.Exception.ToString());
+            }
+
+            Console.WriteLine();
+
+            // Also write a structured line to Debug output so IDEs (Visual Studio) show logs in Debug pane
+            string dbgMsg = $"{entry.TimeStamp:HH:mm:ss.fff} [{entry.Level}] {entry.Message}";
+            if (entry.Exception != null)
+            {
+                dbgMsg += " - " + entry.Exception;
+            }
+            System.Diagnostics.Debug.WriteLine(dbgMsg);
+        }
+        catch { /* don't let console/debug output failures break logging */ }
+    }
+
+    private static void WriteColorText(ConsoleColor color, string text)
+    {
+        try
+        {
+            lock (s_lock)
+            {
+                try
+                {
+                    Console.ForegroundColor = color;
+                    Console.Write(text);
+                    Console.ResetColor();
+                }
+                catch (ArgumentNullException)
+                {
+                    Console.Write(text);
+                }
+            }
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private static ConsoleColor DeriveColor(LogLevel level) => level switch
+    {
+        LogLevel.Trace or LogLevel.Debug => ConsoleColor.DarkGray,
+        LogLevel.Information => ConsoleColor.Green,
+        LogLevel.Warning => ConsoleColor.Yellow,
+        LogLevel.Error or LogLevel.Critical => ConsoleColor.Red,
+        _ => ConsoleColor.Gray
+    };
 
     private static void WriteToFile(VelesLogEntry entry)
     {
