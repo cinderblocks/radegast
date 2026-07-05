@@ -63,6 +63,7 @@ jobs:
             -p:AssemblyVersion=${{ env.BUILD_VERSION }} `
             -p:FileVersion=${{ env.BUILD_VERSION }} `
             -p:InformationalVersion=${{ env.TAG_VERSION }} `
+            -p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }} `
             --no-restore
 
       - name: Build installer

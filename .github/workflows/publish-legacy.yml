@@ -80,6 +80,7 @@ jobs:
             /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
             /p:FileVersion=${{ env.BUILD_VERSION }} `
             /p:InformationalVersion=${{ env.VERSION }} `
+            /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }} `
             /v:minimal
 
       - name: Build installer
