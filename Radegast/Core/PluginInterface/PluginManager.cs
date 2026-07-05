@@ -70,6 +70,7 @@ namespace Radegast
             "RadSpeechLin.dll",
             "RadSpeechMac.dll",
             "RadSpeechWin.dll",
+            "SDL3.dll",
             "SmartThreadPool",
             "Tao.OpenGl.dll",
             "Tao.Platform.Windows.dll",
