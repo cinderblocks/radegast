@@ -1,9 +1,0 @@
-﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <Fragment>
-    <ComponentGroup Id="VoicePackComponentGroup" Directory="INSTALLFOLDER">
-      <Files Include="slvoice\*.dll" />
-      <File Id="SLVoice" Source="slvoice\SLVoice.exe" KeyPath="yes" Checksum="yes" />
-      <File Id="VivoxLicense" Source="slvoice\vivox_licenses.txt" />
-    </ComponentGroup>
-  </Fragment>
-</Wix>

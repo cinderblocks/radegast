@@ -11,7 +11,6 @@
     <!-- Suppress expected warnings -->
     <SuppressSpecificWarnings>
       8601;  <!-- Missing directory for harvesting files (expected for excluded paths) -->
-      8600;  <!-- Zero files harvested (expected when VoicePack files not present) -->
       1076   <!-- ICE03/ICE57 informational warnings from merge modules -->
     </SuppressSpecificWarnings>
   </PropertyGroup>
@@ -21,25 +20,10 @@
     <PackageReference Include="WixToolset.UI.wixext" Version="7.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <Folder Include="slvoice" />
-  </ItemGroup>
-  <ItemGroup>
     <None Include="..\BuildProperties.wxi" />
     <None Include="..\..\LICENSE.rtf" />
-    <Content Include="slvoice\README.txt" />
-    <Content Include="slvoice\vivox_licenses.txt" />
-    <Content Include="slvoice\vivox_sdk_license.txt" />
     <Content Include="UI.wxi" />
     <None Include="assets\README.md" />
-    <None Include="slvoice\DbgHelp.dll" />
-    <None Include="slvoice\ortp.dll" />
-    <None Include="slvoice\ortp.pdb" />
-    <None Include="slvoice\SLVoice.exe" />
-    <None Include="slvoice\vivoxsdk.dll" />
-    <None Include="slvoice\vivoxsdk.lib" />
-    <None Include="slvoice\vivoxsdk.pdb" />
-    <None Include="slvoice\zlib1.dll" />
-    <None Include="vcredist\Microsoft_VC120_CRT_x86.msm" />
     <None Include="vcredist\Microsoft_VC140_CRT_x86.msm" />
     <None Include="vcredist\README.md" />
   </ItemGroup>
