@@ -137,12 +137,16 @@ namespace Radegast
         {
             if (voice == null)
             {
-                voice = new VoiceManager(Instance.Client);
-                if (!voice.AudioDevice.IsAvailable)
+                var candidate = new VoiceManager(Instance.Client);
+                if (!candidate.AudioDevice.IsAvailable)
                 {
+                    // Leave voice null so the next Start() (e.g. next login, or the
+                    // user re-toggling chkVoiceEnable) retries from scratch instead of
+                    // being stuck thinking voice is already (half-)initialized.
                     SetStatus(VoiceStatus.Disconnected);
                     return;
                 }
+                voice = candidate;
                 RegisterVoiceEvents();
                 RefreshDevices();
             }
