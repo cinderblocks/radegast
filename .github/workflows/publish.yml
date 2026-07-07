@@ -70,10 +70,10 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Building Radegast Veles MSI installer for ${{ matrix.platform }}"
-          msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesSetup\VelesSetup.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
           Write-Host "Building Radegast Veles Bundle (bootstrapper) for ${{ matrix.platform }}"
-          msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesBundle\VelesBundle.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
 
       - name: Collect artifacts
         shell: pwsh

@@ -87,12 +87,14 @@ jobs:
         run: |
           Write-Host "Building Radegast MSI installer for ${{ matrix.platform }}"
           msbuild Install\RadegastSetup\RadegastSetup.wixproj `
+            /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
             /p:ProductVersion=${{ env.VERSION }}
 
           Write-Host "Building Radegast Bundle (bootstrapper) for ${{ matrix.platform }}"
           msbuild Install\RadegastBundle\RadegastBundle.wixproj `
+            /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
             /p:ProductVersion=${{ env.VERSION }}
