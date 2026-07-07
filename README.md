@@ -39,6 +39,11 @@ since a signing certificate isn't currently available for this project. macOS wi
 right-click (or Control-click) the app in Finder and choose **Open**, then confirm in the dialog
 that appears. You only need to do this once per download.
 
+### Documentation
+
+See [docs/](docs/README.md) for the Veles user guide, plugin catalog, and
+plugin developer guide.
+
 ### Contributing
 
 Pull requests are nice. Try not to be a dick, and we will all get along just fine.

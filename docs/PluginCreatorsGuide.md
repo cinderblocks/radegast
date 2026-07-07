@@ -7,7 +7,7 @@ This guide explains how to create plugins for **Radegast Veles** using the
 
 ## Overview
 
-Veles plugins are .NET 8 class library assemblies that:
+Veles plugins are .NET 10 class library assemblies that:
 
 1. Reference the `Radegast.Veles.PluginApi` NuGet / project.
 2. Contain **exactly one** public class decorated with `[VelesPlugin]` that
@@ -25,7 +25,7 @@ can be unloaded and reloaded at runtime without restarting the application.
 ### 1. Create a Class Library
 
 ```bash
-dotnet new classlib -n MyPlugin -f net8.0
+dotnet new classlib -n MyPlugin -f net10.0
 ```
 
 ### 2. Reference the Plugin API
@@ -57,7 +57,8 @@ namespace MyPlugin;
 [VelesPlugin("My Plugin",
     Description = "A short description.",
     Author = "Your Name",
-    Version = "1.0.0")]
+    Version = "1.0.0",
+    Url = "https://example.com/my-plugin")]
 public sealed class MyPlugin : IVelesPlugin
 {
     private IPluginContext _ctx = null!;
@@ -115,6 +116,9 @@ The `IPluginContext` is your gateway to the Veles application. It is passed to
 | `Client` | The `GridClient` for the current session. |
 | `NetCom` | Network communication helper (`INetCom`). |
 | `Instance` | The core `IRadegastInstance`. |
+| `VoiceSynth` | Built-in voice-synthesis service (`IVoiceSynthService?`) — lets a plugin speak text over the active WebRTC voice channel. `null` when voice is unavailable. |
+| `IsInP2PCall` | `true` when a P2P voice call is active with at least one other avatar. |
+| `NoTypingAnim` | `true` when the user has disabled the in-world typing animation in Preferences; check this before driving typing state. |
 
 ### Commands
 
@@ -150,12 +154,41 @@ Menu items appear under the **Plugins** menu in the main window.
 context.AddPreferenceTab(new PluginPreferenceTab(
     id: "my_prefs",
     header: "My Plugin",
-    contentFactory: () => new MyPrefsPanel(),
-    onApply: () => SaveMySettings()));
+    contentFactory: () => new MyPrefsPanel())
+{
+    OnApply = () => SaveMySettings()
+});
+
+context.RemovePreferenceTab("my_prefs");
 ```
 
-The tab will appear in the Preferences window. `ContentFactory` is called each
-time the window opens, so return a fresh control.
+> **Note:** `OnApply` is a settable property, not a constructor parameter —
+> set it via an object initializer as shown above.
+
+The tab will appear both in the main Preferences window and in the
+per-plugin **Settings** window (opened from the plugin's entry in the
+**Plugins** menu, or from the Plugin Manager). `ContentFactory` is called
+each time a window opens, so return a fresh control rather than caching one.
+
+### File Pickers
+
+```csharp
+var files = await context.OpenFilePickerAsync(new FilePickerOpenOptions
+{
+    Title = "Import Rules",
+    AllowMultiple = false
+});
+
+var target = await context.SaveFilePickerAsync(new FilePickerSaveOptions
+{
+    Title = "Export Rules",
+    SuggestedFileName = "rules.json"
+});
+```
+
+Both dialogs are platform-native and must be called from the UI thread.
+`OpenFilePickerAsync` returns an empty list if the user cancels;
+`SaveFilePickerAsync` returns `null`.
 
 ### Notifications
 
@@ -181,6 +214,11 @@ Settings are persisted per-plugin, per-user in the global settings store.
 | `IMReceived` | `InstantMessageEventArgs` | Instant message received. |
 | `Connected` | `EventArgs` | Client connects to a simulator. |
 | `Disconnected` | `EventArgs` | Client disconnects. |
+| `ObjectUpdated` | `PrimEventArgs` | An object or avatar update is received from the simulator. |
+| `TeleportProgress` | `TeleportEventArgs` | At each step of a teleport sequence. |
+| `FriendOnline` | `FriendInfoEventArgs` | A friend comes online. |
+| `FriendOffline` | `FriendInfoEventArgs` | A friend goes offline. |
+| `GroupChatJoined` | `GroupChatJoinedEventArgs` | A group chat session is joined or updated. |
 
 ```csharp
 context.ChatReceived += (s, e) =>
@@ -210,7 +248,7 @@ plugins/
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Veles.Plugin.MyPlugin</RootNamespace>
     <AssemblyName>Veles.Plugin.MyPlugin</AssemblyName>
     <Nullable>enable</Nullable>
@@ -263,6 +301,13 @@ Alternatively, use `context.LogToChat(...)` for quick printf-style debugging.
 ## Examples
 
 - **Demo Plugin** (`plugins/Veles.Plugin.Demo/`) — Minimal example showing
-  commands, menu items, chat events, and settings.
+  commands, menu items, chat events, and settings. Start here.
 - **Automation Plugin** (`plugins/Veles.Plugin.Automation/`) — Reimplements
-  AutoSit, PseudoHome, and LSL Helper as a Veles plugin.
+  AutoSit, PseudoHome, and LSL Helper, plus a full rule engine with a
+  Preferences tab and file-picker-based import/export.
+
+Veles ships with several other bundled plugins (chat bridges to Discord/IRC,
+an email digest, a local-LLM chatbot, a macro recorder, and a content
+import/export tool) — see the [Plugin Catalog](PluginCatalog.md) for the full
+list and what each one does, and [Veles User Guide](VelesUserGuide.md) for
+how to install and enable plugins from the app.
