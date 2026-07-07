@@ -3,7 +3,7 @@ xmlns:netfx="http://wixtoolset.org/schemas/v4/wxs/netfx"
 xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 <?include ..\BuildProperties.wxi?>
 <?define productVersion=!(bind.FileVersion.Radegast.Executable) ?>
-<?define UpgradeCode="{B8F7E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
+<?define UpgradeCode="{7DCB250D-4B4D-48B1-82E0-CCA31315D145}" ?>
 
 <Package Name="$(var.productName)"
          Language="1033"

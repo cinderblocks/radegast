@@ -12,6 +12,18 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <Exclude Files="$(var.Radegast.TargetDir)netstandard2.0\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)obj\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)**\*.xml"/>
+        <!-- Exclude SkiaSharp's non-Windows native runtimes (Linux/Android/macOS); only arm64/x64/x86 contain the Windows libSkiaSharp.dll -->
+        <Exclude Files="$(var.Radegast.TargetDir)arm\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)bionic-arm64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)bionic-x64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)loongarch64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)musl-arm\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)musl-arm64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)musl-loongarch64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)musl-riscv64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)musl-x64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)riscv64\**"/>
+        <Exclude Files="$(var.Radegast.TargetDir)libSkiaSharp.dylib"/>
         <!-- Keep *.exe.config - required by .NET Framework 4.8 for runtime init and binding redirects -->
         <Exclude Files="$(var.Radegast.TargetDir)**\*.vshost.exe.config"/>
         <!-- Exclude version control and project files -->

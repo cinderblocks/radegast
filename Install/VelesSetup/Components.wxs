@@ -16,6 +16,29 @@
         <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.sln"/>
         <!-- Exclude all plugin files — each plugin is its own optional Feature -->
         <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.*"/>
+        <!-- Exclude non-Windows native runtimes (Avalonia/SkiaSharp/sherpa-onnx ship android/freebsd/ios/linux/osx variants); only runtimes\win-* is needed here -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\freebsd-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\freebsd-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\ios-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-bionic-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-bionic-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-loongarch64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-loongarch64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-riscv64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-riscv64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-x86\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx-x64\**"/>
       </Files>
       <Component>
         <File Id="RadegastVeles.Executable" Source="$(var.RadegastVeles.TargetDir)RadegastVeles.exe" />

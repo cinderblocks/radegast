@@ -1,7 +1,7 @@
 ﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
   <?include ..\BuildProperties.wxi?>
   <?define productVersion="!(bind.packageVersion.RadegastSetup)"?>
-  <?define UpgradeCode="{B8F7E5A2-3C9D-4A8B-9F2E-7D6C8A1B5E9F}" ?>
+  <?define UpgradeCode="{FC37BB97-5666-46FF-BE02-737F4537CA8B}" ?>
 
   <Bundle Name="$(var.productName)"
           Version="$(var.productVersion)"
