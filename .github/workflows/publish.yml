@@ -170,7 +170,7 @@ jobs:
 
           try {
             Write-Host "Creating intermediate tar: $tarName"
-            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastVelesBundle_*" -mx=0
+            & 7z a $tarName -ttar * '-xr!symbols' '-xr!*.msi' '-xr!RadegastVelesBundle_*' -mx=0
             $code = $LASTEXITCODE
             if ($code -ne 0 -or -not (Test-Path $tarName)) {
               Throw "7z failed to create tar (exit $code)"

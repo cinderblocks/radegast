@@ -183,7 +183,7 @@ jobs:
 
           try {
             Write-Host "Creating tar: $tarName"
-            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastBundle_*" -mx=0
+            & 7z a $tarName -ttar * '-xr!symbols' '-xr!*.msi' '-xr!RadegastBundle_*' -mx=0
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tarName)) { Throw "7z tar failed (exit $LASTEXITCODE)" }
 
             Write-Host "Compressing to tbz: $tbzName"
