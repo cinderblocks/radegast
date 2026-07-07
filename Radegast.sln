@@ -83,6 +83,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.github\workflows\test.yml = .github\workflows\test.yml
 		.github\workflows\ci-release-macos.yml = .github\workflows\ci-release-macos.yml
 		.github\workflows\ci-release-linux-flatpak.yml = .github\workflows\ci-release-linux-flatpak.yml
+		.github\workflows\publish-legacy.yml = .github\workflows\publish-legacy.yml
+		.github\workflows\publish-legacy-appcast.yml = .github\workflows\publish-legacy-appcast.yml
+		.github\workflows\publish-veles-appcast.yml = .github\workflows\publish-veles-appcast.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radegast.Core", "Radegast.Core\Radegast.Core.csproj", "{F08F7BF4-013C-476A-A88C-62E9E2E8CC79}"
