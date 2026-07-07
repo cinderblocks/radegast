@@ -85,19 +85,31 @@ jobs:
 
       - name: Build installer
         run: |
+          # RadegastSetup.wixproj/RadegastBundle.wixproj reference Radegast.csproj as a
+          # ProjectReference, which causes MSBuild to rebuild it here. Without re-passing the
+          # same version/Bugsplat overrides as the "Build" step above, that rebuild silently
+          # clobbers Radegast.exe with the csproj's hardcoded defaults.
           Write-Host "Building Radegast MSI installer for ${{ matrix.platform }}"
           msbuild Install\RadegastSetup\RadegastSetup.wixproj `
             /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
-            /p:ProductVersion=${{ env.VERSION }}
+            /p:ProductVersion=${{ env.VERSION }} `
+            /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            /p:FileVersion=${{ env.BUILD_VERSION }} `
+            /p:InformationalVersion=${{ env.VERSION }} `
+            /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
           Write-Host "Building Radegast Bundle (bootstrapper) for ${{ matrix.platform }}"
           msbuild Install\RadegastBundle\RadegastBundle.wixproj `
             /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
-            /p:ProductVersion=${{ env.VERSION }}
+            /p:ProductVersion=${{ env.VERSION }} `
+            /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            /p:FileVersion=${{ env.BUILD_VERSION }} `
+            /p:InformationalVersion=${{ env.VERSION }} `
+            /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
       - name: Collect artifacts
         run: |

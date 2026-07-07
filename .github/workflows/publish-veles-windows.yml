@@ -69,11 +69,15 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          # VelesSetup.wixproj/VelesBundle.wixproj reference RadegastVeles.csproj as a
+          # ProjectReference, which causes MSBuild to rebuild it here. Without re-passing the
+          # same version/Bugsplat overrides as the "Build" step above, that rebuild silently
+          # clobbers RadegastVeles.exe with the csproj's hardcoded defaults.
           Write-Host "Building Radegast Veles MSI installer for ${{ matrix.platform }}"
-          msbuild Install\VelesSetup\VelesSetup.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesSetup\VelesSetup.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
           Write-Host "Building Radegast Veles Bundle (bootstrapper) for ${{ matrix.platform }}"
-          msbuild Install\VelesBundle\VelesBundle.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesBundle\VelesBundle.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
       - name: Collect artifacts
         shell: pwsh
