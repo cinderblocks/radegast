@@ -88,7 +88,7 @@ jobs:
             netsparkle-generate-appcast `
               -n Radegast `
               -e $ext `
-              -a $temp `
+              -b $temp `
               --output-type json `
               --output-file-name "$($t.Name)" `
               -o "$($t.Os)" `
