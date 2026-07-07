@@ -245,7 +245,11 @@ jobs:
         run: |
           if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
             echo "Release $TAG_NAME not found yet; creating draft release"
-            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME"
+            extra_args=()
+            if [[ "$VERSION" == *-* ]]; then
+              extra_args+=(--prerelease)
+            fi
+            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME" "${extra_args[@]}"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
