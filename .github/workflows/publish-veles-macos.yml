@@ -1,4 +1,4 @@
-name: CI Release macOS DMG
+name: Publish Veles macOS
 
 on:
   push:
@@ -29,6 +29,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Compute version
+        run: echo "VERSION=${TAG_NAME#Veles/}" >> "$GITHUB_ENV"
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -122,7 +125,7 @@ jobs:
       - name: Upload publish artifact
         uses: actions/upload-artifact@v4
         with:
-          name: publish-${{ matrix.arch }}
+          name: radegast-veles-macos-${{ matrix.arch }}-publish
           path: ${{ env.PUBLISH_DIR }}/osx-${{ matrix.arch }}
 
       - name: Create per-arch DMG (optional)
@@ -145,7 +148,7 @@ jobs:
       - name: Upload per-arch DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dmg-${{ matrix.arch }}
+          name: radegast-veles-macos-${{ matrix.arch }}-${{ env.VERSION }}
           path: dist/osx-${{ matrix.arch }}/*
 
   build-universal:
@@ -174,13 +177,13 @@ jobs:
       - name: Download x64 publish
         uses: actions/download-artifact@v4
         with:
-          name: publish-x64
+          name: radegast-veles-macos-x64-publish
           path: publish-x64
 
       - name: Download arm64 publish
         uses: actions/download-artifact@v4
         with:
-          name: publish-arm64
+          name: radegast-veles-macos-arm64-publish
           path: publish-arm64
 
       - name: Create universal .app
@@ -257,7 +260,7 @@ jobs:
       - name: Upload debug artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: macos-universal-debug-${{ env.VERSION }}
+          name: radegast-veles-macos-universal-debug-${{ env.VERSION }}
           path: |
             universal/**
             dist/**

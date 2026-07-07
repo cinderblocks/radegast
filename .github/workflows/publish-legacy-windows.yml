@@ -1,4 +1,4 @@
-name: Publish Legacy Radegast
+name: Publish Legacy Windows
 
 on:
   push:

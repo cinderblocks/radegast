@@ -1,4 +1,4 @@
-name: Publish Release Windows Installer and Archives
+name: Publish Veles Windows
 
 on:
   push:
@@ -427,7 +427,7 @@ jobs:
       # (Symbol upload moved to release job)
 
   release:
-    name: Create Release
+    name: Create Release Draft
     needs: build
     runs-on: windows-2022
     permissions:

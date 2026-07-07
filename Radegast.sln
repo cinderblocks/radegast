@@ -78,12 +78,12 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.gitignore = .gitignore
 		Directory.Build.props = Directory.Build.props
 		LICENSE.txt = LICENSE.txt
-		.github\workflows\publish.yml = .github\workflows\publish.yml
+		.github\workflows\publish-veles-windows.yml = .github\workflows\publish-veles-windows.yml
 		README.md = README.md
 		.github\workflows\test.yml = .github\workflows\test.yml
-		.github\workflows\ci-release-macos.yml = .github\workflows\ci-release-macos.yml
-		.github\workflows\ci-release-linux-flatpak.yml = .github\workflows\ci-release-linux-flatpak.yml
-		.github\workflows\publish-legacy.yml = .github\workflows\publish-legacy.yml
+		.github\workflows\publish-veles-macos.yml = .github\workflows\publish-veles-macos.yml
+		.github\workflows\publish-veles-linux.yml = .github\workflows\publish-veles-linux.yml
+		.github\workflows\publish-legacy-windows.yml = .github\workflows\publish-legacy-windows.yml
 		.github\workflows\publish-legacy-appcast.yml = .github\workflows\publish-legacy-appcast.yml
 		.github\workflows\publish-veles-appcast.yml = .github\workflows\publish-veles-appcast.yml
 	EndProjectSection

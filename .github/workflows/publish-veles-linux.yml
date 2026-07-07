@@ -1,4 +1,4 @@
-name: CI Release Linux Flatpak
+name: Publish Veles Linux Flatpak
 
 on:
   push:
@@ -120,5 +120,5 @@ jobs:
       - name: Upload debug artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flatpak-x86_64-${{ env.VERSION }}
+          name: radegast-veles-linux-x86_64-${{ env.VERSION }}
           path: dist/*.flatpak
