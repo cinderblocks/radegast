@@ -11,7 +11,9 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <!-- Exclude build artifacts and temporary directories -->
         <Exclude Files="$(var.Radegast.TargetDir)netstandard2.0\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)obj\**"/>
-        <Exclude Files="$(var.Radegast.TargetDir)**\*.xml"/>
+        <!-- Exclude C# XML doc-comment files (sit next to each DLL at the output root only) -->
+        <!-- without recursively matching, since linden\**\*.xml are required runtime avatar/asset data, not docs -->
+        <Exclude Files="$(var.Radegast.TargetDir)*.xml"/>
         <!-- Exclude SkiaSharp's non-Windows native runtimes (Linux/Android/macOS); only arm64/x64/x86 contain the Windows libSkiaSharp.dll -->
         <Exclude Files="$(var.Radegast.TargetDir)arm\**"/>
         <Exclude Files="$(var.Radegast.TargetDir)bionic-arm64\**"/>
