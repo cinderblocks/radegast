@@ -685,8 +685,7 @@ namespace Radegast.Rendering
             // And load the skeleton file in to the bones class
 
             XmlNodeList skeleton = lad.GetElementsByTagName("skeleton");
-            string skeletonfilename = skeleton[0].Attributes?.GetNamedItem("file_name").Value;
-            Bone.loadBones(skeletonfilename);
+            Bone.loadBones();
 
             // Next read all the skeleton child nodes, we have attachment points and bone deform params
             // attachment points are an offset and rotation from a bone location
@@ -1817,38 +1816,34 @@ namespace Radegast.Rendering
             mDeformMatrix = new Matrix4(source.mDeformMatrix);
         }
 
-        public static void loadBones(string skeletonfilename)
+        public static void loadBones()
         {
             lock (mBones) mBones.Clear();
-            string basedir = Path.Combine(Directory.GetCurrentDirectory(), "linden", "character");
-            XmlDocument skeleton = new XmlDocument();
-            skeleton.Load(Path.Combine(basedir, skeletonfilename));
-            XmlNode boneslist = skeleton.GetElementsByTagName("linden_skeleton")[0];
-            addBone(boneslist.ChildNodes[0], null);
+
+            // The default skeleton is baked in at compile time by LibreMetaverse's
+            // SkeletonGenerator from this same avatar_skeleton.xml, instead of parsing it here
+            // at runtime. Grids don't customize this file - it's a bundled client asset that
+            // avatar_lad.xml always points at - so there's no need to read it from disk anymore.
+            LindenSkeleton skeleton = LindenSkeleton.GetDefault();
+            addBone(skeleton.bone, null);
         }
 
-        public static void addBone(XmlNode bone, Bone parent)
+        public static void addBone(Joint joint, Bone parent)
         {
-
-            if (bone.Name != "bone")
+            if (joint == null)
                 return;
 
-            Bone b = new Bone {name = bone.Attributes.GetNamedItem("name").Value};
+            Bone b = new Bone {name = joint.name};
 
-            string pos = bone.Attributes.GetNamedItem("pos").Value;
-            string[] posparts = pos.Split(' ');
-            b.pos = new Vector3(float.Parse(posparts[0], Utils.EnUsCulture), float.Parse(posparts[1], Utils.EnUsCulture), float.Parse(posparts[2], Utils.EnUsCulture));
+            b.pos = new Vector3(joint.pos[0], joint.pos[1], joint.pos[2]);
             b.orig_pos = new Vector3(b.pos);
             b.offset_pos = new Vector3(b.pos);
 
-            string rot = bone.Attributes.GetNamedItem("rot").Value;
-            string[] rotparts = rot.Split(' ');
-            b.rot = Quaternion.CreateFromEulers((float)(float.Parse(rotparts[0], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[1], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[2], Utils.EnUsCulture) * Math.PI / 180f));
+            // rot is stored in degrees, matching the raw avatar_skeleton.xml convention.
+            b.rot = Quaternion.CreateFromEulers((float)(joint.rot[0] * Math.PI / 180f), (float)(joint.rot[1] * Math.PI / 180f), (float)(joint.rot[2] * Math.PI / 180f));
             b.orig_rot = b.rot;
 
-            string scale = bone.Attributes.GetNamedItem("scale").Value;
-            string[] scaleparts = scale.Split(' ');
-            b.scale = new Vector3(float.Parse(scaleparts[0], Utils.EnUsCulture), float.Parse(scaleparts[1], Utils.EnUsCulture), float.Parse(scaleparts[2], Utils.EnUsCulture));
+            b.scale = new Vector3(joint.scale[0], joint.scale[1], joint.scale[2]);
             b.orig_scale = new Vector3(b.scale);
 
 
@@ -1869,9 +1864,12 @@ namespace Radegast.Rendering
 
             Logger.Trace($"Found bone {b.name}");
 
-            foreach (XmlNode childbone in bone.ChildNodes)
+            if (joint.bone != null)
             {
-                addBone(childbone, b);
+                foreach (Joint childJoint in joint.bone)
+                {
+                    addBone(childJoint, b);
+                }
             }
 
         }
