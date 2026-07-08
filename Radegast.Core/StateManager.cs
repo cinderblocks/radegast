@@ -588,6 +588,11 @@ namespace Radegast
 
         private void Network_SimChanged(object? sender, SimChangedEventArgs e)
         {
+            // Arm the retry timer right away so auto-sit keeps trying every 10s until the
+            // target prim's data actually arrives, rather than depending on the one-shot
+            // attempt below succeeding on the first try.
+            AutoSit.Arm();
+
             Task.Run(async () =>
             {
                 try
