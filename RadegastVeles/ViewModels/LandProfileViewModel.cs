@@ -212,7 +212,6 @@ public partial class LandProfileViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _envIsCustom;
     [ObservableProperty] private string _envDayLength = string.Empty;
     [ObservableProperty] private string _envDayOffset = string.Empty;
-    [ObservableProperty] private string _envSkyTrack = string.Empty;
     [ObservableProperty] private bool _envHasLegacyWindLight;
     [ObservableProperty] private bool _isEnvironmentLoading = true;
 
@@ -396,26 +395,12 @@ public partial class LandProfileViewModel : ObservableObject, IDisposable
     // --- Edit commands ---
 
     [RelayCommand(CanExecute = nameof(CanStartAuction))]
-    private async Task StartAuction()
+    private void StartAuction()
     {
         if (_parcel == null || _parcelSim == null) return;
 
-        AuctionStatus = "Fetching parcel ID\u2026";
-        var center = new Vector3(
-            (_parcel.AABBMin.X + _parcel.AABBMax.X) / 2f,
-            (_parcel.AABBMin.Y + _parcel.AABBMax.Y) / 2f,
-            (_parcel.AABBMin.Z + _parcel.AABBMax.Z) / 2f);
-        var parcelUUID = await Client.Parcels.RequestRemoteParcelIDAsync(
-            center, _parcelSim.Handle, _parcelSim.ID);
-        if (parcelUUID == UUID.Zero)
-        {
-            AuctionStatus = "Could not resolve parcel ID.";
-            return;
-        }
-
         AuctionStatus = "Starting auction\u2026";
-        await Client.Parcels.StartAuctionAsync(
-            _parcelSim, parcelUUID, _parcel.SnapshotID, (int)AuctionStartingBid);
+        Client.Parcels.StartAuction(_parcelSim, _parcel.LocalID, _parcel.SnapshotID);
         AuctionStatus = "Auction request sent.";
     }
 
@@ -743,7 +728,7 @@ public partial class LandProfileViewModel : ObservableObject, IDisposable
     {
         var trusted = e.RegionExperiences.Trusted.ToList();
         var blocked = e.RegionExperiences.Blocked.ToList();
-        var contrib = e.RegionExperiences.Contrib.ToList();
+        var contrib = e.RegionExperiences.Allowed.ToList();
         Dispatcher.UIThread.Post(() =>
         {
             TrustedExperiences.Clear();
@@ -771,14 +756,12 @@ public partial class LandProfileViewModel : ObservableObject, IDisposable
                 EnvIsCustom = true;
                 EnvDayLength = FormatDayTime(env.DayLength);
                 EnvDayOffset = FormatDayTime(env.DayOffset);
-                EnvSkyTrack = ((EnvironmentTrack)env.SkyTrack).ToString();
             }
             else
             {
                 EnvIsCustom = false;
                 EnvDayLength = string.Empty;
                 EnvDayOffset = string.Empty;
-                EnvSkyTrack = string.Empty;
             }
             EnvHasLegacyWindLight = legacyEnv != null;
             IsEnvironmentLoading = false;

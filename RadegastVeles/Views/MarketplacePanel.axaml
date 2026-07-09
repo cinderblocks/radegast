@@ -44,10 +44,6 @@
 
                     <StackPanel Spacing="4"
                                 IsVisible="{Binding SelectedListing, Converter={x:Static ObjectConverters.IsNotNull}}">
-                        <TextBlock Text="{Binding SelectedListing.Title, StringFormat='Title: {0}', TargetNullValue='', FallbackValue=''}"
-                                   TextWrapping="Wrap" AutomationProperties.Name="Listing title" />
-                        <TextBlock Text="{Binding SelectedListing.PriceLinden, StringFormat='Price: L${0:N0}', FallbackValue=''}"
-                                   AutomationProperties.Name="Listing price" />
                         <TextBlock Text="{Binding SelectedListing.LocalStockCount, StringFormat='Local stock: {0}', FallbackValue=''}"
                                    AutomationProperties.Name="Local stock count" />
                         <TextBlock Text="{Binding SelectedListing.StockCount, StringFormat='Server stock: {0}', FallbackValue=''}"

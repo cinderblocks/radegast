@@ -143,11 +143,12 @@ public partial class MarketplaceViewModel : ClientAwareViewModelBase
     private async Task CreateListing(MarketplaceListingRecord? record)
     {
         record ??= SelectedListing;
-        if (record == null) return;
+        if (record?.VersionFolderUUID == null) return;
         record.IsUpdatePending = true;
         try
         {
-            await Client.Marketplace.CreateListingAsync(record.ListingFolderUUID).ConfigureAwait(false);
+            await Client.Marketplace.CreateListingAsync(record.ListingFolderUUID, record.VersionFolderUUID.Value,
+                record.FolderName, record.LocalStockCount).ConfigureAwait(false);
         }
         finally
         {

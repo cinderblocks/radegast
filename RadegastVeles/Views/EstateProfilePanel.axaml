@@ -161,16 +161,13 @@
                                    AutomationProperties.Name="Region uses grid environment" />
                         <StackPanel IsVisible="{Binding EnvIsCustom}" Spacing="4">
                             <TextBlock Text="Custom EEP environment is set." Opacity="0.8" />
-                            <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto" Margin="0,4,0,0">
+                            <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto" Margin="0,4,0,0">
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Day Length:" FontWeight="SemiBold" />
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding EnvDayLength}"
                                            AutomationProperties.Name="Day length" />
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Day Offset:" FontWeight="SemiBold" />
                                 <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding EnvDayOffset}"
                                            AutomationProperties.Name="Day offset" />
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Sky Track:" FontWeight="SemiBold" />
-                                <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding EnvSkyTrack}"
-                                           AutomationProperties.Name="Sky track" />
                             </Grid>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="6" Margin="0,4,0,0">
