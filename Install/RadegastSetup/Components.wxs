@@ -2,7 +2,7 @@
 xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 <?include ..\BuildProperties.wxi?>
   <Fragment>
-    <ComponentGroup Id="Radegast.Components" Directory="INSTALLFOLDER">
+    <ComponentGroup Id="Radegast.Components" Directory="APPLICATIONFOLDER">
       <Files Include="$(var.Radegast.TargetDir)**">
         <!-- Exclude debug symbols -->
         <Exclude Files="$(var.Radegast.TargetDir)**\*.pdb"/>
@@ -47,8 +47,8 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <Shortcut Id="ApplicationDesktopShortcut"
                   Name="$(var.productName)"
                   Description="$(var.productDesc)"
-                  Target="[INSTALLFOLDER]Radegast.exe"
-                  WorkingDirectory="INSTALLFOLDER"
+                  Target="[APPLICATIONFOLDER]Radegast.exe"
+                  WorkingDirectory="APPLICATIONFOLDER"
                   Icon="Radegast.ico" />
         <RegistryValue Root="HKCU"
                        Key="Software\$(var.companyName)\$(var.productName)"
@@ -63,17 +63,17 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Fragment>
     
     <!-- SLURL Protocol Handlers (optional, controlled by REGISTERPROTOCOLS property) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="SLURLProtocolHandler" Condition="REGISTERPROTOCOLS = 1">
         <!-- secondlife:// protocol handler -->
         <RegistryKey Root="HKCR" Key="secondlife">
           <RegistryValue Type="string" Value="URL:Second Life Protocol" />
           <RegistryValue Type="string" Name="URL Protocol" Value="" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]Radegast.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <!-- hop:// protocol handler for HyperGrid -->
@@ -81,10 +81,10 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
           <RegistryValue Type="string" Value="URL:HyperGrid Protocol" />
           <RegistryValue Type="string" Name="URL Protocol" Value="" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]Radegast.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <!-- Use per-machine registry for KeyPath to match HKCR -->
@@ -105,8 +105,8 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
                   Name="$(var.productName)"
                   Description="$(var.productDesc)"
                   Icon="Radegast.ico"
-                  Target="[INSTALLFOLDER]Radegast.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  Target="[APPLICATIONFOLDER]Radegast.exe"
+                  WorkingDirectory="APPLICATIONFOLDER" />
         
         <!-- Uninstall shortcut -->
         <Shortcut Id="UninstallShortcut"
@@ -140,7 +140,7 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
     </DirectoryRef>
     
     <!-- Uninstall cleanup (optional user data removal) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="UninstallCleanup" Condition="REMOVE=&quot;ALL&quot; AND CLEAN_USERDATA=&quot;1&quot;">
         <!-- This component only activates during uninstall if user chooses to remove data -->
         <RegistryValue Root="HKCU"
@@ -160,10 +160,10 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
     </DirectoryRef>
     
     <!-- Application tracking registry entries -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="RegistryEntries">
         <RegistryKey Root="HKLM" Key="Software\$(var.companyName)\$(var.productName)">
-          <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="InstallPath" Value="[APPLICATIONFOLDER]" />
           <RegistryValue Type="string" Name="Version" Value="[ProductVersion]" />
           <RegistryValue Type="string" Name="DisplayName" Value="$(var.productName)" />
           <RegistryValue Type="string" Name="Publisher" Value="$(var.companyName)" />
@@ -179,7 +179,7 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
     </DirectoryRef>
     
     <!-- File type associations (optional) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="FileAssociations" Condition="REGISTERFILEASSOC = 1">
         <!-- .oar (OpenSimulator Archive) file association -->
         <RegistryKey Root="HKCR" Key=".oar">
@@ -188,10 +188,10 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <RegistryKey Root="HKCR" Key="Radegast.OAR">
           <RegistryValue Type="string" Value="OpenSimulator Archive" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]Radegast.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <!-- .iar (Inventory Archive) file association -->
@@ -201,10 +201,10 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
         <RegistryKey Root="HKCR" Key="Radegast.IAR">
           <RegistryValue Type="string" Value="OpenSimulator Inventory Archive" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]Radegast.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]Radegast.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]Radegast.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <!-- Use per-machine registry for KeyPath to match HKCR -->

@@ -1,7 +1,12 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLFOLDER" Name="!(bind.Property.ProductName)" />
+      <!-- Must be named APPLICATIONFOLDER: WixUI_Advanced's install-scope/browse dialogs
+           hardcode WIXUI_INSTALLDIR to that Directory Id, and there is no supported way to
+           point it elsewhere. Using any other name leaves that Id undefined in the Directory
+           table, which fails at install time with error 2727 ("Directory entry '[2]' does not
+           exist") when the dialog tries to resolve it. -->
+      <Directory Id="APPLICATIONFOLDER" Name="!(bind.Property.ProductName)" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder">
       <Directory Id="ApplicationProgramsFolder" Name="!(bind.Property.ProductName)" />
