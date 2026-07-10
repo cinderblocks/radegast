@@ -75,6 +75,7 @@ namespace Radegast
             this.micMute = new System.Windows.Forms.CheckBox();
             this.pictureBox2 = new System.Windows.Forms.PictureBox();
             this.progressBar1 = new System.Windows.Forms.ProgressBar();
+            this.btnReconnect = new System.Windows.Forms.Button();
             this.label2 = new System.Windows.Forms.Label();
             this.micLevel = new System.Windows.Forms.TrackBar();
             this.spkrLevel = new System.Windows.Forms.TrackBar();
@@ -133,6 +134,7 @@ namespace Radegast
             this.splitContainer1.Panel1.Controls.Add(this.micMute);
             this.splitContainer1.Panel1.Controls.Add(this.pictureBox2);
             this.splitContainer1.Panel1.Controls.Add(this.progressBar1);
+            this.splitContainer1.Panel1.Controls.Add(this.btnReconnect);
             this.splitContainer1.Panel1.Controls.Add(this.label2);
             this.splitContainer1.Panel1.Controls.Add(this.micLevel);
             this.splitContainer1.Panel1.Controls.Add(this.spkrLevel);
@@ -272,6 +274,17 @@ namespace Radegast
             this.progressBar1.Name = "progressBar1";
             this.progressBar1.Size = new System.Drawing.Size(147, 15);
             this.progressBar1.TabIndex = 17;
+            //
+            // btnReconnect
+            //
+            this.btnReconnect.AccessibleName = "Reconnect Voice";
+            this.btnReconnect.Location = new System.Drawing.Point(212, 47);
+            this.btnReconnect.Name = "btnReconnect";
+            this.btnReconnect.Size = new System.Drawing.Size(90, 23);
+            this.btnReconnect.TabIndex = 18;
+            this.btnReconnect.Text = "Reconnect";
+            this.btnReconnect.UseVisualStyleBackColor = true;
+            this.btnReconnect.Click += new System.EventHandler(this.btnReconnect_Click);
             //
             // label2
             //
@@ -542,5 +555,6 @@ namespace Radegast
         private Label label3;
         private Button btnUnmuteAll;
         private Button btnMuteAll;
+        private Button btnReconnect;
     }
 }

@@ -188,6 +188,21 @@ namespace Radegast
             }
         }
 
+        // Manual recovery path for when reprovision backoff has genuinely exhausted (see
+        // Voice_OnReprovisionFailed) and nothing is going to reconnect on its own. Toggling
+        // chkVoiceEnable off/on already does this, but that checkbox reads as "do I want voice
+        // at all," not "reconnect now," so it isn't an obvious recovery step for a stuck session.
+        private void btnReconnect_Click(object sender, EventArgs e)
+        {
+            if (voice == null)
+            {
+                // Never initialized (e.g. audio device unavailable at startup) — retry from scratch.
+                if (chkVoiceEnable.Checked) Start();
+                return;
+            }
+            _ = ConnectAsync();
+        }
+
         private void RegisterVoiceEvents()
         {
             Instance.Names.NameUpdated += Names_NameUpdated;
@@ -195,6 +210,8 @@ namespace Radegast
             voice.PeerConnectionClosed += Voice_PeerConnectionClosed;
             voice.OnRegionTransitionCompleted += Voice_OnRegionTransitionCompleted;
             voice.OnRegionTransitionFailed += Voice_OnRegionTransitionFailed;
+            voice.OnReprovisionSucceeded += Voice_OnReprovisionSucceeded;
+            voice.OnReprovisionFailed += Voice_OnReprovisionFailed;
             voice.PeerJoined += Voice_PeerJoined;
             voice.PeerLeft += Voice_PeerLeft;
             voice.PeerAudioUpdated += Voice_PeerAudioUpdated;
@@ -208,6 +225,8 @@ namespace Radegast
             voice.PeerConnectionClosed -= Voice_PeerConnectionClosed;
             voice.OnRegionTransitionCompleted -= Voice_OnRegionTransitionCompleted;
             voice.OnRegionTransitionFailed -= Voice_OnRegionTransitionFailed;
+            voice.OnReprovisionSucceeded -= Voice_OnReprovisionSucceeded;
+            voice.OnReprovisionFailed -= Voice_OnReprovisionFailed;
             voice.PeerJoined -= Voice_PeerJoined;
             voice.PeerLeft -= Voice_PeerLeft;
             voice.PeerAudioUpdated -= Voice_PeerAudioUpdated;
@@ -452,6 +471,26 @@ namespace Radegast
             BeginInvoke(new MethodInvoker(() =>
             {
                 isConnected = false;
+                SetStatus(VoiceStatus.Disconnected);
+            }));
+        }
+
+        // Fired by the dead-channel watchdog (stuck ICE, failed peer connection, etc.) when it
+        // rebuilds the session in place — distinct from a region crossing. The rebuilt session's
+        // PeerConnectionReady event (already wired) is what actually flips the status back to
+        // Connected once it comes up; this handler exists so a failed attempt (see below) doesn't
+        // leave the console permanently stuck showing "Connecting" with nothing to correct it.
+        private void Voice_OnReprovisionSucceeded()
+        {
+        }
+
+        private void Voice_OnReprovisionFailed(Exception ex)
+        {
+            BeginInvoke(new MethodInvoker(() =>
+            {
+                isConnected = false;
+                pttTimer.Stop();
+                pttKeyHeld = false;
                 SetStatus(VoiceStatus.Disconnected);
             }));
         }
