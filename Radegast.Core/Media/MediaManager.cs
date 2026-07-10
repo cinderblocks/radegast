@@ -112,14 +112,17 @@ namespace Radegast.Media
         // When the 3D scene viewer is open it pushes its camera state here so the FMOD
         // listener tracks the camera rather than the avatar body rotation.
         private volatile CameraListenerState? _cameraListener;
-        private sealed record CameraListenerState(Vector3 EyePosition, Vector3 Forward);
+        private sealed record CameraListenerState(Vector3 EyePosition, Vector3 Forward, Vector3 Up);
 
         /// <summary>
-        /// Override the FMOD listener with the scene camera's eye position and look
-        /// direction.  Call this ~10 Hz while the 3D scene viewer is active.
+        /// Override the FMOD listener with the scene camera's eye position, look
+        /// direction, and up vector. Call this ~10 Hz while the 3D scene viewer is
+        /// active. <paramref name="up"/> must be unit length and perpendicular to
+        /// <paramref name="forward"/> (FMOD rejects listener vectors that aren't),
+        /// which is guaranteed when the camera has any pitch away from level.
         /// </summary>
-        public void SetCameraListenerState(Vector3 eyePosition, Vector3 forward)
-            => _cameraListener = new CameraListenerState(eyePosition, forward);
+        public void SetCameraListenerState(Vector3 eyePosition, Vector3 forward, Vector3 up)
+            => _cameraListener = new CameraListenerState(eyePosition, forward, up);
 
         /// <summary>
         /// Revert the FMOD listener to avatar-body-rotation tracking.
@@ -865,6 +868,7 @@ namespace Radegast.Media
                 var camState = _cameraListener;
                 VECTOR listenerpos;
                 VECTOR forward;
+                VECTOR up;
 
                 if (camState != null)
                 {
@@ -874,6 +878,15 @@ namespace Radegast.Media
                     listenerpos = FromOMVSpace(camState.EyePosition);
                     var f = camState.Forward;
                     forward = new VECTOR { x = -f.Y, y = f.Z, z = f.X };
+
+                    // The world-up (0,1,0) fallback only stays perpendicular to forward
+                    // while the camera is level. Once it pitches up/down, forward gains
+                    // a vertical component and FMOD rejects the pair with
+                    // ERR_INVALID_VECTOR, so use the camera's own up vector instead —
+                    // it's built via cross products and is always unit length and
+                    // perpendicular to forward.
+                    var u = camState.Up;
+                    up = new VECTOR { x = -u.Y, y = u.Z, z = u.X };
                 }
                 else
                 {
@@ -917,6 +930,7 @@ namespace Radegast.Media
                         y = 0.0f,
                         z =  (float)Math.Cos(newAngle)   // East  component ( OMV X)
                     };
+                    up = UpVector;
                 }
 
                 invoke(delegate
@@ -926,7 +940,7 @@ namespace Radegast.Media
                         ref listenerpos,  // Position
                         ref ZeroVector,   // Velocity
                         ref forward,      // Facing direction
-                        ref UpVector));   // Top of head
+                        ref up));         // Top of head
 
                     FMODExec(system.update());
                 });
