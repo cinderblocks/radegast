@@ -11,6 +11,15 @@
 		<GenerateResourceUsePreserializedResources>true</GenerateResourceUsePreserializedResources>
 	<Platforms>AnyCPU;x64;x86;ARM64</Platforms>
 	<OutputPath>..\bin\Radegast\$(Configuration)\</OutputPath>
+	<!-- AnyCPU builds run 64-bit on modern Windows (no 32BITPREF flag), but without a
+	     RuntimeIdentifier NuGet can't pick the right native asset out of packages like
+	     SIPSorceryMedia.SDL3.Native (runtimes/win-x86|win-x64|win-arm64) and silently
+	     grabs the wrong-bitness SDL3.dll, causing HRESULT 0x8007000B at load time. -->
+	<RuntimeIdentifier Condition="'$(Platform)'=='AnyCPU' or '$(Platform)'=='x64'">win-x64</RuntimeIdentifier>
+	<RuntimeIdentifier Condition="'$(Platform)'=='x86'">win-x86</RuntimeIdentifier>
+	<RuntimeIdentifier Condition="'$(Platform)'=='ARM64'">win-arm64</RuntimeIdentifier>
+	<SelfContained>false</SelfContained>
+	<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
 	<Version>2.6.7</Version>
 	<AssemblyVersion>2.6.7.0</AssemblyVersion>
 	<FileVersion>2.6.7.0</FileVersion>
