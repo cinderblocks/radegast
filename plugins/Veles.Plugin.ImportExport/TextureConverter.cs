@@ -82,7 +82,7 @@ internal static class TextureConverter
                 break;
 
             case ".tga":
-                File.WriteAllBytes(path, Targa.Encode(bitmap));
+                File.WriteAllBytes(path, Targa.Encode(LibreMetaverse.Imaging.Skia.SkiaTextureCodec.ToManagedImage(bitmap)));
                 break;
 
             default:

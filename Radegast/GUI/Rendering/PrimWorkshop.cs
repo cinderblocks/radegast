@@ -1091,7 +1091,7 @@ namespace Radegast.Rendering
                         SKBitmap img = null;
                         if (!LoadTexture(prim.Sculpt.SculptTexture, ref img, true))
                             return;
-                        mesh = renderer.GenerateFacetedSculptMesh(prim, img, DetailLevel.Highest);
+                        mesh = renderer.GenerateFacetedSculptMesh(prim, LibreMetaverse.Imaging.Skia.SkiaTextureCodec.ToManagedImage(img), DetailLevel.Highest);
                     }
                     else
                     { // Mesh

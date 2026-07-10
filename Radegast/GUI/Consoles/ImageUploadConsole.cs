@@ -293,7 +293,7 @@ namespace Radegast
                 }
                 else if (type == 2)
                 { // targa
-                    var bitmap = J2kImage.DecodeToImage<SKBitmap>(UploadData);
+                    var bitmap = J2kImage.DecodeToImage<LibreMetaverse.Imaging.ManagedImage>(UploadData);
                     File.WriteAllBytes(dlg.FileName, Targa.Encode(bitmap));
                 }
                 else if (type == 1)
