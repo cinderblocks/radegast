@@ -17,21 +17,22 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
     <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.Rendering.MeshFoundry" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.Types" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.Utilities" Version="3.0.4" />
-    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.0.4" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Imaging.Skia\LibreMetaverse.Imaging.Skia.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.LslTools\LibreMetaverse.LslTools.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Rendering.MeshFoundry\LibreMetaverse.Rendering.MeshFoundry.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.RLV\LibreMetaverse.RLV.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.StructuredData\LibreMetaverse.StructuredData.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Utilities\LibreMetaverse.Utilities.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Types\LibreMetaverse.Types.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Voice.WebRTC\LibreMetaverse.Voice.WebRTC.csproj" />
+    <ProjectReference Include="..\libremetaverse\LibreMetaverse\LibreMetaverse.csproj" />
+    <ProjectReference Include="..\libremetaverse\PrimMesher\LibreMetaverse.PrimMesher.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.148.0" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.148.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.150.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.150.0" />
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.9" />
     <PackageReference Include="System.Threading.RateLimiting" Version="10.0.9" />
   </ItemGroup>
