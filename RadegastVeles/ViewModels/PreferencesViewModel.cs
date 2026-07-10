@@ -879,30 +879,18 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _notificationPrefsStatus = string.Empty;
 
     [RelayCommand]
-    private async Task LoadNotificationPrefsAsync()
+    private Task LoadNotificationPrefsAsync()
     {
-        if (IsLoadingNotificationPrefs) return;
-        IsLoadingNotificationPrefs = true;
-        NotificationPrefsStatus = "Loading\u2026";
-        var msg = await _instance.Client.Self.GetNotificationPreferencesAsync();
-        IsLoadingNotificationPrefs = false;
         NotificationChannels.Clear();
-        if (msg == null) { NotificationPrefsStatus = "Server does not support reading notification preferences. Configure channels below and use Save to push settings to the server."; return; }
-        foreach (var e in msg.Notifications)
-            NotificationChannels.Add(new NotificationChannelEntry(e.Name, e.Value));
-        NotificationPrefsStatus = $"{NotificationChannels.Count} channel(s) loaded.";
+        NotificationPrefsStatus = "Notification preferences are not supported by this client.";
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
-    private async Task SaveNotificationPrefsAsync()
+    private Task SaveNotificationPrefsAsync()
     {
-        var msg = new NotificationPreferencesMessage();
-        msg.Notifications = NotificationChannels
-            .Select(c => new NotificationPreferencesMessage.NotificationEntry
-                { Name = c.Name, Value = c.IsEnabled })
-            .ToList();
-        await _instance.Client.Self.SetNotificationPreferencesAsync(msg);
-        NotificationPrefsStatus = "Saved.";
+        NotificationPrefsStatus = "Notification preferences are not supported by this client.";
+        return Task.CompletedTask;
     }
 }
 

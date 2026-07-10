@@ -57,14 +57,6 @@ public partial class MarketplaceListingRecord : ObservableObject
     [NotifyPropertyChangedFor(nameof(StatusBadgeText))]
     private MarketplaceListingStatus _status = MarketplaceListingStatus.Unknown;
 
-    /// <summary>Listing title from the backend.</summary>
-    [ObservableProperty]
-    private string _title = string.Empty;
-
-    /// <summary>Price in Linden Dollars from the backend.</summary>
-    [ObservableProperty]
-    private int _priceLinden;
-
     /// <summary>Stock count as reported by the backend.</summary>
     [ObservableProperty]
     private int _stockCount;
@@ -162,8 +154,6 @@ public partial class MarketplaceListingRecord : ObservableObject
         VersionFolderUUID = listing.VersionFolderUUID == UUID.Zero
             ? (UUID?)null : listing.VersionFolderUUID;
         Status = listing.Status;
-        Title = listing.Title;
-        PriceLinden = listing.PriceLinden;
         StockCount = listing.StockCount;
         EditUrl = listing.EditUrl;
         LastSyncUtc = listing.LastSyncUtc;

@@ -70,11 +70,13 @@ namespace Radegast
         private void btnDisable_Click(object sender, EventArgs e)
         {
             Instance.GlobalSettings["auto_reconnect"] = OSD.FromBoolean(false);
+            Instance.MainForm.InAutoReconnect = false;
             Close();
         }
 
         private void btnCancel_Click(object sender, EventArgs e)
         {
+            Instance.MainForm.InAutoReconnect = false;
             Close();
         }
     }

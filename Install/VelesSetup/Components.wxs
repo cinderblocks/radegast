@@ -2,7 +2,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <?include ..\VelesBuildProperties.wxi?>
   <Fragment>
-    <ComponentGroup Id="Veles.Components" Directory="INSTALLFOLDER">
+    <ComponentGroup Id="Veles.Components" Directory="APPLICATIONFOLDER">
       <Files Include="$(var.RadegastVeles.TargetDir)**">
         <!-- Exclude debug symbols -->
         <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.pdb"/>
@@ -10,12 +10,37 @@
         <Exclude Files="$(var.RadegastVeles.TargetDir)RadegastVeles.exe"/>
         <!-- Exclude build artifacts -->
         <Exclude Files="$(var.RadegastVeles.TargetDir)obj\**"/>
-        <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.xml"/>
+        <!-- Exclude C# XML doc-comment files (sit next to each DLL at the output root only) -->
+        <!-- without recursively matching, since linden\**\*.xml are required runtime avatar/asset data, not docs -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)*.xml"/>
         <Exclude Files="$(var.RadegastVeles.TargetDir)**\.git*"/>
         <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.csproj"/>
         <Exclude Files="$(var.RadegastVeles.TargetDir)**\*.sln"/>
         <!-- Exclude all plugin files — each plugin is its own optional Feature -->
         <Exclude Files="$(var.RadegastVeles.TargetDir)plugins\Veles.Plugin.*"/>
+        <!-- Exclude non-Windows native runtimes (Avalonia/SkiaSharp/sherpa-onnx ship android/freebsd/ios/linux/osx variants); only runtimes\win-* is needed here -->
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\android-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\freebsd-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\freebsd-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\ios-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-bionic-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-bionic-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-loongarch64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-arm\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-loongarch64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-riscv64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-musl-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-riscv64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-x64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\linux-x86\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx-arm64\**"/>
+        <Exclude Files="$(var.RadegastVeles.TargetDir)runtimes\osx-x64\**"/>
       </Files>
       <Component>
         <File Id="RadegastVeles.Executable" Source="$(var.RadegastVeles.TargetDir)RadegastVeles.exe" />
@@ -69,8 +94,8 @@
         <Shortcut Id="VelesApplicationDesktopShortcut"
                   Name="$(var.productName)"
                   Description="$(var.productDesc)"
-                  Target="[INSTALLFOLDER]RadegastVeles.exe"
-                  WorkingDirectory="INSTALLFOLDER"
+                  Target="[APPLICATIONFOLDER]RadegastVeles.exe"
+                  WorkingDirectory="APPLICATIONFOLDER"
                   Icon="Veles.ico" />
         <RegistryValue Root="HKCU"
                        Key="Software\$(var.companyName)\$(var.productName)"
@@ -84,17 +109,17 @@
 
   <Fragment>
     <!-- SLURL Protocol Handlers (optional, controlled by REGISTERPROTOCOLS property) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="VelesSLURLProtocolHandler" Condition="REGISTERPROTOCOLS = 1">
         <!-- secondlife:// protocol handler -->
         <RegistryKey Root="HKCR" Key="secondlife">
           <RegistryValue Type="string" Value="URL:Second Life Protocol" />
           <RegistryValue Type="string" Name="URL Protocol" Value="" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]RadegastVeles.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <!-- hop:// protocol handler for HyperGrid -->
@@ -102,10 +127,10 @@
           <RegistryValue Type="string" Value="URL:HyperGrid Protocol" />
           <RegistryValue Type="string" Name="URL Protocol" Value="" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]RadegastVeles.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <RegistryValue Root="HKLM"
@@ -124,8 +149,8 @@
                   Name="$(var.productName)"
                   Description="$(var.productDesc)"
                   Icon="Veles.ico"
-                  Target="[INSTALLFOLDER]RadegastVeles.exe"
-                  WorkingDirectory="INSTALLFOLDER" />
+                  Target="[APPLICATIONFOLDER]RadegastVeles.exe"
+                  WorkingDirectory="APPLICATIONFOLDER" />
         <Shortcut Id="VelesUninstallShortcut"
                   Name="Uninstall $(var.productName)"
                   Description="Uninstall $(var.productName)"
@@ -155,7 +180,7 @@
     </DirectoryRef>
 
     <!-- Uninstall cleanup (optional user data removal) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="VelesUninstallCleanup" Condition="REMOVE=&quot;ALL&quot; AND CLEAN_USERDATA=&quot;1&quot;">
         <RegistryValue Root="HKCU"
                        Key="Software\$(var.companyName)\$(var.productName)"
@@ -174,10 +199,10 @@
     </DirectoryRef>
 
     <!-- Application tracking registry entries -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="VelesRegistryEntries">
         <RegistryKey Root="HKLM" Key="Software\$(var.companyName)\$(var.productName)">
-          <RegistryValue Type="string" Name="InstallPath" Value="[INSTALLFOLDER]" />
+          <RegistryValue Type="string" Name="InstallPath" Value="[APPLICATIONFOLDER]" />
           <RegistryValue Type="string" Name="Version" Value="[ProductVersion]" />
           <RegistryValue Type="string" Name="DisplayName" Value="$(var.productName)" />
           <RegistryValue Type="string" Name="Publisher" Value="$(var.companyName)" />
@@ -193,7 +218,7 @@
     </DirectoryRef>
 
     <!-- File type associations (optional) -->
-    <DirectoryRef Id="INSTALLFOLDER">
+    <DirectoryRef Id="APPLICATIONFOLDER">
       <Component Id="VelesFileAssociations" Condition="REGISTERFILEASSOC = 1">
         <RegistryKey Root="HKCR" Key=".oar">
           <RegistryValue Type="string" Value="Veles.OAR" />
@@ -201,10 +226,10 @@
         <RegistryKey Root="HKCR" Key="Veles.OAR">
           <RegistryValue Type="string" Value="OpenSimulator Archive" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]RadegastVeles.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <RegistryKey Root="HKCR" Key=".iar">
@@ -213,10 +238,10 @@
         <RegistryKey Root="HKCR" Key="Veles.IAR">
           <RegistryValue Type="string" Value="OpenSimulator Inventory Archive" />
           <RegistryKey Key="DefaultIcon">
-            <RegistryValue Type="string" Value="[INSTALLFOLDER]RadegastVeles.exe,0" />
+            <RegistryValue Type="string" Value="[APPLICATIONFOLDER]RadegastVeles.exe,0" />
           </RegistryKey>
           <RegistryKey Key="shell\open\command">
-            <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
+            <RegistryValue Type="string" Value="&quot;[APPLICATIONFOLDER]RadegastVeles.exe&quot; &quot;%1&quot;" />
           </RegistryKey>
         </RegistryKey>
         <RegistryValue Root="HKLM"

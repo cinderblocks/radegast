@@ -1,4 +1,4 @@
-name: Publish Legacy Radegast
+name: Publish Legacy Windows
 
 on:
   push:
@@ -85,17 +85,31 @@ jobs:
 
       - name: Build installer
         run: |
+          # RadegastSetup.wixproj/RadegastBundle.wixproj reference Radegast.csproj as a
+          # ProjectReference, which causes MSBuild to rebuild it here. Without re-passing the
+          # same version/Bugsplat overrides as the "Build" step above, that rebuild silently
+          # clobbers Radegast.exe with the csproj's hardcoded defaults.
           Write-Host "Building Radegast MSI installer for ${{ matrix.platform }}"
           msbuild Install\RadegastSetup\RadegastSetup.wixproj `
+            /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
-            /p:ProductVersion=${{ env.VERSION }}
+            /p:ProductVersion=${{ env.VERSION }} `
+            /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            /p:FileVersion=${{ env.BUILD_VERSION }} `
+            /p:InformationalVersion=${{ env.VERSION }} `
+            /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
           Write-Host "Building Radegast Bundle (bootstrapper) for ${{ matrix.platform }}"
           msbuild Install\RadegastBundle\RadegastBundle.wixproj `
+            /restore `
             /p:Configuration=Release `
             /p:Platform=${{ matrix.platform }} `
-            /p:ProductVersion=${{ env.VERSION }}
+            /p:ProductVersion=${{ env.VERSION }} `
+            /p:AssemblyVersion=${{ env.BUILD_VERSION }} `
+            /p:FileVersion=${{ env.BUILD_VERSION }} `
+            /p:InformationalVersion=${{ env.VERSION }} `
+            /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
       - name: Collect artifacts
         run: |
@@ -181,7 +195,7 @@ jobs:
 
           try {
             Write-Host "Creating tar: $tarName"
-            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastBundle_*" -mx=0
+            & 7z a $tarName -ttar * '-xr!symbols' '-xr!*.msi' '-xr!RadegastBundle_*' -mx=0
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tarName)) { Throw "7z tar failed (exit $LASTEXITCODE)" }
 
             Write-Host "Compressing to tbz: $tbzName"
@@ -240,6 +254,7 @@ jobs:
     runs-on: windows-2022
     permissions:
       contents: write
+      copilot-requests: write
     defaults:
       run:
         shell: pwsh
@@ -249,6 +264,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -269,6 +287,8 @@ jobs:
           }
 
       - name: Generate release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ("${{ github.event_name }}" -eq "workflow_dispatch") {
             $version = "${{ inputs.version }}"
@@ -282,11 +302,37 @@ jobs:
           echo "VERSION=$version" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "PRERELEASE=$prerelease" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
+          # Prefer the last Legacy/* tag; fall back to the last tag of any scheme (e.g. v2.53,
+          # from before the Legacy/Veles split) rather than the repo's root commit, which would
+          # dump the entire multi-thousand-commit history into the release notes.
           $previousTag = git describe --tags --abbrev=0 --match 'Legacy/*' "$tag^" 2>$null
+          if (-not $previousTag) { $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null }
           if (-not $previousTag) { $previousTag = git rev-list --max-parents=0 HEAD }
 
-          $commits = git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges 2>$null
-          if (-not $commits) { $commits = "_No changelog available._" }
+          # git log returns one array element per line in PowerShell; interpolating the array
+          # directly joins elements with a space (PowerShell's $OFS), collapsing the list into
+          # one run-on line. Join with newlines explicitly so it renders as markdown bullets.
+          $commitLines = @(git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges 2>$null)
+          if ($commitLines.Count -eq 0) {
+            $commits = "_No changelog available._"
+          } elseif ($commitLines.Count -gt 25) {
+            $commits = "<details><summary>$($commitLines.Count) commits since $previousTag</summary>`n`n$($commitLines -join "`n")`n`n</details>"
+          } else {
+            $commits = $commitLines -join "`n"
+          }
+
+          # Best-effort AI summary via Copilot CLI (billed to the org's Copilot subscription).
+          # Never let a summary failure block the release - fall back to just the commit list.
+          $summary = $null
+          if ($commitLines.Count -gt 0) {
+            try {
+              $prompt = "Summarize the following commits from a Windows desktop app release into a short, friendly changelog for end users (2-4 sentences, plain prose, no markdown headers, no bullet list, do not quote the raw commit messages verbatim). Focus on user-facing fixes/features; omit purely internal/CI-only changes unless nothing else is notable.`n`nCommits:`n$($commitLines -join "`n")"
+              $summary = (copilot --no-ask-user -p $prompt 2>$null | Out-String).Trim()
+            } catch {
+              Write-Warning "Copilot CLI summary generation failed: $_"
+            }
+          }
+          if (-not $summary) { $summary = "" } else { $summary = "$summary`n" }
 
           @"
           # Radegast $version
@@ -301,6 +347,7 @@ jobs:
 
           ## Changes
 
+          $summary
           $commits
 
           ## Requirements

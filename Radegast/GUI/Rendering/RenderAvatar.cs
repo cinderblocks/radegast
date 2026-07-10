@@ -668,17 +668,6 @@ namespace Radegast.Rendering
             }
         }
 
-        public static void dumptweaks()
-        {
-
-            for (int x = 0; x < VisualParamEx.TweakableParams.Count; x++)
-            {
-                VisualParamEx vpe = (VisualParamEx)VisualParamEx.TweakableParams.GetByIndex(x);
-                Console.WriteLine($"{x} is {vpe.Name}");
-            }
-
-        }
-
         public static void loadlindenmeshes2(string LODfilename)
         {
             // Already have mashes loaded?
@@ -696,8 +685,7 @@ namespace Radegast.Rendering
             // And load the skeleton file in to the bones class
 
             XmlNodeList skeleton = lad.GetElementsByTagName("skeleton");
-            string skeletonfilename = skeleton[0].Attributes?.GetNamedItem("file_name").Value;
-            Bone.loadBones(skeletonfilename);
+            Bone.loadBones();
 
             // Next read all the skeleton child nodes, we have attachment points and bone deform params
             // attachment points are an offset and rotation from a bone location
@@ -980,13 +968,22 @@ namespace Radegast.Rendering
 
                     foreach (byte vpvalue in av.VisualParameters)
                     {
-                        if (x >= VisualParamEx.TransmittedParams.Count)
+                        // Group0ParamIds (despite the name) covers group-0 tweakable and
+                        // group-3 transmit_not_tweakable param IDs together, in the same
+                        // ascending-ParamID order the server uses for AvatarAppearance packet
+                        // bytes — generated at compile time from the same avatar_lad.xml.
+                        if (x >= LibreMetaverse.VisualParams.Group0ParamIds.Length)
                         {
                             //Logger.Log("Too many visual parameters in Avatar appearance", Helpers.LogLevel.Warning);
                             break;
                         }
 
-                        VisualParamEx vpe = (VisualParamEx)VisualParamEx.TransmittedParams.GetByIndex(x);
+                        int paramId = LibreMetaverse.VisualParams.Group0ParamIds[x];
+                        if (!VisualParamEx.AllParams.TryGetValue(paramId, out VisualParamEx vpe))
+                        {
+                            x++;
+                            continue;
+                        }
 
                         // Skip group-3 (TRANSMIT_NOT_TWEAKABLE) params — they occupy bytes in
                         // the packet but have no tweakable morphs or bone deforms to apply.
@@ -1819,38 +1816,34 @@ namespace Radegast.Rendering
             mDeformMatrix = new Matrix4(source.mDeformMatrix);
         }
 
-        public static void loadBones(string skeletonfilename)
+        public static void loadBones()
         {
             lock (mBones) mBones.Clear();
-            string basedir = Path.Combine(Directory.GetCurrentDirectory(), "linden", "character");
-            XmlDocument skeleton = new XmlDocument();
-            skeleton.Load(Path.Combine(basedir, skeletonfilename));
-            XmlNode boneslist = skeleton.GetElementsByTagName("linden_skeleton")[0];
-            addBone(boneslist.ChildNodes[0], null);
+
+            // The default skeleton is baked in at compile time by LibreMetaverse's
+            // SkeletonGenerator from this same avatar_skeleton.xml, instead of parsing it here
+            // at runtime. Grids don't customize this file - it's a bundled client asset that
+            // avatar_lad.xml always points at - so there's no need to read it from disk anymore.
+            LindenSkeleton skeleton = LindenSkeleton.GetDefault();
+            addBone(skeleton.bone, null);
         }
 
-        public static void addBone(XmlNode bone, Bone parent)
+        public static void addBone(Joint joint, Bone parent)
         {
-
-            if (bone.Name != "bone")
+            if (joint == null)
                 return;
 
-            Bone b = new Bone {name = bone.Attributes.GetNamedItem("name").Value};
+            Bone b = new Bone {name = joint.name};
 
-            string pos = bone.Attributes.GetNamedItem("pos").Value;
-            string[] posparts = pos.Split(' ');
-            b.pos = new Vector3(float.Parse(posparts[0], Utils.EnUsCulture), float.Parse(posparts[1], Utils.EnUsCulture), float.Parse(posparts[2], Utils.EnUsCulture));
+            b.pos = new Vector3(joint.pos[0], joint.pos[1], joint.pos[2]);
             b.orig_pos = new Vector3(b.pos);
             b.offset_pos = new Vector3(b.pos);
 
-            string rot = bone.Attributes.GetNamedItem("rot").Value;
-            string[] rotparts = rot.Split(' ');
-            b.rot = Quaternion.CreateFromEulers((float)(float.Parse(rotparts[0], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[1], Utils.EnUsCulture) * Math.PI / 180f), (float)(float.Parse(rotparts[2], Utils.EnUsCulture) * Math.PI / 180f));
+            // rot is stored in degrees, matching the raw avatar_skeleton.xml convention.
+            b.rot = Quaternion.CreateFromEulers((float)(joint.rot[0] * Math.PI / 180f), (float)(joint.rot[1] * Math.PI / 180f), (float)(joint.rot[2] * Math.PI / 180f));
             b.orig_rot = b.rot;
 
-            string scale = bone.Attributes.GetNamedItem("scale").Value;
-            string[] scaleparts = scale.Split(' ');
-            b.scale = new Vector3(float.Parse(scaleparts[0], Utils.EnUsCulture), float.Parse(scaleparts[1], Utils.EnUsCulture), float.Parse(scaleparts[2], Utils.EnUsCulture));
+            b.scale = new Vector3(joint.scale[0], joint.scale[1], joint.scale[2]);
             b.orig_scale = new Vector3(b.scale);
 
 
@@ -1871,9 +1864,12 @@ namespace Radegast.Rendering
 
             Logger.Trace($"Found bone {b.name}");
 
-            foreach (XmlNode childbone in bone.ChildNodes)
+            if (joint.bone != null)
             {
-                addBone(childbone, b);
+                foreach (Joint childJoint in joint.bone)
+                {
+                    addBone(childJoint, b);
+                }
             }
 
         }
@@ -2051,15 +2047,6 @@ namespace Radegast.Rendering
         //All visual params indexed by ID
         public static Dictionary<int, VisualParamEx> AllParams = new Dictionary<int, VisualParamEx>();
 
-        // Group-0 only — kept for VisualAppearanceParameters indexing. NOT suitable for
-        // byte-to-param mapping: the AvatarAppearance packet interleaves group-3 params.
-        public static SortedList TweakableParams = new SortedList();
-
-        // All params transmitted in AvatarAppearance (group-0 tweakable + group-3
-        // transmit_not_tweakable), sorted by ParamID. This list matches the byte ordering
-        // of av.VisualParameters exactly.
-        public static SortedList TransmittedParams = new SortedList();
-
         public Dictionary<string, BoneDeform> BoneDeforms = null;
 
         public Dictionary<string, VolumeDeform> VolumeDeforms = null;
@@ -2147,8 +2134,6 @@ namespace Radegast.Rendering
 
         public ParamType pType;
 
-        public static int count = 0;
-
         /// <summary>
         /// Set all the values through the constructor
         /// </summary>
@@ -2195,25 +2180,50 @@ namespace Radegast.Rendering
         {
 
             ParamID = int.Parse(node.Attributes.GetNamedItem("id").Value);
-            Name = node.Attributes.GetNamedItem("name").Value;
-            Group = int.Parse(node.Attributes.GetNamedItem("group").Value);
 
-            //These dont exist for facal expresion morphs
-            if (node.Attributes.GetNamedItem("wearable") != null)
-                Wearable = node.Attributes.GetNamedItem("wearable").Value;
-
-            MinValue = float.Parse(node.Attributes.GetNamedItem("value_min").Value, Utils.EnUsCulture);
-            MaxValue = float.Parse(node.Attributes.GetNamedItem("value_max").Value, Utils.EnUsCulture);
-
-            // These do not exists for driven parameters
-            if (node.Attributes.GetNamedItem("label_min") != null)
+            // Basic scalar metadata (name/group/wearable/labels/default/min/max/bump/alpha/
+            // color/drivers) now comes from LibreMetaverse.VisualParams.Params, generated at
+            // compile time by VisualParamGenerator from this same avatar_lad.xml, instead of
+            // re-parsing it here. Falls back to direct XML parsing if the generated table is
+            // somehow missing this ID (shouldn't normally happen - same source file).
+            bool hasGenerated = LibreMetaverse.VisualParams.Params.TryGetValue(ParamID, out LibreMetaverse.VisualParam generated);
+            if (hasGenerated)
             {
-                LabelMin = node.Attributes.GetNamedItem("label_min").Value;
+                Name = generated.Name;
+                Group = generated.Group;
+                Wearable = generated.Wearable;
+                LabelMin = generated.LabelMin;
+                LabelMax = generated.LabelMax;
+                DefaultValue = generated.DefaultValue;
+                MinValue = generated.MinValue;
+                MaxValue = generated.MaxValue;
+                IsBumpAttribute = generated.IsBumpAttribute;
+                AlphaParams = generated.AlphaParams;
+                ColorParams = generated.ColorParams;
+                Drivers = generated.Drivers;
             }
-
-            if (node.Attributes.GetNamedItem("label_max") != null)
+            else
             {
-                LabelMax = node.Attributes.GetNamedItem("label_max").Value;
+                Name = node.Attributes.GetNamedItem("name").Value;
+                Group = int.Parse(node.Attributes.GetNamedItem("group").Value);
+
+                //These dont exist for facal expresion morphs
+                if (node.Attributes.GetNamedItem("wearable") != null)
+                    Wearable = node.Attributes.GetNamedItem("wearable").Value;
+
+                MinValue = float.Parse(node.Attributes.GetNamedItem("value_min").Value, Utils.EnUsCulture);
+                MaxValue = float.Parse(node.Attributes.GetNamedItem("value_max").Value, Utils.EnUsCulture);
+
+                // These do not exists for driven parameters
+                if (node.Attributes.GetNamedItem("label_min") != null)
+                {
+                    LabelMin = node.Attributes.GetNamedItem("label_min").Value;
+                }
+
+                if (node.Attributes.GetNamedItem("label_max") != null)
+                {
+                    LabelMax = node.Attributes.GetNamedItem("label_max").Value;
+                }
             }
 
             XmlNode sexnode = node.Attributes.GetNamedItem("sex");
@@ -2237,30 +2247,6 @@ namespace Radegast.Rendering
             if (node.ParentNode.Name == "mesh")
             {
                 MorphMesh = node.ParentNode.Attributes.GetNamedItem("type").Value;
-            }
-
-            if (Group == (int)GroupType.VISUAL_PARAM_GROUP_TWEAKABLE)
-            {
-                if (!TweakableParams.ContainsKey(ParamID)) //stupid duplicate shared params
-                {
-                    TweakableParams.Add(ParamID, this);
-                }
-                else
-                {
-                    Logger.Warn($"Warning duplicate tweakable parameter ID {count} {Name}");
-                }
-                count++;
-            }
-
-            // TransmittedParams tracks both group-0 and group-3 params in sorted ParamID
-            // order, matching the byte ordering the server uses in AvatarAppearance packets.
-            if (Group == (int)GroupType.VISUAL_PARAM_GROUP_TWEAKABLE ||
-                Group == (int)GroupType.VISUAL_PARAM_GROUP_TRANSMIT_NOT_TWEAKABLE)
-            {
-                if (!TransmittedParams.ContainsKey(ParamID))
-                {
-                    TransmittedParams.Add(ParamID, this);
-                }
             }
 
             if (AllParams.ContainsKey(ParamID))
@@ -2300,7 +2286,25 @@ namespace Radegast.Rendering
             {
                 pType = ParamType.TYPE_DRIVER;
                 ChildParams = new List<driven>();
-                if (node.HasChildNodes && node.ChildNodes[0].HasChildNodes) //LAZY
+
+                // Driven-param info (target id + piecewise-linear min/max range) now comes
+                // from the same generated table rather than re-parsing <driven> children here.
+                if (hasGenerated && generated.DrivenParams != null)
+                {
+                    foreach (LibreMetaverse.DrivenParamInfo d in generated.DrivenParams)
+                    {
+                        ChildParams.Add(new driven
+                        {
+                            id = d.ParamID,
+                            min1 = d.Min1,
+                            max1 = d.Max1,
+                            max2 = d.Max2,
+                            min2 = d.Min2,
+                            hasMinMax = d.HasRange
+                        });
+                    }
+                }
+                else if (node.HasChildNodes && node.ChildNodes[0].HasChildNodes) //LAZY
                 {
                     ParseDrivers(node.ChildNodes[0].ChildNodes);
                 }
@@ -2309,16 +2313,6 @@ namespace Radegast.Rendering
             if (matchchildnode("param_color", node))
             {
                 pType = ParamType.TYPE_COLOR;
-                if (node.HasChildNodes)
-                {
-                    foreach (XmlNode colorchild in node.ChildNodes)
-                    {
-                        if (colorchild.Name == "param_color")
-                        {
-                            //TODO extract <value color="50, 25, 5, 255" />
-                        }
-                    }
-                }
             }
 
         }

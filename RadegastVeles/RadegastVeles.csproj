@@ -62,8 +62,6 @@
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
     <ProjectReference Include="..\Radegast.Veles.PluginApi\Radegast.Veles.PluginApi.csproj" />
-    <ProjectReference Include="..\libremetaverse\LibreMetaverse.RLV\LibreMetaverse.RLV.csproj" />
-    <ProjectReference Include="..\libremetaverse\LibreMetaverse.Rendering.MeshFoundry\LibreMetaverse.Rendering.MeshFoundry.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\veles.ico" />

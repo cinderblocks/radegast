@@ -98,6 +98,20 @@ namespace Radegast.Automation
             }
         }
 
+        /// <summary>
+        /// Arms the retry timer as soon as we land in a sim, instead of waiting on a single
+        /// one-shot sit attempt to succeed first. Keeps retrying every 10s until the target
+        /// prim's data has arrived (or auto-sit gets disabled), rather than giving up for the
+        /// rest of the session if the first attempt loses a race with scene load.
+        /// </summary>
+        public void Arm()
+        {
+            if (Preferences?.Enabled == true && m_Timer != null)
+            {
+                m_Timer.Enabled = true;
+            }
+        }
+
         public AutoSitPreferences? Preferences
         {
             get => !m_instance.Client.Network.Connected ? null : (AutoSitPreferences)m_instance.ClientSettings;

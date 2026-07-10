@@ -105,7 +105,6 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _envIsCustom;
     [ObservableProperty] private string _envDayLength = string.Empty;
     [ObservableProperty] private string _envDayOffset = string.Empty;
-    [ObservableProperty] private string _envSkyTrack = string.Empty;
     [ObservableProperty] private bool _envHasLegacyWindLight;
     [ObservableProperty] private bool _isEnvironmentLoading = true;
 
@@ -335,14 +334,12 @@ public partial class EstateProfileViewModel : ObservableObject, IDisposable
                 EnvIsCustom = true;
                 EnvDayLength = FormatDayTime(env.DayLength);
                 EnvDayOffset = FormatDayTime(env.DayOffset);
-                EnvSkyTrack = ((EnvironmentTrack)env.SkyTrack).ToString();
             }
             else
             {
                 EnvIsCustom = false;
                 EnvDayLength = string.Empty;
                 EnvDayOffset = string.Empty;
-                EnvSkyTrack = string.Empty;
             }
             IsEnvironmentLoading = false;
         });

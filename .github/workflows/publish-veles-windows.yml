@@ -1,4 +1,4 @@
-name: Publish Release Windows Installer and Archives
+name: Publish Veles Windows
 
 on:
   push:
@@ -69,11 +69,15 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
+          # VelesSetup.wixproj/VelesBundle.wixproj reference RadegastVeles.csproj as a
+          # ProjectReference, which causes MSBuild to rebuild it here. Without re-passing the
+          # same version/Bugsplat overrides as the "Build" step above, that rebuild silently
+          # clobbers RadegastVeles.exe with the csproj's hardcoded defaults.
           Write-Host "Building Radegast Veles MSI installer for ${{ matrix.platform }}"
-          msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesSetup\VelesSetup.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
           Write-Host "Building Radegast Veles Bundle (bootstrapper) for ${{ matrix.platform }}"
-          msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }}
+          msbuild Install\VelesBundle\VelesBundle.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:Version=${{ env.TAG_VERSION }} /p:AssemblyVersion=${{ env.BUILD_VERSION }} /p:FileVersion=${{ env.BUILD_VERSION }} /p:InformationalVersion=${{ env.TAG_VERSION }} /p:BugsplatDatabase=${{ secrets.BUGSPLAT_DATABASE }}
 
       - name: Collect artifacts
         shell: pwsh
@@ -170,7 +174,7 @@ jobs:
 
           try {
             Write-Host "Creating intermediate tar: $tarName"
-            & 7z a $tarName -ttar * -xr!symbols -xr!*.msi -xr!"RadegastVelesBundle_*" -mx=0
+            & 7z a $tarName -ttar * '-xr!symbols' '-xr!*.msi' '-xr!RadegastVelesBundle_*' -mx=0
             $code = $LASTEXITCODE
             if ($code -ne 0 -or -not (Test-Path $tarName)) {
               Throw "7z failed to create tar (exit $code)"
@@ -427,11 +431,12 @@ jobs:
       # (Symbol upload moved to release job)
 
   release:
-    name: Create Release
+    name: Create Release Draft
     needs: build
     runs-on: windows-2022
     permissions:
       contents: write
+      copilot-requests: write
 
     steps:
       - name: Checkout
@@ -439,13 +444,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install Copilot CLI
+        shell: pwsh
+        run: npm install -g @github/copilot
+
       - name: Set version variables
         shell: pwsh
         run: |
           $tag = '${{ github.ref_name }}'
           $tagVersion = $tag -replace '^Veles/',''
+          # Semver convention: a hyphen marks a pre-release identifier (e.g. 1.3.0-beta.1),
+          # so those tags get flagged as GitHub pre-releases instead of full releases.
+          $isPrerelease = $tagVersion -match '-'
           echo "TAG=$tag" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
+          echo "IS_PRERELEASE=$($isPrerelease.ToString().ToLower())" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -607,20 +620,49 @@ jobs:
       - name: Generate release notes
         id: release_notes
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ env.TAG }}"
           $version = "${{ env.TAG_VERSION }}"
 
-          # Get previous tag
+          # Get previous tag. Prefer the last Veles/* tag; fall back to the last tag of any
+          # scheme rather than the repo's root commit, which would dump the entire
+          # multi-thousand-commit history into the release notes.
           $previousTag = git describe --tags --abbrev=0 --match 'Veles/*' "$tag^" 2>$null
+          if (-not $previousTag) {
+            $previousTag = git describe --tags --abbrev=0 "$tag^" 2>$null
+          }
           if (-not $previousTag) {
             $previousTag = git rev-list --max-parents=0 HEAD
           }
 
           Write-Host "Generating release notes from $previousTag to $tag"
 
-          # Get commit log
-          $commits = git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges
+          # git log returns one array element per line in PowerShell; interpolating the array
+          # directly joins elements with a space (PowerShell's $OFS), collapsing the list into
+          # one run-on line. Join with newlines explicitly so it renders as markdown bullets.
+          $commitLines = @(git log "$previousTag..$tag" --pretty=format:"- %s (%an)" --no-merges 2>$null)
+          if ($commitLines.Count -eq 0) {
+            $commits = "_No changelog available._"
+          } elseif ($commitLines.Count -gt 25) {
+            $commits = "<details><summary>$($commitLines.Count) commits since $previousTag</summary>`n`n$($commitLines -join "`n")`n`n</details>"
+          } else {
+            $commits = $commitLines -join "`n"
+          }
+
+          # Best-effort AI summary via Copilot CLI (billed to the org's Copilot subscription).
+          # Never let a summary failure block the release - fall back to just the commit list.
+          $summary = $null
+          if ($commitLines.Count -gt 0) {
+            try {
+              $prompt = "Summarize the following commits from a Windows desktop app release into a short, friendly changelog for end users (2-4 sentences, plain prose, no markdown headers, no bullet list, do not quote the raw commit messages verbatim). Focus on user-facing fixes/features; omit purely internal/CI-only changes unless nothing else is notable.`n`nCommits:`n$($commitLines -join "`n")"
+              $summary = (copilot --no-ask-user -p $prompt 2>$null | Out-String).Trim()
+            } catch {
+              Write-Warning "Copilot CLI summary generation failed: $_"
+            }
+          }
+          if (-not $summary) { $summary = "" } else { $summary = "$summary`n" }
 
           # Create release notes
           $releaseNotes = @"
@@ -646,6 +688,7 @@ jobs:
 
           ## Changes in this Release
 
+          $summary
           $commits
 
           ## Installation Notes
@@ -669,7 +712,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
-          prerelease: false
+          prerelease: ${{ env.IS_PRERELEASE }}
           name: Radegast Veles ${{ env.TAG_VERSION }}
           tag_name: ${{ env.TAG }}
           body_path: release-notes.md

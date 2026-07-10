@@ -11,7 +11,10 @@ on:
 jobs:
   appcast:
     name: Generate and publish NetSparkle appcast
-    if: startsWith(github.event.release.tag_name, 'Veles/') && github.event.release.draft == false
+    # prerelease is set by publish-veles-windows.yml from the tag's semver suffix (e.g.
+    # Veles/1.3.0-beta.1). Beta/RC tags are skipped here so auto-update never pushes a
+    # pre-release build to existing users; testers grab those from the Releases page directly.
+    if: startsWith(github.event.release.tag_name, 'Veles/') && github.event.release.draft == false && github.event.release.prerelease == false
     runs-on: windows-2022
     permissions:
       contents: write
@@ -90,7 +93,7 @@ jobs:
             netsparkle-generate-appcast `
               -n RadegastVeles `
               -e $ext `
-              -a $temp `
+              -b $temp `
               --output-type json `
               --output-file-name "$($t.Name)" `
               -o "$($t.Os)" `
