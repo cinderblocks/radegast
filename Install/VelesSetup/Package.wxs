@@ -21,7 +21,7 @@
       Schedule="afterInstallInitialize"
       AllowDowngrades="yes" />
     <MediaTemplate EmbedCab="true" CompressionLevel="high" />
-    <Icon Id="Veles.ico" SourceFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico" />
+    <Icon Id="Veles.ico" SourceFile="$(var.RadegastVeles.ProjectDir)Assets\veles.ico" />
 
     <Property Id="ApplicationFolderName" Value="$(var.productName)" />
     <Property Id="WixAppFolder" Value="WixPerMachineFolder" />

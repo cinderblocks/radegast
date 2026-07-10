@@ -69,6 +69,11 @@
     <AvaloniaResource Include="Assets\sidebar.png" />
     <AvaloniaResource Include="Rendering\shader_data\*" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\Radegast\grids.xml" Link="grids.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
   <Target Name="CopyNativeAssemblies" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x64&quot; &quot;$(OutDir)dll\x64\&quot; /E/I" />
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x86&quot; &quot;$(OutDir)dll\x86\&quot; /E/I" />

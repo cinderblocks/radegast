@@ -37,6 +37,10 @@ xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
       <Component>
         <File Id="Radegast.Executable" Source="$(var.Radegast.TargetDir)Radegast.exe" />
       </Component>
+      <!-- Re-include grids.xml, collaterally excluded by the *.xml doc-comment exclude above -->
+      <Component>
+        <File Id="Radegast.GridsXml" Source="$(var.Radegast.TargetDir)grids.xml" />
+      </Component>
     </ComponentGroup>
   </Fragment>
 
