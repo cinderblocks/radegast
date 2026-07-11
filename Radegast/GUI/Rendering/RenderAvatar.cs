@@ -820,6 +820,54 @@ namespace Radegast.Rendering
             weight = Utils.Clamp(weight, 0.0f, 1.0f);
             float value = Utils.Lerp(vpx.MinValue, vpx.MaxValue, weight);
 
+            // Driver type
+            // A driver drives multiple slave visual parameters
+            if (vpx.pType == VisualParamEx.ParamType.TYPE_DRIVER)
+            {
+                // Note: no small-value early-out here - a driver whose own value is zero can
+                // still map to a nonzero driven weight through the piecewise ranges below.
+                foreach (VisualParamEx.driven child in vpx.ChildParams)
+                {
+                    if (!child.hasMinMax)
+                    {
+                        // No range mapping: driven weight follows the driver's normalized
+                        // weight directly.
+                        applyMorph(av, child.id, weight);
+                        continue;
+                    }
+
+                    // Piecewise-linear mapping of the driver's *value* (not its normalized
+                    // weight - min1/max1/max2/min2 are expressed in the driver's value space)
+                    // onto a normalized driven weight. Mirrors LLDriverParam::getDrivenWeight
+                    // in the SL viewer and Avatar.DecodeVisualParams in LibreMetaverse.
+                    //
+                    //	driven    ________
+                    //	^        /|       |\       ^
+                    //	|       / |       | \      |
+                    //	|      /  |       |  \     |
+                    //	|     /   |       |   \    |
+                    //	|    /    |       |    \   |
+                    //-------|----|-------|----|-------> driver value
+                    //  |  min1  max1    max2  min2
+
+                    float drivenNorm;
+                    if (value < child.min1)
+                        drivenNorm = 0f;
+                    else if (value < child.max1)
+                        drivenNorm = (value - child.min1) / (child.max1 - child.min1);
+                    else if (value <= child.max2)
+                        drivenNorm = 1f;
+                    else if (value < child.min2)
+                        drivenNorm = (child.min2 - value) / (child.min2 - child.max2);
+                    else
+                        drivenNorm = 0f;
+
+                    applyMorph(av, child.id, Utils.Clamp(drivenNorm, 0f, 1f));
+                }
+
+                return;
+            }
+
             // don't do anything for less than 1% change
             if (value > -0.001 && value < 0.001)
                 return;
@@ -845,83 +893,6 @@ namespace Radegast.Rendering
                         }
                     }
                 }
-            }
-
-            // Driver type
-            // A driver drives multiple slave visual parameters
-            if (vpx.pType == VisualParamEx.ParamType.TYPE_DRIVER)
-            {
-                foreach (VisualParamEx.driven child in vpx.ChildParams)
-                {
-
-                    /***** BEGIN UNGRACEFUL CODE STEALING ******/
-
-                    //	driven    ________
-                    //	^        /|       |\       ^
-                    //	|       / |       | \      |
-                    //	|      /  |       |  \     |
-                    //	|     /   |       |   \    |
-                    //	|    /    |       |    \   |
-                    //-------|----|-------|----|-------> driver
-                    //  | min1   max1    max2  min2
-
-
-                    if (!child.hasMinMax)
-                    {
-                        applyMorph(av, child.id, weight);
-                        continue;
-                    }
-
-                    float driven_weight = vpx.DefaultValue;
-                    float driven_max = VisualParamEx.AllParams[child.id].MaxValue;
-                    float driven_min = VisualParamEx.AllParams[child.id].MinValue;
-                    float input_weight = weight;
-
-                    float min_weight = vpx.MinValue;
-                    float max_weight = vpx.MaxValue;
-
-                    if (input_weight <= child.min1)
-                    {
-                        if (child.min1 == child.max1 &&
-                            child.min1 <= min_weight)
-                        {
-                            driven_weight = driven_max;
-                        }
-                        else
-                        {
-                            driven_weight = driven_min;
-                        }
-                    }
-                    else
-                    {
-                        if (input_weight <= child.max1)
-                        {
-                            float t = (input_weight - child.min1)/(child.max1 - child.min1);
-                            driven_weight = driven_min + t*(driven_max - driven_min);
-                        }
-                        else if (input_weight <= child.max2)
-                        {
-                            driven_weight = driven_max;
-                        }
-                        else if (input_weight <= child.min2)
-                        {
-                            float t = (input_weight - child.max2)/(child.min2 - child.max2);
-                            driven_weight = driven_max + t*(driven_min - driven_max);
-                        }
-                        else
-                        {
-                            driven_weight = child.max2 >= max_weight ? driven_max : driven_min;
-                        }
-                    }
-
-
-                    /***** END UNGRACEFULL CODE STEALING ******/
-
-                    applyMorph(av, child.id, driven_weight);
-
-                }
-
-                return;
             }
 
             //Is this a bone deform?
@@ -2130,7 +2101,10 @@ namespace Radegast.Rendering
         /// <summary>Array of param IDs that are drivers for this parameter</summary>
         public int[] Drivers;
         /// <summary>The Avatar Sex that this parameter applies to</summary>
-        public EparamSex sex;
+        // Must default to SEX_BOTH: the XmlNode constructor only assigns this field when a
+        // param carries an explicit sex attribute, and since SEX_BOTH stopped being 0 the
+        // implicit default is an invalid enum value that fails every sex check in morph().
+        public EparamSex sex = EparamSex.SEX_BOTH;
 
         public ParamType pType;
 
