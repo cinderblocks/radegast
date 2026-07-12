@@ -1076,9 +1076,23 @@ namespace Radegast
             instance.State.SetAlwaysRun(tmnuControlAlwaysRun.Checked);
         }
 
+        private frmSettings shownSettings;
+
         private void tmnuPrefs_Click(object sender, EventArgs e)
         {
-            (new frmSettings(instance)).ShowDialog();
+            if (shownSettings != null && !shownSettings.IsDisposed)
+            {
+                shownSettings.WindowState = FormWindowState.Normal;
+                shownSettings.Focus();
+                return;
+            }
+
+            // Non-modal (matching frmProfile/frmGroupInfo) so the main window stays usable
+            // while adjusting a setting -- settings save live via the GlobalSettings indexer,
+            // so there's nothing that depends on this being modal.
+            shownSettings = new frmSettings(instance);
+            shownSettings.Disposed += (s, args) => shownSettings = null;
+            shownSettings.Show();
         }
 
         private void tbtnAppearance_Click(object sender, EventArgs e)
