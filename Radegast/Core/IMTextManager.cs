@@ -69,6 +69,13 @@ namespace Radegast
             }
 
             showTimestamps = s["im_timestamps"].AsBoolean();
+
+            if (s["im_ding_all"].Type == OSDType.Unknown)
+            {
+                s["im_ding_all"] = OSD.FromBoolean(false);
+            }
+
+            DingOnAllIncoming = s["im_ding_all"].AsBoolean();
         }
 
         protected override void OnSettingChanged(object sender, SettingsEventArgs e)
@@ -77,6 +84,10 @@ namespace Radegast
             {
                 showTimestamps = e.Value.AsBoolean();
                 ReprintAllText();
+            }
+            else if (e.Key == "im_ding_all" && e.Value != null)
+            {
+                DingOnAllIncoming = e.Value.AsBoolean();
             }
 
             base.OnSettingChanged(sender, e);

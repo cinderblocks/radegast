@@ -46,6 +46,7 @@ namespace Radegast
             TargetName = toName;
 
             TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Agent, SessionId, toName);
+            cbAlwaysDing.Checked = TextManager.DingOnAllIncoming;
 
             AddNetcomEvents();
 
@@ -278,7 +279,9 @@ namespace Radegast
 
         private void cbAlwaysDing_CheckedChanged(object sender, EventArgs e)
         {
-            TextManager.DingOnAllIncoming = ((CheckBox)sender).Checked;
+            // Persisted so the setting survives a restart; TextManager.DingOnAllIncoming is
+            // updated via IMTextManager.OnSettingChanged reacting to this same key.
+            instance.GlobalSettings["im_ding_all"] = ((CheckBox)sender).Checked;
         }
 
         private void IMSessions_TypingStarted(object sender, IMTypingEventArgs e)
