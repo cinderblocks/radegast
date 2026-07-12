@@ -148,7 +148,7 @@ namespace Radegast
                             InstantMessageDialog.BusyAutoResponse,
                             InstantMessageOnline.Offline,
                             instance.Client.Self.RelativePosition,
-                            instance.Client.Network.CurrentSim.ID,
+                            instance.Client.Network.CurrentSim?.ID ?? UUID.Zero,
                             null);
                 }
             }
@@ -181,7 +181,7 @@ namespace Radegast
                         InstantMessageDialog.BusyAutoResponse,
                         InstantMessageOnline.Online,
                         instance.Client.Self.RelativePosition,
-                        instance.Client.Network.CurrentSim.ID,
+                        instance.Client.Network.CurrentSim?.ID ?? UUID.Zero,
                         null);
 
                     PrintIM(DateTime.Now, instance.Client.Self.Name, instance.Client.Self.AgentID, instance.GlobalSettings["auto_response_text"].AsString(), isNewMessage);
