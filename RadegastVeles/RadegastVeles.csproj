@@ -54,7 +54,8 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.3" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.3" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.3" />
-    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.0.81" />
+    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.2.86" />
+    <PackageReference Include="CoreJ2K.Skia" Version="2.3.2.86" />
     <PackageReference Include="NVorbis" Version="0.10.5" />
     <PackageReference Include="SharpCompress" Version="0.49.1" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
@@ -68,6 +69,11 @@
     <AvaloniaResource Include="Assets\veles.png" />
     <AvaloniaResource Include="Assets\sidebar.png" />
     <AvaloniaResource Include="Rendering\shader_data\*" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\Radegast\grids.xml" Link="grids.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <Target Name="CopyNativeAssemblies" AfterTargets="PostBuildEvent" Condition=" '$(OS)' == 'Windows_NT' ">
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x64&quot; &quot;$(OutDir)dll\x64\&quot; /E/I" />

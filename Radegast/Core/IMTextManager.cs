@@ -69,6 +69,13 @@ namespace Radegast
             }
 
             showTimestamps = s["im_timestamps"].AsBoolean();
+
+            if (s["im_ding_all"].Type == OSDType.Unknown)
+            {
+                s["im_ding_all"] = OSD.FromBoolean(false);
+            }
+
+            DingOnAllIncoming = s["im_ding_all"].AsBoolean();
         }
 
         protected override void OnSettingChanged(object sender, SettingsEventArgs e)
@@ -77,6 +84,10 @@ namespace Radegast
             {
                 showTimestamps = e.Value.AsBoolean();
                 ReprintAllText();
+            }
+            else if (e.Key == "im_ding_all" && e.Value != null)
+            {
+                DingOnAllIncoming = e.Value.AsBoolean();
             }
 
             base.OnSettingChanged(sender, e);
@@ -148,7 +159,7 @@ namespace Radegast
                             InstantMessageDialog.BusyAutoResponse,
                             InstantMessageOnline.Offline,
                             instance.Client.Self.RelativePosition,
-                            instance.Client.Network.CurrentSim.ID,
+                            instance.Client.Network.CurrentSim?.ID ?? UUID.Zero,
                             null);
                 }
             }
@@ -181,7 +192,7 @@ namespace Radegast
                         InstantMessageDialog.BusyAutoResponse,
                         InstantMessageOnline.Online,
                         instance.Client.Self.RelativePosition,
-                        instance.Client.Network.CurrentSim.ID,
+                        instance.Client.Network.CurrentSim?.ID ?? UUID.Zero,
                         null);
 
                     PrintIM(DateTime.Now, instance.Client.Self.Name, instance.Client.Self.AgentID, instance.GlobalSettings["auto_response_text"].AsString(), isNewMessage);

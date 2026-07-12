@@ -198,12 +198,41 @@ namespace Radegast.Media
         }
 
         /// <summary>
+        /// Cheap sanity check for the two container formats SL sound assets are ever
+        /// delivered in (Ogg Vorbis, and WAV for a couple of legacy/bundled UI sounds).
+        /// Lets us reject obviously-bad payloads (truncated downloads, error bodies) with a
+        /// clear log line instead of an FMOD ERR_FORMAT exception.
+        /// </summary>
+        private static bool LooksLikeAudio(byte[] data)
+        {
+            if (data.Length < 4) return false;
+            // "OggS"
+            if (data[0] == 0x4F && data[1] == 0x67 && data[2] == 0x67 && data[3] == 0x53) return true;
+            // "RIFF" (WAV)
+            if (data[0] == 0x52 && data[1] == 0x49 && data[2] == 0x46 && data[3] == 0x46) return true;
+            return false;
+        }
+
+        /// <summary>
         /// Process sound data (either from cache or freshly downloaded)
         /// </summary>
         private void ProcessSoundData(byte[] data)
         {
             if (data == null || data.Length == 0)
                 return;
+
+            if (!LooksLikeAudio(data))
+            {
+                // Seen when a grid hands back something other than the Ogg Vorbis/WAV bytes
+                // it should (e.g. a truncated download or an error body served with a 200).
+                // FMOD's createSound would throw ERR_FORMAT for this; skip it and log enough
+                // of the header to diagnose which case it was if it recurs.
+                int previewLen = Math.Min(8, data.Length);
+                Logger.Warn(
+                    $"Sound {Id} data does not look like a supported audio format " +
+                    $"(length={data.Length}, header={BitConverter.ToString(data, 0, previewLen)}); skipping playback");
+                return;
+            }
 
             // Describe the data to FMOD
             extraInfo.length = (uint)data.Length;

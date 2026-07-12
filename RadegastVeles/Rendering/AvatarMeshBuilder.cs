@@ -1323,25 +1323,50 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             // Blocking path (original): wait for all bakes before assembling faces.
             if (unique.Count > 0)
             {
+                // RequestServerBakedImageAsync silently returns null for every request when
+                // the region has no server-side-baking capability — no exception, no log.
+                // Surface that here so a permanently-untextured avatar is diagnosable instead
+                // of looking like a generic download failure.
+                if (string.IsNullOrEmpty(client.Network.AgentAppearanceServiceURL))
+                    Logger.Debug("AvatarMeshBuilder: region has no AgentAppearanceServiceURL " +
+                                 "(no server-side baking support); all bake downloads will fail.", client);
+
                 progress?.Report($"Downloading {unique.Count} baked texture(s)…");
 
+                // Use an independent per-texture timeout — do NOT link to ct (the build
+                // token). Same rationale as the streaming path above: an avatar
+                // terse-update or appearance event debounces a reload and cancels ct
+                // while a bake download is still in flight, which used to abort the
+                // whole Task.WhenAll and throw OperationCanceledException out of
+                // BuildAsync. LoadAsync's catch treats that as a normal cancel and
+                // discards the build silently, leaving only the untextured (white)
+                // faces assembled below with no downloaded bakes and no error surfaced.
                 var tasks = unique.Select(t => Task.Run(async () =>
                 {
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    using var linked  =
-                        CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
                     var bmp = await GridTextureHelper.DownloadServerBakedSkBitmapAsync(
-                        client, avatarUuid, t.TexId, t.BakeName, linked.Token)
+                        client, avatarUuid, t.TexId, t.BakeName, timeout.Token)
                         .ConfigureAwait(false);
                     // Preprocess here on the background thread (RGBA8888 convert + vertical
                     // flip) so the GL thread only issues the OpenGL upload call.
                     var processed = bmp != null ? GlTexture.Preprocess(bmp) : null;
+                    if (processed == null)
+                        Logger.Debug($"AvatarMeshBuilder: bake download failed for {t.BakeName} ({t.TexId}), face will render untextured.", client);
                     lock (textures) textures[t.TexId] = processed;
-                }, ct)).ToList();
+                })).ToList();
 
-                try { await Task.WhenAll(tasks).ConfigureAwait(false); }
-                catch (OperationCanceledException) { throw; }
-                catch { /* individual failures leave a null entry in the dict */ }
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+                ct.ThrowIfCancellationRequested();
+            }
+            else if (avatarUuid == UUID.Zero)
+            {
+                Logger.Debug($"AvatarMeshBuilder: avatar UUID could not be resolved for localId={avatarLocalId} " +
+                             $"(isSelf={avatarLocalId == client.Self.LocalID}); skipping bake download, faces will render untextured.", client);
+            }
+            else if (faceData.Count > 0)
+            {
+                Logger.Debug("AvatarMeshBuilder: no bake texture IDs resolved from TextureEntry " +
+                             "(avatar appearance not yet received?); faces will render untextured.", client);
             }
         }
 

@@ -302,7 +302,7 @@ namespace Radegast
 
                                         case AssetType.Texture:
                                             AssetTexture imgAsset = (AssetTexture)receivedAsset;
-                                            var img = CoreJ2K.J2kImage.ToBytes(imgAsset.Image.ExportBitmap());
+                                            var img = CoreJ2K.J2kImage.ToBytes(imgAsset.Image);
                                             File.WriteAllBytes(fullName, img);
                                             if (dateOK)
                                             {

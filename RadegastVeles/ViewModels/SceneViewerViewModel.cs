@@ -830,7 +830,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // Keep the FMOD audio listener in sync with the scene camera so sounds
         // pan and attenuate relative to where the player is looking, not where
         // the avatar body is pointing.
-        _instance.MediaManager?.SetCameraListenerState(pos, atDir);
+        _instance.MediaManager?.SetCameraListenerState(pos, atDir, up);
     }
 
     /// <summary>

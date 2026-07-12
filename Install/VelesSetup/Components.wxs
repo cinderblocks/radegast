@@ -45,6 +45,10 @@
       <Component>
         <File Id="RadegastVeles.Executable" Source="$(var.RadegastVeles.TargetDir)RadegastVeles.exe" />
       </Component>
+      <!-- Re-include grids.xml, collaterally excluded by the *.xml doc-comment exclude above -->
+      <Component>
+        <File Id="RadegastVeles.GridsXml" Source="$(var.RadegastVeles.TargetDir)grids.xml" />
+      </Component>
     </ComponentGroup>
   </Fragment>
 

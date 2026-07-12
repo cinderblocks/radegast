@@ -184,10 +184,16 @@ internal sealed class SceneObjectStreamer : IDisposable
                 var r   = prim.Rotation;
                 var p   = prim.Position;
                 var off = RegionOffset(sim, currentSim);
-                var scale = Matrix4x4.CreateScale(s.X, s.Y, s.Z);
-                var rot   = Matrix4x4.CreateFromQuaternion(new Quaternion(r.X, r.Y, r.Z, r.W));
-                var trans = Matrix4x4.CreateTranslation(p.X + off.X, p.Y + off.Y, p.Z);
-                _viewport.SetSceneObjectTransform(sceneKey, scale * rot * trans);
+                var scale    = new Vector3(s.X, s.Y, s.Z);
+                var rotation = new Quaternion(r.X, r.Y, r.Z, r.W);
+                var position = new Vector3(p.X + off.X, p.Y + off.Y, p.Z);
+                var velocity        = new Vector3(prim.Velocity.X, prim.Velocity.Y, prim.Velocity.Z);
+                var acceleration    = new Vector3(prim.Acceleration.X, prim.Acceleration.Y, prim.Acceleration.Z);
+                var angularVelocity = new Vector3(prim.AngularVelocity.X, prim.AngularVelocity.Y, prim.AngularVelocity.Z);
+                // Dead-reckon between terse updates (velocity/angular velocity carried by the
+                // packet) rather than snapping directly to each update's position, so scripted
+                // and physical object motion reads as continuous instead of teleporting.
+                _viewport.SetSceneObjectMotion(sceneKey, scale, rotation, position, velocity, angularVelocity, acceleration);
 
                 bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
                 if (!isSinglePrim)

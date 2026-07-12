@@ -26,11 +26,12 @@ namespace Radegast.Veles.Rendering;
 /// <summary>
 /// Uploads and wraps a VAO + interleaved VBO + EBO on the GPU.
 /// <para>
-/// Vertex layout (32 bytes per vertex):
+/// Vertex layout (48 bytes / 12 floats per vertex):
 /// <list type="table">
 ///   <item><term>Attribute 0</term><description>Position  – vec3 @ offset  0</description></item>
 ///   <item><term>Attribute 1</term><description>Normal    – vec3 @ offset 12</description></item>
 ///   <item><term>Attribute 2</term><description>TexCoord  – vec2 @ offset 24</description></item>
+///   <item><term>Attribute 14</term><description>Tangent   – vec4 @ offset 32</description></item>
 /// </list>
 /// </para>
 /// Must be created and disposed on the GL render thread.
@@ -59,8 +60,12 @@ public sealed class GlMesh : IDisposable
     /// <paramref name="vertices"/>, which may be an oversized ArrayPool-rented buffer.
     /// The caller is responsible for returning the rented buffer to the pool after this
     /// constructor returns.
+    /// <paramref name="dynamic"/> selects the VBO usage hint: pass <c>false</c> for
+    /// geometry that is never rewritten via <see cref="UpdateVertices(float[])"/> so the
+    /// driver can place it in device-local memory (STATIC_DRAW). Defaults to <c>true</c>
+    /// (DYNAMIC_DRAW) which is always correct, just potentially slower to render.
     /// </summary>
-    public unsafe GlMesh(float[] vertices, int verticesLength, ushort[] indices)
+    public unsafe GlMesh(float[] vertices, int verticesLength, ushort[] indices, bool dynamic = true)
     {
         _indexCount = indices.Length;
         _cpuIndices = indices;
@@ -75,7 +80,8 @@ public sealed class GlMesh : IDisposable
         gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
         fixed (float* p = vertices)
             gl.BufferData(BufferTargetARB.ArrayBuffer,
-                (nuint)(verticesLength * sizeof(float)), p, BufferUsageARB.DynamicDraw);
+                (nuint)(verticesLength * sizeof(float)), p,
+                dynamic ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
 
         gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
         fixed (ushort* p = indices)

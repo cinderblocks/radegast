@@ -1,4 +1,4 @@
-
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.3.11520.95
@@ -78,14 +78,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.gitignore = .gitignore
 		Directory.Build.props = Directory.Build.props
 		LICENSE.txt = LICENSE.txt
-		.github\workflows\publish-veles-windows.yml = .github\workflows\publish-veles-windows.yml
 		README.md = README.md
 		.github\workflows\test.yml = .github\workflows\test.yml
-		.github\workflows\publish-veles-macos.yml = .github\workflows\publish-veles-macos.yml
-		.github\workflows\publish-veles-linux.yml = .github\workflows\publish-veles-linux.yml
-		.github\workflows\publish-legacy-windows.yml = .github\workflows\publish-legacy-windows.yml
 		.github\workflows\publish-legacy-appcast.yml = .github\workflows\publish-legacy-appcast.yml
+		.github\workflows\publish-legacy-windows.yml = .github\workflows\publish-legacy-windows.yml
 		.github\workflows\publish-veles-appcast.yml = .github\workflows\publish-veles-appcast.yml
+		.github\workflows\publish-veles-linux.yml = .github\workflows\publish-veles-linux.yml
+		.github\workflows\publish-veles-macos.yml = .github\workflows\publish-veles-macos.yml
+		.github\workflows\publish-veles-windows.yml = .github\workflows\publish-veles-windows.yml
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Radegast.Core", "Radegast.Core\Radegast.Core.csproj", "{F08F7BF4-013C-476A-A88C-62E9E2E8CC79}"
@@ -123,6 +123,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veles.Plugin.Email", "plugins\Veles.Plugin.Email\Veles.Plugin.Email.csproj", "{17D1DC5B-6CEE-FF16-3F2D-C95A9140806E}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veles.Plugin.OllamaChat", "plugins\Veles.Plugin.OllamaChat\Veles.Plugin.OllamaChat.csproj", "{1E5CB5BD-4542-48E0-8AA5-EC3E89D7A187}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veles.Plugin.Macros", "plugins\Veles.Plugin.Macros\Veles.Plugin.Macros.csproj", "{7EFCDB9E-F03B-4ED4-B997-3585919A8298}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -868,6 +870,50 @@ Global
 		{2C623B50-9239-4F08-B339-AC077D881365}.Release|x64.Build.0 = Release|x64
 		{2C623B50-9239-4F08-B339-AC077D881365}.Release|x86.ActiveCfg = Release|x86
 		{2C623B50-9239-4F08-B339-AC077D881365}.Release|x86.Build.0 = Release|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|ARM64.Build.0 = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|x64.ActiveCfg = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|x64.Build.0 = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|x86.ActiveCfg = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Debug|x86.Build.0 = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.LegacyRadegast|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.LegacyRadegast|ARM64.ActiveCfg = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.LegacyRadegast|x64.ActiveCfg = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.LegacyRadegast|x86.ActiveCfg = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|Any CPU.Build.0 = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|ARM64.ActiveCfg = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|ARM64.Build.0 = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|x64.ActiveCfg = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|x64.Build.0 = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|x86.ActiveCfg = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastLinux|x86.Build.0 = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|Any CPU.Build.0 = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|ARM64.ActiveCfg = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|ARM64.Build.0 = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|x64.ActiveCfg = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|x64.Build.0 = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|x86.ActiveCfg = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastMacOS|x86.Build.0 = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|Any CPU.ActiveCfg = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|Any CPU.Build.0 = Debug|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|ARM64.ActiveCfg = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|ARM64.Build.0 = Debug|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|x64.ActiveCfg = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|x64.Build.0 = Debug|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|x86.ActiveCfg = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.RadegastWindows|x86.Build.0 = Debug|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|ARM64.ActiveCfg = Release|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|ARM64.Build.0 = Release|ARM64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|x64.ActiveCfg = Release|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|x64.Build.0 = Release|x64
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|x86.ActiveCfg = Release|x86
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298}.Release|x86.Build.0 = Release|x86
 		{F314BB97-D9B0-4E8A-AE22-2E75853B6A18}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{F314BB97-D9B0-4E8A-AE22-2E75853B6A18}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F314BB97-D9B0-4E8A-AE22-2E75853B6A18}.Debug|ARM64.ActiveCfg = Debug|ARM64
@@ -1073,6 +1119,7 @@ Global
 		{054236E8-C086-448B-8C52-0CEB8CB4A1B2} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}
 		{2C623B50-9239-4F08-B339-AC077D881365} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}
 		{F314BB97-D9B0-4E8A-AE22-2E75853B6A18} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}
+		{7EFCDB9E-F03B-4ED4-B997-3585919A8298} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}
 		{01A3B310-151E-EE70-5CF3-590CE82F86DA} = {AA000001-0000-0000-0000-000000000000}
 		{F7843198-B57E-4516-AB8A-98FB0DE54D87} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}
 		{17D1DC5B-6CEE-FF16-3F2D-C95A9140806E} = {01A3B310-151E-EE70-5CF3-590CE82F86DA}

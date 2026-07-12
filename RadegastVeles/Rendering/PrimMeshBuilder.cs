@@ -888,7 +888,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 if (sculptBmp != null)
                 {
                     using (sculptBmp)
-                        return _mesher.GenerateFacetedSculptMesh(prim, sculptBmp, detailLevel);
+                        return _mesher.GenerateFacetedSculptMesh(prim, LibreMetaverse.Imaging.Skia.SkiaTextureCodec.ToManagedImage(sculptBmp), detailLevel);
                 }
                 // Fallback: parametric if sculpt texture unavailable.
                 return _mesher.GenerateFacetedMesh(prim, detailLevel);

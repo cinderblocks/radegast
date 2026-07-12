@@ -2612,7 +2612,7 @@ namespace Radegast.Rendering
                             }
                         }
 
-                        mesh = renderer.GenerateFacetedSculptMesh(prim, img, RenderSettings.SculptRenderDetail);
+                        mesh = renderer.GenerateFacetedSculptMesh(prim, LibreMetaverse.Imaging.Skia.SkiaTextureCodec.ToManagedImage(img), RenderSettings.SculptRenderDetail);
                     }
                     else
                     { // Mesh

@@ -12,7 +12,7 @@
           HelpUrl="$(var.aboutUrl)"
           UpdateUrl="$(var.aboutUrl)"
           Copyright="$(var.copyright)"
-          IconSourceFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico"
+          IconSourceFile="$(var.RadegastVeles.ProjectDir)Assets\veles.ico"
           UpgradeCode="$(var.UpgradeCode)"
           DisableModify="yes">
 
@@ -22,7 +22,7 @@
         ShowVersion="yes"
         SuppressOptionsUI="no"
         Theme="hyperlinkSidebarLicense"
-        LogoFile="$(var.RadegastVeles.ProjectDir)Assets\radegast.ico"
+        LogoFile="$(var.RadegastVeles.ProjectDir)Assets\veles.ico"
         LogoSideFile="$(var.VelesSetup.ProjectDir)assets\dialog.png" />
     </BootstrapperApplication>
 

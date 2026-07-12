@@ -153,7 +153,9 @@ public class GlViewportControl : Panel
     private GlShader? _navMeshOverlayShader;
 
     // Navmesh walkability types, updated via UpdateNavMeshTypes from any thread.
-    private readonly ConcurrentDictionary<uint, NavMeshWalkabilityType> _navMeshTypes = new();
+    // Replaced wholesale (volatile reference swap) rather than mutated in place so a
+    // frame rendered mid-update never sees a partially cleared table.
+    private volatile ConcurrentDictionary<uint, NavMeshWalkabilityType> _navMeshTypes = new();
     private GlShader? _ssaoShader;     // SSAO pass
     private GlShader? _ssaoBlurShader; // SSAO blur pass
     private string?   _initError;
@@ -278,6 +280,12 @@ public class GlViewportControl : Panel
     // ── Scene-object layer (additive over the base terrain submission) ────────────
     // keyed by scene key (ulong: upper 32 bits = sim index, lower 32 bits = localId)
     private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
+    // Reference counts for every GlTexture held by scene-object face slots, one count per
+    // slot occurrence. Replaces the previous "scan every other object's faces on removal"
+    // approach (O(total scene faces) per removed object) with O(faces of removed object),
+    // and makes it safe to dispose a texture shared across faces exactly when the last
+    // slot referencing it goes away. GL thread only.
+    private readonly Dictionary<GlTexture, int> _sceneTexRefs = new();
     // FlexiGpuData for scene objects, parallel to _sceneObjects (only populated when compute is available).
     private readonly Dictionary<ulong, FlexiGpuData[]> _flexiGpuDataMap = new();
     // Pending scene-object updates keyed by sceneKey.  null value means "remove from GPU".
@@ -289,9 +297,6 @@ public class GlViewportControl : Panel
     // Flat draw lists rebuilt from _sceneObjects each time objects are added/removed.
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneOpaque = new();
     private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _sceneAlpha  = new();
-    // Parallel root-ID lists so the draw loop can apply per-root transform overrides.
-    private readonly List<ulong> _sceneOpaqueRootIds = new();
-    private readonly List<ulong> _sceneAlphaRootIds  = new();
 
     // Ordered list of every GlMesh uploaded in the current submission, indexed by face order.
     // Used to apply per-face vertex updates submitted from the animation thread.
@@ -317,26 +322,77 @@ public class GlViewportControl : Panel
     // with new[] (exact size required by glBufferSubData) and must NOT be returned to the pool.
     private readonly ConcurrentQueue<(uint RootId, int FaceOffset, float[] Verts, int VertsLength, bool IsPoolRented)> _pendingSceneVertexUpdates = new();
 
-    // Per-root model-matrix overrides (e.g. avatar position updates without a full re-upload).
-    // When a sceneKey is present here its matrix replaces face.Transform for every face in that object.
+    // Parked model-matrix overrides for roots whose upload has not landed yet.
+    // Dequeued overrides are applied directly to the faces of live objects; only overrides
+    // that arrive while the object is still building wait here, and UploadSceneObjectNoRebuild
+    // consumes them the moment the object's faces exist. (GL thread only.)
     private readonly ConcurrentDictionary<ulong, Matrix4x4> _sceneObjectTransformOverrides = new();
     // Pending transform override updates enqueued from non-GL threads.
     private readonly ConcurrentQueue<(ulong RootId, Matrix4x4 Transform)> _pendingTransformOverrides = new();
+
+    // Kinematic state for scene objects currently in motion (nonzero velocity/angular velocity),
+    // keyed by scene key. Populated by SetSceneObjectMotion and consumed every frame by
+    // ExtrapolateMovingSceneObjects to dead-reckon a smooth transform between the sim's terse
+    // update packets. Entries are removed once an object comes to rest or is torn down, so cost
+    // is proportional to the number of objects actually moving, not total scene size.
+    private readonly ConcurrentDictionary<ulong, SceneObjectMotion> _sceneObjectMotion = new();
+
+    // Caps how far dead reckoning will extrapolate past the last received update, so an object
+    // that stops sending updates (e.g. leaves the interest list just before a kill) doesn't fly
+    // off under stale velocity forever.
+    private const float MaxDeadReckoningSeconds = 2f;
+
+    private readonly struct SceneObjectMotion
+    {
+        public readonly Vector3 Scale;
+        public readonly Quaternion Rotation;
+        public readonly Vector3 Position;
+        public readonly Vector3 Velocity;
+        public readonly Vector3 AngularVelocity;
+        public readonly Vector3 Acceleration;
+        public readonly long UpdateTick;
+
+        public SceneObjectMotion(Vector3 scale, Quaternion rotation, Vector3 position,
+            Vector3 velocity, Vector3 angularVelocity, Vector3 acceleration, long updateTick)
+        {
+            Scale = scale;
+            Rotation = rotation;
+            Position = position;
+            Velocity = velocity;
+            AngularVelocity = angularVelocity;
+            Acceleration = acceleration;
+            UpdateTick = updateTick;
+        }
+    }
 
     // Pending single-texture patches for already-live scene objects (progressive texture streaming).
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingTexturePatches = new();
     // Back-pressure gate: limits _pendingTexturePatches to 200 entries without spin-waiting.
     // Each WaitAsync/Wait in PatchSceneObjectTexture consumes a permit; each dequeue in
     // ApplyTexturePatches releases one.  Initial count matches the queue-depth limit.
-    private readonly SemaphoreSlim _texturePatchGate = new SemaphoreSlim(200, 200);
+    // NOT readonly: GlDeinit disposes the gate to unblock waiting producers, then installs
+    // a fresh instance so texture streaming keeps working after Avalonia recreates the GL
+    // context (tab switch). Producers capture the field into a local before Wait/Release.
+    private SemaphoreSlim _texturePatchGate = new SemaphoreSlim(200, 200);
+    private const int TexturePatchQueueDepth = 200;
+
+    // Releases permits on the given gate instance, tolerating the deinit/reinit races:
+    // a producer may have consumed its permit from a previous (now disposed) gate instance,
+    // in which case releasing on the current one could exceed maxCount.
+    private static void ReleasePatchGate(SemaphoreSlim gate, int count = 1)
+    {
+        try { gate.Release(count); }
+        catch (SemaphoreFullException) { /* permit was consumed on a previous gate instance */ }
+        catch (ObjectDisposedException) { /* gate torn down mid-release; nothing to balance */ }
+    }
     // Pending texture patches for the single-submission (AvatarViewer / ObjectViewer) path.
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingSubmissionPatches = new();
-    // Patches that arrived before their scene object was uploaded; retried each frame for up to ~5 s.
+    // Patches that arrived before their scene object was uploaded; retried each frame for up to ~30 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredPatches = new();
     // Set when a texture patch upgraded a legacy face to the alpha pass; triggers a single
     // RebuildSceneFlatLists() at the end of ApplyTexturePatches so the face moves draw lists.
     private bool _alphaReclassNeeded;
-    // Submission patches that arrived before UploadSubmission ran; retried for up to ~5 s.
+    // Submission patches that arrived before UploadSubmission ran; retried for up to ~30 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredSubmissionPatches = new();
 
     // ── Last-frame camera state (GL thread only) — used for pick ray construction ──
@@ -395,8 +451,34 @@ public class GlViewportControl : Panel
     /// </summary>
     public bool WaterReflectionsEnabled { get; set; } = false;
 
+    /// <summary>
+    /// Enables instanced batching (<see cref="GlInstanceDrawer"/>) for opaque faces that
+    /// share a deduplicated mesh. Defaults to <c>false</c>: scene-object mesh dedup only
+    /// started producing shared meshes once VerticesLength survived face translation
+    /// (before that, dedup hashes covered pool garbage and never matched), and the very
+    /// first real workload — linksets of identical prims — renders exploded geometry, so
+    /// the instanced path has a latent defect that was never exercised. The per-face
+    /// uniform path is proven correct; re-enable this only once the instanced path is
+    /// validated against a dense identical-prim scene.
+    /// </summary>
+    public bool InstancingEnabled { get; set; } = false;
+
     /// <summary>Number of scene object submissions waiting to be uploaded to the GPU this frame. Zero-cost snapshot.</summary>
     public int PendingUploadCount => _pendingSceneObjects.Count;
+
+    // True when any cross-thread queue holds work that only the GL thread can drain.
+    // Read from the UI-thread heartbeat; all members are safe to probe cross-thread.
+    private bool HasPendingGpuWork =>
+        _pendingSubmission != null
+        || _pendingClearScene
+        || !_pendingSceneObjects.IsEmpty
+        || !_pendingVertexUpdates.IsEmpty
+        || !_pendingSceneVertexUpdates.IsEmpty
+        || !_pendingTransformOverrides.IsEmpty
+        || !_pendingTexturePatches.IsEmpty
+        || !_pendingSubmissionPatches.IsEmpty
+        || !_pendingParticleMap.IsEmpty
+        || !_sceneObjectMotion.IsEmpty;
 
     // ── Constructor ──────────────────────────────────────────────────────────────
 
@@ -679,9 +761,10 @@ public class GlViewportControl : Panel
     /// </summary>
     public void UpdateNavMeshTypes(IReadOnlyDictionary<uint, NavMeshWalkabilityType> types)
     {
-        _navMeshTypes.Clear();
+        var fresh = new ConcurrentDictionary<uint, NavMeshWalkabilityType>();
         foreach (var kvp in types)
-            _navMeshTypes[kvp.Key] = kvp.Value;
+            fresh[kvp.Key] = kvp.Value;
+        _navMeshTypes = fresh; // atomic swap — renderer sees old or new table, never partial
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -707,12 +790,22 @@ public class GlViewportControl : Panel
         // Start a ~30 fps heartbeat so the scene repaints after returning from
         // another tab (Avalonia hides the parent ContentPresenter, not this
         // control, so IsVisibleProperty never fires on tab switch).
+        // Skip the frame request while the control is hidden by an ancestor
+        // (IsEffectivelyVisible accounts for the hidden ContentPresenter) UNLESS
+        // cross-thread queues have pending GPU work — draining those keeps the
+        // producers (streamers, animators, ArrayPool rentals) flowing exactly as
+        // before. The timer keeps ticking so the first tick after the tab returns
+        // repaints immediately.
         if (_heartbeat == null)
         {
             _heartbeat = new Avalonia.Threading.DispatcherTimer(
                 System.TimeSpan.FromMilliseconds(33),
                 Avalonia.Threading.DispatcherPriority.Render,
-                (_, _) => _core.RequestNextFrameRendering());
+                (_, _) =>
+                {
+                    if (IsEffectivelyVisible || HasPendingGpuWork)
+                        _core.RequestNextFrameRendering();
+                });
             _heartbeat.Start();
         }
     }
@@ -926,6 +1019,9 @@ public class GlViewportControl : Panel
         // Full GL state reset — Avalonia's compositing engine may leave masks,
         // scissor, or blend state in any configuration between our render calls.
         // The SL viewer similarly resets all state before each avatar draw pass.
+        // Texture-unit bindings may also have been touched by Avalonia, so drop the
+        // redundant-bind cache used by GlTexture.Bind.
+        GlTexture.ResetBindCache();
         GlApi.Gl.ColorMask(true, true, true, true);
         GlApi.Gl.DepthMask(true);
         GlApi.Gl.Disable(EnableCap.ScissorTest);
@@ -964,6 +1060,17 @@ public class GlViewportControl : Panel
         Frustum? frustum = FrustumCullingEnabled
             ? FrustumCuller.ExtractPlanes(viewProj)
             : (Frustum?)null;
+
+        // Apply pending transform overrides BEFORE any pass that culls or draws scene
+        // faces (G-buffer pre-pass, water reflection, main pass) so every pass this
+        // frame sees the same up-to-date face.Transform.
+        ApplySceneTransformOverrides();
+
+        // Dead-reckon any scene objects currently in motion forward from their last terse
+        // update. Must run after ApplySceneTransformOverrides (which lands the exact received
+        // pose at t=0) and before any culling/draw pass so they see the same extrapolated
+        // face.Transform this frame.
+        ExtrapolateMovingSceneObjects();
 
         // ── EEP day-cycle update ──────────────────────────────────────────
         // Sample the environment service once per frame so sky and water colour
@@ -1007,8 +1114,8 @@ public class GlViewportControl : Panel
                 GlApi.Gl.DepthFunc(DepthFunction.Less);
                 GlApi.Gl.Enable(EnableCap.CullFace);
                 GlApi.Gl.Disable(EnableCap.Blend);
-                DrawFacesNormal(_opaque, _gnormShader!, ref view, ref proj);
-                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj);
+                DrawFacesNormal(_opaque,      _gnormShader!, ref view, ref proj, frustum);
+                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj, frustum);
 
                 // — SSAO pass —
                 GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
@@ -1047,10 +1154,12 @@ public class GlViewportControl : Panel
                 _ssaoBlurShader.Unuse();
                 GlApi.Gl.BindVertexArray(0);
 
-                // Restore state for the main scene pass.
+                // Restore state for the main scene pass. The SSAO passes bound raw
+                // textures on units 0–2 behind GlTexture.Bind's back — invalidate its cache.
                 GlApi.Gl.Enable(EnableCap.DepthTest);
                 GlApi.Gl.DepthMask(true);
                 GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+                GlTexture.ResetBindCache();
                 ssaoTex = _ssaoBlurTex;
             }
         }
@@ -1072,15 +1181,13 @@ public class GlViewportControl : Panel
         // Opaque pass
         GlApi.Gl.Disable(EnableCap.Blend);
         GlApi.Gl.DepthMask(true);
-        // Apply any pending transform overrides directly to face.Transform so all draw
-        // paths (opaque, alpha, wireframe, picking) automatically use the updated position.
-        ApplySceneTransformOverrides();
         // Apply any pending progressive texture patches (streamed bitmaps arriving after
-        // the geometry was already submitted).
+        // the geometry was already submitted). Transform overrides were already applied
+        // right after frustum construction, before the G-buffer/reflection pre-passes.
         ApplyTexturePatches();
 
-        DrawFaces(_opaque,      _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: true, sortForBatching: true);
-        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: true);
+        DrawFaces(_opaque,      _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
 
         // ── Water surface ─────────────────────────────────────────────────
         // Drawn after opaque geometry (correct depth test) but before alpha
@@ -1092,10 +1199,13 @@ public class GlViewportControl : Panel
         var allAlpha = _alpha.Count > 0 || _sceneAlpha.Count > 0;
         if (allAlpha)
         {
-            // Merge base alpha + scene-object alpha into a persistent list (reused each frame).
+            // Merge base alpha + scene-object alpha into a persistent list (reused each
+            // frame), frustum-culling during the merge so off-screen faces never enter
+            // the O(N log N) sort. DrawFaces then receives frustum: null — survivors are
+            // known-visible (it still records them in the frame stats).
             _mergedAlpha.Clear();
-            _mergedAlpha.AddRange(_alpha);
-            _mergedAlpha.AddRange(_sceneAlpha);
+            AppendVisibleAlpha(_alpha,      frustum);
+            AppendVisibleAlpha(_sceneAlpha, frustum);
             var mergedAlpha = _mergedAlpha;
             if (mergedAlpha.Count > 1)
             {
@@ -1103,8 +1213,11 @@ public class GlViewportControl : Panel
                 // Precompute each face's squared eye-distance once (O(N)). The comparator
                 // then reads the cached float, avoiding a vector subtraction + LengthSquared
                 // on every one of the O(N log N) comparisons performed by Sort.
+                // GetWorldCentroid derives the reference point from the CURRENT Transform,
+                // so faces moved via transform overrides (walking avatars) sort by where
+                // they are now rather than their build-time Centroid.
                 for (int i = 0; i < mergedAlpha.Count; i++)
-                    mergedAlpha[i].face.AlphaSortKey = (mergedAlpha[i].face.Centroid - eye).LengthSquared();
+                    mergedAlpha[i].face.AlphaSortKey = (mergedAlpha[i].face.GetWorldCentroid() - eye).LengthSquared();
                 mergedAlpha.Sort(static (a, b) => b.face.AlphaSortKey.CompareTo(a.face.AlphaSortKey));
             }
 
@@ -1113,22 +1226,24 @@ public class GlViewportControl : Panel
             GlApi.Gl.DepthMask(false);
             GlApi.Gl.Disable(EnableCap.CullFace);
             // Alpha surfaces don't receive SSAO — matches SL viewer behaviour.
-            DrawFaces(mergedAlpha, _primShader, ref view, ref proj, manageCulling: false, frustum: frustum, stats: _stats, sky: Sky);
+            DrawFaces(mergedAlpha, _primShader, ref view, ref proj, manageCulling: false, frustum: null, stats: _stats, sky: Sky);
             GlApi.Gl.Enable(EnableCap.CullFace);
             GlApi.Gl.DepthMask(true);
             GlApi.Gl.Disable(EnableCap.Blend);
         }
 
         // NavMesh walkability overlay — semi-transparent tint by pathfinding type.
-        if (NavMeshOverlayEnabled && _navMeshOverlayShader != null && !_navMeshTypes.IsEmpty)
+        // Capture the volatile table once so both passes render from the same snapshot.
+        var navTypes = _navMeshTypes;
+        if (NavMeshOverlayEnabled && _navMeshOverlayShader != null && !navTypes.IsEmpty)
         {
             GlApi.Gl.Enable(EnableCap.Blend);
             GlApi.Gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
             GlApi.Gl.Disable(EnableCap.CullFace);
             GlApi.Gl.DepthMask(false);
             GlApi.Gl.DepthFunc(DepthFunction.Lequal);
-            DrawFacesNavMeshOverlay(_sceneOpaque, _navMeshOverlayShader, ref view, ref proj, _navMeshTypes);
-            DrawFacesNavMeshOverlay(_sceneAlpha,  _navMeshOverlayShader, ref view, ref proj, _navMeshTypes);
+            DrawFacesNavMeshOverlay(_sceneOpaque, _navMeshOverlayShader, ref view, ref proj, navTypes);
+            DrawFacesNavMeshOverlay(_sceneAlpha,  _navMeshOverlayShader, ref view, ref proj, navTypes);
             GlApi.Gl.DepthFunc(DepthFunction.Less);
             GlApi.Gl.DepthMask(true);
             GlApi.Gl.Enable(EnableCap.CullFace);
@@ -1274,11 +1389,11 @@ public class GlViewportControl : Panel
                 GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, (uint)fb);
                 GlApi.Gl.Enable(EnableCap.CullFace);
 
-                // R+G encode a 1-based index into _pickMap (background cleared to 0,0,0,0).
-                // Non-zero R or G means a face was hit; look up the real LocalId/FaceIndex.
-                if (pixel[0] != 0 || pixel[1] != 0)
+                // R+G+B encode a 1-based index into _pickMap (background cleared to 0,0,0,0).
+                // Non-zero RGB means a face was hit; look up the real LocalId/FaceIndex.
+                if (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
                 {
-                    uint idx = (uint)(pixel[0] | (pixel[1] << 8)); // 1-based
+                    uint idx = (uint)(pixel[0] | (pixel[1] << 8) | (pixel[2] << 16)); // 1-based
                     if (idx >= 1 && (int)idx <= _pickMap.Count)
                     {
                         var (primLocalId, faceIndex) = _pickMap[(int)(idx - 1)];
@@ -1308,12 +1423,18 @@ public class GlViewportControl : Panel
 
         // Drain scene-object texture patches and release the gate so any blocked
         // producers unblock and observe cancellation instead of hanging forever.
+        var oldGate = _texturePatchGate;
         while (_pendingTexturePatches.TryDequeue(out var tp))
         {
             tp.Bitmap?.Dispose();
-            _texturePatchGate.Release();
+            ReleasePatchGate(oldGate);
         }
-        _texturePatchGate.Dispose();
+        // Install a fresh gate BEFORE disposing the old one so producers that observe the
+        // field after this line get a live instance. Without this, the first tab-switch
+        // teardown left a permanently disposed gate and every later texture patch was
+        // silently dropped (progressive texture streaming died for the session).
+        _texturePatchGate = new SemaphoreSlim(TexturePatchQueueDepth, TexturePatchQueueDepth);
+        oldGate.Dispose();
 
         // Drain pending scene-object submissions and dispose embedded bitmaps.
         foreach (var key in _pendingSceneObjects.Keys)
@@ -1342,6 +1463,7 @@ public class GlViewportControl : Panel
         DeleteWaterResources();
         DeleteSkyResources();
         _primShader?.Dispose();     _primShader     = null;
+        _primLocs = null;           _primLocsShader = null;
         _wireShader?.Dispose();     _wireShader     = null;
         _pickShader?.Dispose();     _pickShader     = null;
         _particleShader?.Dispose(); _particleShader = null;
@@ -1478,7 +1600,7 @@ public class GlViewportControl : Panel
         if (bestTri < 0)
             return FaceHitInfo.Unknown; // no intersection (shouldn't happen after GPU pick)
 
-        // Object-local position from the compact picker buffer (stride 3: X,Y,Z).
+        // Vertex indices of the hit triangle into the compact picker buffer (stride 3: X,Y,Z).
         int p0 = indices[bestTri + 0] * PickerStride;
         int p1 = indices[bestTri + 1] * PickerStride;
         int p2 = indices[bestTri + 2] * PickerStride;
@@ -1487,7 +1609,11 @@ public class GlViewportControl : Panel
         var lpos0 = new Vector3(pickerVerts[p0], pickerVerts[p0+1], pickerVerts[p0+2]);
         var lpos1 = new Vector3(pickerVerts[p1], pickerVerts[p1+1], pickerVerts[p1+2]);
         var lpos2 = new Vector3(pickerVerts[p2], pickerVerts[p2+1], pickerVerts[p2+2]);
-        var localPos = lpos0 * w0 + lpos1 * w1 + lpos2 * w2;
+
+        // World-space hit point straight from the ray parameter — the intersection loop
+        // above already ran in world space, so this is exact and matches the documented
+        // contract (SL ObjectGrab Position is world/region space, not object-local).
+        var worldPos = rayOrigin + rayDir * bestT;
 
         // Normal and UV from the compact normal/UV buffer (stride 5: nx,ny,nz,u,v).
         int n0i = indices[bestTri + 0] * NormalUvStride;
@@ -1497,14 +1623,27 @@ public class GlViewportControl : Panel
         var n0 = Vector3.Normalize(new Vector3(normalUvVerts[n0i], normalUvVerts[n0i+1], normalUvVerts[n0i+2]));
         var n1 = Vector3.Normalize(new Vector3(normalUvVerts[n1i], normalUvVerts[n1i+1], normalUvVerts[n1i+2]));
         var n2 = Vector3.Normalize(new Vector3(normalUvVerts[n2i], normalUvVerts[n2i+1], normalUvVerts[n2i+2]));
-        var normal = Vector3.Normalize(n0 * w0 + n1 * w1 + n2 * w2);
+        var localNormal = Vector3.Normalize(n0 * w0 + n1 * w1 + n2 * w2);
+
+        // Transform the interpolated normal into world space with the inverse-transpose of
+        // the model matrix (correct under non-uniform scale). Row-vector convention:
+        // n_world = n_local · (M⁻¹)ᵀ. Falls back to the plain 3×3 for a singular model.
+        Vector3 normal;
+        if (Matrix4x4.Invert(model, out var invModel))
+            normal = Vector3.Normalize(Vector3.TransformNormal(localNormal, Matrix4x4.Transpose(invModel)));
+        else
+            normal = Vector3.Normalize(Vector3.TransformNormal(localNormal, model));
 
         float uvX = normalUvVerts[n0i+3] * w0 + normalUvVerts[n1i+3] * w1 + normalUvVerts[n2i+3] * w2;
         float uvY = normalUvVerts[n0i+4] * w0 + normalUvVerts[n1i+4] * w1 + normalUvVerts[n2i+4] * w2;
 
-        // Binormal: from local-space triangle edge/UV delta pair (Lengyel's method).
-        var  edge1w  = lpos1 - lpos0;
-        var  edge2w  = lpos2 - lpos0;
+        // Binormal: from world-space triangle edge/UV delta pair (Lengyel's method), so the
+        // resulting frame matches the world-space normal above.
+        var _w0 = Vector4.Transform(new Vector4(lpos0, 1f), model);
+        var _w1 = Vector4.Transform(new Vector4(lpos1, 1f), model);
+        var _w2 = Vector4.Transform(new Vector4(lpos2, 1f), model);
+        var  edge1w  = new Vector3(_w1.X, _w1.Y, _w1.Z) - new Vector3(_w0.X, _w0.Y, _w0.Z);
+        var  edge2w  = new Vector3(_w2.X, _w2.Y, _w2.Z) - new Vector3(_w0.X, _w0.Y, _w0.Z);
         float duv1x  = normalUvVerts[n1i+3] - normalUvVerts[n0i+3];
         float duv1y  = normalUvVerts[n1i+4] - normalUvVerts[n0i+4];
         float duv2x  = normalUvVerts[n2i+3] - normalUvVerts[n0i+3];
@@ -1527,7 +1666,7 @@ public class GlViewportControl : Panel
         {
             UvCoord  = uvVec,
             StCoord  = uvVec,
-            Position = localPos,
+            Position = worldPos,
             Normal   = normal,
             Binormal = binormal,
         };
@@ -1947,8 +2086,8 @@ public class GlViewportControl : Panel
         // Z mirror flips winding: what was CCW becomes CW from the reflected camera
         GlApi.Gl.FrontFace(FrontFaceDirection.CW);
 
-        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: true, sortForBatching: true);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: true);
+        DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
 
         GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
@@ -2017,10 +2156,12 @@ public class GlViewportControl : Panel
         GlApi.Gl.Disable(EnableCap.Blend);
         _waterShader.Unuse();
 
-        // Clean up texture units so subsequent passes start from a known state
+        // Clean up texture units so subsequent passes start from a known state.
+        // These raw binds bypass GlTexture.Bind, so its redundant-bind cache must be dropped.
         GlApi.Gl.ActiveTexture(TextureUnit.Texture2); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
         GlApi.Gl.ActiveTexture(TextureUnit.Texture1); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
         GlApi.Gl.ActiveTexture(TextureUnit.Texture0); GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+        GlTexture.ResetBindCache();
     }
 
     private void DeleteWaterResources()
@@ -2233,22 +2374,29 @@ public class GlViewportControl : Panel
         // Halves GPU memory for linksets with copy-pasted faces and enables instanced draws.
         var meshPool = new Dictionary<ulong, GlMesh>(sub.Faces.Length);
 
+        // VBO usage hint: submissions carrying skin/animesh data get their vertex buffers
+        // rewritten every animation tick; everything else is static after upload.
+        // Such submissions also must NOT deduplicate meshes: the dedup hash covers only
+        // vertices+indices, not rigging, and per-face animation updates write into the
+        // mesh VBO — a shared VBO would make one face's deformation stomp another's.
+        bool subAnimated = sub.SkinData.Length > 0 || sub.AnimeshSkinData.Length > 0;
+
         foreach (var face in sub.Faces)
         {
             int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
             GlMesh mesh;
-            if (!face.IsFlexi)
+            if (!face.IsFlexi && !subAnimated)
             {
                 ulong h = VertexHash(face.Vertices!, vLen, face.Indices);
                 if (!meshPool.TryGetValue(h, out mesh!))
                 {
-                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices, dynamic: false);
                     meshPool[h] = mesh;
                 }
             }
             else
             {
-                mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                mesh = new GlMesh(face.Vertices!, vLen, face.Indices, dynamic: true);
             }
             _faceMeshes.Add(mesh); // indexed by face position for animation updates
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
@@ -2257,9 +2405,16 @@ public class GlViewportControl : Panel
             // NormalUvVertices (5 floats/vertex: nx,ny,nz,u,v) is used by ComputeHitInfo.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
             face.NormalUvVertices = NormalUvFromInterleaved(face.Vertices, vLen);
-            if (face.VerticesLength > 0)
-                ArrayPool<float>.Shared.Return(face.Vertices!);
-            face.Vertices         = null; // release the full 8-wide LOH array
+            // Deliberately NOT returned to ArrayPool even when pool-rented (VerticesLength > 0):
+            // the upload cannot prove exclusive ownership of this buffer. Builder outputs alias
+            // it from several places (AvatarFaceSkinData.BindVerts shares the face's vertex
+            // array, background texture-stream tasks hold the pre-translation face list).
+            // Returning a still-referenced buffer lets a concurrent renter — e.g. the avatar
+            // animators, which rent from the same pool every tick — write into live vertex
+            // data, uploading avatar-space verts into unrelated meshes (objects rendering as
+            // corrupt geometry at the avatar's position). Dropping the reference and letting
+            // the GC collect it is always safe; the pool just allocates fresh arrays.
+            face.Vertices         = null; // release the full 12-wide LOH array
             // Fall back to an inherited texture from the previous draw lists so that
             // faces whose textures were already patched in don't go white on reload.
             var tex       = TryUpload(face.Texture)
@@ -2293,6 +2448,14 @@ public class GlViewportControl : Panel
             if (face.EmissiveTexture != null && bmpToDispose.Remove(face.EmissiveTexture.Handle))
                 face.EmissiveTexture.Dispose();
         }
+
+        // Sort the opaque draw list by (mesh ref, tex ref) once at upload so identical-
+        // geometry faces are consecutive for instanced batching. Order only changes when
+        // geometry is re-uploaded, so DrawFaces never needs to re-sort per frame.
+        // (_faceMeshes keeps submission order for animation updates; the pick map is
+        // rebuilt from list order at pick time, so sorting here stays consistent.)
+        if (_opaque.Count > 1)
+            _opaque.Sort(static (a, b) => CompareBatchOrder(a, b));
 
         // Register flexi-prim GPU resources for compute deformation.
         if (_flexiDeformer != null)
@@ -2374,6 +2537,30 @@ public class GlViewportControl : Panel
 
     // ── Scene-object layer GPU helpers ────────────────────────────────────────────
 
+    // One increment per face slot that stores the texture. Null-safe no-op.
+    private void SceneTexAddRef(GlTexture? tex)
+    {
+        if (tex == null) return;
+        _sceneTexRefs.TryGetValue(tex, out int count);
+        _sceneTexRefs[tex] = count + 1;
+    }
+
+    // One decrement per face slot released; disposes the texture when the last slot goes.
+    // A texture missing from the table (defensive) is disposed immediately.
+    private void SceneTexRelease(GlTexture? tex)
+    {
+        if (tex == null) return;
+        if (!_sceneTexRefs.TryGetValue(tex, out int count) || count <= 1)
+        {
+            _sceneTexRefs.Remove(tex);
+            tex.Dispose();
+        }
+        else
+        {
+            _sceneTexRefs[tex] = count - 1;
+        }
+    }
+
     private void FreeSceneObjectResources()
     {
         foreach (var gpuDatas in _flexiGpuDataMap.Values)
@@ -2383,22 +2570,15 @@ public class GlViewportControl : Panel
             foreach (var gd in gpuDatas) gd.Dispose();
         _skinGpuDataMap.Clear();
 
-        var textures = new HashSet<GlTexture>();
         foreach (var faces in _sceneObjects.Values)
-        {
-            foreach (var (mesh, tex, normalTex, specTex, mrTex, emTex, _) in faces)
-            {
+            foreach (var (mesh, _, _, _, _, _, _) in faces)
                 mesh.Dispose();
-                if (tex      != null) textures.Add(tex);
-                if (normalTex != null) textures.Add(normalTex);
-                if (specTex  != null) textures.Add(specTex);
-                if (mrTex    != null) textures.Add(mrTex);
-                if (emTex    != null) textures.Add(emTex);
-            }
-        }
-        foreach (var tex in textures) tex.Dispose();
+        // Every scene texture is tracked in the refcount table; dispose each once.
+        foreach (var tex in _sceneTexRefs.Keys) tex.Dispose();
+        _sceneTexRefs.Clear();
         _sceneObjects.Clear();
         _sceneObjectTransformOverrides.Clear();
+        _sceneObjectMotion.Clear();
         while (_pendingSceneVertexUpdates.TryDequeue(out _)) { }
         while (_pendingTransformOverrides.TryDequeue(out _)) { }
         // Discard all pending scene-object submissions — they belong to the old scene
@@ -2416,92 +2596,63 @@ public class GlViewportControl : Panel
         int purged = 0;
         while (_pendingTexturePatches.TryDequeue(out var p)) { p.Bitmap?.Dispose(); purged++; }
         // Release all consumed gate permits so future PatchSceneObjectTexture calls are not starved.
-        if (purged > 0) _texturePatchGate.Release(purged);
+        if (purged > 0) ReleasePatchGate(_texturePatchGate, purged);
         RebuildSceneFlatLists();
     }
 
-    private void RemoveSceneObjectGpu(ulong rootId)
-    {
-        if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
-
-        var textures = new HashSet<GlTexture>();
-        foreach (var (mesh, tex, normalTex, specTex, mrTex, emTex, _) in faces)
-        {
-            mesh.Dispose();
-            if (tex      != null) textures.Add(tex);
-            if (normalTex != null) textures.Add(normalTex);
-            if (specTex  != null) textures.Add(specTex);
-            if (mrTex    != null) textures.Add(mrTex);
-            if (emTex    != null) textures.Add(emTex);
-        }
-        // Don't dispose a texture that is still referenced by another object.
-        foreach (var otherEntry in _sceneObjects)
-        {
-            if (otherEntry.Key == rootId) continue;
-            foreach (var (_, tex, normalTex, specTex, mrTex, emTex, _) in otherEntry.Value)
-            {
-                textures.Remove(tex!);
-                textures.Remove(normalTex!);
-                textures.Remove(specTex!);
-                textures.Remove(mrTex!);
-                textures.Remove(emTex!);
-            }
-        }
-        foreach (var tex in textures) tex.Dispose();
-        _sceneObjects.Remove(rootId);
-        _sceneObjectTransformOverrides.TryRemove(rootId, out _);
-        if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
-            foreach (var gd in gpuDatas) gd.Dispose();
-        if (_skinGpuDataMap.Remove(rootId, out var skinGpuDatas))
-            foreach (var gd in skinGpuDatas) gd.Dispose();
-        RebuildSceneFlatLists();
-    }
-
-    // No-rebuild variant used by the batched drain loop in GlRender.
+    // No-rebuild variant used by the batched drain loop in GlRender; the caller invokes
+    // RebuildSceneFlatLists once after processing the whole batch.
+    // Texture disposal goes through the refcount table, so cost is proportional to this
+    // object's faces (the previous implementation scanned every other object's faces to
+    // detect sharing — O(total scene faces) per removal during interest-list churn).
     private void RemoveSceneObjectGpuNoRebuild(ulong rootId)
     {
         if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
 
-        var textures = new HashSet<GlTexture>();
         foreach (var (mesh, tex, normalTex, specTex, mrTex, emTex, _) in faces)
         {
             mesh.Dispose();
-            if (tex      != null) textures.Add(tex);
-            if (normalTex != null) textures.Add(normalTex);
-            if (specTex  != null) textures.Add(specTex);
-            if (mrTex    != null) textures.Add(mrTex);
-            if (emTex    != null) textures.Add(emTex);
+            SceneTexRelease(tex);
+            SceneTexRelease(normalTex);
+            SceneTexRelease(specTex);
+            SceneTexRelease(mrTex);
+            SceneTexRelease(emTex);
         }
-        foreach (var otherEntry in _sceneObjects)
-        {
-            if (otherEntry.Key == rootId) continue;
-            foreach (var (_, tex, normalTex, specTex, mrTex, emTex, _) in otherEntry.Value)
-            {
-                textures.Remove(tex!);
-                textures.Remove(normalTex!);
-                textures.Remove(specTex!);
-                textures.Remove(mrTex!);
-                textures.Remove(emTex!);
-            }
-        }
-        foreach (var tex in textures) tex.Dispose();
         _sceneObjects.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
+        _sceneObjectMotion.TryRemove(rootId, out _);
         if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
             foreach (var gd in gpuDatas) gd.Dispose();
         if (_skinGpuDataMap.Remove(rootId, out var skinGpuDatas))
             foreach (var gd in skinGpuDatas) gd.Dispose();
     }
 
-    private void UploadSceneObject(ulong rootId, PrimRenderSubmission sub)
-    {
-        UploadSceneObjectNoRebuild(rootId, sub);
-        RebuildSceneFlatLists();
-    }
-
-    // No-rebuild variant: caller is responsible for calling RebuildSceneFlatLists once.
+    // Caller is responsible for calling RebuildSceneFlatLists once after a batch of uploads.
     private void UploadSceneObjectNoRebuild(ulong rootId, PrimRenderSubmission sub)
     {
+        // Snapshot already-patched textures from the outgoing faces, keyed by
+        // (PrimLocalId, FaceIndex, slot), so the replacement submission inherits them —
+        // mirroring UploadSubmission's inheritedTex logic. This is what keeps an avatar's
+        // baked textures across the placeholder→real-mesh replacement and across LOD
+        // rebuilds: with the disk cache, bakes often arrive (and get patched) BEFORE the
+        // real body upload lands, and were previously destroyed along with the placeholder,
+        // leaving the avatar permanently grey. Each snapshot entry takes a +1 refcount hold
+        // so the removal below cannot dispose it; all holds are released at the end
+        // (a consumed entry keeps living via the +1 its new face slot added).
+        Dictionary<(uint primId, int faceIdx, int slot), GlTexture>? inheritedTex = null;
+        if (_sceneObjects.TryGetValue(rootId, out var outgoingFaces))
+        {
+            inheritedTex = new Dictionary<(uint, int, int), GlTexture>();
+            foreach (var (_, oTex, oNorm, oSpec, oMr, oEm, oFace) in outgoingFaces)
+            {
+                SnapshotSlot(inheritedTex, oFace, 0, oTex);
+                SnapshotSlot(inheritedTex, oFace, 1, oNorm);
+                SnapshotSlot(inheritedTex, oFace, 2, oSpec);
+                SnapshotSlot(inheritedTex, oFace, 3, oMr);
+                SnapshotSlot(inheritedTex, oFace, 4, oEm);
+            }
+        }
+
         // Free existing GPU resources for this root before uploading the new ones.
         RemoveSceneObjectGpuNoRebuild(rootId);
 
@@ -2530,35 +2681,56 @@ public class GlViewportControl : Panel
         // Per-submission mesh pool: same dedup as UploadSubmission.
         var meshPool = new Dictionary<ulong, GlMesh>(sub.Faces.Length);
 
+        // VBO usage hint: skinned/animesh scene objects (avatars) get per-tick vertex
+        // rewrites; plain prims are static after upload.
+        // Animated submissions must NOT deduplicate meshes — the dedup hash covers only
+        // vertices+indices (not rigging), and per-face animation updates write into the
+        // mesh VBO, so a shared VBO would make faces stomp each other's deformation.
+        bool subAnimated = sub.SkinData.Length > 0 || sub.AnimeshSkinData.Length > 0;
+
         foreach (var face in sub.Faces)
         {
             int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
             GlMesh mesh;
-            if (!face.IsFlexi)
+            if (!face.IsFlexi && !subAnimated)
             {
                 ulong h = VertexHash(face.Vertices!, vLen, face.Indices);
                 if (!meshPool.TryGetValue(h, out mesh!))
                 {
-                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                    mesh = new GlMesh(face.Vertices!, vLen, face.Indices, dynamic: false);
                     meshPool[h] = mesh;
                 }
             }
             else
             {
-                mesh = new GlMesh(face.Vertices!, vLen, face.Indices);
+                mesh = new GlMesh(face.Vertices!, vLen, face.Indices, dynamic: true);
             }
             // Extract compact CPU-side picker and normal/UV buffers, then release the full
             // interleaved float[] (12 floats/vertex) so the LOH array can be collected.
             face.PickerVertices   = PickerFromInterleaved(face.Vertices, vLen);
             face.NormalUvVertices = NormalUvFromInterleaved(face.Vertices, vLen);
-            if (face.VerticesLength > 0)
-                ArrayPool<float>.Shared.Return(face.Vertices!);
-            face.Vertices         = null; // release the full 8-wide LOH array
-            var tex       = TryUpload(face.Texture);
-            var normalTex = TryUpload(face.NormalMapTexture);
-            var specTex   = TryUpload(face.SpecularMapTexture);
-            var mrTex     = TryUpload(face.MetallicRoughnessTexture);
-            var emTex     = TryUpload(face.EmissiveTexture);
+            // NOT returned to ArrayPool — see the matching comment in UploadSubmission:
+            // the buffer may still be referenced by skin data or background build tasks,
+            // and returning it lets concurrent renters corrupt live vertex data.
+            face.Vertices         = null; // release the full 12-wide LOH array
+            // Slots with no embedded bitmap inherit the previous incarnation's patched
+            // texture (progressive streaming submits faces textureless and patches later).
+            var tex       = TryUpload(face.Texture)
+                            ?? inheritedTex?.GetValueOrDefault((face.PrimLocalId, face.FaceIndex, 0));
+            var normalTex = TryUpload(face.NormalMapTexture)
+                            ?? inheritedTex?.GetValueOrDefault((face.PrimLocalId, face.FaceIndex, 1));
+            var specTex   = TryUpload(face.SpecularMapTexture)
+                            ?? inheritedTex?.GetValueOrDefault((face.PrimLocalId, face.FaceIndex, 2));
+            var mrTex     = TryUpload(face.MetallicRoughnessTexture)
+                            ?? inheritedTex?.GetValueOrDefault((face.PrimLocalId, face.FaceIndex, 3));
+            var emTex     = TryUpload(face.EmissiveTexture)
+                            ?? inheritedTex?.GetValueOrDefault((face.PrimLocalId, face.FaceIndex, 4));
+            // One refcount per occupied slot — SceneTexRelease mirrors this on removal.
+            SceneTexAddRef(tex);
+            SceneTexAddRef(normalTex);
+            SceneTexAddRef(specTex);
+            SceneTexAddRef(mrTex);
+            SceneTexAddRef(emTex);
             faces.Add((mesh, tex, normalTex, specTex, mrTex, emTex, face));
         }
 
@@ -2573,6 +2745,12 @@ public class GlViewportControl : Panel
         }
 
         _sceneObjects[rootId] = faces;
+
+        // A transform override may have arrived while this object was still building
+        // (terse update racing the mesh build). Apply the parked matrix now so the object
+        // first appears at its current position rather than its build-time position.
+        if (_sceneObjectTransformOverrides.TryRemove(rootId, out var parkedTransform))
+            ApplyTransformToFaces(faces, parkedTransform);
 
         // Register flexi-prim GPU resources when compute deformation is available.
         if (_flexiDeformer != null && sub.FlexiPrims.Length > 0)
@@ -2604,30 +2782,65 @@ public class GlViewportControl : Panel
             }
             _skinGpuDataMap[rootId] = skinGpuDatas;
         }
+
+        // Release the snapshot holds. Entries consumed by a new face slot stay alive via
+        // the slot's own refcount; unconsumed entries (faces that no longer exist in the
+        // new submission) drop to zero here and are disposed.
+        if (inheritedTex != null)
+            foreach (var held in inheritedTex.Values)
+                SceneTexRelease(held);
+    }
+
+    // Adds one snapshot entry per (face, slot) with a +1 refcount hold, for texture
+    // inheritance across a scene-object re-upload. TryAdd keeps the first texture seen
+    // for a key (duplicate (PrimLocalId, FaceIndex) pairs should not occur within one object).
+    private void SnapshotSlot(
+        Dictionary<(uint primId, int faceIdx, int slot), GlTexture> snapshot,
+        PrimRenderFace face, int slot, GlTexture? tex)
+    {
+        if (tex == null) return;
+        if (snapshot.TryAdd((face.PrimLocalId, face.FaceIndex, slot), tex))
+            SceneTexAddRef(tex);
+    }
+
+    // Batching order: group by mesh reference, then texture reference, so DrawFaces'
+    // batch detection finds maximal runs of identical (mesh, texture) faces to instance.
+    // Identity hash codes are stable for an object's lifetime, which is all a grouping
+    // key needs (the relative order of groups is irrelevant).
+    private static int CompareBatchOrder(
+        (GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face) a,
+        (GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face) b)
+    {
+        int mh = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.mesh)
+                 .CompareTo(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.mesh));
+        if (mh != 0) return mh;
+        int tha = a.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.tex);
+        int thb = b.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.tex);
+        return tha.CompareTo(thb);
     }
 
     private void RebuildSceneFlatLists()
     {
         _sceneOpaque.Clear();
         _sceneAlpha.Clear();
-        _sceneOpaqueRootIds.Clear();
-        _sceneAlphaRootIds.Clear();
-        foreach (var (rootId, faces) in _sceneObjects)
+        foreach (var faces in _sceneObjects.Values)
         {
             foreach (var entry in faces)
             {
                 if (entry.face.HasAlpha)
-                {
                     _sceneAlpha.Add(entry);
-                    _sceneAlphaRootIds.Add(rootId);
-                }
                 else
-                {
                     _sceneOpaque.Add(entry);
-                    _sceneOpaqueRootIds.Add(rootId);
-                }
             }
         }
+
+        // Sort the opaque flat list into batching order. This is what lets identical
+        // trees/rocks from DIFFERENT linksets fall into one instanced draw — previously
+        // only faces that happened to be adjacent in upload order ever batched. Runs only
+        // on scene membership changes (batched per frame), never per rendered frame.
+        // The alpha list is skipped: it is re-sorted back-to-front every frame anyway.
+        if (_sceneOpaque.Count > 1)
+            _sceneOpaque.Sort(static (a, b) => CompareBatchOrder(a, b));
     }
 
     /// <summary>
@@ -2668,6 +2881,41 @@ public class GlViewportControl : Panel
     }
 
     /// <summary>
+    /// Records the kinematic state (position, rotation, velocity, angular velocity,
+    /// acceleration) reported by a terse update for a scene object's root, so the render loop
+    /// can dead-reckon its transform forward every frame instead of only snapping to each
+    /// (comparatively infrequent, throttled) terse-update packet. This is what keeps scripted
+    /// and physical object motion looking continuous rather than teleporting.
+    /// <para>
+    /// When both <paramref name="velocity"/> and <paramref name="angularVelocity"/> are ~zero
+    /// the object is treated as at rest: any previous motion tracking is cleared and the exact
+    /// transform is applied once, same as <see cref="SetSceneObjectTransform"/>.
+    /// </para>
+    /// Safe to call from any thread.
+    /// </summary>
+    public void SetSceneObjectMotion(ulong sceneKey, Vector3 scale, Quaternion rotation, Vector3 position,
+        Vector3 velocity, Vector3 angularVelocity, Vector3 acceleration)
+    {
+        const float epsilon = 1e-4f;
+        if (velocity.LengthSquared() > epsilon || angularVelocity.LengthSquared() > epsilon)
+        {
+            _sceneObjectMotion[sceneKey] = new SceneObjectMotion(
+                scale, rotation, position, velocity, angularVelocity, acceleration, Environment.TickCount64);
+        }
+        else
+        {
+            _sceneObjectMotion.TryRemove(sceneKey, out _);
+        }
+
+        // Land the exact received pose immediately so the object doesn't wait a frame to
+        // reflect the update; ExtrapolateMovingSceneObjects takes over from here for movers.
+        var transform = Matrix4x4.CreateScale(scale)
+                      * Matrix4x4.CreateFromQuaternion(rotation)
+                      * Matrix4x4.CreateTranslation(position);
+        SetSceneObjectTransform(sceneKey, transform);
+    }
+
+    /// <summary>
     /// Enqueues a single decoded texture bitmap to be uploaded and stitched into an
     /// already-live scene-object face on the next GL frame.  Called by
     /// <see cref="SceneObjectStreamer"/> as each texture download completes during
@@ -2685,9 +2933,12 @@ public class GlViewportControl : Panel
         // waiting for the GL thread to drain an available slot.
         // Ownership of patch.Bitmap transfers to the viewport only after Enqueue succeeds.
         // Dispose it here if we exit early so the caller is never responsible for cleanup.
+        // Capture the gate into a local: GlDeinit swaps the field for a fresh instance,
+        // and Wait/Release must operate on the same object.
+        var gate = _texturePatchGate;
         try
         {
-            _texturePatchGate.Wait(ct);
+            gate.Wait(ct);
         }
         catch (OperationCanceledException)
         {
@@ -2697,9 +2948,11 @@ public class GlViewportControl : Panel
         }
         catch (ObjectDisposedException)
         {
-            // Viewport is tearing down (GlDeinit already disposed the semaphore).
-            // Treat as cancellation: dispose the bitmap and silently exit — throwing
-            // here would propagate through Progress<T> onto the thread pool and crash.
+            // The GL context was torn down between the field read and Wait (GlDeinit
+            // disposed this gate instance). Treat as cancellation: dispose the bitmap and
+            // silently exit — throwing here would propagate through Progress<T> onto the
+            // thread pool and crash. The streamer will re-request the texture after the
+            // SceneReset re-dirty cycle.
             patch.Bitmap?.Dispose();
             return;
         }
@@ -2717,7 +2970,7 @@ public class GlViewportControl : Panel
         catch
         {
             patch.Bitmap?.Dispose();
-            _texturePatchGate.Release();
+            ReleasePatchGate(gate);
             throw;
         }
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
@@ -2773,31 +3026,84 @@ public class GlViewportControl : Panel
     internal void ScheduleSkinCompute(SkinComputeJob job) => _skinDeformer?.Enqueue(job);
 
     /// <summary>
-    /// Drains <see cref="_pendingTransformOverrides"/>, stores the latest matrix per root,
-    /// then patches <see cref="PrimRenderFace.Transform"/> on all flat-list entries whose
-    /// root ID has an active override. Called once per render frame before draw calls.
+    /// Drains <see cref="_pendingTransformOverrides"/> and patches
+    /// <see cref="PrimRenderFace.Transform"/> on the faces of each dequeued root directly
+    /// (the flat draw lists share the same face instances, so they pick the change up
+    /// automatically). Faces retain the patched transform, so — unlike the previous
+    /// implementation — nothing is re-applied per frame: cost is proportional to the
+    /// number of overrides that actually arrived, not to total scene size.
+    /// Overrides for roots whose upload has not landed yet are parked in
+    /// <see cref="_sceneObjectTransformOverrides"/> and applied by
+    /// <see cref="UploadSceneObjectNoRebuild"/> when the object appears.
     /// </summary>
     private void ApplySceneTransformOverrides()
     {
-        // Drain the concurrent queue into the dictionary.
         while (_pendingTransformOverrides.TryDequeue(out var to))
-            _sceneObjectTransformOverrides[to.RootId] = to.Transform;
-
-        if (_sceneObjectTransformOverrides.IsEmpty) return;
-
-        for (int i = 0; i < _sceneOpaque.Count; i++)
         {
-            if (_sceneOpaque[i].face.IsFlexi) continue;            // never stomp flexi (see PrimRenderFace.IsFlexi)
-            if (i < _sceneOpaqueRootIds.Count &&
-                _sceneObjectTransformOverrides.TryGetValue(_sceneOpaqueRootIds[i], out var m))
-                _sceneOpaque[i].face.Transform = m;
+            if (_sceneObjects.TryGetValue(to.RootId, out var faces))
+            {
+                ApplyTransformToFaces(faces, to.Transform);
+                // A fresher matrix supersedes any parked value for this root.
+                _sceneObjectTransformOverrides.TryRemove(to.RootId, out _);
+            }
+            else
+            {
+                // Object still building/queued — park the latest matrix until upload.
+                _sceneObjectTransformOverrides[to.RootId] = to.Transform;
+            }
         }
-        for (int i = 0; i < _sceneAlpha.Count; i++)
+    }
+
+    /// <summary>
+    /// Dead-reckons every scene object tracked in <see cref="_sceneObjectMotion"/> forward from
+    /// its last terse update using the velocity/angular-velocity/acceleration the simulator
+    /// reported, and writes the extrapolated pose straight into the faces' <see
+    /// cref="PrimRenderFace.Transform"/>. Called once per rendered frame so continuous
+    /// scripted/physical motion is smooth even though the sim only sends terse updates
+    /// intermittently (throttled, priority-based). Objects come off the tracking list the
+    /// moment a terse update reports them at rest (see <see cref="SetSceneObjectMotion"/>), so
+    /// cost is proportional to the number of objects actually moving right now.
+    /// </summary>
+    private void ExtrapolateMovingSceneObjects()
+    {
+        if (_sceneObjectMotion.IsEmpty) return;
+
+        long now = Environment.TickCount64;
+        foreach (var (sceneKey, m) in _sceneObjectMotion)
         {
-            if (_sceneAlpha[i].face.IsFlexi) continue;
-            if (i < _sceneAlphaRootIds.Count &&
-                _sceneObjectTransformOverrides.TryGetValue(_sceneAlphaRootIds[i], out var m))
-                _sceneAlpha[i].face.Transform = m;
+            // Still building — the parked override from SetSceneObjectMotion's immediate
+            // SetSceneObjectTransform call will land it once the upload completes.
+            if (!_sceneObjects.TryGetValue(sceneKey, out var faces)) continue;
+
+            float dt = MathF.Min((now - m.UpdateTick) / 1000f, MaxDeadReckoningSeconds);
+
+            var position = m.Position + m.Velocity * dt + 0.5f * m.Acceleration * dt * dt;
+
+            var rotation = m.Rotation;
+            float angSpeedSq = m.AngularVelocity.LengthSquared();
+            if (angSpeedSq > 1e-8f)
+            {
+                float angSpeed = MathF.Sqrt(angSpeedSq);
+                var axis = m.AngularVelocity / angSpeed;
+                var delta = Quaternion.CreateFromAxisAngle(axis, angSpeed * dt);
+                rotation = Quaternion.Normalize(delta * rotation);
+            }
+
+            var transform = Matrix4x4.CreateScale(m.Scale)
+                          * Matrix4x4.CreateFromQuaternion(rotation)
+                          * Matrix4x4.CreateTranslation(position);
+            ApplyTransformToFaces(faces, transform);
+        }
+    }
+
+    private static void ApplyTransformToFaces(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> faces,
+        Matrix4x4 transform)
+    {
+        foreach (var entry in faces)
+        {
+            if (entry.face.IsFlexi) continue; // never stomp flexi (see PrimRenderFace.IsFlexi)
+            entry.face.Transform = transform;
         }
     }
 
@@ -2846,11 +3152,14 @@ public class GlViewportControl : Panel
         while (budget > 0 && _pendingTexturePatches.TryDequeue(out var patch))
         {
             budget--;
-            _texturePatchGate.Release();  // a slot is now free; wake any waiting producer
+            ReleasePatchGate(_texturePatchGate);  // a slot is now free; wake any waiting producer
             if (!TryApplyTexturePatch(patch))
             {
-                // Scene object not yet uploaded — defer for up to ~150 frames (~5 s at 30 Hz).
-                _deferredPatches.Add((patch, 150));
+                // Scene object not yet uploaded — defer and retry each frame. The budget is
+                // generous (~30 s at 30 Hz): with the disk cache, textures often decode long
+                // before their object's mesh build finishes (login bursts, avatar wearable
+                // fetches), and a dropped patch leaves the face permanently untextured.
+                _deferredPatches.Add((patch, 900));
             }
         }
         // If the queue still has patches, request another render tick to continue draining.
@@ -2906,8 +3215,9 @@ public class GlViewportControl : Panel
             if (ApplySubmissionPatchIfReady(patch)) return;
         }
 
-        // Geometry not yet uploaded — defer for up to ~150 frames (~5 s at 30 Hz).
-        _deferredSubmissionPatches.Add((patch, 150));
+        // Geometry not yet uploaded — defer for up to ~900 frames (~30 s at 30 Hz);
+        // cached textures can decode long before the avatar/object mesh build finishes.
+        _deferredSubmissionPatches.Add((patch, 900));
         Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
     }
 
@@ -2942,8 +3252,8 @@ public class GlViewportControl : Panel
         catch { patch.Bitmap.Dispose(); return true; }
         patch.Bitmap.Dispose();
 
-        var oldTex = ApplyPatchToList(_opaque, patch, newTex)
-                  ?? ApplyPatchToList(_alpha,  patch, newTex);
+        var oldTex = ApplyPatchToList(_opaque, patch, newTex, out _)
+                  ?? ApplyPatchToList(_alpha,  patch, newTex, out _);
         if (oldTex != null && oldTex != newTex)
             oldTex.Dispose();
         return true;
@@ -3000,22 +3310,37 @@ public class GlViewportControl : Panel
         catch { patch.Bitmap.Dispose(); return true; }
         patch.Bitmap.Dispose();
 
-        // Update the flat draw lists and capture the displaced texture.
-        // The face lives in exactly one of the two lists; the other call returns null.
-        var oldTex = ApplyPatchToList(_sceneOpaque, patch, newTex)
-                  ?? ApplyPatchToList(_sceneAlpha,  patch, newTex);
+        // Update the flat draw lists (same face-slot instances as _sceneObjects entries).
+        // The face lives in at most one of the two lists; the other call returns null.
+        ApplyPatchToList(_sceneOpaque, patch, newTex, out bool foundInOpaque);
+        ApplyPatchToList(_sceneAlpha,  patch, newTex, out bool foundInAlpha);
+        bool flatUpdated = foundInOpaque || foundInAlpha;
 
         // Mirror the texture into _sceneObjects so re-flattening picks it up.
         // Search by PrimLocalId + FaceIndex rather than using patch.FaceIndex as a
         // direct index: attachment FaceIndex values are local to the attachment's own
         // face list, not the combined global index in the avatar+attachment submission.
+        // The object list is the source of truth for texture refcounts, so the displaced
+        // texture is captured here rather than from the flat-list update above.
+        bool       applied  = false;
+        GlTexture? displaced = null;
         for (int fi = 0; fi < faceTuples.Count; fi++)
         {
             var (mesh, tex, normalTex, specTex, mrTex, emTex, face) = faceTuples[fi];
             if (face.PrimLocalId != patch.RootLocalId || face.FaceIndex != patch.FaceIndex) continue;
+            displaced = patch.Slot switch
+            {
+                TextureSlot.Albedo            => tex,
+                TextureSlot.Normal            => normalTex,
+                TextureSlot.Specular          => specTex,
+                TextureSlot.MetallicRoughness => mrTex,
+                TextureSlot.Emissive          => emTex,
+                _                             => null,
+            };
             var (updTex, updNorm, updSpec, updMr, updEm) =
                 ReplacedSlot(patch.Slot, newTex, tex, normalTex, specTex, mrTex, emTex);
             faceTuples[fi] = (mesh, updTex, updNorm, updSpec, updMr, updEm, face);
+            applied = true;
 
             // A legacy face whose alpha was inferred from face colour alone (AlphaAuto) renders
             // opaque until we learn its albedo texture is transparent. Upgrade it to the alpha
@@ -3031,22 +3356,47 @@ public class GlViewportControl : Panel
             break;
         }
 
-        // Dispose the old GlTexture now that every reference has been replaced.
-        // oldTex is null on the first-ever patch (initial slots are null from
-        // BuildFacesWithoutTextures).  Guard against the degenerate case where a
-        // patch re-applies the same GlTexture instance.
-        if (oldTex != null && oldTex != newTex)
-            oldTex.Dispose();
+        if (applied)
+        {
+            // Transfer the slot's refcount from the displaced texture to the new one.
+            // The displaced texture is only disposed when no other face slot still uses
+            // it (initial texture uploads can be shared across faces via the per-upload
+            // bitmap dedup cache). Guard against a degenerate same-instance re-apply.
+            if (!ReferenceEquals(displaced, newTex))
+            {
+                SceneTexAddRef(newTex);
+                SceneTexRelease(displaced);
+            }
+        }
+        else if (flatUpdated)
+        {
+            // Degenerate: a flat-list entry (possibly from another object sharing the
+            // same PrimLocalId+FaceIndex) took the texture but the resolved object list
+            // didn't. Track the texture so scene teardown disposes it, but do NOT release
+            // the displaced flat-list texture — the object list still references it and
+            // the next RebuildSceneFlatLists restores it to the draw lists.
+            SceneTexAddRef(newTex);
+        }
+        else
+        {
+            // Face vanished between the lookup above and here (shouldn't happen) —
+            // the new texture was installed nowhere that removal tracks; drop it.
+            newTex.Dispose();
+        }
 
         return true;
     }
 
     // Returns the GlTexture that was displaced from the slot, or null if the face was
-    // not found or the slot was already null.  Caller is responsible for disposing it.
+    // not found or the slot was already null. <paramref name="found"/> distinguishes the
+    // two: true when a face matched and the slot was replaced (even if it held null).
+    // Texture lifetime is managed by the caller (refcounts for the scene path, direct
+    // disposal for the single-submission path).
     private static GlTexture? ApplyPatchToList(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         SceneTexturePatch patch,
-        GlTexture newTex)
+        GlTexture newTex,
+        out bool found)
     {
         for (int i = 0; i < list.Count; i++)
         {
@@ -3056,7 +3406,8 @@ public class GlViewportControl : Panel
             var (updTex, updNorm, updSpec, updMr, updEm) =
                 ReplacedSlot(patch.Slot, newTex, tex, normalTex, specTex, mrTex, emTex);
             list[i] = (mesh, updTex, updNorm, updSpec, updMr, updEm, face);
-            // Return the displaced texture so the caller can dispose it.
+            found = true;
+            // Return the displaced texture so the caller can manage its lifetime.
             return patch.Slot switch
             {
                 TextureSlot.Albedo            => tex,
@@ -3067,6 +3418,7 @@ public class GlViewportControl : Panel
                 _                             => null,
             };
         }
+        found = false;
         return null;
     }
 
@@ -3083,6 +3435,114 @@ public class GlViewportControl : Panel
             _                             => (tex,    norm, spec,  mr,    em),
         };
 
+    /// <summary>
+    /// Appends the faces of <paramref name="src"/> that intersect <paramref name="frustum"/>
+    /// to <see cref="_mergedAlpha"/>, recording culled faces in the frame stats. Flexi faces
+    /// bypass the test for the same reason as in <see cref="DrawFaces"/> (stale bind-pose AABB).
+    /// Faces that survive are counted by DrawFaces itself, so totals stay consistent.
+    /// </summary>
+    private void AppendVisibleAlpha(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> src,
+        Frustum? frustum)
+    {
+        if (!frustum.HasValue)
+        {
+            _mergedAlpha.AddRange(src);
+            return;
+        }
+        var f = frustum.Value;
+        for (int i = 0; i < src.Count; i++)
+        {
+            var face = src[i].face;
+            if (!face.IsFlexi)
+            {
+                face.GetWorldAabb(out var amin, out var amax);
+                if (!FrustumCuller.IntersectsAabb(f, amin, amax))
+                {
+                    _stats.RecordFaceConsidered();
+                    _stats.RecordFaceCulled();
+                    continue;
+                }
+            }
+            _mergedAlpha.Add(src[i]);
+        }
+    }
+
+    /// <summary>
+    /// Pre-resolved uniform locations for the prim shader's hot draw loop.
+    /// <see cref="GlShader.Set(string, int)"/> costs a string-keyed dictionary lookup per
+    /// call; DrawFaces writes ~25 uniforms per face per frame, so the lookups alone were
+    /// measurable in dense scenes. Locations are resolved once per compiled shader
+    /// (-1 entries — uniforms optimised out by the driver — are no-ops in the int Set overloads).
+    /// </summary>
+    private sealed class PrimShaderLocations
+    {
+        public readonly int SsaoMap, HasSsao, ScreenSize, SunDir, SunColor, AmbientColor, Instanced;
+        public readonly int Mvp, ModelView, NormalMat, Color, Fullbright, Glow, AlphaCutoff, Shiny, HasBump, AlphaMode;
+        public readonly int HasTexture, Albedo, IsPBR, HasMaterial;
+        public readonly int BaseColorFactor, MetallicFactor, RoughnessFactor, EmissiveFactor, BaseColorUvST, BaseColorUvRot;
+        public readonly int HasNormalMap, NormalMap, PbrNormalUvST, PbrNormalUvRot;
+        public readonly int HasMRMap, MetallicRoughnessMap, MRUvST, MRUvRot;
+        public readonly int HasEmissiveMap, EmissiveMap, EmissiveUvST, EmissiveUvRot;
+        public readonly int NormalUvST, NormalUvRot, HasSpecularMap, SpecularMap, SpecUvST, SpecUvRot, SpecColor, SpecExp, EnvIntensity;
+
+        public PrimShaderLocations(GlShader s)
+        {
+            SsaoMap              = s.GetLocation("uSsaoMap");
+            HasSsao              = s.GetLocation("uHasSsao");
+            ScreenSize           = s.GetLocation("uScreenSize");
+            SunDir               = s.GetLocation("uSunDir");
+            SunColor             = s.GetLocation("uSunColor");
+            AmbientColor         = s.GetLocation("uAmbientColor");
+            Instanced            = s.GetLocation("uInstanced");
+            Mvp                  = s.GetLocation("uMvp");
+            ModelView            = s.GetLocation("uModelView");
+            NormalMat            = s.GetLocation("uNormalMat");
+            Color                = s.GetLocation("uColor");
+            Fullbright           = s.GetLocation("uFullbright");
+            Glow                 = s.GetLocation("uGlow");
+            AlphaCutoff          = s.GetLocation("uAlphaCutoff");
+            Shiny                = s.GetLocation("uShiny");
+            HasBump              = s.GetLocation("uHasBump");
+            AlphaMode            = s.GetLocation("uAlphaMode");
+            HasTexture           = s.GetLocation("uHasTexture");
+            Albedo               = s.GetLocation("uAlbedo");
+            IsPBR                = s.GetLocation("uIsPBR");
+            HasMaterial          = s.GetLocation("uHasMaterial");
+            BaseColorFactor      = s.GetLocation("uBaseColorFactor");
+            MetallicFactor       = s.GetLocation("uMetallicFactor");
+            RoughnessFactor      = s.GetLocation("uRoughnessFactor");
+            EmissiveFactor       = s.GetLocation("uEmissiveFactor");
+            BaseColorUvST        = s.GetLocation("uBaseColorUvST");
+            BaseColorUvRot       = s.GetLocation("uBaseColorUvRot");
+            HasNormalMap         = s.GetLocation("uHasNormalMap");
+            NormalMap            = s.GetLocation("uNormalMap");
+            PbrNormalUvST        = s.GetLocation("uPbrNormalUvST");
+            PbrNormalUvRot       = s.GetLocation("uPbrNormalUvRot");
+            HasMRMap             = s.GetLocation("uHasMRMap");
+            MetallicRoughnessMap = s.GetLocation("uMetallicRoughnessMap");
+            MRUvST               = s.GetLocation("uMRUvST");
+            MRUvRot              = s.GetLocation("uMRUvRot");
+            HasEmissiveMap       = s.GetLocation("uHasEmissiveMap");
+            EmissiveMap          = s.GetLocation("uEmissiveMap");
+            EmissiveUvST         = s.GetLocation("uEmissiveUvST");
+            EmissiveUvRot        = s.GetLocation("uEmissiveUvRot");
+            NormalUvST           = s.GetLocation("uNormalUvST");
+            NormalUvRot          = s.GetLocation("uNormalUvRot");
+            HasSpecularMap       = s.GetLocation("uHasSpecularMap");
+            SpecularMap          = s.GetLocation("uSpecularMap");
+            SpecUvST             = s.GetLocation("uSpecUvST");
+            SpecUvRot            = s.GetLocation("uSpecUvRot");
+            SpecColor            = s.GetLocation("uSpecColor");
+            SpecExp              = s.GetLocation("uSpecExp");
+            EnvIntensity         = s.GetLocation("uEnvIntensity");
+        }
+    }
+
+    // Lazy per-shader cache: rebuilt only when the shader instance changes (GL re-init).
+    private GlShader?            _primLocsShader;
+    private PrimShaderLocations? _primLocs;
+
     private void DrawFaces(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
@@ -3094,10 +3554,16 @@ public class GlViewportControl : Panel
         Frustum? frustum = null,
         FrameStatsTracker? stats = null,
         SkySettings? sky = null,
-        bool enableInstancing = false,
-        bool sortForBatching = false)
+        bool enableInstancing = false)
     {
         shader.Use();
+
+        if (!ReferenceEquals(_primLocsShader, shader))
+        {
+            _primLocs       = new PrimShaderLocations(shader);
+            _primLocsShader = shader;
+        }
+        var L = _primLocs!;
 
         // Bind SSAO blur result to texture unit 4 (units 0–3 used by material textures).
         bool hasSsao = ssaoTex != 0 && screenSize != default;
@@ -3105,13 +3571,13 @@ public class GlViewportControl : Panel
         {
             GlApi.Gl.ActiveTexture(TextureUnit.Texture4);
             GlApi.Gl.BindTexture(TextureTarget.Texture2D, ssaoTex);
-            shader.Set("uSsaoMap",    4);
-            shader.Set("uHasSsao",    1);
-            shader.Set("uScreenSize", screenSize);
+            shader.Set(L.SsaoMap,    4);
+            shader.Set(L.HasSsao,    1);
+            shader.Set(L.ScreenSize, screenSize);
         }
         else
         {
-            shader.Set("uHasSsao", 0);
+            shader.Set(L.HasSsao, 0);
         }
 
         // Set EEP sun/ambient uniforms — constant for all faces in this draw call.
@@ -3124,9 +3590,9 @@ public class GlViewportControl : Panel
                 Vector3.Dot(new Vector3(view.M11, view.M12, view.M13), worldSun),
                 Vector3.Dot(new Vector3(view.M21, view.M22, view.M23), worldSun),
                 Vector3.Dot(new Vector3(view.M31, view.M32, view.M33), worldSun));
-            shader.Set("uSunDir",       sunViewDir);
-            shader.Set("uSunColor",     s.SunlightColor);
-            shader.Set("uAmbientColor", s.Ambient);
+            shader.Set(L.SunDir,       sunViewDir);
+            shader.Set(L.SunColor,     s.SunlightColor);
+            shader.Set(L.AmbientColor, s.Ambient);
         }
 
         // View inverse (upper-3×3) is constant for every face this frame. The per-face
@@ -3138,25 +3604,15 @@ public class GlViewportControl : Panel
 
         bool canBatch = enableInstancing && _instanceDrawer != null;
 
-        if (canBatch && sortForBatching)
-        {
-            // Sort opaque list by (mesh ref, tex ref) so identical-geometry faces are
-            // consecutive, maximising instanced batch sizes while minimising texture binds.
-            // Only done for lists without a parallel index array (_opaque, not _sceneOpaque).
-            list.Sort(static (a, b) =>
-            {
-                int mh = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.mesh)
-                         .CompareTo(System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.mesh));
-                if (mh != 0) return mh;
-                int tha = a.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(a.tex);
-                int thb = b.tex == null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(b.tex);
-                return tha.CompareTo(thb);
-            });
-        }
+        // Note: draw lists are pre-sorted by (mesh ref, tex ref) where batching matters —
+        // _opaque at upload time (UploadSubmission) and _sceneOpaque at rebuild time
+        // (RebuildSceneFlatLists) — so identical-geometry faces are already consecutive.
+        // Sorting per frame here would be O(N log N) of wasted work: list order only
+        // changes when geometry is (re)uploaded.
 
         // Signal the vertex shader which draw path is active. Set to false once up-front;
         // toggled to true only around instanced batches, then restored.
-        shader.Set("uInstanced", false);
+        shader.Set(L.Instanced, false);
 
         bool cullActive = true;
         int _i = 0;
@@ -3193,11 +3649,11 @@ public class GlViewportControl : Panel
 
                     // Set shared batch uniforms (texture + material-class flags).
                     bool hasTex0 = tex != null;
-                    shader.Set("uHasTexture",  hasTex0);
-                    if (hasTex0) { tex!.Bind(0); shader.Set("uAlbedo", 0); }
-                    shader.Set("uIsPBR",       false);
-                    shader.Set("uHasMaterial", false);
-                    shader.Set("uHasBump",     false);
+                    shader.Set(L.HasTexture,  hasTex0);
+                    if (hasTex0) { tex!.Bind(0); shader.Set(L.Albedo, 0); }
+                    shader.Set(L.IsPBR,       false);
+                    shader.Set(L.HasMaterial, false);
+                    shader.Set(L.HasBump,     false);
 
                     // Grow the per-instance data buffer if needed.
                     int needed = batchCount * GlInstanceDrawer.InstanceFloats;
@@ -3205,7 +3661,7 @@ public class GlViewportControl : Panel
                         _instanceDataBuf = new float[needed * 2];
 
                     // Build per-instance data with individual frustum culling.
-                    shader.Set("uInstanced", true);
+                    shader.Set(L.Instanced, true);
                     int written = 0;
                     for (int j = _i; j < batchEnd; j++)
                     {
@@ -3225,7 +3681,7 @@ public class GlViewportControl : Panel
                     if (written > 0)
                         _instanceDrawer!.DrawInstanced(mesh, _instanceDataBuf, written);
 
-                    shader.Set("uInstanced", false);
+                    shader.Set(L.Instanced, false);
                     _i = batchEnd;
                     continue;
                 }
@@ -3277,107 +3733,107 @@ public class GlViewportControl : Panel
             // the face's cached model inverse instead of inverting the full MV every face.
             var normalMat = viewInv3 * face.ModelInverse3;
 
-            shader.Set("uMvp",       ref mvp);
-            shader.Set("uModelView", ref mv);
-            shader.Set("uNormalMat", ref normalMat, transpose: true);
-            shader.Set("uColor",     face.Color);
-            shader.Set("uFullbright", face.Fullbright);
-            shader.Set("uGlow",      face.Glow);
-            shader.Set("uAlphaCutoff", face.AlphaCutoff);
-            shader.Set("uShiny",     face.Shiny);
-            shader.Set("uHasBump",   face.HasBump);
-            shader.Set("uAlphaMode", (int)face.AlphaMode);
+            shader.Set(L.Mvp,       ref mvp);
+            shader.Set(L.ModelView, ref mv);
+            shader.Set(L.NormalMat, ref normalMat, transpose: true);
+            shader.Set(L.Color,     face.Color);
+            shader.Set(L.Fullbright, face.Fullbright);
+            shader.Set(L.Glow,      face.Glow);
+            shader.Set(L.AlphaCutoff, face.AlphaCutoff);
+            shader.Set(L.Shiny,     face.Shiny);
+            shader.Set(L.HasBump,   face.HasBump);
+            shader.Set(L.AlphaMode, (int)face.AlphaMode);
 
             bool hasTex = tex != null;
-            shader.Set("uHasTexture", hasTex);
+            shader.Set(L.HasTexture, hasTex);
             if (hasTex)
             {
                 tex!.Bind(0);
-                shader.Set("uAlbedo", 0);
+                shader.Set(L.Albedo, 0);
             }
 
             // ── PBR path ─────────────────────────────────────────────────
-            shader.Set("uIsPBR", face.IsPBR);
+            shader.Set(L.IsPBR, face.IsPBR);
             if (face.IsPBR)
             {
-                shader.Set("uBaseColorFactor",  face.BaseColorFactor);
-                shader.Set("uMetallicFactor",   face.MetallicFactor);
-                shader.Set("uRoughnessFactor",  face.RoughnessFactor);
-                shader.Set("uEmissiveFactor",   face.EmissiveFactor);
+                shader.Set(L.BaseColorFactor,  face.BaseColorFactor);
+                shader.Set(L.MetallicFactor,   face.MetallicFactor);
+                shader.Set(L.RoughnessFactor,  face.RoughnessFactor);
+                shader.Set(L.EmissiveFactor,   face.EmissiveFactor);
 
-                shader.Set("uBaseColorUvST",  new Vector4(
+                shader.Set(L.BaseColorUvST,  new Vector4(
                     face.BaseColorUvXform.ScaleX, face.BaseColorUvXform.ScaleY,
                     face.BaseColorUvXform.OffsetX, face.BaseColorUvXform.OffsetY));
-                shader.Set("uBaseColorUvRot", face.BaseColorUvXform.Rotation);
+                shader.Set(L.BaseColorUvRot, face.BaseColorUvXform.Rotation);
 
                 bool hasNorm = normalTex != null;
-                shader.Set("uHasNormalMap", hasNorm);
+                shader.Set(L.HasNormalMap, hasNorm);
                 if (hasNorm)
                 {
                     normalTex!.Bind(1);
-                    shader.Set("uNormalMap", 1);
+                    shader.Set(L.NormalMap, 1);
                 }
-                shader.Set("uPbrNormalUvST",  new Vector4(
+                shader.Set(L.PbrNormalUvST,  new Vector4(
                     face.PbrNormalUvXform.ScaleX, face.PbrNormalUvXform.ScaleY,
                     face.PbrNormalUvXform.OffsetX, face.PbrNormalUvXform.OffsetY));
-                shader.Set("uPbrNormalUvRot", face.PbrNormalUvXform.Rotation);
+                shader.Set(L.PbrNormalUvRot, face.PbrNormalUvXform.Rotation);
 
                 bool hasMR = mrTex != null;
-                shader.Set("uHasMRMap", hasMR);
+                shader.Set(L.HasMRMap, hasMR);
                 if (hasMR)
                 {
                     mrTex!.Bind(2);
-                    shader.Set("uMetallicRoughnessMap", 2);
+                    shader.Set(L.MetallicRoughnessMap, 2);
                 }
-                shader.Set("uMRUvST",  new Vector4(
+                shader.Set(L.MRUvST,  new Vector4(
                     face.MetallicRoughnessUvXform.ScaleX, face.MetallicRoughnessUvXform.ScaleY,
                     face.MetallicRoughnessUvXform.OffsetX, face.MetallicRoughnessUvXform.OffsetY));
-                shader.Set("uMRUvRot", face.MetallicRoughnessUvXform.Rotation);
+                shader.Set(L.MRUvRot, face.MetallicRoughnessUvXform.Rotation);
 
                 bool hasEm = emTex != null;
-                shader.Set("uHasEmissiveMap", hasEm);
+                shader.Set(L.HasEmissiveMap, hasEm);
                 if (hasEm)
                 {
                     emTex!.Bind(3);
-                    shader.Set("uEmissiveMap", 3);
+                    shader.Set(L.EmissiveMap, 3);
                 }
-                shader.Set("uEmissiveUvST",  new Vector4(
+                shader.Set(L.EmissiveUvST,  new Vector4(
                     face.EmissiveUvXform.ScaleX, face.EmissiveUvXform.ScaleY,
                     face.EmissiveUvXform.OffsetX, face.EmissiveUvXform.OffsetY));
-                shader.Set("uEmissiveUvRot", face.EmissiveUvXform.Rotation);
+                shader.Set(L.EmissiveUvRot, face.EmissiveUvXform.Rotation);
             }
             else
             {
                 // ── Legacy material path ──────────────────────────────────
-                shader.Set("uHasMaterial", face.HasMaterial);
+                shader.Set(L.HasMaterial, face.HasMaterial);
 
                 bool hasNorm = normalTex != null;
-                shader.Set("uHasNormalMap", hasNorm);
+                shader.Set(L.HasNormalMap, hasNorm);
                 if (hasNorm)
                 {
                     normalTex!.Bind(1);
-                    shader.Set("uNormalMap", 1);
+                    shader.Set(L.NormalMap, 1);
                 }
-                shader.Set("uNormalUvST", new Vector4(
+                shader.Set(L.NormalUvST, new Vector4(
                     face.NormalUvXform.ScaleX, face.NormalUvXform.ScaleY,
                     face.NormalUvXform.OffsetX, face.NormalUvXform.OffsetY));
-                shader.Set("uNormalUvRot", face.NormalUvXform.Rotation);
+                shader.Set(L.NormalUvRot, face.NormalUvXform.Rotation);
 
                 bool hasSpec = specTex != null;
-                shader.Set("uHasSpecularMap", hasSpec);
+                shader.Set(L.HasSpecularMap, hasSpec);
                 if (hasSpec)
                 {
                     specTex!.Bind(2);
-                    shader.Set("uSpecularMap", 2);
+                    shader.Set(L.SpecularMap, 2);
                 }
-                shader.Set("uSpecUvST", new Vector4(
+                shader.Set(L.SpecUvST, new Vector4(
                     face.SpecularUvXform.ScaleX, face.SpecularUvXform.ScaleY,
                     face.SpecularUvXform.OffsetX, face.SpecularUvXform.OffsetY));
-                shader.Set("uSpecUvRot", face.SpecularUvXform.Rotation);
+                shader.Set(L.SpecUvRot, face.SpecularUvXform.Rotation);
 
-                shader.Set("uSpecColor",      face.SpecularColor);
-                shader.Set("uSpecExp",        face.SpecularExponent);
-                shader.Set("uEnvIntensity",   face.EnvironmentIntensity);
+                shader.Set(L.SpecColor,      face.SpecularColor);
+                shader.Set(L.SpecExp,        face.SpecularExponent);
+                shader.Set(L.EnvIntensity,   face.EnvironmentIntensity);
             }
 
             mesh.Draw();
@@ -3420,29 +3876,41 @@ public class GlViewportControl : Panel
         buf[@base + 41] = 0f; buf[@base + 42] = 0f; buf[@base + 43] = 0f;
     }
 
-    // FNV-64 hash over raw vertex + index bytes.
-    // Used for per-submission mesh deduplication: identical geometry → shared GlMesh.
+    // FNV-1a-style hash over raw vertex + index bytes, folded 8 bytes per step (with a
+    // byte-wise tail) instead of byte-at-a-time — ~8× fewer iterations over what can be
+    // hundreds of KB per face during upload bursts. Only used as a grouping key for
+    // per-submission mesh deduplication (identical geometry → shared GlMesh), so the
+    // weaker per-chunk mixing versus canonical FNV-1a is irrelevant.
     private static ulong VertexHash(float[] verts, int len, ushort[] indices)
     {
-        const ulong Prime  = 0x00000100000001B3UL;
-        const ulong Offset = 0xCBF29CE484222325UL;
-        ulong hash = Offset;
-        var vBytes = System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(verts.AsSpan(0, len));
-        foreach (byte b in vBytes) { hash = (hash ^ b) * Prime; }
-        var iBytes = System.Runtime.InteropServices.MemoryMarshal.Cast<ushort, byte>(indices.AsSpan());
-        foreach (byte b in iBytes) { hash = (hash ^ b) * Prime; }
+        ulong hash = 0xCBF29CE484222325UL;
+        hash = HashBytes(hash, System.Runtime.InteropServices.MemoryMarshal.Cast<float, byte>(verts.AsSpan(0, len)));
+        hash = HashBytes(hash, System.Runtime.InteropServices.MemoryMarshal.Cast<ushort, byte>(indices.AsSpan()));
+        return hash;
+    }
+
+    private static ulong HashBytes(ulong hash, ReadOnlySpan<byte> bytes)
+    {
+        const ulong Prime = 0x00000100000001B3UL;
+        var chunks = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, ulong>(bytes);
+        foreach (ulong c in chunks) { hash = (hash ^ c) * Prime; }
+        for (int i = chunks.Length * sizeof(ulong); i < bytes.Length; i++)
+            hash = (hash ^ bytes[i]) * Prime;
         return hash;
     }
 
     /// <summary>
     /// G-buffer pass: render geometry into the gbuf FBO writing packed view-space
     /// normals to the colour attachment. Uses the same prim.vert so MVPs match.
+    /// Frustum-culls with the same test as the main pass so off-screen faces don't
+    /// cost a draw call each; screen-space AO never needs off-screen occluders anyway.
     /// </summary>
     private static void DrawFacesNormal(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
         ref Matrix4x4 view,
-        ref Matrix4x4 proj)
+        ref Matrix4x4 proj,
+        Frustum? frustum)
     {
         shader.Use();
         // Per-frame view inverse (upper-3×3); combined with each face's cached model
@@ -3451,6 +3919,13 @@ public class GlViewportControl : Panel
         var viewInv3 = new Matrix3x3(new Vector3(viewInvFull.M11, viewInvFull.M12, viewInvFull.M13), new Vector3(viewInvFull.M21, viewInvFull.M22, viewInvFull.M23), new Vector3(viewInvFull.M31, viewInvFull.M32, viewInvFull.M33));
         foreach (var (mesh, _, _, _, _, _, face) in list)
         {
+            // Same flexi exemption as DrawFaces: their cached AABB is bind-pose.
+            if (frustum.HasValue && !face.IsFlexi)
+            {
+                face.GetWorldAabb(out var amin, out var amax);
+                if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
+                    continue;
+            }
             var mv  = face.Transform * view;
             var mvp = mv * proj;
             var normalMat = viewInv3 * face.ModelInverse3;
@@ -3530,9 +4005,9 @@ public class GlViewportControl : Panel
 
     /// <summary>
     /// Render each face with a unique flat colour that encodes its 1-based position in
-    /// the pick map (R = bits 0–7, G = bits 8–15). Alpha is always 1.0 and acts as the
-    /// hit sentinel (clear alpha = 0). The actual LocalId and FaceIndex are looked up
-    /// from <see cref="_pickMap"/> after <c>ReadPixels</c>.
+    /// the pick map (R = bits 0–7, G = bits 8–15, B = bits 16–23; ~16.7M faces). Alpha is
+    /// always 1.0 and acts as the hit sentinel (clear alpha = 0). The actual LocalId and
+    /// FaceIndex are looked up from <see cref="_pickMap"/> after <c>ReadPixels</c>.
     /// </summary>
     private static void DrawFacesPicking(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
@@ -3551,7 +4026,8 @@ public class GlViewportControl : Panel
             uint idx = (uint)(startIdx + i); // 1-based
             float r = ( idx        & 0xFF) / 255f;
             float g = ((idx >> 8)  & 0xFF) / 255f;
-            shader.Set("uPickColor", new Vector4(r, g, 0f, 1f));
+            float b = ((idx >> 16) & 0xFF) / 255f;
+            shader.Set("uPickColor", new Vector4(r, g, b, 1f));
 
             mesh.Draw();
         }

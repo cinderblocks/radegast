@@ -27,6 +27,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using CoreJ2K;
 using LibreMetaverse;
+using LibreMetaverse.Imaging;
 using LibreMetaverse.Rendering;
 using Radegast.Rendering;
 using SkiaSharp;
@@ -366,7 +367,7 @@ namespace Radegast
             }
             else if (prim.Sculpt.Type != SculptType.Mesh)
             {
-                SKBitmap? img = await LoadTextureAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
+                ManagedImage? img = await LoadTextureAsync(prim.Sculpt.SculptTexture).ConfigureAwait(false);
                 if (img != null)
                 {
                     mesh = Mesher.GenerateFacetedSculptMesh(prim, img, DetailLevel.Highest);
@@ -383,13 +384,13 @@ namespace Radegast
             return mesh;
         }
 
-        private async Task<SKBitmap?> LoadTextureAsync(UUID textureID)
+        private async Task<ManagedImage?> LoadTextureAsync(UUID textureID)
         {
             try
             {
                 var assetTexture = await Client.Assets.RequestImageAsync(textureID).ConfigureAwait(false);
                 if (assetTexture == null) return null;
-                try { return J2kImage.DecodeToImage<SKBitmap>(assetTexture.AssetData); } catch { return null; }
+                try { return J2kImage.DecodeToImage<ManagedImage>(assetTexture.AssetData); } catch { return null; }
             }
             catch (Exception ex)
             {

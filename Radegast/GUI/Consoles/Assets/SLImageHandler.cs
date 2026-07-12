@@ -552,7 +552,7 @@ namespace Radegast
                 else if (type == 1)
                 { // targa
                     var bmp = (Bitmap)image;
-                    var tga = Targa.Encode(bmp.ToSKBitmap());
+                    var tga = Targa.Encode(LibreMetaverse.Imaging.Skia.SkiaTextureCodec.ToManagedImage(bmp.ToSKBitmap()));
                     File.WriteAllBytes(dlg.FileName, tga);
                 }
                 else if (type == 3)
