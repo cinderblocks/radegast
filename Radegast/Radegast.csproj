@@ -20,9 +20,9 @@
 	<RuntimeIdentifier Condition="'$(Platform)'=='ARM64'">win-arm64</RuntimeIdentifier>
 	<SelfContained>false</SelfContained>
 	<AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-	<Version>2.6.7</Version>
-	<AssemblyVersion>2.6.7.0</AssemblyVersion>
-	<FileVersion>2.6.7.0</FileVersion>
+	<Version>2.54.0</Version>
+	<AssemblyVersion>2.54.0.0</AssemblyVersion>
+	<FileVersion>2.54.0.0</FileVersion>
 	</PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x86' ">
     <DebugType>full</DebugType>
