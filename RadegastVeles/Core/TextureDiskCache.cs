@@ -142,6 +142,7 @@ internal static class TextureDiskCache
 
         Task.Run(() =>
         {
+            string? tmp = null;
             try
             {
                 EvictIfNeeded();
@@ -151,13 +152,28 @@ internal static class TextureDiskCache
 
                 // Write to a temp file then atomically move so a partial write is never
                 // left behind if the process is killed mid-write.
-                var tmp = path + ".tmp";
+                // The temp name must be unique PER WRITER: the same texture is often
+                // stored concurrently (scene streamer + avatar viewer requesting the same
+                // asset), and a shared "<id>.tmp" made the writers collide on WriteAllBytes
+                // ("file in use by another process"). overwrite:true makes the move
+                // race-tolerant too — both writers carry identical bytes, so last-in wins
+                // harmlessly instead of throwing "file already exists".
+                tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 File.WriteAllBytes(tmp, j2kData);
-                File.Move(tmp, path, overwrite: false);
+                File.Move(tmp, path, overwrite: true);
+                tmp = null; // moved successfully — nothing to clean up
             }
             catch (Exception ex)
             {
                 Logger.Debug($"TextureDiskCache: failed to cache texture {textureId}.", ex);
+            }
+            finally
+            {
+                // Remove the orphaned temp file if the write or move failed.
+                if (tmp != null)
+                {
+                    try { File.Delete(tmp); } catch { /* best effort */ }
+                }
             }
         });
     }

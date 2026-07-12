@@ -55,10 +55,11 @@ public readonly struct UvTransform
 public sealed class PrimRenderFace
 {
     /// <summary>
-    /// Interleaved floats: Position(3) + Normal(3) + TexCoord(2) per vertex.
+    /// Interleaved floats: Position(3) + Normal(3) + TexCoord(2) + Tangent(4) per vertex
+    /// (12 floats, matching <see cref="GlMesh.VertexStride"/>).
     /// Owned by the builder, consumed by <see cref="GlMesh"/> during upload. After upload
     /// the viewport may null this out and populate <see cref="PickerVertices"/> instead
-    /// to release the LOH array (5/8 of which is dead weight post-upload). Code that reads
+    /// to release the LOH array (9/12 of which is dead weight post-upload). Code that reads
     /// this field after upload must fall back to <see cref="PickerVertices"/>.
     /// When the buffer was rented from <see cref="System.Buffers.ArrayPool{T}"/>,
     /// <see cref="VerticesLength"/> holds the valid element count (the rented array may
@@ -322,6 +323,22 @@ public sealed class PrimRenderFace
     /// same approximation used by the SL viewer's renderable bounding volume so
     /// occasional near-pose deformation never causes false culling.
     /// </summary>
+    /// <summary>
+    /// World-space center of the cached local AABB under the <em>current</em>
+    /// <see cref="Transform"/>. Used as the alpha-sort reference point instead of the
+    /// build-time <see cref="Centroid"/> so faces whose transform is updated after build
+    /// (walking avatars, terse-updated prims via transform overrides) sort by where they
+    /// are now, not where they were built. Falls back to <see cref="Centroid"/> when no
+    /// vertex data is available (degenerate/empty faces).
+    /// </summary>
+    public Vector3 GetWorldCentroid()
+    {
+        EnsureLocalAabb();
+        if (_localMin == Vector3.Zero && _localMax == Vector3.Zero)
+            return Centroid;
+        return Vector3.Transform((_localMin + _localMax) * 0.5f, _transform);
+    }
+
     public void GetWorldAabb(out Vector3 min, out Vector3 max)
     {
         EnsureLocalAabb();
@@ -375,8 +392,10 @@ public sealed class PrimRenderFace
         }
         float minX = float.PositiveInfinity, minY = minX, minZ = minX;
         float maxX = float.NegativeInfinity, maxY = maxX, maxZ = maxX;
-        // Stride is 8 floats (pos3 + nrm3 + uv2); positions at offset 0.
-        for (int i = 0; i + 2 < v.Length; i += 8)
+        // Stride is 12 floats (pos3 + nrm3 + uv2 + tangent4); positions at offset 0.
+        // Respect VerticesLength — the buffer may be ArrayPool-rented and oversized.
+        int len = VerticesLength > 0 ? System.Math.Min(VerticesLength, v.Length) : v.Length;
+        for (int i = 0; i + 2 < len; i += 12)
         {
             float x = v[i], y = v[i + 1], z = v[i + 2];
             if (x < minX) minX = x; if (x > maxX) maxX = x;
@@ -411,7 +430,13 @@ public sealed class PrimRenderFace
         return new PrimRenderFace
         {
             Vertices                   = Vertices,
+            // VerticesLength MUST travel with Vertices: builder faces carry ArrayPool-rented
+            // buffers whose logical length is VerticesLength. Dropping it here made the GPU
+            // upload consume the oversized rented array (garbage tail → poisoned picker/AABB
+            // data) and skipped the ArrayPool return after upload.
+            VerticesLength             = VerticesLength,
             PickerVertices             = PickerVertices,
+            NormalUvVertices           = NormalUvVertices,
             Indices                    = Indices,
             Color                      = Color,
             Fullbright                 = Fullbright,

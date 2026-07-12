@@ -53,8 +53,6 @@ internal sealed class GlInstanceDrawer : IDisposable
     private uint _vao;
     private uint _vbo;
     private int  _vboFloatCap;
-    private uint _lastGeomVbo;
-    private uint _lastGeomEbo;
     private bool _instanceAttribsSetup;
     private bool _disposed;
 
@@ -102,19 +100,14 @@ internal sealed class GlInstanceDrawer : IDisposable
             _instanceAttribsSetup = true;
         }
 
-        // Update geometry attribs when the mesh changes.
-        if (mesh.Vbo != _lastGeomVbo)
-        {
-            SetupGeomAttribs(mesh);
-            _lastGeomVbo = mesh.Vbo;
-        }
-
-        // EBO is stored in the VAO; rebind when it changes.
-        if (mesh.Ebo != _lastGeomEbo)
-        {
-            gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, mesh.Ebo);
-            _lastGeomEbo = mesh.Ebo;
-        }
+        // Re-attach the geometry buffers unconditionally on every batch. Caching this by
+        // buffer handle was actively dangerous (GL recycles deleted names, so a rebuilt
+        // object's new mesh can inherit its predecessor's vbo id and the skipped setup
+        // leaves the VAO reading the orphaned old buffer), and even identity caching
+        // assumes no other code ever perturbs this VAO's attachments. A few redundant
+        // pointer/bind calls per batch are noise next to the instanced draw itself.
+        SetupGeomAttribs(mesh);
+        gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, mesh.Ebo);
 
         gl.DrawElementsInstanced(PrimitiveType.Triangles,
             (uint)mesh.IndexCount, DrawElementsType.UnsignedShort, (void*)0, (uint)instanceCount);

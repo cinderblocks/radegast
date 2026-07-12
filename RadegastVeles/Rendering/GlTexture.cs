@@ -138,19 +138,45 @@ public sealed class GlTexture : IDisposable
         gl.GenerateMipmap(TextureTarget.Texture2D);
         gl.BindTexture(TextureTarget.Texture2D, 0);
 
+        // This constructor bound (and then unbound) a texture on whatever unit happened
+        // to be active — textures are created mid-frame by texture patching and particle
+        // uploads, after Bind() has populated the cache for that unit. Invalidate so the
+        // next Bind() on the affected unit re-binds instead of trusting a stale entry.
+        ResetBindCache();
+
         bitmap.Dispose();
     }
+
+    // Last texture id bound per unit via Bind(). Lets consecutive faces sharing a texture
+    // skip the redundant ActiveTexture+BindTexture pair (common after the upload-time
+    // batching sort groups faces by texture). Only valid on the GL thread. Any code that
+    // binds textures directly through GlApi.Gl.BindTexture (sky/water/SSAO passes) must
+    // call ResetBindCache() afterwards so this cache never goes stale.
+    private static readonly int[] s_lastBound = new int[8];
+
+    static GlTexture() => Array.Fill(s_lastBound, -1);
+
+    /// <summary>
+    /// Invalidates the redundant-bind cache. Call at the start of each frame and after any
+    /// pass that binds textures without going through <see cref="Bind"/>.
+    /// </summary>
+    public static void ResetBindCache() => Array.Fill(s_lastBound, -1);
 
     /// <summary>
     /// Binds this texture to a texture unit. <paramref name="unit"/> is the zero-based unit
     /// index (0 = GL_TEXTURE0, 1 = GL_TEXTURE1, …) so callers don't depend on any GL binding
     /// library's enum during the OpenTK→Silk.NET migration.
+    /// Skips the GL calls when this texture is already bound to the unit.
     /// </summary>
     public void Bind(int unit = 0)
     {
+        if ((uint)unit < (uint)s_lastBound.Length && s_lastBound[unit] == TextureId)
+            return;
         var gl = GlApi.Gl;
         gl.ActiveTexture((TextureUnit)((int)TextureUnit.Texture0 + unit));
         gl.BindTexture(TextureTarget.Texture2D, (uint)TextureId);
+        if ((uint)unit < (uint)s_lastBound.Length)
+            s_lastBound[unit] = TextureId;
     }
 
     public void Dispose()
@@ -158,5 +184,9 @@ public sealed class GlTexture : IDisposable
         if (_disposed) return;
         _disposed = true;
         GlApi.Gl.DeleteTexture((uint)TextureId);
+        // GL recycles deleted texture names; drop any cache entry that would otherwise
+        // suppress the first bind of a future texture reusing this id.
+        for (int i = 0; i < s_lastBound.Length; i++)
+            if (s_lastBound[i] == TextureId) s_lastBound[i] = -1;
     }
 }

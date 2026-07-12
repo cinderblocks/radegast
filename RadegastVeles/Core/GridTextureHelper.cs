@@ -40,6 +40,10 @@ namespace Radegast.Veles.Core;
 /// </summary>
 public static class GridTextureHelper
 {
+    // CoreJ2K.Util.SKBitmapImageCreator (needed for the J2kImage...As<SKBitmap>() calls in
+    // this file) is registered by CoreJ2K.Skia's [ModuleInitializer], which Program.Main
+    // forces to run at startup — see the comment there for why.
+
     private static readonly LruCache<UUID, Bitmap> Cache = new(256);
     private static readonly ConcurrentDictionary<UUID, byte> Pending = new();
     private static readonly ConcurrentDictionary<UUID, long> ProgressDecodeTime = new();
@@ -859,11 +863,29 @@ public static class GridTextureHelper
 
         _ = Task.Run(async () =>
         {
-            var asset = await client.Assets.RequestServerBakedImageAsync(avatarId, textureId, bakeName, ct).ConfigureAwait(false);
+            LibreMetaverse.Assets.AssetTexture? asset;
+            try
+            {
+                asset = await client.Assets.RequestServerBakedImageAsync(avatarId, textureId, bakeName, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // RequestServerBakedImageAsync's own Cache.HasAsset/TryGetCachedAssetBytes
+                // call is outside its try/catch, so a corrupt LMV asset-cache entry throws
+                // here uncaught instead of returning null. Without this catch the exception
+                // faulted the Task.Run and tcs was never completed, so the caller silently
+                // hung until its own timeout — with nothing in the log to explain why.
+                reg.Dispose();
+                Logger.Warn($"GridTextureHelper: RequestServerBakedImageAsync threw for bake {bakeName} ({textureId}).", ex, client);
+                tcs.TrySetResult(null);
+                return;
+            }
             reg.Dispose();
 
             if (asset?.AssetData == null)
             {
+                Logger.Debug($"GridTextureHelper: no asset data returned for bake {bakeName} ({textureId}) " +
+                             "(RequestServerBakedImageAsync returned null — see its own Warn log for the HTTP-level reason, if any).", client);
                 tcs.TrySetResult(null);
                 return;
             }
@@ -882,14 +904,20 @@ public static class GridTextureHelper
                             if (prev != null) progress.Report(prev);
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"GridTextureHelper: preview decode failed for bake {bakeName} ({textureId}), {data.Length} byte(s).", ex, client);
+                    }
                 }
                 using var raw = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
+                if (raw == null)
+                    Logger.Warn($"GridTextureHelper: J2K decode returned null for bake {bakeName} ({textureId}), {data.Length} byte(s) — likely a stale/corrupt entry in the LibreMetaverse asset cache.", client);
                 var bmp = raw != null ? raw.Copy(raw.ColorType) : null;
                 tcs.TrySetResult(bmp);
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn($"GridTextureHelper: J2K decode threw for bake {bakeName} ({textureId}), {data.Length} byte(s).", ex, client);
                 tcs.TrySetResult(null);
             }
         });

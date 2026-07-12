@@ -39,16 +39,34 @@ public sealed class GlShader : IDisposable
     // Eliminates GL.GetUniformLocation driver round-trips on every Set(...) call.
     private readonly Dictionary<string, int> _uniformLocations = new(StringComparer.Ordinal);
 
-    // Cached uniform *values*, keyed by location. Uniform state is per-program and persists
+    // Cached uniform *values*, indexed by location. Uniform state is per-program and persists
     // until changed, so as long as every write goes through Set(...) we can skip the
     // glUniform* driver round-trip when the value is unchanged. The hot DrawFaces loop sets
     // ~23 uniforms per face every frame, most identical between adjacent faces (fullbright,
     // glow, PBR flags, UV transforms…), so this eliminates the large majority of those calls.
     // Matrices are intentionally not cached — they change essentially every face, and a
     // 16-float compare costs about as much as the upload.
-    private readonly Dictionary<int, int>     _cachedInt   = new();
-    private readonly Dictionary<int, float>   _cachedFloat = new();
-    private readonly Dictionary<int, Vector4> _cachedVec   = new();
+    // Flat arrays (grown on demand) instead of Dictionary<int,T>: uniform locations are
+    // small sequential ints, so this turns a hash lookup per Set(...) into an array index.
+    private int[]     _cachedInt      = Array.Empty<int>();
+    private bool[]    _cachedIntHas   = Array.Empty<bool>();
+    private float[]   _cachedFloat    = Array.Empty<float>();
+    private bool[]    _cachedFloatHas = Array.Empty<bool>();
+    private Vector4[] _cachedVec      = Array.Empty<Vector4>();
+    private bool[]    _cachedVecHas   = Array.Empty<bool>();
+
+    // Locations above this are not value-cached (defensive against drivers handing out
+    // sparse/large locations); the uniform is simply uploaded every time.
+    private const int MaxCachedLocation = 1024;
+
+    private static void EnsureCap<T>(ref T[] values, ref bool[] has, int loc)
+    {
+        if (loc < values.Length) return;
+        int newLen = Math.Max(64, values.Length);
+        while (newLen <= loc) newLen *= 2;
+        Array.Resize(ref values, newLen);
+        Array.Resize(ref has, newLen);
+    }
 
     private GlShader(uint programId) => _programId = programId;
 
@@ -115,52 +133,87 @@ public sealed class GlShader : IDisposable
         return loc;
     }
 
-    public void Set(string name, int v)
+    /// <summary>
+    /// Resolves (and caches) the location of a uniform so hot draw loops can use the
+    /// int-location <c>Set</c> overloads and skip the per-call string lookup.
+    /// Returns -1 when the uniform does not exist (optimised out or wrong name);
+    /// all int-location overloads treat -1 as a no-op.
+    /// </summary>
+    public int GetLocation(string name) => Loc(name);
+
+    public void Set(string name, int v)     => Set(Loc(name), v);
+    public void Set(string name, float v)   => Set(Loc(name), v);
+    public void Set(string name, bool v)    => Set(Loc(name), v ? 1 : 0);
+    public void Set(string name, Vector2 v) => Set(Loc(name), v);
+    public void Set(string name, Vector3 v) => Set(Loc(name), v);
+    public void Set(string name, Vector4 v) => Set(Loc(name), v);
+
+    public void Set(int loc, int v)
     {
-        int loc = Loc(name);
         if (loc < 0) return;
-        if (_cachedInt.TryGetValue(loc, out var prev) && prev == v) return;
-        _cachedInt[loc] = v;
+        if ((uint)loc < MaxCachedLocation)
+        {
+            EnsureCap(ref _cachedInt, ref _cachedIntHas, loc);
+            if (_cachedIntHas[loc] && _cachedInt[loc] == v) return;
+            _cachedInt[loc] = v;
+            _cachedIntHas[loc] = true;
+        }
         GlApi.Gl.Uniform1(loc, v);
     }
 
-    public void Set(string name, float v)
+    public void Set(int loc, float v)
     {
-        int loc = Loc(name);
         if (loc < 0) return;
-        if (_cachedFloat.TryGetValue(loc, out var prev) && prev == v) return;
-        _cachedFloat[loc] = v;
+        if ((uint)loc < MaxCachedLocation)
+        {
+            EnsureCap(ref _cachedFloat, ref _cachedFloatHas, loc);
+            if (_cachedFloatHas[loc] && _cachedFloat[loc] == v) return;
+            _cachedFloat[loc] = v;
+            _cachedFloatHas[loc] = true;
+        }
         GlApi.Gl.Uniform1(loc, v);
     }
 
-    public void Set(string name, bool v) => Set(name, v ? 1 : 0);
+    public void Set(int loc, bool v) => Set(loc, v ? 1 : 0);
 
-    public void Set(string name, Vector2 v)
+    public void Set(int loc, Vector2 v)
     {
-        int loc = Loc(name);
         if (loc < 0) return;
         var key = new Vector4(v.X, v.Y, 0f, 0f);
-        if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
-        _cachedVec[loc] = key;
+        if ((uint)loc < MaxCachedLocation)
+        {
+            EnsureCap(ref _cachedVec, ref _cachedVecHas, loc);
+            if (_cachedVecHas[loc] && _cachedVec[loc] == key) return;
+            _cachedVec[loc] = key;
+            _cachedVecHas[loc] = true;
+        }
         GlApi.Gl.Uniform2(loc, v.X, v.Y);
     }
 
-    public void Set(string name, Vector3 v)
+    public void Set(int loc, Vector3 v)
     {
-        int loc = Loc(name);
         if (loc < 0) return;
         var key = new Vector4(v.X, v.Y, v.Z, 0f);
-        if (_cachedVec.TryGetValue(loc, out var prev) && prev == key) return;
-        _cachedVec[loc] = key;
+        if ((uint)loc < MaxCachedLocation)
+        {
+            EnsureCap(ref _cachedVec, ref _cachedVecHas, loc);
+            if (_cachedVecHas[loc] && _cachedVec[loc] == key) return;
+            _cachedVec[loc] = key;
+            _cachedVecHas[loc] = true;
+        }
         GlApi.Gl.Uniform3(loc, v.X, v.Y, v.Z);
     }
 
-    public void Set(string name, Vector4 v)
+    public void Set(int loc, Vector4 v)
     {
-        int loc = Loc(name);
         if (loc < 0) return;
-        if (_cachedVec.TryGetValue(loc, out var prev) && prev == v) return;
-        _cachedVec[loc] = v;
+        if ((uint)loc < MaxCachedLocation)
+        {
+            EnsureCap(ref _cachedVec, ref _cachedVecHas, loc);
+            if (_cachedVecHas[loc] && _cachedVec[loc] == v) return;
+            _cachedVec[loc] = v;
+            _cachedVecHas[loc] = true;
+        }
         GlApi.Gl.Uniform4(loc, v.X, v.Y, v.Z, v.W);
     }
 
@@ -177,17 +230,25 @@ public sealed class GlShader : IDisposable
     // System.Numerics Matrix4x4/Matrix3x3 are contiguous row-major float blocks.
     // Reinterpret them as a float span for Silk.NET's glUniformMatrix*fv (count = 1).
     public void Set(string name, ref Matrix4x4 m, bool transpose = false)
-    {
-        ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
-            ref Unsafe.As<Matrix4x4, float>(ref m), 16);
-        GlApi.Gl.UniformMatrix4(Loc(name), 1, transpose, span);
-    }
+        => Set(Loc(name), ref m, transpose);
 
     public void Set(string name, ref Matrix3x3 m, bool transpose = false)
+        => Set(Loc(name), ref m, transpose);
+
+    public void Set(int loc, ref Matrix4x4 m, bool transpose = false)
     {
+        if (loc < 0) return;
+        ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.As<Matrix4x4, float>(ref m), 16);
+        GlApi.Gl.UniformMatrix4(loc, 1, transpose, span);
+    }
+
+    public void Set(int loc, ref Matrix3x3 m, bool transpose = false)
+    {
+        if (loc < 0) return;
         ReadOnlySpan<float> span = MemoryMarshal.CreateReadOnlySpan(
             ref Unsafe.As<Matrix3x3, float>(ref m), 9);
-        GlApi.Gl.UniformMatrix3(Loc(name), 1, transpose, span);
+        GlApi.Gl.UniformMatrix3(loc, 1, transpose, span);
     }
 
     private static uint CompileStage(ShaderType type, string src)

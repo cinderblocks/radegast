@@ -21,6 +21,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Avalonia;
 using BugSplatDotNetStandard;
@@ -61,6 +62,23 @@ internal static class Program
             builder.AddProvider(new VelesLogProvider());
         });
         Logger.SetLoggerFactory(loggerFactory, "RadegastVeles");
+
+        // On .NET 8+ CoreJ2K no longer discovers image-creator plugins by reflection; each
+        // plugin assembly (CoreJ2K.Skia, CoreJ2K.Avalonia) instead self-registers via a
+        // [ModuleInitializer]. But module initializers only run when the CLR loads the
+        // assembly, and nothing here references a CoreJ2K.Skia/CoreJ2K.Avalonia type at a
+        // call site — decodes go through J2kImage...As<SKBitmap>()/DecodeToImage<T>() whose
+        // target types live in SkiaSharp/Avalonia — so without this the plugin assemblies
+        // never load, ImageFactory finds no creator, and every decode silently returns null
+        // (callers treat a failed decode as "texture unavailable"). That is what made avatar
+        // bakes render untextured. Force both module initializers to run up front.
+        // (CoreJ2K >= 2.3.1.85 made Register idempotent per image type and made resolution
+        // tolerate concurrent registration — earlier versions returned null for every
+        // SKBitmap decode after a duplicate Register, and could transiently fail decodes
+        // that raced a Register, e.g. LibreMetaverse's AssetTexture static ctor registering
+        // ManagedImageCreator when the first texture asset arrived mid-decode.)
+        RuntimeHelpers.RunModuleConstructor(typeof(CoreJ2K.Util.SKBitmapImageCreator).Module.ModuleHandle);
+        RuntimeHelpers.RunModuleConstructor(typeof(CoreJ2K.Util.AvaloniaImageCreator).Module.ModuleHandle);
 
         // Tune the J2K decode concurrency gate based on GC-visible available RAM.
         // Must run after the logger is configured so the diagnostic line is captured.
