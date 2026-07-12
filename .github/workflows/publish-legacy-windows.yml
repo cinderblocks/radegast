@@ -65,7 +65,10 @@ jobs:
           echo "VERSION=$version" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
           echo "BUILD_VERSION=$buildVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Restore
+      - name: Restore NuGet packages
+        run: nuget restore radegast.sln
+
+      - name: Restore for platform-specific build
         run: |
           Write-Host "Restoring NuGet packages for ${{ matrix.platform }}..."
           msbuild Radegast\Radegast.csproj /t:Restore /p:Configuration=Release /p:Platform=${{ matrix.platform }}
