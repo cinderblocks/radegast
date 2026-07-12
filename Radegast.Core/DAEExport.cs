@@ -155,14 +155,16 @@ namespace Radegast
                 {
                     Textures.Add(defaultTexture.TextureID);
                 }
+
                 if (prim.Textures?.FaceTextures != null)
-                foreach (var te in prim.Textures.FaceTextures)
                 {
-                    if (te == null) continue;
-                    UUID id = te.TextureID;
-                    if (!Textures.Contains(id))
+                    foreach (var te in prim.Textures.FaceTextures)
                     {
-                        Textures.Add(id);
+                        UUID id = te.TextureID;
+                        if (!Textures.Contains(id))
+                        {
+                            Textures.Add(id);
+                        }
                     }
                 }
             }
