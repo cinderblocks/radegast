@@ -29,6 +29,7 @@
     <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.1.0" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="CoreJ2K.Skia" Version="2.3.2.86" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.148.0" />
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.150.0" />
