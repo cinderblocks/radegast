@@ -41,6 +41,7 @@ namespace Radegast
         private UUID SLImageID;
 
         private bool gotPicks = false;
+        private bool gotProperties = false;
         private UUID requestedPick;
         private ProfilePick currentPick;
         private readonly Dictionary<UUID, ProfilePick> pickCache = new Dictionary<UUID, ProfilePick>();
@@ -412,10 +413,18 @@ namespace Radegast
 
         private void Avatars_AvatarProfileReply(bool success, AgentProfileMessage profile)
         {
-            if (!success) return;
+            // The AgentProfile capability can 404 for a specific avatar even though the
+            // capability itself is registered on the sim (see radegast#189) — RequestAvatarProperties
+            // (UDP) is always fired alongside this in InitializeProfile so that case still
+            // populates the profile. Whichever reply lands first wins; the other is dropped so
+            // rich-text controls that use AppendText/Controls.Add don't get populated twice.
+            if (!success || gotProperties) return;
 
             ThreadingHelper.SafeInvokeSync(this, new Action(() =>
             {
+                if (gotProperties) return;
+                gotProperties = true;
+
                 AvatarProperties = new Avatar.AvatarProperties
                 {
                     AboutText = profile.SecondLifeAboutText,
@@ -444,6 +453,10 @@ namespace Radegast
                 ThreadingHelper.SafeInvokeSync(this, new Action(() => Avatars_AvatarPropertiesReply(sender, e)), Instance.MonoRuntime);
                 return;
             }
+
+            if (gotProperties) return;
+            gotProperties = true;
+
             AvatarProperties = e.Properties;
 
             populateFields();
@@ -537,6 +550,15 @@ namespace Radegast
             txtFullName.AgentID = AgentID;
             btnOfferTeleport.Enabled = btnPay.Enabled = AgentID != Client.Self.AgentID;
 
+            // Always request via UDP — this is also what triggers the groups, interests,
+            // and notes replies, and it's the only fallback for the case (radegast#189)
+            // where the AgentProfile capability is registered but 404s for this specific
+            // avatar. Avatars_AvatarProfileReply/Avatars_AvatarPropertiesReply guard against
+            // double-population via `gotProperties`.
+            Client.Avatars.RequestAvatarProperties(AgentID);
+            Client.Avatars.RequestAvatarNotes(AgentID);
+
+            // Also try the capability path for potentially faster property data.
             if (Client.Avatars.AgentProfileAvailable())
             {
                 _ = System.Threading.Tasks.Task.Run(async () =>
@@ -544,11 +566,6 @@ namespace Radegast
                     var (success, profile) = await Client.Avatars.RequestAgentProfileAsync(AgentID);
                     Avatars_AvatarProfileReply(success, profile);
                 });
-            }
-            else
-            {
-                Client.Avatars.RequestAvatarProperties(AgentID);
-                Client.Avatars.RequestAvatarNotes(AgentID);
             }
 
             UpdateMuteButton();
