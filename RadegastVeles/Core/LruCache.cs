@@ -123,6 +123,12 @@ public sealed class LruCache<TKey, TValue> where TKey : notnull
                     new KeyValuePair<TKey, TValue>(key, value));
                 _list.AddFirst(refreshed);
                 _map[key] = refreshed;
+                // The overwritten value is being replaced, not evicted for capacity reasons,
+                // but it's just as orphaned from the caller's perspective — without this,
+                // callers that dispose native resources (e.g. SKBitmap) only via onEvicted
+                // would leak the old value's native memory on every overwrite.
+                if (!EqualityComparer<TValue>.Default.Equals(existing.Value.Value, value))
+                    evicted = existing.Value;
             }
             else
             {
