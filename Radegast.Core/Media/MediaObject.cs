@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Runtime.InteropServices;
@@ -44,7 +45,7 @@ namespace Radegast.Media
         ///
         protected static readonly Queue<SoundDelegate> queue = new Queue<SoundDelegate>();
         protected static MediaManager manager = null!;
-        protected static Dictionary<UUID,BufferSound> allBuffers = null!;
+        protected static ConcurrentDictionary<UUID,BufferSound> allBuffers = null!;
 
 
         // A SOUND represents the data (buffer or stream)
@@ -196,29 +197,23 @@ namespace Radegast.Media
             return v;
         }
 
-        protected static Dictionary<IntPtr,MediaObject> allSounds = null!;
-        protected static Dictionary<IntPtr, MediaObject> allChannels = null!;
+        protected static ConcurrentDictionary<IntPtr,MediaObject> allSounds = null!;
+        protected static ConcurrentDictionary<IntPtr, MediaObject> allChannels = null!;
         protected void RegisterSound(Sound sound)
         {
-            IntPtr raw = sound.handle;
-            allSounds.Remove(raw);
-            allSounds.Add(raw, this);
+            allSounds[sound.handle] = this;
         }
         protected void RegisterChannel(Channel channel)
         {
-            IntPtr raw = channel.handle;
-            allChannels.Remove(raw);
-            allChannels.Add(raw, this);
+            allChannels[channel.handle] = this;
         }
         protected void UnRegisterSound()
         {
-            IntPtr raw = sound.handle;
-            allSounds.Remove(raw);
+            allSounds.TryRemove(sound.handle, out _);
         }
         protected void UnRegisterChannel()
         {
-            IntPtr raw = channel.handle;
-            allChannels.Remove(raw);
+            allChannels.TryRemove(channel.handle, out _);
         }
 
         /// <summary>
