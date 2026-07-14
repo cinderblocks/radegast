@@ -210,9 +210,16 @@ public sealed partial class VoiceSynthViewModel : ObservableObject, IDisposable
     partial void OnVoiceSynthEnabledChanged(bool value)
     {
         if (!value)
+        {
             _service.DetachVoiceSession();
+            // Free the (potentially large) ONNX model from memory now that TTS is off,
+            // rather than leaving it resident until the process exits.
+            if (ModelLoaded || ModelLoading) UnloadModel();
+        }
         else if (_voiceVm.IsConnected && _voiceVm._voice != null)
+        {
             _service.AttachVoiceSession(_voiceVm._voice.AudioDevice);
+        }
     }
 
     partial void OnSpeedChanged(double value)

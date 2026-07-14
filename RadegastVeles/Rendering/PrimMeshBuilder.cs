@@ -19,6 +19,7 @@
 
 using System;
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -50,6 +51,199 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     private readonly Dictionary<UUID, AssetMaterial?>   _pbrCache     = new();
     private readonly object                             _pbrCacheLock = new();
+
+    // ── Decoded-mesh cache ────────────────────────────────────────────────────────
+    // Mesh assets are immutable per UUID and always decoded at DetailLevel.Highest, so
+    // decoded geometry is shared process-wide across linksets, attachments, and builder
+    // instances. TransformTexCoords mutates face.Vertices in place during face packing,
+    // so cached meshes are NEVER handed out directly — every consumer gets a per-prim
+    // clone with fresh Vertices lists (Indices/Weights/TexCoords1/SkinData stay shared;
+    // nothing downstream mutates them).
+    private sealed record CachedMesh(UUID AssetId, FacetedMesh Mesh, int VertexCount);
+
+    private static readonly object MeshCacheLock = new();
+    private static readonly Dictionary<UUID, LinkedListNode<CachedMesh>> MeshCache = new();
+    private static readonly LinkedList<CachedMesh> MeshCacheLru = new(); // head = most recently used
+    private static long _meshCacheVertexTotal;
+    private static long _meshCacheMaxVertices = DefaultMeshCacheMaxVertices;
+
+    /// <summary>Default decoded-mesh cache budget (~1.5 M vertices, roughly 100–250 MB worst case).</summary>
+    public const long DefaultMeshCacheMaxVertices = 1_500_000;
+
+    /// <summary>
+    /// Total vertex budget for the decoded-mesh cache. Lowered by low-memory mode;
+    /// shrinking it evicts immediately.
+    /// </summary>
+    public static long MeshCacheMaxVertices
+    {
+        get { lock (MeshCacheLock) return _meshCacheMaxVertices; }
+        set
+        {
+            lock (MeshCacheLock)
+            {
+                _meshCacheMaxVertices = Math.Max(0, value);
+                EvictMeshCacheOverBudgetLocked();
+            }
+        }
+    }
+
+    // In-flight mesh fetch+decode tasks keyed by asset id, so N prims referencing the
+    // same mesh share one download and one decode instead of racing N of each.
+    // Lazy wrapper: GetOrAdd may call the factory more than once under race, but only
+    // the stored Lazy ever executes, so exactly one download runs per asset id.
+    private static readonly ConcurrentDictionary<UUID, Lazy<Task<FacetedMesh?>>> MeshFetchInflight = new();
+
+    private static bool TryGetCachedMesh(UUID assetId, out FacetedMesh mesh)
+    {
+        lock (MeshCacheLock)
+        {
+            if (MeshCache.TryGetValue(assetId, out var node))
+            {
+                MeshCacheLru.Remove(node);
+                MeshCacheLru.AddFirst(node);
+                mesh = node.Value.Mesh;
+                return true;
+            }
+        }
+        mesh = null!;
+        return false;
+    }
+
+    private static void AddToMeshCache(UUID assetId, FacetedMesh mesh)
+    {
+        int vertexCount = 0;
+        foreach (var f in mesh.Faces)
+            vertexCount += f.Vertices?.Count ?? 0;
+
+        lock (MeshCacheLock)
+        {
+            if (MeshCache.ContainsKey(assetId)) return;
+            var node = MeshCacheLru.AddFirst(new CachedMesh(assetId, mesh, vertexCount));
+            MeshCache[assetId] = node;
+            _meshCacheVertexTotal += vertexCount;
+            EvictMeshCacheOverBudgetLocked();
+        }
+    }
+
+    private static void EvictMeshCacheOverBudgetLocked()
+    {
+        // Evicting is always safe: in-flight consumers hold their own reference to the
+        // canonical mesh, and consumers only ever receive clones.
+        while (_meshCacheVertexTotal > _meshCacheMaxVertices && MeshCacheLru.Count > 0)
+        {
+            var last = MeshCacheLru.Last!.Value;
+            MeshCacheLru.RemoveLast();
+            MeshCache.Remove(last.AssetId);
+            _meshCacheVertexTotal -= last.VertexCount;
+        }
+    }
+
+    /// <summary>
+    /// Clones a cached canonical mesh for use by one specific prim. Vertices are copied
+    /// because TransformTexCoords rewrites TexCoords in place per prim; everything else
+    /// is shared read-only. TextureFace is re-derived from the requesting prim (the
+    /// canonical mesh carries the first requester's texture entry).
+    /// </summary>
+    private static FacetedMesh CloneMeshForPrim(FacetedMesh src, Primitive prim)
+    {
+        var clone = new FacetedMesh
+        {
+            Prim     = prim,
+            Path     = src.Path,
+            Profile  = src.Profile,
+            SkinData = src.SkinData,
+            Faces    = new List<Face>(src.Faces.Count),
+        };
+        foreach (var f in src.Faces)
+        {
+            var cf = f; // struct copy — shares Indices/Weights/TexCoords1
+            cf.Vertices = new List<Vertex>(f.Vertices);
+            if (prim.Textures != null)
+                cf.TextureFace = prim.Textures.GetFace((uint)f.ID);
+            clone.Faces.Add(cf);
+        }
+        return clone;
+    }
+
+    /// <summary>
+    /// Fetches and decodes a mesh asset, deduplicating concurrent requests for the same
+    /// id. The shared task runs on its own 60 s timeout rather than any caller's token —
+    /// one caller cancelling (e.g. an object update superseding a build) must not fail
+    /// the download for everyone else, and a completed download still lands in the cache
+    /// for the follow-up build. Callers bound their own wait with Task.WaitAsync(ct).
+    /// </summary>
+    private Task<FacetedMesh?> FetchDecodedMeshAsync(Primitive prim, UUID assetId)
+    {
+        return MeshFetchInflight.GetOrAdd(assetId, id => new Lazy<Task<FacetedMesh?>>(() => Task.Run(async () =>
+        {
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                var meshAsset = await client.Assets.RequestMeshAsync(id, timeout.Token).ConfigureAwait(false);
+                if (meshAsset == null) return null;
+
+                var mesh = _mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData);
+                if (mesh != null)
+                {
+                    // Detach the requesting prim before caching: a cached canonical must
+                    // not pin the first requester's Primitive graph (TextureEntry etc.)
+                    // for the cache's lifetime — that prim may leave the scene long
+                    // before this asset is evicted. Clones stamp their own prim and
+                    // re-derive TextureFace, so nothing downstream reads these values.
+                    mesh.Prim = new Primitive();
+                    for (int i = 0; i < mesh.Faces.Count; i++)
+                    {
+                        var f = mesh.Faces[i];
+                        f.TextureFace = new Primitive.TextureEntryFace(null);
+                        mesh.Faces[i] = f;
+                    }
+                    AddToMeshCache(id, mesh);
+                }
+                return mesh;
+            }
+            finally
+            {
+                // Success: future callers hit the decode cache. Failure: removing the
+                // entry lets a later build retry instead of latching the null forever.
+                MeshFetchInflight.TryRemove(id, out _);
+            }
+        }))).Value;
+    }
+
+    /// <summary>
+    /// Warms the shared asset caches for every unique downloadable asset referenced by
+    /// <paramref name="prims"/>, in parallel: mesh assets are downloaded and decoded into
+    /// the decoded-mesh cache; sculpt textures get their raw J2K bytes staged into
+    /// <see cref="TextureDiskCache"/> (no decode). Run this OUTSIDE the CPU build
+    /// scheduler so tessellation slots never sit idle waiting on the network.
+    /// Failures are ignored — tessellation falls back to its own download path.
+    /// </summary>
+    public async Task PrefetchLinksetAssetsAsync(IReadOnlyList<Primitive> prims, CancellationToken ct)
+    {
+        List<Task>? fetches = null;
+        var seen = new HashSet<UUID>();
+        foreach (var prim in prims)
+        {
+            var sculpt = prim.Sculpt;
+            if (sculpt == null || sculpt.SculptTexture == UUID.Zero) continue;
+            if (!seen.Add(sculpt.SculptTexture)) continue;
+
+            fetches ??= new List<Task>();
+            if (sculpt.Type == SculptType.Mesh)
+            {
+                if (!TryGetCachedMesh(sculpt.SculptTexture, out _))
+                    fetches.Add(FetchDecodedMeshAsync(prim, sculpt.SculptTexture).WaitAsync(ct));
+            }
+            else
+            {
+                fetches.Add(GridTextureHelper.PrefetchJ2KBytesAsync(client, sculpt.SculptTexture, ct));
+            }
+        }
+
+        if (fetches == null) return;
+        try { await Task.WhenAll(fetches).ConfigureAwait(false); }
+        catch { /* per-asset failures and cancellation are non-fatal; the build path re-fetches */ }
+    }
 
     private record RawFace(
         float[]       Vertices,
@@ -320,9 +514,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct)
     {
-        var meshAsset = await client.Assets.RequestMeshAsync(prim.Sculpt!.SculptTexture, ct).ConfigureAwait(false);
-        if (meshAsset == null) return null;
-        return _mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData);
+        var meshId = prim.Sculpt!.SculptTexture;
+
+        if (TryGetCachedMesh(meshId, out var cached))
+            return CloneMeshForPrim(cached, prim);
+
+        var canonical = await FetchDecodedMeshAsync(prim, meshId).WaitAsync(ct).ConfigureAwait(false);
+        // Clone even for the first caller: concurrent awaiters of the same in-flight
+        // fetch all receive the same canonical instance, and face packing mutates it.
+        return canonical == null ? null : CloneMeshForPrim(canonical, prim);
     }
 
     // ── Texture fetching ──────────────────────────────────────────────────────────

@@ -61,8 +61,7 @@ namespace Radegast.Media
             if (manager == null || !manager.SoundSystemAvailable) return;
 
             // Do not let this get garbage-collected.
-            lock (allBuffers)
-                allBuffers[objectId] = this;
+            allBuffers[objectId] = this;
 
             ContainerId = objectId;
             Id = soundId;
@@ -92,9 +91,8 @@ namespace Radegast.Media
 
         public static void Kill(UUID id)
         {
-            if (allBuffers.ContainsKey(id))
+            if (allBuffers.TryGetValue(id, out var bs))
             {
-                BufferSound bs = allBuffers[id];
                 bs.StopSound(true);
             }
         }
@@ -104,10 +102,9 @@ namespace Radegast.Media
         /// </summary>
         public static void KillAll()
         {
-            // Make a list from the dictionary so we do not get a deadlock
-            // on it when removing entries.
+            // Snapshot into a list so we do not get a deadlock on the
+            // dictionary when removing entries while iterating.
             var list = new List<BufferSound>(allBuffers.Values);
-
             foreach (var s in list)
             {
                 s.StopSound();
@@ -134,9 +131,9 @@ namespace Radegast.Media
         /// <param name="multiplier">Volume multiplier (0.0 to 1.0)</param>
         public static void AdjustVolumes(float multiplier)
         {
-            // Make a list from the dictionary so we do not get a deadlock
+            // Snapshot into a list so we do not get a deadlock on the
+            // dictionary if a sound stops mid-iteration.
             var list = new List<BufferSound>(allBuffers.Values);
-
             foreach (var s in list)
             {
                 s.AdjustVolume(multiplier);
@@ -349,8 +346,7 @@ namespace Radegast.Media
                 {
                     if (channel.hasHandle())
                     {
-                        lock (allChannels)
-                            allChannels.Remove(channel.handle);
+                        allChannels.TryRemove(channel.handle, out _);
                         chanStr = channel.handle.ToString("X");
                         channel.stop();
                         channel.clearHandle();
@@ -369,8 +365,7 @@ namespace Radegast.Media
                     Id.ToString()),
                     Helpers.LogLevel.Debug);
 #endif
-                    lock (allBuffers)
-                        allBuffers.Remove(ContainerId);
+                    allBuffers.TryRemove(ContainerId, out _);
                 }
                 catch { }
 

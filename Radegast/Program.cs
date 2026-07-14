@@ -23,6 +23,7 @@ using System.Windows.Forms;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using CommandLine;
 using CommandLine.Text;
 using System.Threading;
@@ -173,6 +174,17 @@ namespace Radegast
         private static void Main(string[] args)
         {
             Core.NativeMethods.Init();
+
+            // On .NET 8+ CoreJ2K no longer discovers image-creator plugins by reflection;
+            // CoreJ2K.Skia instead self-registers via a [ModuleInitializer]. But module
+            // initializers only run when the CLR loads the assembly, and nothing here
+            // references a CoreJ2K.Skia type at a call site — decodes go through
+            // J2kImage...As<SKBitmap>()/DecodeToImage<T>() whose target type lives in
+            // SkiaSharp — so without this the plugin assembly never loads, ImageFactory
+            // finds no creator, and every decode throws "No image creator registered for
+            // target type SkiaSharp.SKBitmap." Force the module initializer to run up front.
+            RuntimeHelpers.RunModuleConstructor(typeof(CoreJ2K.Util.SKBitmapImageCreator).Module.ModuleHandle);
+
             try
             {
                 var parser = new Parser(x => x.HelpWriter = null);

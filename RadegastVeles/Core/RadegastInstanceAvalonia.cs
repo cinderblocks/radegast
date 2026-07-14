@@ -125,6 +125,47 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <summary>Persistent group-notice archive for this session.</summary>
     public GroupNoticeArchiveService NoticeArchive { get; }
 
+    /// <summary>
+    /// When enabled, disables the 3D Scene Viewer, the Nearby/Objects minimaps, and tightens
+    /// texture/asset cache sizes to a conservative preset. Intended for running many bot
+    /// instances at once. Read from settings at construction so it takes effect even if the
+    /// user never opens Preferences that session.
+    /// </summary>
+    public bool LowMemoryModeEnabled { get; private set; }
+
+    /// <summary>Raised when <see cref="LowMemoryModeEnabled"/> changes so live UI/state can react.</summary>
+    public event EventHandler<bool>? LowMemoryModeChanged;
+
+    /// <summary>Sets <see cref="LowMemoryModeEnabled"/> and raises <see cref="LowMemoryModeChanged"/> if it changed.</summary>
+    public void SetLowMemoryModeEnabled(bool enabled)
+    {
+        if (LowMemoryModeEnabled == enabled) return;
+        LowMemoryModeEnabled = enabled;
+        LowMemoryModeChanged?.Invoke(this, enabled);
+    }
+
+    /// <summary>
+    /// Pushes texture/asset cache size settings to the live caches, substituting
+    /// <see cref="LowMemoryModePreset"/> values for the user's own settings while
+    /// <see cref="LowMemoryModeEnabled"/> is on.
+    /// </summary>
+    internal void ApplyCacheSettings(
+        int assetCacheMaxSizeMb, int skBitmapCacheCap, int textureBitmapCacheCapacity, int textureDiskCacheMaxFiles)
+    {
+        bool low = LowMemoryModeEnabled;
+        Client.Settings.AssetCache.MaxSize =
+            (long)(low ? LowMemoryModePreset.AssetCacheMaxSizeMb : assetCacheMaxSizeMb) * 1024 * 1024;
+        GridTextureHelper.SkBitmapCacheCap =
+            low ? LowMemoryModePreset.SkBitmapCacheCap : skBitmapCacheCap;
+        TextureDownloadQueue.Instance.CacheCapacity =
+            low ? LowMemoryModePreset.TextureBitmapCacheCapacity : textureBitmapCacheCapacity;
+        TextureDiskCache.MaxCachedFiles =
+            low ? LowMemoryModePreset.TextureDiskCacheMaxFiles : textureDiskCacheMaxFiles;
+        Rendering.PrimMeshBuilder.MeshCacheMaxVertices = low
+            ? LowMemoryModePreset.MeshDecodeCacheMaxVertices
+            : Rendering.PrimMeshBuilder.DefaultMeshCacheMaxVertices;
+    }
+
     internal RadegastInstanceAvalonia(string appName, GridClient client)
         : base(appName, client, new NetComAvalonia(client))
     {
@@ -142,6 +183,20 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
 
         if (GlobalSettings["chat_logging_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown)
             ChatLog.IsEnabled = GlobalSettings["chat_logging_enabled"].AsBoolean();
+
+        // Low Memory Mode must take effect from process start, even if the user never opens
+        // Preferences this session (important for unattended bots).
+        LowMemoryModeEnabled = GlobalSettings["low_memory_mode_enabled"].AsBoolean();
+
+        var assetCacheMaxSizeMb = GlobalSettings["asset_cache_max_size_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? GlobalSettings["asset_cache_max_size_mb"].AsInteger() : 1024;
+        var skBitmapCacheCap = GlobalSettings["sk_bitmap_cache_cap"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? GlobalSettings["sk_bitmap_cache_cap"].AsInteger() : GridTextureHelper.RecommendSkBitmapCacheCap();
+        var textureBitmapCacheCapacity = GlobalSettings["texture_bitmap_cache_capacity"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? GlobalSettings["texture_bitmap_cache_capacity"].AsInteger() : 2500;
+        var textureDiskCacheMaxFiles = GlobalSettings["texture_disk_cache_max_files"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? GlobalSettings["texture_disk_cache_max_files"].AsInteger() : 8192;
+        ApplyCacheSettings(assetCacheMaxSizeMb, skBitmapCacheCap, textureBitmapCacheCapacity, textureDiskCacheMaxFiles);
 
         client.Self.ScriptDialog += Self_ScriptDialog;
         client.Self.ScriptQuestion += Self_ScriptQuestion;

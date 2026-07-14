@@ -48,6 +48,11 @@ internal sealed class SceneObjectStreamer : IDisposable
     private readonly PrimMeshBuilder     _builder;
     private readonly SceneBuildScheduler _scheduler;
 
+    // Network-bound prefetch stage. Wider than the CPU build scheduler because its slots
+    // spend their time awaiting HTTP downloads, not computing; LibreMetaverse's download
+    // manager provides the actual connection-level throttle.
+    private readonly SceneBuildScheduler _fetchScheduler = new(maxConcurrent: 8);
+
     // sceneKey → CancellationTokenSource for the in-flight build task.
     private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _inflight = new();
 
@@ -307,6 +312,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _simByIndex.Clear();
         Interlocked.Exchange(ref _nextNeighborIndex, 0);
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        _fetchScheduler.Clear();
 
         foreach (var (_, cts) in _inflight)
         {
@@ -324,6 +330,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _disposed = true;
         _debounceTimer.Dispose();
         _textureLodTimer.Dispose();
+        _fetchScheduler.Dispose();
         foreach (var cts in _inflight.Values) { cts.Cancel(); cts.Dispose(); }
         _inflight.Clear();
     }
@@ -527,6 +534,37 @@ internal sealed class SceneObjectStreamer : IDisposable
             }
         }
 
+        _fetchScheduler.Enqueue(priority, _ => PrefetchThenScheduleBuildAsync(sceneKey, priority, token));
+    }
+
+    /// <summary>
+    /// Stage 1 of the build pipeline (network-bound): prefetch the linkset's mesh assets
+    /// and sculpt-texture bytes in parallel under <see cref="_fetchScheduler"/>, whose
+    /// slots are cheap to hold across HTTP waits. Stage 2 (CPU-bound) then runs in the
+    /// shared build scheduler against warm caches, so tessellation slots do pure CPU work
+    /// instead of serialising on one download per prim.
+    /// </summary>
+    private async Task PrefetchThenScheduleBuildAsync(ulong sceneKey, float priority, CancellationToken token)
+    {
+        if (_disposed || token.IsCancellationRequested) return;
+
+        try
+        {
+            var sim = SimForSceneKey(sceneKey);
+            if (sim != null)
+            {
+                // BuildObjectAsync re-collects the linkset when it runs: children that
+                // arrive while the prefetch is in flight must be part of the build (the
+                // prefetch for them is merely missed — the build path downloads on miss).
+                var prims = CollectLinkset(sim, LocalIdForSceneKey(sceneKey));
+                if (prims is { Count: > 0 })
+                    await _builder.PrefetchLinksetAssetsAsync(prims, token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { return; }
+        catch { /* prefetch is best-effort; BuildObjectAsync downloads on cache miss */ }
+
+        if (_disposed || token.IsCancellationRequested) return;
         _scheduler.Enqueue(priority, _ => BuildObjectAsync(sceneKey, token));
     }
 

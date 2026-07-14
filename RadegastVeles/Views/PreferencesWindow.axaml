@@ -328,7 +328,7 @@
                             <CheckBox Content="Enable Text to Speech (speak via voice channel)"
                                       IsChecked="{Binding Voice.VoiceSynth.VoiceSynthEnabled}"
                                       AutomationProperties.Name="Enable text to speech" />
-                            <TextBlock Text="TTS requires a connected voice session and a Piper voice model."
+                            <TextBlock Text="TTS requires a connected voice session and a Piper voice model. Disabling this also unloads the model from memory, so bots that don't need voice pay no TTS memory cost regardless of Low Memory Mode."
                                        FontSize="11" Foreground="{DynamicResource VelesMutedForeground}" TextWrapping="Wrap" />
 
                             <StackPanel IsEnabled="{Binding Voice.VoiceSynth.VoiceSynthEnabled}" Spacing="12">
@@ -566,6 +566,16 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="8" Spacing="12">
 
+                        <!-- ── Low Memory Mode ────────────────────────────── -->
+                        <TextBlock Text="Low Memory Mode" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Disables the 3D Scene Viewer and the per-region minimaps (Nearby radar and Objects map), and tightens the cache sizes below to conservative presets. Intended for running many bot instances at once. Your own cache values below are preserved and restored when this is turned off. The World Map and profile pictures are not affected." />
+                        <CheckBox Content="Enable Low Memory Mode"
+                                  IsChecked="{Binding LowMemoryModeEnabled}"
+                                  AutomationProperties.Name="Enable low memory mode" />
+
+                        <Separator />
+
                         <!-- ── J2K Decode Tuning ──────────────────────────── -->
                         <TextBlock Text="J2K Decode Tuning" FontWeight="SemiBold" FontSize="14" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
@@ -590,7 +600,7 @@
                                        Text="{Binding DecodePerDecodeMb, StringFormat='{}{0:F1} MB'}"
                                        VerticalAlignment="Center" HorizontalAlignment="Right" />
                         </Grid>
-                        <Grid ColumnDefinitions="180,*,60">
+                        <Grid ColumnDefinitions="180,*,60" IsEnabled="{Binding !LowMemoryModeEnabled}">
                             <TextBlock Grid.Column="0" Text="Decoded bitmap cache cap" VerticalAlignment="Center" />
                             <Slider Grid.Column="1"
                                     Minimum="8" Maximum="2048"
@@ -660,7 +670,7 @@
                                         Click="OnBrowseTextureDiskCacheDirClick"
                                         AutomationProperties.Name="Browse for texture disk cache directory" />
                             </Grid>
-                            <Grid ColumnDefinitions="180,*,60">
+                            <Grid ColumnDefinitions="180,*,60" IsEnabled="{Binding !LowMemoryModeEnabled}">
                                 <TextBlock Grid.Column="0" Text="Max cached files" VerticalAlignment="Center" />
                                 <Slider Grid.Column="1"
                                         Minimum="64" Maximum="32768"
@@ -678,7 +688,7 @@
                         <TextBlock Text="Texture Bitmap Memory Cache" FontWeight="SemiBold" FontSize="14" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Decoded bitmaps are kept in memory so textures already seen do not need to be re-decoded. Increase for large worlds with many unique surfaces; decrease on low-memory devices." />
-                        <Grid ColumnDefinitions="180,*,60">
+                        <Grid ColumnDefinitions="180,*,60" IsEnabled="{Binding !LowMemoryModeEnabled}">
                             <TextBlock Grid.Column="0" Text="Max cached bitmaps" VerticalAlignment="Center" />
                             <Slider Grid.Column="1"
                                     Minimum="64" Maximum="8192"

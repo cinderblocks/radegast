@@ -51,6 +51,7 @@ namespace Radegast
         private string currentURL;
         private Stream parcelStream;
         private readonly object parcelMusicLock = new object();
+        private string lastArtistTag = string.Empty;
 
 
         public MediaConsole(RadegastInstanceForms instance)
@@ -364,6 +365,7 @@ namespace Radegast
                 parcelStream = null;
                 lblStation.Tag = lblStation.Text = string.Empty;
                 txtSongTitle.Text = string.Empty;
+                lastArtistTag = string.Empty;
             }
         }
 
@@ -390,11 +392,15 @@ namespace Radegast
             switch (e.Key)
             {
                 case "artist":
-                    txtSongTitle.Text = e.Value;
+                    lastArtistTag = e.Value;
                     break;
 
                 case "title":
-                    txtSongTitle.Text += " - " + e.Value;
+                    // Replace (never append) so each new track fully overwrites the last —
+                    // otherwise every song change concatenates onto the previous title forever.
+                    txtSongTitle.Text = string.IsNullOrEmpty(lastArtistTag)
+                        ? e.Value
+                        : $"{lastArtistTag} - {e.Value}";
                     break;
 
                 case "icy-name":

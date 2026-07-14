@@ -18,7 +18,6 @@
  */
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -27,14 +26,18 @@ namespace Radegast.Veles.Core;
 
 public static class MapTileCache
 {
-    private static readonly ConcurrentDictionary<(uint, uint), Bitmap?> Cache = new();
+    // Small JPEGs (map-1-*-objects.jpg); a generous bound is cheap and keeps a long-running
+    // bot session (or one that visits many regions) from growing this cache unboundedly.
+    private const int CacheCapacity = 512;
+
+    private static readonly LruCache<(uint, uint), Bitmap> Cache =
+        new(CacheCapacity, onEvicted: static (_, bmp) => bmp.Dispose());
     private static readonly object _lock = new();
     private static readonly Dictionary<string, List<Action>> _pendingCallbacks = new();
 
     public static Bitmap? GetTile(uint gridX, uint gridY)
     {
-        Cache.TryGetValue((gridX, gridY), out var bitmap);
-        return bitmap;
+        return Cache.TryGetValue((gridX, gridY), out var bitmap) ? bitmap : null;
     }
 
     public static void RequestTile(uint gridX, uint gridY, Action? onComplete = null)
@@ -70,7 +73,7 @@ public static class MapTileCache
             TextureDownloadQueue.Instance.Enqueue(queueKey, url, bitmap =>
             {
                 if (bitmap != null)
-                    Cache[key] = bitmap;
+                    Cache.AddOrUpdate(key, bitmap);
 
                 List<Action>? toFire;
                 lock (_lock)

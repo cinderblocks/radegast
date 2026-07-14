@@ -395,7 +395,7 @@ public static class GridTextureHelper
             Bitmap? bitmap = null;
             try
             {
-                TextureDiskCache.PutAsync(textureId, data);
+                _ = TextureDiskCache.PutAsync(textureId, data);
                 using (var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>())
                 {
                     var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
@@ -588,6 +588,29 @@ public static class GridTextureHelper
     }
 
     /// <summary>
+    /// Ensures the raw J2K bytes for <paramref name="textureId"/> are present in
+    /// <see cref="TextureDiskCache"/> without decoding them. Used by asset-prefetch stages
+    /// that want the network round-trip done ahead of time while leaving the (gated,
+    /// CPU-heavy) J2K decode to the consumer that actually needs pixels.
+    /// Failures are silent — the consumer's own download path is the fallback.
+    /// </summary>
+    public static async Task PrefetchJ2KBytesAsync(GridClient client, UUID textureId, CancellationToken ct = default)
+    {
+        if (textureId == UUID.Zero) return;
+        if (SkBitmapCache.TryGetValue(textureId, out _)) return; // already decoded in memory
+        if (TextureDiskCache.Contains(textureId)) return;        // bytes already on disk
+
+        var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct).ConfigureAwait(false);
+        if (asset?.AssetData is { Length: > 0 } data)
+        {
+            // Await the disk write: prefetch completion is the signal the build stage
+            // relies on, so the bytes must actually be visible to TryGet by then —
+            // otherwise the build stage re-downloads the same texture.
+            await TextureDiskCache.PutAsync(textureId, data).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Download and decode a grid texture, returning a raw <see cref="SKBitmap"/> on a
     /// background thread.  Returns <c>null</c> if the texture cannot be fetched or decoded.
     /// Suitable for GL upload paths that need the raw pixel data, not an Avalonia Bitmap.
@@ -653,7 +676,7 @@ public static class GridTextureHelper
             }
 
             var data = asset.AssetData;
-            TextureDiskCache.PutAsync(textureId, data);
+            _ = TextureDiskCache.PutAsync(textureId, data);
 
             if (progress != null)
             {
@@ -769,7 +792,7 @@ public static class GridTextureHelper
                                 if (resp.StatusCode != System.Net.HttpStatusCode.PartialContent
                                     && j2kBytes.Length > byteTarget * 4)
                                 {
-                                    TextureDiskCache.PutAsync(textureId, j2kBytes);
+                                    _ = TextureDiskCache.PutAsync(textureId, j2kBytes);
                                 }
                             }
                         }
@@ -784,7 +807,7 @@ public static class GridTextureHelper
                                                        .ConfigureAwait(false);
                         if (asset?.AssetData == null) { winnerTcs.TrySetResult(null); return null; }
                         j2kBytes = asset.AssetData;
-                        TextureDiskCache.PutAsync(textureId, j2kBytes);
+                        _ = TextureDiskCache.PutAsync(textureId, j2kBytes);
                     }
                 }
 

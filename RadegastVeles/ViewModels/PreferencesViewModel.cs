@@ -44,6 +44,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private readonly VoiceViewModel? _voice;
     private Settings GlobalSettings => _instance.GlobalSettings;
 
+    // Advanced – Low Memory Mode (disables Scene Viewer + minimaps, tightens cache presets below)
+    [ObservableProperty]
+    private bool _lowMemoryModeEnabled;
+
     // General – Asset cache (LibreMetaverse built-in, all asset types)
     [ObservableProperty]
     private bool _assetCacheEnabled = true;
@@ -566,6 +570,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     {
         var s = GlobalSettings;
 
+        LowMemoryModeEnabled = _instance.LowMemoryModeEnabled;
+
         AssetCacheEnabled = s["asset_cache_enabled"].Type != OSDType.Unknown
             ? s["asset_cache_enabled"].AsBoolean() : true;
         AssetCacheMaxSizeMb = s["asset_cache_max_size_mb"].Type != OSDType.Unknown
@@ -579,11 +585,9 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["decode_per_decode_mb"].AsReal() : GridTextureHelper.DefaultDecodePerDecodeMb;
         SkBitmapCacheCap = s["sk_bitmap_cache_cap"].Type != OSDType.Unknown
             ? s["sk_bitmap_cache_cap"].AsInteger() : GridTextureHelper.RecommendSkBitmapCacheCap();
-        GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
 
-        // Apply immediately
+        // Apply immediately (Enabled flags aren't part of the Low Memory Mode preset, only sizes)
         _instance.Client.Settings.AssetCache.Enabled = AssetCacheEnabled;
-        _instance.Client.Settings.AssetCache.MaxSize = (long)AssetCacheMaxSizeMb * 1024 * 1024;
 
         // Texture disk cache
         TextureDiskCacheEnabled = s["texture_disk_cache_enabled"].Type != OSDType.Unknown
@@ -594,15 +598,17 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["texture_disk_cache_max_files"].AsInteger() : 8192;
 
         // Apply disk cache config immediately so downloads benefit from the stored settings.
-        TextureDiskCache.Enabled        = TextureDiskCacheEnabled;
-        TextureDiskCache.MaxCachedFiles = TextureDiskCacheMaxFiles;
+        TextureDiskCache.Enabled = TextureDiskCacheEnabled;
         if (!string.IsNullOrWhiteSpace(TextureDiskCacheDir))
             TextureDiskCache.CacheDir = TextureDiskCacheDir;
 
         // Bitmap memory cache
         TextureBitmapCacheCapacity = s["texture_bitmap_cache_capacity"].Type != OSDType.Unknown
             ? s["texture_bitmap_cache_capacity"].AsInteger() : 2500;
-        TextureDownloadQueue.Instance.CacheCapacity = TextureBitmapCacheCapacity;
+
+        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles,
+        // substituting the Low Memory Mode preset for these four values while it's enabled.
+        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles);
 
         SoundSystemAvailable = _media.SoundSystemAvailable;
         SoundSystemStatus = _media.SoundSystemStatus;
@@ -712,15 +718,17 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     public void Apply()
     {
         var s = GlobalSettings;
+
+        s["low_memory_mode_enabled"] = OSD.FromBoolean(LowMemoryModeEnabled);
+        _instance.SetLowMemoryModeEnabled(LowMemoryModeEnabled);
+
         s["asset_cache_enabled"]      = OSD.FromBoolean(AssetCacheEnabled);
         s["asset_cache_max_size_mb"]   = OSD.FromInteger(AssetCacheMaxSizeMb);
         s["image_decode_concurrency"]  = OSD.FromInteger(ImageDecodeConcurrency);
         s["decode_reserved_ram_mb"]    = OSD.FromInteger(DecodeReservedRamMb);
         s["decode_per_decode_mb"]      = OSD.FromReal(DecodePerDecodeMb);
         s["sk_bitmap_cache_cap"]       = OSD.FromInteger(SkBitmapCacheCap);
-        GridTextureHelper.SkBitmapCacheCap = SkBitmapCacheCap;
-        _instance.Client.Settings.AssetCache.Enabled      = AssetCacheEnabled;
-        _instance.Client.Settings.AssetCache.MaxSize = (long)AssetCacheMaxSizeMb * 1024 * 1024;
+        _instance.Client.Settings.AssetCache.Enabled = AssetCacheEnabled;
 
         // Re-tune
         GridTextureHelper.TuneDecodeGateForAvailableRam(DecodeReservedRamMb, DecodePerDecodeMb);
@@ -733,8 +741,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Texture disk cache
         s["texture_disk_cache_enabled"]   = OSD.FromBoolean(TextureDiskCacheEnabled);
         s["texture_disk_cache_max_files"] = OSD.FromInteger(TextureDiskCacheMaxFiles);
-        TextureDiskCache.Enabled       = TextureDiskCacheEnabled;
-        TextureDiskCache.MaxCachedFiles = TextureDiskCacheMaxFiles;
+        TextureDiskCache.Enabled = TextureDiskCacheEnabled;
         if (!string.IsNullOrWhiteSpace(TextureDiskCacheDir))
         {
             s["texture_disk_cache_dir"] = OSD.FromString(TextureDiskCacheDir);
@@ -747,7 +754,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
 
         // Bitmap memory cache
         s["texture_bitmap_cache_capacity"] = OSD.FromInteger(TextureBitmapCacheCapacity);
-        TextureDownloadQueue.Instance.CacheCapacity = TextureBitmapCacheCapacity;
+
+        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles,
+        // substituting the Low Memory Mode preset for these four values while it's enabled.
+        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles);
 
         // Push audio changes to MediaViewModel; it will persist them to GlobalSettings
         _media.MasterVolume = MasterVolume;

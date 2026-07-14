@@ -19,6 +19,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -255,7 +256,7 @@ namespace Radegast.Media
             manager = this;
 
             endCallback = DispatchEndCallback;
-            allBuffers = new Dictionary<UUID, BufferSound>();
+            allBuffers = new ConcurrentDictionary<UUID, BufferSound>();
 
             soundCancelToken = new CancellationTokenSource();
 
@@ -266,8 +267,8 @@ namespace Radegast.Media
             ZeroVector.y = 0.0f;
             ZeroVector.z = 0.0f;
 
-            allSounds = new Dictionary<IntPtr, MediaObject>();
-            allChannels = new Dictionary<IntPtr, MediaObject>();
+            allSounds = new ConcurrentDictionary<IntPtr, MediaObject>();
+            allChannels = new ConcurrentDictionary<IntPtr, MediaObject>();
 
             // Initialize sound cache
             Cache = new SoundCache(Instance, 50 * 1024 * 1024); // 50MB default
@@ -1141,10 +1142,9 @@ namespace Radegast.Media
             }
 
             // See if this is an update to  something we already know about.
-            if (allBuffers.ContainsKey(p.ID))
+            if (allBuffers.TryGetValue(p.ID, out var snd))
             {
                 // Exists already, so modify existing sound.
-                BufferSound snd = allBuffers[p.ID];
                 snd.Volume = p.SoundGain * ObjectVolume;
                 snd.Position = fullPosition;
             }

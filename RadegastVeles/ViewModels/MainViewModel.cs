@@ -74,6 +74,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsSceneViewerOpen => SceneViewer != null;
 
     [ObservableProperty]
+    private bool _isLowMemoryModeEnabled;
+
+    [ObservableProperty]
     private bool _isRegionTabOpen;
 
     [ObservableProperty]
@@ -146,6 +149,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _prevBalance = _instance.Client.Self.Balance;
         Chat.IsActive = true;
 
+        IsLowMemoryModeEnabled = _instance.LowMemoryModeEnabled;
+        _instance.LowMemoryModeChanged += Instance_LowMemoryModeChanged;
+
         _instance.Client.Self.MoneyBalance += Self_MoneyBalance;
         _instance.IMRequested += Instance_IMRequested;
         _instance.GroupIMRequested += Instance_GroupIMRequested;
@@ -164,6 +170,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.GroupIMRequested -= Instance_GroupIMRequested;
         _instance.ShowOnMapRequested -= Instance_ShowOnMapRequested;
         _instance.NotificationReceived -= Instance_NotificationReceived;
+        _instance.LowMemoryModeChanged -= Instance_LowMemoryModeChanged;
         IM.NavigateToSessionRequested -= OnIMNavigateRequested;
 
         Chat.Dispose();
@@ -233,6 +240,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() => Notifications.Add(e));
     }
 
+    private void Instance_LowMemoryModeChanged(object? sender, bool enabled)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            IsLowMemoryModeEnabled = enabled;
+            if (enabled) CloseSceneViewer();
+        });
+    }
+
     public void ShowTab(int index)
     {
         SelectedTabIndex = index;
@@ -244,6 +260,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     public void OpenSceneViewer()
     {
+        if (_instance.LowMemoryModeEnabled) return;
         if (SceneViewer == null)
         {
             var vm = new SceneViewerViewModel(_instance);
