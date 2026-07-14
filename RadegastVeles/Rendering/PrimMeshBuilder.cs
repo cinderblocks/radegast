@@ -93,6 +93,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
     // the stored Lazy ever executes, so exactly one download runs per asset id.
     private static readonly ConcurrentDictionary<UUID, Lazy<Task<FacetedMesh?>>> MeshFetchInflight = new();
 
+    private static long _meshCacheHits, _meshCacheMisses;
+    /// <summary>Decoded-mesh cache hits since process start (telemetry).</summary>
+    public static long MeshCacheHits => Interlocked.Read(ref _meshCacheHits);
+    /// <summary>Decoded-mesh cache misses since process start (telemetry).</summary>
+    public static long MeshCacheMisses => Interlocked.Read(ref _meshCacheMisses);
+
     private static bool TryGetCachedMesh(UUID assetId, out FacetedMesh mesh)
     {
         lock (MeshCacheLock)
@@ -102,9 +108,11 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 MeshCacheLru.Remove(node);
                 MeshCacheLru.AddFirst(node);
                 mesh = node.Value.Mesh;
+                Interlocked.Increment(ref _meshCacheHits);
                 return true;
             }
         }
+        Interlocked.Increment(ref _meshCacheMisses);
         mesh = null!;
         return false;
     }

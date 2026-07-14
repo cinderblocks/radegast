@@ -392,6 +392,8 @@ public class GlViewportControl : Panel
     // Set when a texture patch upgraded a legacy face to the alpha pass; triggers a single
     // RebuildSceneFlatLists() at the end of ApplyTexturePatches so the face moves draw lists.
     private bool _alphaReclassNeeded;
+    // Frame counter for the periodic [SceneLoad] pipeline telemetry log.
+    private int _loadTelemetryFrame;
     // Submission patches that arrived before UploadSubmission ran; retried for up to ~30 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredSubmissionPatches = new();
 
@@ -453,15 +455,15 @@ public class GlViewportControl : Panel
 
     /// <summary>
     /// Enables instanced batching (<see cref="GlInstanceDrawer"/>) for opaque faces that
-    /// share a deduplicated mesh. Defaults to <c>false</c>: scene-object mesh dedup only
-    /// started producing shared meshes once VerticesLength survived face translation
-    /// (before that, dedup hashes covered pool garbage and never matched), and the very
-    /// first real workload — linksets of identical prims — renders exploded geometry, so
-    /// the instanced path has a latent defect that was never exercised. The per-face
-    /// uniform path is proven correct; re-enable this only once the instanced path is
-    /// validated against a dense identical-prim scene.
+    /// share a deduplicated mesh. The 2026-07-11 "exploded geometry" regression that
+    /// forced this off was root-caused to WriteInstanceData double-transposing the
+    /// per-instance matrices (the raw System.Numerics bytes already read as the correct
+    /// column-vector matrix on the GL side, matching the uniform path); with that fixed,
+    /// the instanced path is back on. History: the defect was latent because mesh dedup
+    /// never produced shared meshes until VerticesLength survived face translation, so
+    /// the path first ran against real workloads only after that fix.
     /// </summary>
-    public bool InstancingEnabled { get; set; } = false;
+    public bool InstancingEnabled { get; set; } = true;
 
     /// <summary>Number of scene object submissions waiting to be uploaded to the GPU this frame. Zero-cost snapshot.</summary>
     public int PendingUploadCount => _pendingSceneObjects.Count;
@@ -936,10 +938,13 @@ public class GlViewportControl : Panel
             UploadSubmission(pending);
 
         // Process scene-object layer updates (additive on top of the base submission).
-        // Cap uploads per frame so a large burst (e.g. scene entry / teleport) is spread
-        // across many frames instead of stalling the GL thread. Each upload can involve
-        // several glTexImage2D calls, so even 5 per frame can take ~10 ms on a mid-range GPU.
-        const int MaxSceneUploadsPerFrame = 5;
+        // Time-budget uploads per frame so a large burst (e.g. scene entry / teleport) is
+        // spread across frames without capping throughput artificially: a fixed count cap
+        // (formerly 5/frame) throttled scene loading to ~150 objects/sec at 30 fps even
+        // when the uploads were cheap single prims, while a heavy mesh linkset could still
+        // blow the frame at count 1. The budget always admits at least one upload per
+        // frame so progress is guaranteed.
+        const double MaxSceneUploadMillis = 6.0;
         if (_initError == null)
         {
             if (_pendingClearScene)
@@ -948,14 +953,17 @@ public class GlViewportControl : Panel
                 FreeSceneObjectResources();
             }
             bool sceneListDirty = false;
-            int uploadsThisFrame = 0;
             if (!_pendingSceneObjects.IsEmpty)
             {
-                // Snapshot at most MaxSceneUploadsPerFrame keys so the foreach is bounded.
+                long uploadStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                double ticksPerMs = System.Diagnostics.Stopwatch.Frequency / 1000.0;
+                int uploadsThisFrame = 0;
                 // ConcurrentDictionary.Keys is a snapshot enumerable; TryRemove is safe mid-loop.
                 foreach (var key in _pendingSceneObjects.Keys)
                 {
-                    if (uploadsThisFrame >= MaxSceneUploadsPerFrame) break;
+                    if (uploadsThisFrame > 0 &&
+                        (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStart) / ticksPerMs >= MaxSceneUploadMillis)
+                        break;
                     if (!_pendingSceneObjects.TryRemove(key, out var sub)) continue;
                     if (sub == null)
                         RemoveSceneObjectGpuNoRebuild(key);
@@ -970,6 +978,23 @@ public class GlViewportControl : Panel
                 _core.RequestNextFrameRendering();
             if (sceneListDirty)
                 RebuildSceneFlatLists();
+
+            // Periodic scene-load pipeline telemetry (~every 5 s at 30 fps) while work is
+            // pending, so "loading feels slow" is diagnosable from Veles.log: it shows
+            // which stage is deep — GPU upload queue vs texture patches vs deferrals —
+            // and whether the decoded-mesh cache is earning its keep.
+            if (++_loadTelemetryFrame >= 150)
+            {
+                _loadTelemetryFrame = 0;
+                int up = _pendingSceneObjects.Count;
+                int qp = _pendingTexturePatches.Count;
+                int dp = _deferredPatches.Count;
+                if (up > 0 || qp > 50 || dp > 50)
+                    LibreMetaverse.Logger.Debug(
+                        $"[SceneLoad] pendingUploads={up} queuedPatches={qp} deferredPatches={dp} " +
+                        $"sceneFaces={_sceneOpaque.Count + _sceneAlpha.Count} " +
+                        $"meshCache={PrimMeshBuilder.MeshCacheHits}h/{PrimMeshBuilder.MeshCacheMisses}m");
+            }
         }
 
         // Apply per-face vertex updates queued by the animation thread.
@@ -2933,6 +2958,22 @@ public class GlViewportControl : Panel
         // waiting for the GL thread to drain an available slot.
         // Ownership of patch.Bitmap transfers to the viewport only after Enqueue succeeds.
         // Dispose it here if we exit early so the caller is never responsible for cleanup.
+        // NEVER block on the gate from the UI thread: ApplyTexturePatches — the only permit
+        // producer — runs on that same thread, so a blocking Wait here can never be
+        // satisfied and freezes the whole app. Reachable when a Progress<T> constructed
+        // with the Avalonia SynchronizationContext delivers a patch callback to the
+        // dispatcher. Hop to the pool and apply back-pressure there instead.
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            var deferred = patch;
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try { PatchSceneObjectTexture(deferred, ct); }
+                catch (OperationCanceledException) { /* bitmap already disposed inside */ }
+            });
+            return;
+        }
+
         // Capture the gate into a local: GlDeinit swaps the field for a fresh instance,
         // and Wait/Release must operate on the same object.
         var gate = _texturePatchGate;
@@ -3148,17 +3189,37 @@ public class GlViewportControl : Panel
             _deferredPatches.AddRange(stillDeferred);
         }
 
-        // Drain from the incoming queue using remaining budget.
-        while (budget > 0 && _pendingTexturePatches.TryDequeue(out var patch))
+        // Drain the incoming queue every frame, releasing one gate permit per dequeued
+        // patch, so permits keep flowing even when the apply budget is spent: producers
+        // block on the gate, and during a scene-load burst the deferred backlog can
+        // consume the entire budget for many consecutive frames — leaving patches in the
+        // queue starved the gate and stalled every texture-streaming thread on Wait.
+        // Bounded to TexturePatchQueueDepth (the gate's own capacity) per frame rather
+        // than looping until the queue is momentarily empty: releasing a permit here can
+        // immediately wake a waiting producer, which re-enqueues before this loop's next
+        // TryDequeue check, so an unbounded "drain completely" loop can chase a fast
+        // producer burst (e.g. mesh-cache hits during scene load) and hold the GL thread
+        // for the whole burst instead of one frame — the exact freeze this queue depth
+        // was meant to bound. Dequeuing is cheap; only TryApplyTexturePatch's GL upload
+        // costs real time, and that still respects the budget — over-budget patches are
+        // parked in _deferredPatches, where over-budget work lives anyway. Any remainder
+        // left in the queue is picked up next frame via the re-request below.
+        int drained = 0;
+        while (drained < TexturePatchQueueDepth && _pendingTexturePatches.TryDequeue(out var patch))
         {
-            budget--;
+            drained++;
             ReleasePatchGate(_texturePatchGate);  // a slot is now free; wake any waiting producer
-            if (!TryApplyTexturePatch(patch))
+            if (budget > 0 && TryApplyTexturePatch(patch))
             {
-                // Scene object not yet uploaded — defer and retry each frame. The budget is
-                // generous (~30 s at 30 Hz): with the disk cache, textures often decode long
-                // before their object's mesh build finishes (login bursts, avatar wearable
-                // fetches), and a dropped patch leaves the face permanently untextured.
+                budget--;
+            }
+            else
+            {
+                // Out of budget, or scene object not yet uploaded — defer and retry each
+                // frame. The retry allowance is generous (~30 s at 30 Hz): with the disk
+                // cache, textures often decode long before their object's mesh build
+                // finishes (login bursts, avatar wearable fetches), and a dropped patch
+                // leaves the face permanently untextured.
                 _deferredPatches.Add((patch, 900));
             }
         }
@@ -3846,7 +3907,6 @@ public class GlViewportControl : Panel
     }
 
     // Writes one instance's data into buf starting at instanceIdx * GlInstanceDrawer.InstanceFloats.
-    // Matrices are transposed from System.Numerics row-major to GL column-major order.
     private static unsafe void WriteInstanceData(
         float[] buf, int instanceIdx, PrimRenderFace face, ref Matrix4x4 view, ref Matrix4x4 proj)
     {
@@ -3854,13 +3914,18 @@ public class GlViewportControl : Panel
         var mv    = face.Transform * view;
         var mvp   = mv * proj;
 
-        // Column-major upload: System.Numerics is row-major, so transpose before copying raw bytes.
-        var mvpT = Matrix4x4.Transpose(mvp);
-        var mvT  = Matrix4x4.Transpose(mv);
+        // Copy the System.Numerics matrices RAW — no transpose. SN stores row-major with
+        // row-vector convention; GL reads attribute mat4 columns from consecutive vec4s,
+        // so the raw bytes arrive as the transposed (column-vector) matrix, which is
+        // exactly what prim.vert's `aInstMvp * vec4(pos,1)` needs. This mirrors the
+        // uniform path (GlShader.Set uploads raw with transpose:false). Transposing here
+        // fed the shader the row-vector matrix — translation in the bottom row made w
+        // position-dependent and exploded instanced geometry into fans (2026-07-11
+        // instancing regression, root cause).
         var mvpSpan = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvpT), 16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvp), 16);
         var mvSpan  = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvT),  16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mv),  16);
         mvpSpan.CopyTo(buf.AsSpan(@base,      16));
         mvSpan.CopyTo( buf.AsSpan(@base + 16, 16));
 
