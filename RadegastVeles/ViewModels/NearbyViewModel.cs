@@ -238,6 +238,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
         RegisterClientEvents(Client);
         _instance.NotificationInChat += Instance_NotificationInChat;
+        _instance.LowMemoryModeChanged += Instance_LowMemoryModeChanged;
 
         // Initial status
         StatusText = $"Logged in as {Client.Self.Name}";
@@ -266,6 +267,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         NetCom.ClientDisconnected -= NetCom_ClientDisconnected;
 
         _instance.NotificationInChat -= Instance_NotificationInChat;
+        _instance.LowMemoryModeChanged -= Instance_LowMemoryModeChanged;
 
         _healthTimer?.Stop();
         _healthTimer = null;
@@ -992,9 +994,31 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         }
     }
 
+    /// <summary>Avatar-radar minimap visibility, hidden while Low Memory Mode is on.</summary>
+    public bool IsMinimapVisible => !_instance.LowMemoryModeEnabled;
+
+    private void Instance_LowMemoryModeChanged(object? sender, bool enabled)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(IsMinimapVisible));
+            if (enabled)
+            {
+                MinimapEntries.Clear();
+                MinimapTile = null;
+            }
+            else
+            {
+                FetchMinimapTile();
+                RebuildMinimap();
+            }
+        });
+    }
+
     private void RebuildMinimap()
     {
         MinimapEntries.Clear();
+        if (_instance.LowMemoryModeEnabled) return;
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
@@ -1309,6 +1333,7 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
     private void FetchMinimapTile()
     {
+        if (_instance.LowMemoryModeEnabled) { MinimapTile = null; return; }
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 

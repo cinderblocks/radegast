@@ -117,7 +117,7 @@
         <!-- Right panel -->
         <DockPanel Grid.Column="2">
             <!-- Minimap -->
-            <Border DockPanel.Dock="Top" Padding="4,4,4,0" AutomationProperties.Name="Minimap area">
+            <Border DockPanel.Dock="Top" Padding="4,4,4,0" IsVisible="{Binding IsMinimapVisible}" AutomationProperties.Name="Minimap area">
                 <StackPanel Spacing="2">
                     <TextBlock Text="Minimap" FontWeight="SemiBold" FontSize="11" />
                     <controls:MinimapControl x:Name="Minimap" Entries="{Binding MinimapEntries}" BackgroundImage="{Binding MinimapTile}"

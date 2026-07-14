@@ -74,6 +74,7 @@
                           Click="OnShowMarketplaceClick" />
                 <Separator />
                 <MenuItem Header="_Scene Viewer" AutomationProperties.Name="Open 3D scene viewer"
+                          IsEnabled="{Binding !IsLowMemoryModeEnabled}"
                           Click="OnShowSceneViewerClick" />
                 <Separator />
                 <MenuItem Header="Teleport _Home" AutomationProperties.Name="Teleport home"

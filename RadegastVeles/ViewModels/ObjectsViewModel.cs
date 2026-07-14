@@ -190,6 +190,7 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
         RegisterClientEvents(Client);
         _instance.State.SitStateChanged += State_SitStateChanged;
+        _instance.LowMemoryModeChanged += Instance_LowMemoryModeChanged;
 
         var selfPos = Client.Self.SimPosition;
         _selfX = selfPos.X;
@@ -202,6 +203,7 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
     {
         base.Dispose();
         _instance.State.SitStateChanged -= State_SitStateChanged;
+        _instance.LowMemoryModeChanged -= Instance_LowMemoryModeChanged;
 
         lock (_timerLock)
         {
@@ -930,8 +932,30 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     #region Object Map Helpers
 
+    /// <summary>Object-minimap visibility, hidden while Low Memory Mode is on (the prim list itself stays live).</summary>
+    public bool IsObjectMinimapVisible => !_instance.LowMemoryModeEnabled;
+
+    private void Instance_LowMemoryModeChanged(object? sender, bool enabled)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            OnPropertyChanged(nameof(IsObjectMinimapVisible));
+            if (enabled)
+            {
+                MapEntries.Clear();
+                ObjectMapTile = null;
+            }
+            else
+            {
+                FetchMapTile();
+                RebuildMapEntries();
+            }
+        });
+    }
+
     private void FetchMapTile()
     {
+        if (_instance.LowMemoryModeEnabled) { ObjectMapTile = null; return; }
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
         Utils.LongToUInts(sim.Handle, out var gridX, out var gridY);
@@ -944,8 +968,9 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     private void RebuildMapEntries()
     {
-        var sim = Client.Network.CurrentSim;
         MapEntries.Clear();
+        if (_instance.LowMemoryModeEnabled) return;
+        var sim = Client.Network.CurrentSim;
         if (sim == null) return;
         foreach (var entry in Objects)
         {

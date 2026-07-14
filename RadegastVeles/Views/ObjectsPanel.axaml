@@ -90,6 +90,7 @@
             <Expander DockPanel.Dock="Bottom" Header="Object Map" IsExpanded="True"
                       HorizontalAlignment="Stretch"
                       Padding="4,0,8,4"
+                      IsVisible="{Binding IsObjectMinimapVisible}"
                       AutomationProperties.Name="Objects minimap area">
                 <controls:ObjectMinimapControl
                     Entries="{Binding MapEntries}"
