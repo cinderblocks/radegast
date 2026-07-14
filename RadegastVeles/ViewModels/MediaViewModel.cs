@@ -39,6 +39,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private readonly object _parcelMusicLock = new();
     private bool _playing;
     private string _currentURL = string.Empty;
+    private string _lastArtistTag = string.Empty;
 
     private Timer? _configTimer;
     private const int SaveConfigTimeout = 1000;
@@ -360,6 +361,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
         _parcelStream = null;
         StationName = string.Empty;
         SongTitle = string.Empty;
+        _lastArtistTag = string.Empty;
     }
 
     private void OnStreamInfo(object? sender, StreamInfoArgs e)
@@ -369,13 +371,14 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
             switch (e.Key)
             {
                 case "artist":
-                    SongTitle = e.Value;
+                    _lastArtistTag = e.Value;
                     break;
                 case "title":
-                    if (!string.IsNullOrEmpty(SongTitle))
-                        SongTitle += " - " + e.Value;
-                    else
-                        SongTitle = e.Value;
+                    // Replace (never append) so each new track fully overwrites the last —
+                    // otherwise every song change concatenates onto the previous title forever.
+                    SongTitle = string.IsNullOrEmpty(_lastArtistTag)
+                        ? e.Value
+                        : $"{_lastArtistTag} - {e.Value}";
                     if (MediaMetadataNotificationsEnabled && !string.IsNullOrEmpty(SongTitle))
                         VelesNotificationService.Show("Now Playing", SongTitle);
                     break;
