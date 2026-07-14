@@ -17,16 +17,16 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
     <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.Imaging.Skia" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.Rendering.MeshFoundry" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.Types" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.Utilities" Version="3.1.0" />
-    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.1.0" />
+    <PackageReference Include="LibreMetaverse" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.Imaging.Skia" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.LslTools" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.PrimMesher" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.Rendering.MeshFoundry" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.RLV" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.Types" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.Utilities" Version="3.1.1" />
+    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.1.1" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CoreJ2K.Skia" Version="2.3.2.86" />
