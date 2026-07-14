@@ -844,6 +844,11 @@ public static class GridTextureHelper
             }
             catch
             {
+                // Unlike the full-resolution paths (Download/DecodeWithDeduplication), this
+                // LOD path can be the ONLY consumer of a given texture (e.g. a distant object
+                // that never gets a full-res build). Without evicting here, a truncated/corrupt
+                // disk-cached codestream is never cleared and re-fails identically forever.
+                TextureDiskCache.Evict(textureId);
                 winnerTcs.TrySetResult(null);
                 return null;
             }
