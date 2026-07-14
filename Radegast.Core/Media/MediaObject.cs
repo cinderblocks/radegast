@@ -148,7 +148,7 @@ namespace Radegast.Media
             set
             {
                 position = FromOMVSpace(value);
-                if (!channel.hasHandle()) return;
+                if (!channel.hasHandle() || finished) return;
 
                 invoke(delegate
                 {
