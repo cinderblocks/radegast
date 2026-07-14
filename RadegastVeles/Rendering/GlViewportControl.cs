@@ -3158,8 +3158,16 @@ public class GlViewportControl : Panel
     {
         // Cap texture uploads per frame across BOTH deferred retries and new patches.
         // Each TexImage2D call can take ~0.5–2 ms; 20/frame ≈ 10–40 ms max.
-        const int MaxPatchesPerFrame = 20;
-        int budget = MaxPatchesPerFrame;
+        // Split into two independent halves rather than one shared counter: a single
+        // shared budget let a large deferred backlog (built up during a scene-load
+        // burst) exhaust the whole frame's budget on retries — which run first — before
+        // the incoming-queue loop below ever got a look. That starved brand-new patches
+        // of their (often successful, since their object may have *just* finished
+        // uploading) first attempt, forcing them straight into the deferred list too and
+        // compounding the backlog every frame instead of letting it drain.
+        const int MaxDeferredPerFrame = 10;
+        const int MaxIncomingPerFrame = 10;
+        int budget = MaxDeferredPerFrame;
 
         // Retry deferred patches from previous frames first (they may have geometry now).
         if (_deferredPatches.Count > 0)
@@ -3173,9 +3181,18 @@ public class GlViewportControl : Panel
                     stillDeferred.Add((patch, retriesLeft));
                     continue;
                 }
+                // Consume a budget slot for this attempt whether or not it succeeds: a
+                // miss still runs TryApplyTexturePatch's fallback scan over every scene
+                // face (see below), so letting failures go unmetered turned this foreach
+                // into an unbounded full-list, full-scene rescan every single frame once
+                // the deferred backlog grew past a few thousand entries (observed
+                // deferredPatches climbing past 5000 during a scene-load burst) — the
+                // budget<=0 bailout above almost never tripped because successes, not
+                // attempts, were what decremented it.
+                budget--;
                 if (TryApplyTexturePatch(patch))
                 {
-                    budget--;  // consumed a slot whether or not geometry was found
+                    // applied — drop it, do not re-add to stillDeferred
                 }
                 else
                 {
@@ -3205,13 +3222,14 @@ public class GlViewportControl : Panel
         // parked in _deferredPatches, where over-budget work lives anyway. Any remainder
         // left in the queue is picked up next frame via the re-request below.
         int drained = 0;
+        int incomingBudget = MaxIncomingPerFrame;
         while (drained < TexturePatchQueueDepth && _pendingTexturePatches.TryDequeue(out var patch))
         {
             drained++;
             ReleasePatchGate(_texturePatchGate);  // a slot is now free; wake any waiting producer
-            if (budget > 0 && TryApplyTexturePatch(patch))
+            if (incomingBudget > 0 && TryApplyTexturePatch(patch))
             {
-                budget--;
+                incomingBudget--;
             }
             else
             {
