@@ -32,4 +32,7 @@ public static class LowMemoryModePreset
     public const int AssetCacheMaxSizeMb = 128;
     public const int TextureBitmapCacheCapacity = 400;
     public const int TextureDiskCacheMaxFiles = 1024;
+    // Low-memory mode disables the 3D scene viewer, but attachments for the avatar
+    // viewer still decode meshes — keep a small budget rather than zero.
+    public const long MeshDecodeCacheMaxVertices = 200_000;
 }

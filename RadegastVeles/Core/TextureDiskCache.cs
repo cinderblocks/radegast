@@ -129,18 +129,33 @@ internal static class TextureDiskCache
     }
 
     /// <summary>
-    /// Asynchronously write raw JPEG 2000 <paramref name="j2kData"/> bytes to disk
-    /// (fire-and-forget).  The byte array is captured by reference; the caller must
-    /// not mutate or recycle the array after this call.
+    /// Returns true when raw J2K bytes for <paramref name="textureId"/> are already on disk,
+    /// without reading them. Used by prefetch paths that only need to know whether a
+    /// download can be skipped.
+    /// </summary>
+    public static bool Contains(UUID textureId)
+    {
+        if (!_enabled) return false;
+        try { return File.Exists(FilePath(textureId)); }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Asynchronously write raw JPEG 2000 <paramref name="j2kData"/> bytes to disk.
+    /// The byte array is captured by reference; the caller must not mutate or recycle
+    /// the array after this call.
     /// Silently skips the write if the cache is disabled, already at capacity,
     /// or if the file already exists.
+    /// Most callers discard the returned task (fire-and-forget); prefetch paths await
+    /// it so that a subsequent <see cref="TryGet"/>/<see cref="Contains"/> is
+    /// guaranteed to see the bytes.
     /// </summary>
-    public static void PutAsync(UUID textureId, byte[] j2kData)
+    public static Task PutAsync(UUID textureId, byte[] j2kData)
     {
-        if (!_enabled) return;
-        if (j2kData == null || j2kData.Length == 0) return;
+        if (!_enabled) return Task.CompletedTask;
+        if (j2kData == null || j2kData.Length == 0) return Task.CompletedTask;
 
-        Task.Run(() =>
+        return Task.Run(() =>
         {
             string? tmp = null;
             try

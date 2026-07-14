@@ -161,6 +161,9 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
             low ? LowMemoryModePreset.TextureBitmapCacheCapacity : textureBitmapCacheCapacity;
         TextureDiskCache.MaxCachedFiles =
             low ? LowMemoryModePreset.TextureDiskCacheMaxFiles : textureDiskCacheMaxFiles;
+        Rendering.PrimMeshBuilder.MeshCacheMaxVertices = low
+            ? LowMemoryModePreset.MeshDecodeCacheMaxVertices
+            : Rendering.PrimMeshBuilder.DefaultMeshCacheMaxVertices;
     }
 
     internal RadegastInstanceAvalonia(string appName, GridClient client)
