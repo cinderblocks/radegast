@@ -205,6 +205,8 @@ namespace Radegast
             {
                 OnClientLoginStatus(
                     new LoginProgressEventArgs(LoginStatus.Failed, "One or more fields are blank.", string.Empty));
+                IsLoggingIn = false;
+                return;
             }
 
             string startLocation = string.Empty;

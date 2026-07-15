@@ -33,6 +33,7 @@ using System.Linq;
 using LibreMetaverse;
 using NetSparkleUpdater.SignatureVerifiers;
 using System.Runtime.InteropServices;
+using Radegast.GUI;
 
 namespace Radegast
 {
@@ -290,6 +291,19 @@ namespace Radegast
             if (e.Status == LoginStatus.Failed)
             {
                 if (!InAutoReconnect) return;
+
+                if (e.FailReason == "mfa_challenge")
+                {
+                    // Auto-reconnect can't be completed silently when the grid demands a fresh
+                    // MFA code, so prompt for one here instead of looping the reconnect timer forever.
+                    var prompt = new MfaPrompt(instance);
+                    if (prompt.ShowDialog(this) != DialogResult.OK)
+                    {
+                        InAutoReconnect = false;
+                    }
+                    prompt.Dispose();
+                    return;
+                }
 
                 if (instance.GlobalSettings["auto_reconnect"].AsBoolean() && e.FailReason != "tos")
                     BeginAutoReconnect();
