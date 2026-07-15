@@ -158,6 +158,12 @@ namespace Radegast
             }
 
             Application.Run(RadegastInstanceForms.Instance.MainForm);
+
+            // Application is exiting for good here (Application.Run has returned) - flush and
+            // tear down the process-wide logger exactly once. This must not happen any earlier
+            // (e.g. from GridClient.Dispose() during a reconnect), since Logger is a shared
+            // static facility used for the lifetime of the whole process, not any one GridClient.
+            Logger.Shutdown();
         }
 
         private static void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs exEventArgs)
