@@ -25,6 +25,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Platform.Storage;
 using LibreMetaverse;
+using Microsoft.Extensions.Logging;
 using Radegast.Veles.Core;
 using Radegast.Veles.PluginApi;
 
@@ -325,15 +326,62 @@ internal sealed class PluginContext : IPluginContext
         }
     }
 
-    private void OnChat(object? sender, ChatEventArgs e) => _chatReceived?.Invoke(this, e);
-    private void OnIM(object? sender, InstantMessageEventArgs e) => _imReceived?.Invoke(this, e);
-    private void OnSimConnected(object? sender, SimConnectedEventArgs e) => _connected?.Invoke(this, e);
-    private void OnDisconnected(object? sender, DisconnectedEventArgs e) => _disconnected?.Invoke(this, e);
-    private void OnObjectUpdated(object? sender, PrimEventArgs e) => _objectUpdated?.Invoke(this, e);
-    private void OnTeleportProgress(object? sender, TeleportEventArgs e) => _teleportProgress?.Invoke(this, e);
-    private void OnFriendOnline(object? sender, FriendInfoEventArgs e) => _friendOnline?.Invoke(this, e);
-    private void OnFriendOffline(object? sender, FriendInfoEventArgs e) => _friendOffline?.Invoke(this, e);
-    private void OnGroupChatJoined(object? sender, GroupChatJoinedEventArgs e) => _groupChatJoined?.Invoke(this, e);
+    // Each of these is a direct subscriber on a shared GridClient multicast event, so an
+    // unhandled exception here would propagate back into that event's invocation and stop
+    // any other subscriber (other plugins, or Radegast's own internal handlers) from running.
+    private void OnChat(object? sender, ChatEventArgs e)
+    {
+        try { _chatReceived?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' chat handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnIM(object? sender, InstantMessageEventArgs e)
+    {
+        try { _imReceived?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' IM handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnSimConnected(object? sender, SimConnectedEventArgs e)
+    {
+        try { _connected?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' sim-connected handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        try { _disconnected?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' disconnected handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnObjectUpdated(object? sender, PrimEventArgs e)
+    {
+        try { _objectUpdated?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' object-updated handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnTeleportProgress(object? sender, TeleportEventArgs e)
+    {
+        try { _teleportProgress?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' teleport-progress handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnFriendOnline(object? sender, FriendInfoEventArgs e)
+    {
+        try { _friendOnline?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' friend-online handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnFriendOffline(object? sender, FriendInfoEventArgs e)
+    {
+        try { _friendOffline?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' friend-offline handler threw: {ex.Message}", LogLevel.Warning); }
+    }
+
+    private void OnGroupChatJoined(object? sender, GroupChatJoinedEventArgs e)
+    {
+        try { _groupChatJoined?.Invoke(this, e); }
+        catch (Exception ex) { Logger.Log($"Plugin '{PluginName}' group-chat-joined handler threw: {ex.Message}", LogLevel.Warning); }
+    }
 
     /// <summary>
     /// Remove all registrations made by the plugin. Called automatically
