@@ -344,81 +344,82 @@ public static class GridTextureHelper
             return;
         }
 
-        // Check the persistent on-disk cache before hitting the asset server.
+        // TextureDiskCache.TryGet does synchronous file I/O (File.Exists + ReadAllBytes).
+        // Download is frequently called directly from UI-thread ViewModel code (profile,
+        // group, parcel, and landmark panels reacting to server replies), so dispatch the
+        // disk-cache check itself to the thread pool instead of blocking the caller.
+        Task.Run(() =>
         {
             var diskJ2k = TextureDiskCache.TryGet(textureId);
             if (diskJ2k != null)
             {
-                Task.Run(() =>
+                try
                 {
-                    try
+                    // Two-pass: cheap low-res preview first so the UI shows something
+                    // immediately, then replace with the full-resolution bitmap.
+                    using (var previewRaw = J2kImage.FromBytes(diskJ2k, PreviewDecoderCfg).As<SKBitmap>())
                     {
-                        // Two-pass: cheap low-res preview first so the UI shows something
-                        // immediately, then replace with the full-resolution bitmap.
-                        using (var previewRaw = J2kImage.FromBytes(diskJ2k, PreviewDecoderCfg).As<SKBitmap>())
-                        {
-                            var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
-                            if (previewBmp != null)
-                                Dispatcher.UIThread.Post(() => onComplete(previewBmp));
-                        }
+                        var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
+                        if (previewBmp != null)
+                            Dispatcher.UIThread.Post(() => onComplete(previewBmp));
+                    }
 
-                        using var raw = J2kImage.FromBytes(diskJ2k, FullDecoderCfg).As<SKBitmap>();
-                        if (raw == null) return;
-                        var bitmap = SkBitmapToAvaloniaBitmap(raw);
-                        if (bitmap == null) return;
-                        Cache.AddOrUpdate(textureId, bitmap);
-                        Dispatcher.UIThread.Post(() => onComplete(bitmap));
-                    }
-                    catch
-                    {
-                        TextureDiskCache.Evict(textureId);
-                    }
-                });
+                    using var raw = J2kImage.FromBytes(diskJ2k, FullDecoderCfg).As<SKBitmap>();
+                    if (raw == null) return;
+                    var bitmap = SkBitmapToAvaloniaBitmap(raw);
+                    if (bitmap == null) return;
+                    Cache.AddOrUpdate(textureId, bitmap);
+                    Dispatcher.UIThread.Post(() => onComplete(bitmap));
+                }
+                catch
+                {
+                    TextureDiskCache.Evict(textureId);
+                }
                 return;
             }
-        }
 
-        if (!Pending.TryAdd(textureId, 0))
-            return;
-
-        _ = Task.Run(async () =>
-        {
-            var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal);
-            ProgressDecodeTime.TryRemove(textureId, out _);
-            if (asset?.AssetData == null)
-            {
-                Pending.TryRemove(textureId, out _);
-                Dispatcher.UIThread.Post(() => onComplete(null));
+            if (!Pending.TryAdd(textureId, 0))
                 return;
-            }
-            var data = asset.AssetData;
-            Bitmap? bitmap = null;
-            try
+
+            _ = Task.Run(async () =>
             {
-                _ = TextureDiskCache.PutAsync(textureId, data);
-                using (var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>())
+                var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal);
+                ProgressDecodeTime.TryRemove(textureId, out _);
+                if (asset?.AssetData == null)
                 {
-                    var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
-                    if (previewBmp != null)
-                        Dispatcher.UIThread.Post(() => onComplete(previewBmp));
+                    Pending.TryRemove(textureId, out _);
+                    Dispatcher.UIThread.Post(() => onComplete(null));
+                    return;
                 }
-                using var skBitmap = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
-                if (skBitmap != null)
+                var data = asset.AssetData;
+                Bitmap? bitmap = null;
+                try
                 {
-                    bitmap = SkBitmapToAvaloniaBitmap(skBitmap);
-                    if (bitmap != null)
-                        Cache.AddOrUpdate(textureId, bitmap);
+                    _ = TextureDiskCache.PutAsync(textureId, data);
+                    using (var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>())
+                    {
+                        var previewBmp = previewRaw != null ? SkBitmapToAvaloniaBitmap(previewRaw) : null;
+                        if (previewBmp != null)
+                            Dispatcher.UIThread.Post(() => onComplete(previewBmp));
+                    }
+                    using var skBitmap = J2kImage.FromBytes(data, FullDecoderCfg).As<SKBitmap>();
+                    if (skBitmap != null)
+                    {
+                        bitmap = SkBitmapToAvaloniaBitmap(skBitmap);
+                        if (bitmap != null)
+                            Cache.AddOrUpdate(textureId, bitmap);
+                    }
                 }
-            }
-            catch
-            {
-                TextureDiskCache.Evict(textureId);
-            }
-            finally
-            {
-                Pending.TryRemove(textureId, out _);
-            }
-            Dispatcher.UIThread.Post(() => onComplete(bitmap));
+                catch
+                {
+                    TextureDiskCache.Evict(textureId);
+                }
+                finally
+                {
+                    Pending.TryRemove(textureId, out _);
+                }
+                Dispatcher.UIThread.Post(() => onComplete(bitmap));
+            });
         });
     }
 

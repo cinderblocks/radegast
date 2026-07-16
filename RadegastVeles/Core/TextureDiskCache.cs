@@ -19,6 +19,7 @@
 
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
 
@@ -119,7 +120,24 @@ internal static class TextureDiskCache
             // Touch the access time so LRU eviction keeps recently used files longer.
             File.SetLastAccessTimeUtc(path, DateTime.UtcNow);
 
-            return File.ReadAllBytes(path);
+            // File.ReadAllBytes opens with the default FileShare.Read, which does NOT
+            // include Delete/rename sharing. If a concurrent PutAsync call for the same
+            // texture (two callers racing a cache miss for the same UUID, or a re-fetch
+            // after eviction) is mid File.Move(tmp, path, overwrite: true) while this read
+            // is open, Windows denies the move with UnauthorizedAccessException. Opening
+            // with FileShare.Delete lets that concurrent replace proceed — this read still
+            // completes against the original file's data.
+            using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var buffer = new byte[stream.Length];
+            int offset = 0;
+            while (offset < buffer.Length)
+            {
+                int read = stream.Read(buffer, offset, buffer.Length - offset);
+                if (read == 0) break; // shorter than reported length; return what we got
+                offset += read;
+            }
+            return buffer;
         }
         catch (Exception ex)
         {
@@ -272,8 +290,19 @@ internal static class TextureDiskCache
 
     // ── LRU eviction ─────────────────────────────────────────────────────────────
 
+    // A full directory listing + sort is too expensive to run on every single PutAsync
+    // call (region entry / teleport can trigger thousands of these back to back). Only
+    // actually check capacity once every EvictionCheckInterval puts; the bounded slack
+    // this introduces (at most that many files over _maxCachedFiles) is negligible next
+    // to the default 8192-file budget.
+    private const int EvictionCheckInterval = 64;
+    private static int _putsSinceEvictionCheck;
+
     private static void EvictIfNeeded()
     {
+        if (Interlocked.Increment(ref _putsSinceEvictionCheck) < EvictionCheckInterval) return;
+        Interlocked.Exchange(ref _putsSinceEvictionCheck, 0);
+
         try
         {
             var files = new DirectoryInfo(_cacheDir).GetFiles("*.j2k");

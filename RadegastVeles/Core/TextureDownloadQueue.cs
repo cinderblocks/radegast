@@ -351,7 +351,11 @@ public sealed class TextureDownloadQueue : IDisposable
 
                 if (item == null || token.IsCancellationRequested) continue;
 
-                ProcessItem(item, token).GetAwaiter().GetResult();
+                // Fire-and-forget: ProcessItem's own download/decode semaphores already
+                // bound true concurrency (4 downloads / 2 decodes). Blocking this dispatcher
+                // thread on the result would cap in-flight items at WorkerCount instead,
+                // defeating the point of having independently-tunable download/decode limits.
+                _ = ProcessItemSafe(item, token);
             }
             catch (OperationCanceledException)
             {
@@ -366,6 +370,19 @@ public sealed class TextureDownloadQueue : IDisposable
                     try { item.OnComplete(null); } catch { }
                 }
             }
+        }
+    }
+
+    private async Task ProcessItemSafe(WorkItem item, CancellationToken token)
+    {
+        try
+        {
+            await ProcessItem(item, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Queue is shutting down; matches ProcessLoop's prior behavior of not
+            // invoking OnComplete for in-flight items on cancellation.
         }
     }
 

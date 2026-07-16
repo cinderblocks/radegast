@@ -23,24 +23,28 @@ using System.Numerics;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Generates a semi-transparent cloud-puff ellipsoid placeholder for an avatar
-/// that has not yet been downloaded and built, matching the "cloud avatar" visual
-/// used by the Second Life C++ viewer.
+/// Generates an invisible ellipsoid placeholder for an avatar that has not yet been
+/// downloaded and built. The visible "cloud avatar" effect used by the Second Life C++
+/// viewer is produced entirely by <see cref="AvatarCloudDriver"/>'s particle burst; this
+/// mesh exists only so the avatar has a pick/touch target and a world-space footprint
+/// (for the spatial-culling grid, etc.) while it loads.
 /// <para>
-/// The cloud is a UV-sphere scaled to roughly human proportions (0.6 m wide,
-/// 0.35 m deep, 1.8 m tall) centred at hip height.  It uses two-sided rendering
-/// and alpha blending so it looks wispy from any angle.
+/// The ellipsoid is a UV-sphere scaled to roughly human proportions (0.6 m wide,
+/// 0.35 m deep, 1.8 m tall) centred at hip height, alpha-blended at zero opacity.
 /// </para>
 /// <para>
 /// When <see cref="SceneAvatarStreamer"/> finishes its async build it calls
 /// <see cref="GlViewportControl.SubmitSceneObject"/> again with the real geometry,
-/// silently replacing the cloud.
+/// silently replacing this placeholder.
 /// </para>
 /// </summary>
 internal static class AvatarPlaceholderFactory
 {
-    // Soft white with ~60 % opacity — matches the SL cloud avatar appearance.
-    private static readonly Vector4 CloudColor = new(0.92f, 0.95f, 1.00f, 0.60f);
+    // Fully transparent: this mesh is now only a pick/touch target and world-footprint
+    // placeholder (feeds the spatial-culling grid, TryApplyTexturePatch's "1 face = still
+    // placeholder" check, etc.) — the visible cloud effect is entirely AvatarCloudDriver's
+    // particle burst now, not this mesh. See RadegastVeles/Rendering/AvatarCloudDriver.cs.
+    private static readonly Vector4 CloudColor = new(1.00f, 1.00f, 1.00f, 0.00f);
 
     // Ellipsoid radii (half-extents) in avatar-local space.
     // X = left/right (shoulder width), Y = front/back depth, Z = height.

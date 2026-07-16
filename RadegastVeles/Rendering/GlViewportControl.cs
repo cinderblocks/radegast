@@ -280,6 +280,15 @@ public class GlViewportControl : Panel
     // ── Scene-object layer (additive over the base terrain submission) ────────────
     // keyed by scene key (ulong: upper 32 bits = sim index, lower 32 bits = localId)
     private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
+    // Coarse spatial pre-filter over _sceneObjects world AABBs, used to skip the exact
+    // per-face frustum test for objects trivially outside the frustum. GL thread only,
+    // kept in sync with _sceneObjects at every add/remove/transform-update site.
+    private readonly SceneSpatialGrid _spatialGrid = new();
+    // Separate persistent result sets for the main-camera and water-reflection-camera
+    // queries — SceneSpatialGrid.QueryVisible takes a caller-owned set specifically so
+    // these two per-frame queries (different frustums) can't alias and clobber each other.
+    private readonly HashSet<ulong> _visibleSceneKeys = new();
+    private readonly HashSet<ulong> _reflVisibleSceneKeys = new();
     // Reference counts for every GlTexture held by scene-object face slots, one count per
     // slot occurrence. Replaces the previous "scan every other object's faces on removal"
     // approach (O(total scene faces) per removed object) with O(faces of removed object),
@@ -367,6 +376,11 @@ public class GlViewportControl : Panel
 
     // Pending single-texture patches for already-live scene objects (progressive texture streaming).
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingTexturePatches = new();
+    // High-priority patches (currently: self-avatar bake textures, see SceneTexturePatch.HighPriority)
+    // bypass the normal per-frame budget entirely and are drained unconditionally every frame —
+    // see ApplyTexturePatches. Volume through here is always small (one avatar's bake layers).
+    private readonly ConcurrentQueue<SceneTexturePatch> _highPriorityTexturePatches = new();
+    private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredHighPriorityPatches = new();
     // Back-pressure gate: limits _pendingTexturePatches to 200 entries without spin-waiting.
     // Each WaitAsync/Wait in PatchSceneObjectTexture consumes a permit; each dequeue in
     // ApplyTexturePatches releases one.  Initial count matches the queue-depth limit.
@@ -1097,6 +1111,18 @@ public class GlViewportControl : Panel
         // face.Transform this frame.
         ExtrapolateMovingSceneObjects();
 
+        // Coarse spatial pre-filter for this frame's scene-object passes (G-buffer, main,
+        // alpha). Computed once here, after transforms/motion have landed, so every pass
+        // sees the same candidate set. Null when culling is disabled — every call site below
+        // treats null as "no pre-filter," falling back to the exact per-face test only,
+        // identical to pre-change behavior.
+        HashSet<ulong>? visibleSceneKeys = null;
+        if (frustum.HasValue)
+        {
+            _spatialGrid.QueryVisible(frustum.Value, _visibleSceneKeys);
+            visibleSceneKeys = _visibleSceneKeys;
+        }
+
         // ── EEP day-cycle update ──────────────────────────────────────────
         // Sample the environment service once per frame so sky and water colour
         // track the in-world day/night cycle.  Done before DrawSky so the sky
@@ -1140,7 +1166,7 @@ public class GlViewportControl : Panel
                 GlApi.Gl.Enable(EnableCap.CullFace);
                 GlApi.Gl.Disable(EnableCap.Blend);
                 DrawFacesNormal(_opaque,      _gnormShader!, ref view, ref proj, frustum);
-                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj, frustum);
+                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj, frustum, visibleSceneKeys);
 
                 // — SSAO pass —
                 GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
@@ -1212,7 +1238,7 @@ public class GlViewportControl : Panel
         ApplyTexturePatches();
 
         DrawFaces(_opaque,      _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
-        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled, visibleSceneKeys: visibleSceneKeys);
 
         // ── Water surface ─────────────────────────────────────────────────
         // Drawn after opaque geometry (correct depth test) but before alpha
@@ -1230,7 +1256,7 @@ public class GlViewportControl : Panel
             // known-visible (it still records them in the frame stats).
             _mergedAlpha.Clear();
             AppendVisibleAlpha(_alpha,      frustum);
-            AppendVisibleAlpha(_sceneAlpha, frustum);
+            AppendVisibleAlpha(_sceneAlpha, frustum, visibleSceneKeys);
             var mergedAlpha = _mergedAlpha;
             if (mergedAlpha.Count > 1)
             {
@@ -2099,6 +2125,10 @@ public class GlViewportControl : Panel
         var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
         _lastReflViewProj = reflViewProj;
 
+        // Independent grid query into its own persistent set — must not reuse the main
+        // pass's _visibleSceneKeys, since the two frustums differ.
+        _spatialGrid.QueryVisible(reflFrustum, _reflVisibleSceneKeys);
+
         GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
         GlApi.Gl.Viewport(0, 0, WaterReflSize, WaterReflSize);
         GlApi.Gl.ClearColor(0.39f, 0.58f, 0.93f, 1f);
@@ -2112,7 +2142,7 @@ public class GlViewportControl : Panel
         GlApi.Gl.FrontFace(FrontFaceDirection.CW);
 
         DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled, visibleSceneKeys: _reflVisibleSceneKeys);
 
         GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
@@ -2602,6 +2632,7 @@ public class GlViewportControl : Panel
         foreach (var tex in _sceneTexRefs.Keys) tex.Dispose();
         _sceneTexRefs.Clear();
         _sceneObjects.Clear();
+        _spatialGrid.Clear();
         _sceneObjectTransformOverrides.Clear();
         _sceneObjectMotion.Clear();
         while (_pendingSceneVertexUpdates.TryDequeue(out _)) { }
@@ -2618,8 +2649,11 @@ public class GlViewportControl : Panel
         // and must not be applied to new objects that may share the same local IDs.
         foreach (var (patch, _) in _deferredPatches) patch.Bitmap?.Dispose();
         _deferredPatches.Clear();
+        foreach (var (patch, _) in _deferredHighPriorityPatches) patch.Bitmap?.Dispose();
+        _deferredHighPriorityPatches.Clear();
         int purged = 0;
         while (_pendingTexturePatches.TryDequeue(out var p)) { p.Bitmap?.Dispose(); purged++; }
+        while (_highPriorityTexturePatches.TryDequeue(out var hp)) { hp.Bitmap?.Dispose(); purged++; }
         // Release all consumed gate permits so future PatchSceneObjectTexture calls are not starved.
         if (purged > 0) ReleasePatchGate(_texturePatchGate, purged);
         RebuildSceneFlatLists();
@@ -2644,6 +2678,7 @@ public class GlViewportControl : Panel
             SceneTexRelease(emTex);
         }
         _sceneObjects.Remove(rootId);
+        _spatialGrid.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
         _sceneObjectMotion.TryRemove(rootId, out _);
         if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
@@ -2715,6 +2750,7 @@ public class GlViewportControl : Panel
 
         foreach (var face in sub.Faces)
         {
+            face.RootSceneKey = rootId;
             int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
             GlMesh mesh;
             if (!face.IsFlexi && !subAnimated)
@@ -2776,6 +2812,14 @@ public class GlViewportControl : Panel
         // first appears at its current position rather than its build-time position.
         if (_sceneObjectTransformOverrides.TryRemove(rootId, out var parkedTransform))
             ApplyTransformToFaces(faces, parkedTransform);
+
+        // Feed the spatial grid after any parked transform has landed, so the entry
+        // reflects the object's final position rather than its build-time pose.
+        if (faces.Count > 0)
+        {
+            var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+            _spatialGrid.Upsert(rootId, aabbMin, aabbMax);
+        }
 
         // Register flexi-prim GPU resources when compute deformation is available.
         if (_flexiDeformer != null && sub.FlexiPrims.Length > 0)
@@ -3006,7 +3050,10 @@ public class GlViewportControl : Panel
         {
             if (patch.Bitmap != null)
                 patch = patch with { Bitmap = GlTexture.Preprocess(patch.Bitmap) };
-            _pendingTexturePatches.Enqueue(patch);
+            if (patch.HighPriority)
+                _highPriorityTexturePatches.Enqueue(patch);
+            else
+                _pendingTexturePatches.Enqueue(patch);
         }
         catch
         {
@@ -3086,6 +3133,11 @@ public class GlViewportControl : Panel
                 ApplyTransformToFaces(faces, to.Transform);
                 // A fresher matrix supersedes any parked value for this root.
                 _sceneObjectTransformOverrides.TryRemove(to.RootId, out _);
+                if (faces.Count > 0)
+                {
+                    var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+                    _spatialGrid.Upsert(to.RootId, aabbMin, aabbMax);
+                }
             }
             else
             {
@@ -3134,6 +3186,11 @@ public class GlViewportControl : Panel
                           * Matrix4x4.CreateFromQuaternion(rotation)
                           * Matrix4x4.CreateTranslation(position);
             ApplyTransformToFaces(faces, transform);
+            if (faces.Count > 0)
+            {
+                var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+                _spatialGrid.Upsert(sceneKey, aabbMin, aabbMax);
+            }
         }
     }
 
@@ -3149,6 +3206,28 @@ public class GlViewportControl : Panel
     }
 
     /// <summary>
+    /// Unions <see cref="PrimRenderFace.GetWorldAabb"/> over every face in
+    /// <paramref name="faces"/> (including flexi faces — an object's overall visibility
+    /// should account for their extents even though individual flexi faces bypass the
+    /// fine-grained per-face cull). Used to feed <see cref="_spatialGrid"/>. Returns a
+    /// degenerate (min > max) box for an empty list; callers must check <c>faces.Count</c>
+    /// first.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) ComputeObjectWorldAabb(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> faces)
+    {
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var entry in faces)
+        {
+            entry.face.GetWorldAabb(out var fMin, out var fMax);
+            min = Vector3.Min(min, fMin);
+            max = Vector3.Max(max, fMax);
+        }
+        return (min, max);
+    }
+
+    /// <summary>
     /// Drains <see cref="_pendingTexturePatches"/> and for each patch uploads the bitmap
     /// to a new <see cref="GlTexture"/>, then replaces the corresponding slot in the
     /// relevant flat draw-list entry.  The old texture is disposed.  Called once per
@@ -3156,6 +3235,30 @@ public class GlViewportControl : Panel
     /// </summary>
     private void ApplyTexturePatches()
     {
+        // High-priority patches (self-avatar bake textures) bypass the budget below
+        // entirely and are drained unconditionally first. Volume here is always small
+        // (one avatar's bake layers), so this can't cause the frame-time blowout the
+        // budget exists to prevent — it's what lets the self-avatar's own skin/clothing
+        // appear promptly instead of waiting behind the rest of the scene's patches.
+        if (_deferredHighPriorityPatches.Count > 0)
+        {
+            var stillDeferredHp = new List<(SceneTexturePatch patch, int retriesLeft)>(_deferredHighPriorityPatches.Count);
+            foreach (var (patch, retriesLeft) in _deferredHighPriorityPatches)
+            {
+                if (TryApplyTexturePatch(patch)) { /* applied — drop it */ }
+                else if (retriesLeft > 0) stillDeferredHp.Add((patch, retriesLeft - 1));
+                else patch.Bitmap?.Dispose();
+            }
+            _deferredHighPriorityPatches.Clear();
+            _deferredHighPriorityPatches.AddRange(stillDeferredHp);
+        }
+        while (_highPriorityTexturePatches.TryDequeue(out var hpPatch))
+        {
+            ReleasePatchGate(_texturePatchGate);
+            if (!TryApplyTexturePatch(hpPatch))
+                _deferredHighPriorityPatches.Add((hpPatch, 900));
+        }
+
         // Cap texture uploads per frame across BOTH deferred retries and new patches.
         // Each TexImage2D call can take ~0.5–2 ms; 20/frame ≈ 10–40 ms max.
         // Split into two independent halves rather than one shared counter: a single
@@ -3242,7 +3345,8 @@ public class GlViewportControl : Panel
             }
         }
         // If the queue still has patches, request another render tick to continue draining.
-        if (!_pendingTexturePatches.IsEmpty || _deferredPatches.Count > 0)
+        if (!_pendingTexturePatches.IsEmpty || _deferredPatches.Count > 0
+            || !_highPriorityTexturePatches.IsEmpty || _deferredHighPriorityPatches.Count > 0)
             Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
 
         // One or more faces were upgraded to the alpha pass after their texture decoded.
@@ -3522,7 +3626,8 @@ public class GlViewportControl : Panel
     /// </summary>
     private void AppendVisibleAlpha(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> src,
-        Frustum? frustum)
+        Frustum? frustum,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         if (!frustum.HasValue)
         {
@@ -3535,6 +3640,12 @@ public class GlViewportControl : Panel
             var face = src[i].face;
             if (!face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                {
+                    _stats.RecordFaceConsidered();
+                    _stats.RecordFaceCulled();
+                    continue;
+                }
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(f, amin, amax))
                 {
@@ -3633,7 +3744,8 @@ public class GlViewportControl : Panel
         Frustum? frustum = null,
         FrameStatsTracker? stats = null,
         SkySettings? sky = null,
-        bool enableInstancing = false)
+        bool enableInstancing = false,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         shader.Use();
 
@@ -3748,6 +3860,10 @@ public class GlViewportControl : Panel
                         stats?.RecordFaceConsidered();
                         if (frustum.HasValue)
                         {
+                            // Flexi faces never reach this loop (excluded from batch
+                            // eligibility above), so no IsFlexi gate is needed here.
+                            if (visibleSceneKeys != null && !visibleSceneKeys.Contains(jFace.RootSceneKey))
+                            { stats?.RecordFaceCulled(); continue; }
                             jFace.GetWorldAabb(out var jMin, out var jMax);
                             if (!FrustumCuller.IntersectsAabb(frustum.Value, jMin, jMax))
                             { stats?.RecordFaceCulled(); continue; }
@@ -3776,6 +3892,12 @@ public class GlViewportControl : Panel
             // would always reject them. Skip the cull for flexi faces — they are small and rare.
             if (frustum.HasValue && !face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                {
+                    stats?.RecordFaceCulled();
+                    _i++;
+                    continue;
+                }
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
                 {
@@ -3993,7 +4115,8 @@ public class GlViewportControl : Panel
         GlShader shader,
         ref Matrix4x4 view,
         ref Matrix4x4 proj,
-        Frustum? frustum)
+        Frustum? frustum,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         shader.Use();
         // Per-frame view inverse (upper-3×3); combined with each face's cached model
@@ -4005,6 +4128,8 @@ public class GlViewportControl : Panel
             // Same flexi exemption as DrawFaces: their cached AABB is bind-pose.
             if (frustum.HasValue && !face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                    continue;
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
                     continue;
