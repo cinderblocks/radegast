@@ -46,11 +46,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
 {
     private readonly MeshFoundry _mesher = new();
 
-    private readonly Dictionary<UUID, LegacyMaterial?> _materialCache     = new();
-    private readonly object                             _materialCacheLock = new();
+    // Bounded so a long-running session doesn't accumulate one entry per material/PBR
+    // UUID ever seen; these are small metadata objects, not textures, so a generous
+    // capacity is cheap. The outer locks still make each read-modify-write block atomic
+    // even though LruCache also has its own internal lock (harmless double-locking).
+    private readonly LruCache<UUID, LegacyMaterial?> _materialCache     = new(4096);
+    private readonly object                          _materialCacheLock = new();
 
-    private readonly Dictionary<UUID, AssetMaterial?>   _pbrCache     = new();
-    private readonly object                             _pbrCacheLock = new();
+    private readonly LruCache<UUID, AssetMaterial?>  _pbrCache     = new(4096);
+    private readonly object                          _pbrCacheLock = new();
 
     // ── Decoded-mesh cache ────────────────────────────────────────────────────────
     // Mesh assets are immutable per UUID and always decoded at DetailLevel.Highest, so
@@ -985,9 +989,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 foreach (var id in needed)
                 {
                     if (byId.TryGetValue(id, out var m))
-                        _materialCache[id] = m;
-                    else
-                        _materialCache.TryAdd(id, null);
+                        _materialCache.AddOrUpdate(id, m);
+                    else if (!_materialCache.ContainsKey(id))
+                        _materialCache.AddOrUpdate(id, null);
                 }
             }
         }
@@ -996,7 +1000,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
             lock (_materialCacheLock)
             {
                 foreach (var id in needed)
-                    _materialCache.TryAdd(id, null);
+                    if (!_materialCache.ContainsKey(id))
+                        _materialCache.AddOrUpdate(id, null);
             }
         }
 
@@ -1050,9 +1055,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     // If one fetch times out after the other succeeds, the null result
                     // must not poison the cache entry and block future PBR texture loads.
                     if (result != null)
-                        _pbrCache[id] = result;
-                    else
-                        _pbrCache.TryAdd(id, null);
+                        _pbrCache.AddOrUpdate(id, result);
+                    else if (!_pbrCache.ContainsKey(id))
+                        _pbrCache.AddOrUpdate(id, null);
                 }
             }, ct)).ToList();
 
@@ -1061,7 +1066,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
             {
                 lock (_pbrCacheLock)
                 {
-                    foreach (var id in needed) _pbrCache.TryAdd(id, null);
+                    foreach (var id in needed)
+                        if (!_pbrCache.ContainsKey(id))
+                            _pbrCache.AddOrUpdate(id, null);
                 }
             }
         }
