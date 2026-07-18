@@ -470,6 +470,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         GridTextureHelper.ClearSkBitmapCache();
         CancelAllNeighborTerrainBuilds();
 
+        // Re-fetch EEP for the new region. SimConnected (which normally triggers this) does not
+        // reliably re-fire when crossing into an already-connected neighbor sim — the common case
+        // for a seamless region crossing — so the sky/water settings were sticking with whatever
+        // the old region had until a full teleport/relog forced a fresh SimConnected.
+        _envService?.OnRegionChanged();
+
         Dispatcher.UIThread.Post(() =>
         {
             _objectStreamer?.Clear();

@@ -28,10 +28,20 @@ using SkiaSharp;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Builds a composited terrain splat texture from a region heightmap and four
-/// detail textures, following the OpenSimulator terrain-splatting algorithm.
+/// Fetches the four terrain detail textures for a region and builds the height/noise-based
+/// layer map that selects between them, following the OpenSimulator terrain-splatting
+/// algorithm's layer computation.
+/// <para>
+/// Unlike the original CPU-side splatting approach (which pre-composited the four detail
+/// textures into one texture using the terrain mesh's simple top-down planar UVs), the
+/// blending itself now happens in <c>prim.frag</c> at draw time via triplanar projection —
+/// see <see cref="GlViewportControl"/>'s terrain path. That avoids the severe stretching a
+/// pre-baked, planar-UV-mapped texture suffers on steep terrain (a single top-down UV
+/// coordinate is shared by every vertex at that (x,y), regardless of how tall the slope
+/// is there), and removes a real per-rebuild CPU cost (a 2048×2048 parallel pixel blend).
+/// </para>
 /// </summary>
-/// <remarks>Ported from Radegast.Rendering.TerrainSplat — see
+/// <remarks>Layer-map math ported from Radegast.Rendering.TerrainSplat — see
 /// http://opensimulator.org/wiki/Terrain_Splatting </remarks>
 internal static class TerrainSplat
 {
@@ -53,15 +63,20 @@ internal static class TerrainSplat
         new SKColor(125, 128, 130),
     ];
 
-    private const int RegionSize  = 256;
-    private const int OutputSize  = 2048;
+    private const int RegionSize     = 256;
     private const int DetailTileSize = 256;
 
     /// <summary>
-    /// Builds a composited terrain texture asynchronously.
-    /// Returns a 2048×2048 BGRA8888 <see cref="SKBitmap"/> owned by the caller.
+    /// The four raw detail-texture bitmaps (index order matches the region's
+    /// TerrainDetail0-3) and the baked layer-select map (grayscale, value/255*3 gives the
+    /// [0,3] layer value <c>prim.frag</c>'s terrain path expects), both owned by the caller.
     /// </summary>
-    public static async Task<SKBitmap> SplatAsync(
+    public readonly record struct TerrainLayers(SKBitmap[] Detail, SKBitmap LayerMap);
+
+    /// <summary>
+    /// Fetches the four detail textures and builds the layer-select map asynchronously.
+    /// </summary>
+    public static async Task<TerrainLayers> BuildLayersAsync(
         GridClient       client,
         float[,]         heightmap,
         UUID[]           textureIds,
@@ -94,7 +109,7 @@ internal static class TerrainSplat
         int hmW = heightmap.GetLength(0);
         int hmH = heightmap.GetLength(1);
         int diff = hmW / RegionSize;
-        var layermap = new float[RegionSize * RegionSize];
+        var layerValues = new float[RegionSize * RegionSize];
 
         for (int y = 0; y < hmH; y += diff)
         {
@@ -120,115 +135,50 @@ internal static class TerrainSplat
 
                 float layer = ((height + noise - startH) / rangeH) * 4f;
                 if (float.IsNaN(layer)) layer = 0f;
-                layermap[ny * RegionSize + nx] = Utils.Clamp(layer, 0f, 3f);
+                layerValues[ny * RegionSize + nx] = Utils.Clamp(layer, 0f, 3f);
             }
         }
 
-        // ── Composite ─────────────────────────────────────────────────────────
-        var output = new SKBitmap(OutputSize, OutputSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
-        CompositeDetail(output, detail, layermap);
-        foreach (var bmp in detail) bmp.Dispose();
+        ct.ThrowIfCancellationRequested();
 
-        // Rotate 270° to match SL orientation
-        var rotated = new SKBitmap(OutputSize, OutputSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
-        using (var canvas = new SKCanvas(rotated))
+        // Bake the layer map into a texture, encoded so a plain [0,1] R-channel sample
+        // (bilinear-filtered by the GPU on upload, giving the same cross-cell smoothing
+        // the old CPU composite did by hand) recovers layer/3. Written into all of B/G/R
+        // so the shader isn't sensitive to which channel it happens to read.
+        var layerBmp = new SKBitmap(RegionSize, RegionSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
+        unsafe
         {
-            canvas.Translate(OutputSize / 2f, OutputSize / 2f);
-            canvas.RotateDegrees(270);
-            canvas.Translate(-OutputSize / 2f, -OutputSize / 2f);
-            canvas.DrawBitmap(output, 0f, 0f, new SKSamplingOptions());
+            IntPtr pixels   = layerBmp.GetPixels();
+            int    rowBytes = layerBmp.RowBytes;
+            for (int y = 0; y < RegionSize; y++)
+            {
+                byte* row = (byte*)pixels + y * rowBytes;
+                for (int x = 0; x < RegionSize; x++)
+                {
+                    byte v = (byte)(Utils.Clamp(layerValues[y * RegionSize + x] / 3f, 0f, 1f) * 255f);
+                    int o = x * 4;
+                    row[o + 0] = v; row[o + 1] = v; row[o + 2] = v; row[o + 3] = 255;
+                }
+            }
         }
-        output.Dispose();
-        return rotated;
+
+        // Rotate 270° to match the terrain mesh's existing (unchanged) UV orientation —
+        // the same transform the old pre-composited splat texture used, so the layer map
+        // lines up with SculptMesh's planar top-down UVs exactly as before.
+        var layerRotated = new SKBitmap(RegionSize, RegionSize, SKColorType.Bgra8888, SKAlphaType.Opaque);
+        using (var canvas = new SKCanvas(layerRotated))
+        {
+            canvas.Translate(RegionSize / 2f, RegionSize / 2f);
+            canvas.RotateDegrees(270);
+            canvas.Translate(-RegionSize / 2f, -RegionSize / 2f);
+            canvas.DrawBitmap(layerBmp, 0f, 0f, new SKSamplingOptions());
+        }
+        layerBmp.Dispose();
+
+        return new TerrainLayers(detail, layerRotated);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Composites four detail bitmaps into <paramref name="output"/> using the
-    /// terrain layer map. Extracted for benchmarking and to isolate the hot loop.
-    /// </summary>
-    internal static unsafe void CompositeDetail(SKBitmap output, SKBitmap[] detail, float[] layermap)
-    {
-        const int ratio = OutputSize / RegionSize;
-
-        var scans    = new IntPtr[4];
-        var rowBytes = new int[4];
-        for (int i = 0; i < 4; i++)
-        {
-            scans[i]    = detail[i].GetPixels();
-            rowBytes[i] = detail[i].RowBytes;
-        }
-
-        IntPtr outPtr      = output.GetPixels();
-        int    outRowBytes = output.RowBytes;
-
-        // Each row is independent: reads are from shared read-only arrays (scans, layermap)
-        // and each row writes to a distinct slice of outPtr — no data races.
-        Parallel.For(0, OutputSize, y =>
-        {
-            int lmY  = y / ratio;
-            int lmY1 = lmY < RegionSize - 1 ? lmY + 1 : RegionSize - 1;
-            int lmYM = lmY > 0              ? lmY - 1 : 0;
-
-            unsafe
-            {
-                byte* pOutRow = (byte*)outPtr + y * outRowBytes;
-
-                for (int x = 0; x < OutputSize; x++)
-                {
-                    int lmX  = x / ratio;
-                    int lmX1 = lmX < RegionSize - 1 ? lmX + 1 : RegionSize - 1;
-                    int lmXM = lmX > 0              ? lmX - 1 : 0;
-
-                    float layer   = layermap[lmY  * RegionSize + lmX];
-                    float layerx  = layermap[lmY  * RegionSize + lmX1];
-                    float layerxx = layermap[lmY  * RegionSize + lmXM];
-                    float layery  = layermap[lmY1 * RegionSize + lmX];
-                    float layeryy = layermap[lmYM * RegionSize + lmX];
-
-                    int l0 = (int)layer;
-                    int l1 = l0 < 3 ? l0 + 1 : 3;
-                    int tx = x % DetailTileSize;
-                    int ty = y % DetailTileSize;
-
-                    int rbA = rowBytes[l0];
-                    int rbB = rowBytes[l1];
-                    byte* pA = (byte*)scans[l0] + ty * rbA + tx * 4;
-                    byte* pB = (byte*)scans[l1] + ty * rbB + tx * 4;
-                    byte* pO = pOutRow + x * 4;
-
-                    float aB = pA[0], aG = pA[1], aR = pA[2];
-                    float bB = pB[0], bG = pB[1], bR = pB[2];
-
-                    int lX  = (int)layerx;
-                    int lXX = (int)layerxx;
-                    int lY  = (int)layery;
-                    int lYY = (int)layeryy;
-                    byte* pX  = (byte*)scans[lX]  + ty * rowBytes[lX]  + tx * 4;
-                    byte* pXX = (byte*)scans[lXX] + ty * rowBytes[lXX] + tx * 4;
-                    byte* pY  = (byte*)scans[lY]  + ty * rowBytes[lY]  + tx * 4;
-                    byte* pYY = (byte*)scans[lYY] + ty * rowBytes[lYY] + tx * 4;
-
-                    float d   = layer   - l0;
-                    float dx  = layerx  - layer;
-                    float dxx = layerxx - layer;
-                    float dy  = layery  - layer;
-                    float dyy = layeryy - layer;
-
-                    float fB = aB + d * (bB - aB) + dx * (pX[0] - aB) + dxx * (pXX[0] - aB) + dy * (pY[0] - aB) + dyy * (pYY[0] - aB);
-                    float fG = aG + d * (bG - aG) + dx * (pX[1] - aG) + dxx * (pXX[1] - aG) + dy * (pY[1] - aG) + dyy * (pYY[1] - aG);
-                    float fR = aR + d * (bR - aR) + dx * (pX[2] - aR) + dxx * (pXX[2] - aR) + dy * (pY[2] - aR) + dyy * (pYY[2] - aR);
-                    pO[0] = fB < 0f ? (byte)0 : fB > 255f ? (byte)255 : (byte)fB;
-                    pO[1] = fG < 0f ? (byte)0 : fG > 255f ? (byte)255 : (byte)fG;
-                    pO[2] = fR < 0f ? (byte)0 : fR > 255f ? (byte)255 : (byte)fR;
-                    pO[3] = 255;
-                }
-            }
-        });
-    }
-
-
 
     private static async Task<SKBitmap?> FetchDetailTextureAsync(
         GridClient client, UUID id, CancellationToken ct)
@@ -261,8 +211,6 @@ internal static class TerrainSplat
 
     private static float Bilinear(float v00, float v01, float v10, float v11, float xPct, float yPct)
         => Utils.Lerp(Utils.Lerp(v00, v01, xPct), Utils.Lerp(v10, v11, xPct), yPct);
-
-    private static byte ClampByte(float v) => (byte)Math.Floor(Math.Max(0, Math.Min(255, v)));
 
     /// <summary>
     /// Fallback: builds a simple green–brown heightmap texture when detail

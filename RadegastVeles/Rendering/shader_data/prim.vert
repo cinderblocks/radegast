@@ -36,6 +36,13 @@ out vec3 vNormal;
 out vec3 vViewPos;
 out vec2 vTexCoord;
 out vec4 vTangent;  // view-space tangent xyz + handedness w
+// Object-space position/normal, used only by prim.frag's terrain triplanar path (see
+// uIsTerrain). View-space vNormal/vViewPos above would make the triplanar projection
+// swim as the camera moves; object space is a stable frame instead. Terrain's own
+// transform is translation-only, so object space and world space coincide for it —
+// pure pass-through of the raw attributes, zero extra cost for every other face too.
+out vec3 vObjPos;
+out vec3 vObjNormal;
 
 void main()
 {
@@ -61,5 +68,7 @@ void main()
         vInstAlphaMode = uAlphaMode;
         vTangent = vec4(normalize(mat3(uModelView) * aTangent.xyz), aTangent.w);
     }
-    vTexCoord = aTexCoord;
+    vObjPos    = aPosition;
+    vObjNormal = aNormal;
+    vTexCoord  = aTexCoord;
 }

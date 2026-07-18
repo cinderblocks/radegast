@@ -63,7 +63,14 @@ public sealed class SceneEnvironmentService : IDisposable
         Vector3    SunlightColor,
         Vector3    Ambient,
         float      GlowFocus,
-        float      GlowSize
+        float      GlowSize,
+        Vector3    CloudColor,
+        Vector4    CloudPosDensity1,
+        Vector4    CloudPosDensity2,
+        float      CloudScale,
+        float      CloudShadow,
+        Vector2    CloudScrollRate,
+        float      CloudVariance
     );
 
     private readonly record struct ParsedWaterFrame(Vector4 FogColor);
@@ -115,7 +122,22 @@ public sealed class SceneEnvironmentService : IDisposable
     /// Call once per frame from the GL render loop.
     /// </summary>
     public SkySettings GetCurrentSky()
-        => InterpolateSky(ComputeProgress(), _skyTrack);
+    {
+        var sky = InterpolateSky(ComputeProgress(), _skyTrack);
+
+        // Prefer the simulator's own authoritative real-time sun direction (from the
+        // SimulatorViewerTimeMessage packet — the same data SL's own viewer uses) over
+        // our client-side day-cycle keyframe interpolation, whenever we've actually
+        // received one. This guarantees the sun/moon position always exactly matches
+        // the simulator's real current state regardless of any inaccuracy in
+        // ComputeProgress's wall-clock/day_offset/day_length arithmetic — which we
+        // can't fully verify against the real protocol without a live reference.
+        var realSunDir = _instance.Client.Grid.SunDirection;
+        if (realSunDir != LibreMetaverse.Vector3.Zero)
+            sky.SunDirection = new Vector3(realSunDir.X, realSunDir.Y, realSunDir.Z);
+
+        return sky;
+    }
 
     /// <summary>
     /// Returns interpolated water fog colour for the current day-cycle time.
@@ -135,6 +157,9 @@ public sealed class SceneEnvironmentService : IDisposable
     {
         if (env?.DayCycle == null)
         {
+            // Per ExtEnvironmentMessage.Environment's own contract, a null DayCycle here
+            // means "no custom override at this scope — inherits from parent," which is
+            // the common case for regions that don't set a custom Windlight/EEP override.
             _skyTrack   = MakeDefaultSkyTrack();
             _waterTrack = MakeDefaultWaterTrack();
             return;
@@ -258,18 +283,60 @@ public sealed class SceneEnvironmentService : IDisposable
                 sunRot = QuatFromTo(Vector3.UnitZ, Vector3.Normalize(sunDir));
             }
 
-            var  blueH  = ReadColorRgb(map, "blue_horizon",   new Vector3(0.4f, 0.4f, 0.9f));
-            var  blueD  = ReadColorRgb(map, "blue_density",   new Vector3(0.2f, 0.4f, 0.4f));
-            float hazeH = ReadScalar(map, "haze_horizon", 0.19f);
-            float hazeD = ReadScalar(map, "haze_density", 0.70f);
-            var  sunC   = ReadColorRgb(map, "sun_moon_color", new Vector3(0.8f, 0.8f, 0.8f));
-            var  amb    = ReadColorRgb(map, "sky_ambient",    new Vector3(0.25f, 0.25f, 0.25f));
+            // Newer EEP regions describe the atmosphere with a physically-based model
+            // (rayleigh_config/mie_config/absorption_config + planetary radii) that this
+            // renderer's simpler analytic sky shader doesn't consume. LL ships a
+            // "legacy_haze" sub-block on exactly these regions specifically so older/
+            // simpler viewers can still render a reasonable approximation — read the
+            // classic blue_horizon/blue_density/haze_horizon/haze_density fields from
+            // there when present, falling back to the top level for older-format regions
+            // that put them there directly.
+            bool hasLegacyHaze = map.ContainsKey("legacy_haze") && map["legacy_haze"] is OSDMap;
+            OSDMap legacy = hasLegacyHaze ? (OSDMap)map["legacy_haze"] : map;
+
+            // legacy_haze mirrors the OLD pre-EEP Windlight LLSD layout, which stores
+            // these as plain 3-component [r,g,b] vectors — NOT the newer EEP convention
+            // of a 4-component [r,g,b,intensity] array with the RGB pre-multiplied by
+            // the 4th element (that convention applies to today's top-level EEP colour
+            // fields like sunlight_color, not this legacy compatibility block). Using
+            // the intensity-multiplying reader here was zeroing blue_density out
+            // whenever legacy_haze's 4th array slot happened to be 0.
+            // Clamped defensively: live region data has already shown an "ambient" value
+            // with a channel at 3.0 (way outside a normal [0,1] colour range — confirmed
+            // via the diagnostic log), which blows out into an "unintended glow" across
+            // everything lit by it (this same Ambient feeds both the sky dome and
+            // GlViewportControl.DrawFaces's scene-geometry lighting). 1.5 gives some
+            // headroom for a legitimately bright/glowy region without letting a bad or
+            // unusually-encoded value blow out the render.
+            var maxColor = new Vector3(1.5f);
+            var  blueH  = Vector3.Clamp(ReadVec3(legacy, "blue_horizon", new Vector3(0.24f, 0.35f, 0.75f)), Vector3.Zero, maxColor);
+            var  blueD  = Vector3.Clamp(ReadVec3(legacy, "blue_density", new Vector3(0.15f, 0.25f, 0.35f)), Vector3.Zero, maxColor);
+            float hazeH = ReadScalar(legacy, "haze_horizon", 0.19f);
+            float hazeD = ReadScalar(legacy, "haze_density", 0.70f);
+            // "sunlight_color" is the current EEP key; "sun_moon_color" is the legacy
+            // Windlight name still used by some older region configurations.
+            var  sunC   = Vector3.Clamp(map.ContainsKey("sunlight_color")
+                ? ReadColorRgb(map, "sunlight_color", new Vector3(0.73f, 0.78f, 0.90f))
+                : ReadColorRgb(map, "sun_moon_color", new Vector3(0.73f, 0.78f, 0.90f)), Vector3.Zero, maxColor);
+            // legacy_haze's own field is "ambient", not "sky_ambient" (confirmed via
+            // live key dump — sky_ambient never matched, so this always fell back to
+            // the local default).
+            var  amb    = Vector3.Clamp(ReadVec3(legacy, "ambient", new Vector3(0.25f, 0.25f, 0.25f)), Vector3.Zero, maxColor);
 
             float[] g     = ReadFloatArr(map, "glow", [5.0f, 0f, -0.01f, 1.0f]);
             float   focus = g[0] / 20.0f;
             float   size  = g.Length > 2 ? Math.Max(0.001f, -g[2]) : 1.75f;
 
-            frame = new ParsedSkyFrame(sunRot, blueH, blueD, hazeH, hazeD, sunC, amb, focus, size);
+            var   cloudColor = ReadColorRgb(map, "cloud_color", new Vector3(1f, 1f, 1f));
+            var   cloudPd1   = ReadVec4(map, "cloud_pos_density1", new Vector4(1f, 0.5f, 1f, 0.35f));
+            var   cloudPd2   = ReadVec4(map, "cloud_pos_density2", new Vector4(1f, 0.5f, 1f, 0.35f));
+            float cloudScale = ReadScalar(map, "cloud_scale", 0.42f);
+            float cloudShad  = ReadScalar(map, "cloud_shadow", 0.27f);
+            var   cloudScrl  = ReadVec2(map, "cloud_scroll_rate", new Vector2(0.2f, 0.01f));
+            float cloudVar   = ReadScalar(map, "cloud_variance", 0f);
+
+            frame = new ParsedSkyFrame(sunRot, blueH, blueD, hazeH, hazeD, sunC, amb, focus, size,
+                cloudColor, cloudPd1, cloudPd2, cloudScale, cloudShad, cloudScrl, cloudVar);
             return true;
         }
         catch { return false; }
@@ -312,6 +379,13 @@ public sealed class SceneEnvironmentService : IDisposable
         if (map.ContainsKey(key) && map[key] is OSDArray a && a.Count >= 4)
             return new Vector4((float)a[0].AsReal(), (float)a[1].AsReal(),
                                (float)a[2].AsReal(), (float)a[3].AsReal());
+        return def;
+    }
+
+    private static Vector2 ReadVec2(OSDMap map, string key, Vector2 def)
+    {
+        if (map.ContainsKey(key) && map[key] is OSDArray a && a.Count >= 2)
+            return new Vector2((float)a[0].AsReal(), (float)a[1].AsReal());
         return def;
     }
 
@@ -368,7 +442,9 @@ public sealed class SceneEnvironmentService : IDisposable
         var sunRot = QuatFromTo(Vector3.UnitZ, sunDir);
         var frame  = new ParsedSkyFrame(sunRot, def.BlueHorizon, def.BlueDensity,
                          def.HazeHorizon, def.HazeDensity, def.SunlightColor,
-                         def.Ambient, def.SunGlowFocus, def.SunGlowSize);
+                         def.Ambient, def.SunGlowFocus, def.SunGlowSize,
+                         def.CloudColor, def.CloudPosDensity1, def.CloudPosDensity2,
+                         def.CloudScale, def.CloudShadow, def.CloudScrollRate, def.CloudVariance);
         return [(0.0, frame)];  // single frame → no time animation
     }
 
@@ -432,15 +508,22 @@ public sealed class SceneEnvironmentService : IDisposable
 
     private static SkySettings ToSkySettings(in ParsedSkyFrame f) => new()
     {
-        SunDirection  = Vector3.Normalize(RotateByQuat(f.SunRotation, Vector3.UnitZ)),
-        BlueHorizon   = f.BlueHorizon,
-        BlueDensity   = f.BlueDensity,
-        HazeHorizon   = f.HazeHorizon,
-        HazeDensity   = f.HazeDensity,
-        SunlightColor = f.SunlightColor,
-        Ambient       = f.Ambient,
-        SunGlowFocus  = f.GlowFocus,
-        SunGlowSize   = f.GlowSize,
+        SunDirection     = Vector3.Normalize(RotateByQuat(f.SunRotation, Vector3.UnitZ)),
+        BlueHorizon      = f.BlueHorizon,
+        BlueDensity      = f.BlueDensity,
+        HazeHorizon      = f.HazeHorizon,
+        HazeDensity      = f.HazeDensity,
+        SunlightColor    = f.SunlightColor,
+        Ambient          = f.Ambient,
+        SunGlowFocus     = f.GlowFocus,
+        SunGlowSize      = f.GlowSize,
+        CloudColor       = f.CloudColor,
+        CloudPosDensity1 = f.CloudPosDensity1,
+        CloudPosDensity2 = f.CloudPosDensity2,
+        CloudScale       = f.CloudScale,
+        CloudShadow      = f.CloudShadow,
+        CloudScrollRate  = f.CloudScrollRate,
+        CloudVariance    = f.CloudVariance,
     };
 
     private static SkySettings LerpSkyFrames(in ParsedSkyFrame a, in ParsedSkyFrame b, float t)
@@ -448,15 +531,22 @@ public sealed class SceneEnvironmentService : IDisposable
         var sunRot = Quaternion.Slerp(a.SunRotation, b.SunRotation, t);
         return new SkySettings
         {
-            SunDirection  = Vector3.Normalize(RotateByQuat(sunRot, Vector3.UnitZ)),
-            BlueHorizon   = Vector3.Lerp(a.BlueHorizon,   b.BlueHorizon,   t),
-            BlueDensity   = Vector3.Lerp(a.BlueDensity,   b.BlueDensity,   t),
-            HazeHorizon   = a.HazeHorizon + (b.HazeHorizon - a.HazeHorizon) * t,
-            HazeDensity   = a.HazeDensity + (b.HazeDensity - a.HazeDensity) * t,
-            SunlightColor = Vector3.Lerp(a.SunlightColor, b.SunlightColor, t),
-            Ambient       = Vector3.Lerp(a.Ambient,       b.Ambient,       t),
-            SunGlowFocus  = a.GlowFocus + (b.GlowFocus - a.GlowFocus) * t,
-            SunGlowSize   = a.GlowSize  + (b.GlowSize  - a.GlowSize)  * t,
+            SunDirection     = Vector3.Normalize(RotateByQuat(sunRot, Vector3.UnitZ)),
+            BlueHorizon      = Vector3.Lerp(a.BlueHorizon,   b.BlueHorizon,   t),
+            BlueDensity      = Vector3.Lerp(a.BlueDensity,   b.BlueDensity,   t),
+            HazeHorizon      = a.HazeHorizon + (b.HazeHorizon - a.HazeHorizon) * t,
+            HazeDensity      = a.HazeDensity + (b.HazeDensity - a.HazeDensity) * t,
+            SunlightColor    = Vector3.Lerp(a.SunlightColor, b.SunlightColor, t),
+            Ambient          = Vector3.Lerp(a.Ambient,       b.Ambient,       t),
+            SunGlowFocus     = a.GlowFocus + (b.GlowFocus - a.GlowFocus) * t,
+            SunGlowSize      = a.GlowSize  + (b.GlowSize  - a.GlowSize)  * t,
+            CloudColor       = Vector3.Lerp(a.CloudColor,       b.CloudColor,       t),
+            CloudPosDensity1 = Vector4.Lerp(a.CloudPosDensity1, b.CloudPosDensity1, t),
+            CloudPosDensity2 = Vector4.Lerp(a.CloudPosDensity2, b.CloudPosDensity2, t),
+            CloudScale       = a.CloudScale  + (b.CloudScale  - a.CloudScale)  * t,
+            CloudShadow      = a.CloudShadow + (b.CloudShadow - a.CloudShadow) * t,
+            CloudScrollRate  = Vector2.Lerp(a.CloudScrollRate,  b.CloudScrollRate,  t),
+            CloudVariance    = a.CloudVariance + (b.CloudVariance - a.CloudVariance) * t,
         };
     }
 }

@@ -284,6 +284,14 @@ public sealed class PrimRenderFace
     /// <summary>UV transform for the specular map texture.</summary>
     public          UvTransform SpecularUvXform       { get; init; } = UvTransform.Default;
 
+    /// <summary>
+    /// True for the single terrain face built by <see cref="SceneTerrainBuilder"/>. The
+    /// five texture slots below carry the region's four raw detail textures plus a
+    /// baked layer-select map (not PBR material data) — see
+    /// <see cref="GlViewportControl"/>'s terrain triplanar-blend path in prim.frag.
+    /// </summary>
+    public          bool        IsTerrain                  { get; init; }
+
     // ── PBR (GLTF metallic-roughness) fields ─────────────────────────────────────
 
     /// <summary>True when this face has a GLTF PBR render material applied.</summary>
@@ -458,6 +466,7 @@ public sealed class PrimRenderFace
             Texture                    = Texture,
             Transform                  = worldTransform,
             IsFlexi                    = IsFlexi,
+            IsTerrain                  = IsTerrain,
             Centroid                   = worldCentroid,
             IsTwoSided                 = IsTwoSided,
             AlphaCutoff                = AlphaCutoff,

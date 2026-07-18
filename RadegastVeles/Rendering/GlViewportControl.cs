@@ -176,6 +176,10 @@ public class GlViewportControl : Panel
     // Precomputed hemisphere kernel and 4×4 noise texture.
     private Vector3[]? _ssaoKernel;
     private uint _ssaoNoiseTex;
+    // Tiling cloud-noise texture, built once at sky-init time. See BuildCloudNoiseTex.
+    private uint _cloudNoiseTex;
+    private float _cloudTime;
+    private long  _cloudLastTick;
     // Whether SSAO compiled successfully.
     private bool _ssaoReady;
     /// <summary>Enable or disable SSAO. Change takes effect on the next frame.</summary>
@@ -2238,6 +2242,7 @@ public class GlViewportControl : Panel
         var vert = ShaderLoader.Load("sky.vert");
         var frag = ShaderLoader.Load("sky.frag");
         _skyShader = GlShader.Compile(vert, frag);
+        _cloudNoiseTex = BuildCloudNoiseTex();
         _skyReady  = true;
     }
 
@@ -2251,6 +2256,11 @@ public class GlViewportControl : Panel
 
         var vp    = view * proj;
         Matrix4x4.Invert(vp, out var invVP);
+
+        long  now = Environment.TickCount64;
+        float dt  = _cloudLastTick == 0 ? 0f : MathF.Min((now - _cloudLastTick) / 1000f, 0.1f);
+        _cloudLastTick = now;
+        _cloudTime    += dt;
 
         GlApi.Gl.DepthMask(false);
         GlApi.Gl.Disable(EnableCap.DepthTest);
@@ -2268,6 +2278,19 @@ public class GlViewportControl : Panel
         _skyShader.Set("uSunGlowFocus",  Sky.SunGlowFocus);
         _skyShader.Set("uSunGlowSize",   Sky.SunGlowSize);
 
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _cloudNoiseTex);
+        _skyShader.Set("uCloudNoise",       0);
+        _skyShader.Set("uCloudColor",       Sky.CloudColor);
+        _skyShader.Set("uCloudPosDensity1", Sky.CloudPosDensity1);
+        _skyShader.Set("uCloudPosDensity2", Sky.CloudPosDensity2);
+        _skyShader.Set("uCloudScale",       Sky.CloudScale);
+        _skyShader.Set("uCloudShadow",      Sky.CloudShadow);
+        _skyShader.Set("uCloudScrollRate",  Sky.CloudScrollRate);
+        _skyShader.Set("uCloudVariance",    Sky.CloudVariance);
+        _skyShader.Set("uCameraPos",        _camera.EyePosition);
+        _skyShader.Set("uTime",             _cloudTime);
+
         GlApi.Gl.BindVertexArray(_quadVao);
         GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
         GlApi.Gl.BindVertexArray(0);
@@ -2283,6 +2306,7 @@ public class GlViewportControl : Panel
     private void DeleteSkyResources()
     {
         _skyShader?.Dispose(); _skyShader = null;
+        if (_cloudNoiseTex != 0) { GlApi.Gl.DeleteTexture(_cloudNoiseTex); _cloudNoiseTex = 0; }
         _skyReady = false;
     }
 
@@ -2335,6 +2359,73 @@ public class GlViewportControl : Panel
                 size, size, 0, PixelFormat.RG, PixelType.UnsignedByte, p);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+        return tex;
+    }
+
+    /// <summary>
+    /// Builds a small tiling single-channel cloud-density noise texture (256×256, R8),
+    /// baked once in C# rather than computed per-pixel in the shader — a handful of
+    /// texture samples across the multi-layer cloud composite is cheaper than in-shader
+    /// FBM hashing for the same visual result. Tileable value noise: each of 4 octaves
+    /// uses a wrapping lattice (mod indices) so the result repeats seamlessly under
+    /// GL_REPEAT, smoothstep-interpolated between lattice points (classic value noise).
+    /// </summary>
+    private static unsafe uint BuildCloudNoiseTex()
+    {
+        const int size = 256;
+        const int octaves = 4;
+        var rng = new Random(1337);
+
+        var accum   = new float[size * size];
+        float amp   = 0.5f;
+        float ampSum = 0f;
+        for (int o = 0; o < octaves; o++)
+        {
+            int lattice = 4 << o; // 4, 8, 16, 32 — all divide 256 evenly for a clean seam
+            var grid = new float[lattice, lattice];
+            for (int y = 0; y < lattice; y++)
+                for (int x = 0; x < lattice; x++)
+                    grid[y, x] = (float)rng.NextDouble();
+
+            for (int y = 0; y < size; y++)
+            {
+                float gy = (float)y / size * lattice;
+                int   y0 = (int)gy % lattice, y1 = (y0 + 1) % lattice;
+                float fy = gy - MathF.Floor(gy);
+                fy = fy * fy * (3f - 2f * fy); // smoothstep
+
+                for (int x = 0; x < size; x++)
+                {
+                    float gx = (float)x / size * lattice;
+                    int   x0 = (int)gx % lattice, x1 = (x0 + 1) % lattice;
+                    float fx = gx - MathF.Floor(gx);
+                    fx = fx * fx * (3f - 2f * fx);
+
+                    float v00 = grid[y0, x0], v10 = grid[y0, x1];
+                    float v01 = grid[y1, x0], v11 = grid[y1, x1];
+                    float vx0 = v00 + (v10 - v00) * fx;
+                    float vx1 = v01 + (v11 - v01) * fx;
+                    accum[y * size + x] += (vx0 + (vx1 - vx0) * fy) * amp;
+                }
+            }
+            ampSum += amp;
+            amp    *= 0.5f;
+        }
+
+        var data = new byte[size * size];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (byte)(Math.Clamp(accum[i] / ampSum, 0f, 1f) * 255f);
+
+        uint tex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, tex);
+        fixed (byte* p = data)
+            GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+                size, size, 0, PixelFormat.Red, PixelType.UnsignedByte, p);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
         GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
@@ -3669,7 +3760,7 @@ public class GlViewportControl : Panel
     {
         public readonly int SsaoMap, HasSsao, ScreenSize, SunDir, SunColor, AmbientColor, Instanced;
         public readonly int Mvp, ModelView, NormalMat, Color, Fullbright, Glow, AlphaCutoff, Shiny, HasBump, AlphaMode;
-        public readonly int HasTexture, Albedo, IsPBR, HasMaterial;
+        public readonly int HasTexture, Albedo, IsPBR, HasMaterial, IsTerrain;
         public readonly int BaseColorFactor, MetallicFactor, RoughnessFactor, EmissiveFactor, BaseColorUvST, BaseColorUvRot;
         public readonly int HasNormalMap, NormalMap, PbrNormalUvST, PbrNormalUvRot;
         public readonly int HasMRMap, MetallicRoughnessMap, MRUvST, MRUvRot;
@@ -3699,6 +3790,7 @@ public class GlViewportControl : Panel
             Albedo               = s.GetLocation("uAlbedo");
             IsPBR                = s.GetLocation("uIsPBR");
             HasMaterial          = s.GetLocation("uHasMaterial");
+            IsTerrain            = s.GetLocation("uIsTerrain");
             BaseColorFactor      = s.GetLocation("uBaseColorFactor");
             MetallicFactor       = s.GetLocation("uMetallicFactor");
             RoughnessFactor      = s.GetLocation("uRoughnessFactor");
@@ -3944,6 +4036,7 @@ public class GlViewportControl : Panel
             shader.Set(L.Shiny,     face.Shiny);
             shader.Set(L.HasBump,   face.HasBump);
             shader.Set(L.AlphaMode, (int)face.AlphaMode);
+            shader.Set(L.IsTerrain, face.IsTerrain);
 
             bool hasTex = tex != null;
             shader.Set(L.HasTexture, hasTex);
@@ -4035,6 +4128,17 @@ public class GlViewportControl : Panel
                 shader.Set(L.SpecColor,      face.SpecularColor);
                 shader.Set(L.SpecExp,        face.SpecularExponent);
                 shader.Set(L.EnvIntensity,   face.EnvironmentIntensity);
+
+                // Terrain's remaining two detail-texture slots (uMetallicRoughnessMap =
+                // detail3, uEmissiveMap = layer-select map) aren't wired by either branch
+                // above — the PBR branch above binds them for actual PBR data, and this
+                // legacy-material branch has no use for them otherwise. Only terrain sets
+                // mrTex/emTex on a non-PBR face, so this is a no-op for every other face.
+                if (face.IsTerrain)
+                {
+                    if (mrTex != null) { mrTex.Bind(3); shader.Set(L.MetallicRoughnessMap, 3); }
+                    if (emTex != null) { emTex.Bind(4); shader.Set(L.EmissiveMap, 4); }
+                }
             }
 
             mesh.Draw();

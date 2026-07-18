@@ -4,6 +4,8 @@ precision mediump float;
 in  vec3 vNormal;
 in  vec3 vViewPos;
 in  vec2 vTexCoord;
+in  vec3 vObjPos;     // object-space position — terrain triplanar path only
+in  vec3 vObjNormal;  // object-space normal   — terrain triplanar path only
 
 // Per-face / per-instance data forwarded from prim.vert.
 // For non-instanced draws these mirror the per-face uniforms; for instanced draws
@@ -16,6 +18,10 @@ uniform sampler2D uAlbedo;
 uniform int       uHasTexture;
 // 1 if the TE face has a legacy bump code (Bumpiness != None)
 uniform int       uHasBump;
+// 1 for the single terrain face (SceneTerrainBuilder). Repurposes uAlbedo/uNormalMap/
+// uSpecularMap/uMetallicRoughnessMap/uEmissiveMap to carry four raw detail textures +
+// a baked layer-select map instead of their usual meaning — see terrainAlbedo() below.
+uniform int       uIsTerrain;
 
 // -- LLMaterial uniforms ------------------------------------------------------
 uniform int       uHasMaterial;
@@ -108,6 +114,55 @@ vec2 transformUv(vec2 uv, vec4 st, float rot)
     vec2 rotated = vec2(centered.x * c - centered.y * s,
                         centered.x * s + centered.y * c);
     return rotated + 0.5 + st.zw;
+}
+
+// ── Terrain triplanar path ────────────────────────────────────────────────────
+// Fixes severe texture stretching on steep terrain: SculptMesh's UVs (vTexCoord) are a
+// simple top-down (x,y)-grid projection with no dependence on height, so a near-vertical
+// slope has many vertices sharing nearly the same UV — the old single pre-baked splat
+// texture got smeared across the whole vertical extent. Sampling from world/object-space
+// position along three axes and blending by how much the surface normal faces each axis
+// sidesteps that entirely: steep faces draw mostly from the side projections, which don't
+// stretch, while flat ground keeps using (effectively) the old top-down look.
+
+vec3 triplanarSample(sampler2D tex, vec3 p, vec3 blend)
+{
+    vec3 cx = texture(tex, p.yz).rgb;
+    vec3 cy = texture(tex, p.xz).rgb;
+    vec3 cz = texture(tex, p.xy).rgb;
+    return cx * blend.x + cy * blend.y + cz * blend.z;
+}
+
+vec3 terrainAlbedo()
+{
+    // Layer-select map (baked by TerrainSplat.BuildLayersAsync), sampled at the mesh's
+    // existing UV — bilinear-filtered by the GPU, giving the same cross-cell smoothing
+    // the old CPU composite achieved by hand-blending neighbouring heightmap cells.
+    float layer = texture(uEmissiveMap, vTexCoord).r * 3.0;
+
+    vec3 n = normalize(vObjNormal);
+    vec3 blend = pow(abs(n), vec3(4.0));
+    blend /= (blend.x + blend.y + blend.z + 1e-5);
+
+    // ~32 m per detail-tile repeat, matching the tiling density the old CPU splat used
+    // (256-texel detail tiles repeating 8× across the 256 m region).
+    const float kTileScale = 1.0 / 32.0;
+    vec3 p = vObjPos * kTileScale;
+
+    vec3 c0 = triplanarSample(uAlbedo,              p, blend);
+    vec3 c1 = triplanarSample(uNormalMap,            p, blend);
+    vec3 c2 = triplanarSample(uSpecularMap,          p, blend);
+    vec3 c3 = triplanarSample(uMetallicRoughnessMap, p, blend);
+
+    // Smooth "tent" weight per layer index — always all four samples (branch-free, GPU-
+    // friendly, cheap next to a single terrain draw call), naturally reducing to a
+    // two-layer blend since at most two tents overlap at any given layer value.
+    float w0 = clamp(1.0 - abs(layer - 0.0), 0.0, 1.0);
+    float w1 = clamp(1.0 - abs(layer - 1.0), 0.0, 1.0);
+    float w2 = clamp(1.0 - abs(layer - 2.0), 0.0, 1.0);
+    float w3 = clamp(1.0 - abs(layer - 3.0), 0.0, 1.0);
+    float wSum = w0 + w1 + w2 + w3;
+    return (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / max(wSum, 0.0001);
 }
 
 // ── PBR helpers (GGX / Cook-Torrance) ────────────────────────────────────────
@@ -320,9 +375,11 @@ void main()
     }
 
     // ── Legacy Blinn-Phong path ──────────────────────────────────────────
-    vec4 base = (uHasTexture != 0)
-        ? texture(uAlbedo, vTexCoord) * faceColor
-        : faceColor;
+    vec4 base = (uIsTerrain != 0)
+        ? vec4(terrainAlbedo(), 1.0)
+        : (uHasTexture != 0)
+            ? texture(uAlbedo, vTexCoord) * faceColor
+            : faceColor;
 
     // AlphaMode 0 (None/opaque): never discard — baked textures store compositing
     // data in alpha, not GL transparency.  Mode 1 (blend) and 2 (mask) use the
@@ -375,7 +432,9 @@ void main()
     }
 
     // Material normal map: perturb normal using tangent-space sample.
-    if (uHasNormalMap != 0 && hasTBN)
+    // Terrain repurposes uNormalMap/uHasNormalMap to carry a raw detail texture (not a
+    // real normal map) — excluded here so it isn't misread as tangent-space normal data.
+    if (uHasNormalMap != 0 && hasTBN && uIsTerrain == 0)
     {
         vec2 nmUv = transformUv(vTexCoord, uNormalUvST, uNormalUvRot);
         vec3 nmSample = texture(uNormalMap, nmUv).rgb * 2.0 - 1.0;
@@ -389,10 +448,13 @@ void main()
     }
 
     // Resolve specular parameters: material path or legacy TE shiny.
+    // Terrain sets HasMaterial=false (SceneTerrainBuilder) so this already reads false,
+    // but the explicit uIsTerrain check guards uSpecularMap (terrain's detail2) from ever
+    // being read as a real specular tint even if that ever changes.
     float specStrength;
     float shininess;
     vec3  specTint;
-    if (uHasMaterial != 0)
+    if (uHasMaterial != 0 && uIsTerrain == 0)
     {
         shininess    = max(1.0, uSpecExp * 255.0);
         specStrength = 1.0;
