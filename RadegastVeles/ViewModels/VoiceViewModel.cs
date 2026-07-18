@@ -526,12 +526,22 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         {
             // Participants from the old region are stale
             Participants.Clear();
-            IsConnected = false;
-            StatusText  = "Reconnecting...";
+
+            // PeerConnectionReady and this event are both posted to the UI thread from
+            // VoiceManager's background reprovision task, so their relative order here isn't
+            // guaranteed. When the new session connects fast (the common case since the
+            // signaling-send race was fixed), OnConnectionReady's Post can already be queued
+            // — or have already run — by the time this one runs. Blindly setting
+            // IsConnected = false here would then clobber a correct "connected" state with
+            // nothing left to flip it back, since PeerConnectionReady only fires once per
+            // connect and won't fire again. Reflect the manager's actual current state instead.
+            bool alreadyConnected = _voice?.Connected ?? false;
+            IsConnected = alreadyConnected;
+            StatusText  = alreadyConnected ? "Connected" : "Reconnecting...";
             // VoiceManager.ReprovisionForNewRegion() already created and provisioned the new
             // session before firing this event. Do NOT call ConnectPrimaryRegion() here —
             // that would race a second session against the one the manager already started.
-            // PeerConnectionReady will set IsConnected = true when the new session connects.
+            // If not yet connected, PeerConnectionReady will set IsConnected = true later.
         });
 
     private void OnRegionTransitionFailed(Exception ex)
