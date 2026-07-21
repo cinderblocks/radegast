@@ -41,7 +41,22 @@ public partial class MainWindow : Window
     private bool _forceClose;
 
     private readonly Dictionary<int, PanelHostWindow> _detachedPanels = new();
-    private readonly string[] _panelTitles = ["Chat", "IMs", "World Map", "Objects", "Inventory", "Friends", "Groups"];
+    private readonly Dictionary<int, string> _panelTitles = new()
+    {
+        [0] = "Chat", [1] = "IMs", [2] = "World Map", [3] = "Objects",
+        [4] = "Inventory", [5] = "Friends", [6] = "Groups",
+    };
+    // Count of tabs that are always visible (Chat..Groups, indices 0-6), used for Ctrl+Tab
+    // cycling — unlike Scene Viewer (and Region/Appearance), these are never conditionally hidden.
+    private const int AlwaysVisibleTabCount = 7;
+    // The Scene Viewer instance currently floating in its own window, if any — a completely
+    // separate ViewModel/panel from the docked MainViewModel.SceneViewer (see
+    // OnUndockSceneViewerClick for why detaching doesn't move the live GL-backed panel).
+    private SceneViewerViewModel? _floatingSceneViewer;
+    // Suppresses reopening the Scene Viewer docked when its floating window closes — set while
+    // that close is driven by Low Memory Mode or app shutdown rather than the user's own
+    // "⬅ Dock"/"X" action.
+    private bool _sceneViewerForceClosing;
     private LogViewerWindow? _logViewerWindow;
     private Window? _marketplaceWindow;
     private ReconnectWindow? _reconnectWindow;
@@ -74,6 +89,19 @@ public partial class MainWindow : Window
 
         KeyDownEvent.AddClassHandler<TopLevel>(OnGlobalKeyDown, handledEventsToo: false);
         KeyUpEvent.AddClassHandler<TopLevel>(OnGlobalKeyUp, handledEventsToo: false);
+
+        _vm.ForceCloseFloatingSceneViewerRequested += OnForceCloseFloatingSceneViewerRequested;
+    }
+
+    // Low Memory Mode wants the floating Scene Viewer (if any) gone entirely, not reopened
+    // docked — MainViewModel.CloseSceneViewer() only ever touches the docked instance, so it
+    // can't reach this one (it's never assigned to MainViewModel.SceneViewer).
+    private void OnForceCloseFloatingSceneViewerRequested(object? sender, EventArgs e)
+    {
+        if (!_detachedPanels.TryGetValue(MainViewModel.SceneViewerTabIndex, out var hostWindow)) return;
+        _sceneViewerForceClosing = true;
+        hostWindow.Close();
+        _sceneViewerForceClosing = false;
     }
 
     private void OnIMPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -99,16 +127,22 @@ public partial class MainWindow : Window
         _session.Instance.PluginManager.PreferenceTabs.CollectionChanged -= OnPluginMenuItemsChanged;
         _session.Instance.NetCom.ClientDisconnected -= OnClientDisconnected;
         _vm.IM.PropertyChanged -= OnIMPropertyChanged;
+        _vm.ForceCloseFloatingSceneViewerRequested -= OnForceCloseFloatingSceneViewerRequested;
 
         _pluginManagerWindow?.Close();
         _pluginManagerWindow = null;
 
-        // Re-dock any detached panels so their controls are released properly
+        // Re-dock any detached panels so their controls are released properly. The app is
+        // shutting down, so suppress Scene Viewer's usual "reopen docked" reaction to its
+        // floating window closing.
+        _sceneViewerForceClosing = true;
         foreach (var kvp in _detachedPanels)
         {
             kvp.Value.Close();
         }
         _detachedPanels.Clear();
+        _floatingSceneViewer?.Dispose();
+        _floatingSceneViewer = null;
 
         base.OnClosed(e);
     }
@@ -353,14 +387,14 @@ public partial class MainWindow : Window
         // Ctrl+Tab / Ctrl+Shift+Tab — cycle tabs
         if (key == Key.Tab && mod == KeyModifiers.Control)
         {
-            var count = _panelTitles.Length;
+            var count = AlwaysVisibleTabCount;
             _vm.ShowTab((_vm.SelectedTabIndex + 1) % count);
             e.Handled = true;
             return;
         }
         if (key == Key.Tab && mod == (KeyModifiers.Control | KeyModifiers.Shift))
         {
-            var count = _panelTitles.Length;
+            var count = AlwaysVisibleTabCount;
             _vm.ShowTab((_vm.SelectedTabIndex - 1 + count) % count);
             e.Handled = true;
             return;
@@ -507,6 +541,54 @@ public partial class MainWindow : Window
     private void OnUndockFriendsClick(object? sender, RoutedEventArgs e) => UndockPanel(5);
     private void OnUndockGroupsClick(object? sender, RoutedEventArgs e) => UndockPanel(6);
 
+    // Scene Viewer does NOT use the generic UndockPanel/DockPanel mechanism below. That
+    // mechanism moves the tab's already-live Control into PanelHostWindow, which works fine
+    // for plain UI panels but not for Scene Viewer: its tab content is a ContentControl bound
+    // via "{Binding SceneViewer}", relying on an inherited DataContext that resolves to null
+    // the moment the control is reparented (briefly parentless mid-move, then under
+    // PanelHostWindow, which never sets a DataContext of its own) — silently collapsing
+    // Content to null and tearing down the templated SceneViewerPanel/GlViewportControl
+    // entirely. So instead: detaching closes the docked instance and opens a brand new one
+    // hosted directly in its own window, the same pattern already used for
+    // PrimViewer/AvatarViewer (RadegastInstanceAvalonia.ShowPrimViewer/ShowAvatarViewer).
+    private void OnUndockSceneViewerClick(object? sender, RoutedEventArgs e)
+    {
+        if (_detachedPanels.ContainsKey(MainViewModel.SceneViewerTabIndex)) return;
+
+        _vm.CloseSceneViewer();
+
+        _floatingSceneViewer = new SceneViewerViewModel(_session.Instance, _vm.Chat);
+        var panel = new SceneViewerPanel { DataContext = _floatingSceneViewer };
+
+        var hostWindow = new PanelHostWindow
+        {
+            Title = $"Radegast Veles - Scene Viewer - {_session.AgentName}"
+        };
+        hostWindow.DockRequested += OnSceneViewerHostDockRequested;
+        _detachedPanels[MainViewModel.SceneViewerTabIndex] = hostWindow;
+        _vm.IsSceneViewerDetached = true;
+
+        hostWindow.Show();
+        hostWindow.SetPanel(panel);
+    }
+
+    // Fires whether the user clicked "⬅ Dock" or the window's native close button — both mean
+    // "I'm done with the floating Scene Viewer." Unless a forced close is already in progress
+    // (Low Memory Mode / app shutdown), that's answered by reopening a fresh docked instance.
+    private void OnSceneViewerHostDockRequested(object? sender, EventArgs e)
+    {
+        if (sender is PanelHostWindow hostWindow)
+            hostWindow.DockRequested -= OnSceneViewerHostDockRequested;
+
+        _floatingSceneViewer?.Dispose();
+        _floatingSceneViewer = null;
+        _detachedPanels.Remove(MainViewModel.SceneViewerTabIndex);
+        _vm.IsSceneViewerDetached = false;
+
+        if (!_sceneViewerForceClosing)
+            _vm.OpenSceneViewer();
+    }
+
     private void UndockPanel(int tabIndex)
     {
         if (_detachedPanels.ContainsKey(tabIndex)) return;
@@ -532,12 +614,13 @@ public partial class MainWindow : Window
         {
             Title = $"Radegast Veles - {_panelTitles[tabIndex]} - {_session.AgentName}"
         };
-        hostWindow.SetPanel(panel);
 
         var capturedIndex = tabIndex;
         hostWindow.DockRequested += (_, _) => DockPanel(capturedIndex, hostWindow);
         _detachedPanels[tabIndex] = hostWindow;
+
         hostWindow.Show();
+        hostWindow.SetPanel(panel);
     }
 
     private void DockPanel(int tabIndex, PanelHostWindow hostWindow)

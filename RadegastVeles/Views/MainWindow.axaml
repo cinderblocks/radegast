@@ -74,7 +74,7 @@
                           Click="OnShowMarketplaceClick" />
                 <Separator />
                 <MenuItem Header="_Scene Viewer" AutomationProperties.Name="Open 3D scene viewer"
-                          IsEnabled="{Binding !IsLowMemoryModeEnabled}"
+                          IsEnabled="{Binding CanOpenSceneViewer}"
                           Click="OnShowSceneViewerClick" />
                 <Separator />
                 <MenuItem Header="Teleport _Home" AutomationProperties.Name="Teleport home"
@@ -447,6 +447,10 @@
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <TextBlock Text="Scene Viewer" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockSceneViewerClick"
+                                ToolTip.Tip="Detach to its own window (closes and reopens fresh there)"
+                                AutomationProperties.Name="Detach scene viewer panel" />
                         <Button Content="✕" FontSize="10" Padding="2"
                                 Click="OnCloseSceneViewerClick"
                                 ToolTip.Tip="Close scene viewer (releases GPU resources)"

@@ -49,6 +49,10 @@ namespace Radegast.Veles.ViewModels;
 public partial class SceneViewerViewModel : ObservableObject, IDisposable
 {
     private readonly RadegastInstanceAvalonia _instance;
+    // The shared Nearby-chat ViewModel — chat sent from the viewport is delegated to its
+    // ProcessChatInput (gesture/command/RLV handling) rather than reimplemented here, and
+    // its history buffer is shared so Ctrl+Up/Down recall works across both chat surfaces.
+    private readonly NearbyViewModel _chat;
     private GlViewportControl? _viewport;
     private bool _disposed;
 
@@ -97,6 +101,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private const int ChatOverlayMaxLines = 10;
     /// <summary>Bounded list of the most recent nearby chat messages shown in the scene overlay.</summary>
     public ObservableCollection<ChatLine> ChatOverlayLines { get; } = new();
+    /// <summary>Text currently typed into the viewport's own chat input box.</summary>
+    [ObservableProperty] private string _chatInput = string.Empty;
+    /// <summary>Whether the viewport's chat input box is shown (toggled by Enter / the chat button).</summary>
+    [ObservableProperty] private bool   _chatInputVisible;
+    /// <summary>True while the viewport is in first-person mouselook (see <see cref="GlViewportControl.MouselookActive"/>).</summary>
+    [ObservableProperty] private bool   _mouselookActive;
     [ObservableProperty] private bool   _isFlying;
     [ObservableProperty] private bool   _isRunning;
     /// <summary>Draw / stream distance in metres (16–512). Default matches SceneObjectStreamer.</summary>
@@ -131,9 +141,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     /// <summary>Raised when the user clicks the tab's close (✕) button.</summary>
     public event EventHandler? CloseRequested;
 
-    public SceneViewerViewModel(RadegastInstanceAvalonia instance)
+    public SceneViewerViewModel(RadegastInstanceAvalonia instance, NearbyViewModel chat)
     {
         _instance    = instance;
+        _chat        = chat;
         _ssaoEnabled = instance.GlobalSettings["ssao_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["ssao_enabled"].AsBoolean() : true;
         _frustumCullingEnabled = instance.GlobalSettings["frustum_culling_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
@@ -221,6 +232,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         };
         _viewport.SceneReset            += OnSceneReset;
         _viewport.FaceClicked           += OnFaceClicked;
+        _viewport.GroundClicked         += OnGroundClicked;
+        _viewport.MouselookChanged      += OnMouselookChanged;
+        _viewport.TerrainHeightProvider = (x, y) =>
+        {
+            var sim = _instance.Client.Network.CurrentSim;
+            return sim != null && sim.TerrainHeightAtPoint(x, y, out var h) ? h : (float?)null;
+        };
 
         // Subscribe to land patch and sim-change events.
         _instance.Client.Terrain.LandPatchReceived        += OnLandPatchReceived;
@@ -755,6 +773,39 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Double-clicked empty ground: autopilot the avatar there, matching the minimap's walk-to.</summary>
+    private void OnGroundClicked(Vector3 worldPos)
+    {
+        if (_disposed) return;
+        _chat.WalkToPoint(worldPos.X, worldPos.Y);
+        StatusText = $"Walking to ({worldPos.X:0}, {worldPos.Y:0})...";
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="GlViewportControl.MouselookActive"/> and switches the camera between
+    /// third-person orbit and first-person mouselook. Only the view is first-person in this
+    /// slice — avatar body rotation and movement direction still follow the third-person
+    /// turn/strafe keys, not the look direction.
+    /// </summary>
+    private void OnMouselookChanged(bool active)
+    {
+        MouselookActive = active;
+        if (_viewport == null) return;
+
+        _viewport.Camera.MouselookMode = active;
+        if (active)
+        {
+            var pos = _instance.Client.Self.SimPosition;
+            _viewport.Camera.MouselookEye = new Vector3(pos.X, pos.Y, pos.Z + 1.0f);
+            StatusText = "Mouselook (view only) — press Esc to exit";
+        }
+        else
+        {
+            CenterCameraOnAvatar();
+        }
+        _viewport.RequestRender();
+    }
+
     /// <summary>
     /// Composes a "Region (x, y, z) | Fly | Run" status string and posts it to
     /// <see cref="StatusText"/> on the UI thread.
@@ -882,6 +933,19 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_viewport == null) return;
         var pos = _instance.Client.Self.SimPosition;
         if (pos.X == 0f && pos.Y == 0f && pos.Z == 0f) return;
+
+        if (MouselookActive)
+        {
+            // In mouselook the user's mouse drives Yaw/Pitch directly (see
+            // GlViewportControl.OnPointerMoved) — just keep the fixed eye position
+            // tracking the avatar, don't auto-rotate yaw to face heading.
+            var eye = new Vector3(pos.X, pos.Y, pos.Z + 1.0f);
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (_viewport != null) { _viewport.Camera.MouselookEye = eye; _viewport.RequestRender(); }
+            });
+            return;
+        }
 
         // Compute the avatar's current heading in degrees.
         var rot = _instance.Client.Self.SimRotation;
@@ -1195,6 +1259,45 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void Close() => CloseRequested?.Invoke(this, EventArgs.Empty);
 
+    // ── In-viewport chat ──────────────────────────────────────────────────────────
+    // Sends delegate to the shared NearbyViewModel.ProcessChatInput so gesture/slash-command/
+    // RLV handling is not duplicated; only the read/write of ChatInput and the input box's
+    // visibility are local to the scene viewer.
+
+    [RelayCommand]
+    private void ToggleChatInput() => ChatInputVisible = !ChatInputVisible;
+
+    [RelayCommand]
+    private void SendChatFromViewport() => SendFromViewport(LibreMetaverse.ChatType.Normal);
+
+    [RelayCommand]
+    private void SendWhisperFromViewport() => SendFromViewport(LibreMetaverse.ChatType.Whisper);
+
+    [RelayCommand]
+    private void SendShoutFromViewport() => SendFromViewport(LibreMetaverse.ChatType.Shout);
+
+    private void SendFromViewport(LibreMetaverse.ChatType type)
+    {
+        if (string.IsNullOrEmpty(ChatInput)) return;
+        _chat.NotifyTypingStopped();
+        _chat.ProcessChatInput(ChatInput, type);
+        ChatInput = string.Empty;
+    }
+
+    /// <summary>Recalls the previous entry from the shared chat history (Ctrl+Up).</summary>
+    public void ChatHistoryPrevInViewport()
+    {
+        _chat.ChatHistoryPrev();
+        ChatInput = _chat.ChatInput;
+    }
+
+    /// <summary>Recalls the next entry from the shared chat history (Ctrl+Down).</summary>
+    public void ChatHistoryNextInViewport()
+    {
+        _chat.ChatHistoryNext();
+        ChatInput = _chat.ChatInput;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -1215,8 +1318,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         if (_viewport != null)
         {
-            _viewport.FaceClicked -= OnFaceClicked;
-            _viewport.SceneReset  -= OnSceneReset;
+            _viewport.FaceClicked      -= OnFaceClicked;
+            _viewport.SceneReset       -= OnSceneReset;
+            _viewport.GroundClicked    -= OnGroundClicked;
+            _viewport.MouselookChanged -= OnMouselookChanged;
         }
 
         // Release any held movement keys so the avatar doesn't keep moving.
@@ -1230,6 +1335,24 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             var mv = _instance.Client.Self.Movement;
             mv.AtPos = mv.AtNeg = mv.LeftPos = mv.LeftNeg = mv.UpPos = mv.UpNeg = false;
             mv.TurnLeft = mv.TurnRight = false;
+
+            // Undo SyncCameraToServer's continuous overrides of the agent's reported camera.
+            // Without this, Position/LookDirection stay frozen wherever the free-look viewport
+            // last pointed and Far stays at DrawDistance instead of LibreMetaverse's own default
+            // (128m, AgentCamera's constructor), indefinitely after this tab closes. The
+            // simulator uses that reported camera to help decide which neighbor regions to
+            // keep connected as child agents — leaving it stuck correlates with the WebRTC
+            // voice layer (which reacts purely to Client.Network.Simulators membership)
+            // reprovisioning around Scene Viewer open/close.
+            var pos = _instance.Client.Self.SimPosition;
+            var rot = _instance.Client.Self.SimRotation;
+            float headingRad = MathF.Atan2(
+                2f * (rot.W * rot.Z + rot.X * rot.Y),
+                1f - 2f * (rot.Y * rot.Y + rot.Z * rot.Z));
+            mv.Camera.Position = pos;
+            mv.Camera.LookDirection(new OmVector3(MathF.Cos(headingRad), MathF.Sin(headingRad), 0f));
+            mv.Camera.Far = 128f;
+
             mv.SendUpdate();
         }
 

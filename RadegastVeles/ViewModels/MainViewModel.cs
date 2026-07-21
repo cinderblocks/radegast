@@ -73,8 +73,32 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public bool IsSceneViewerOpen => SceneViewer != null;
 
+    /// <summary>
+    /// True while a second, independent Scene Viewer instance is floating in its own window
+    /// (see MainWindow.axaml.cs's OnUndockSceneViewerClick — detaching closes the docked
+    /// instance and opens a fresh one in a floating window, rather than moving the live,
+    /// GL-backed panel between windows, which Avalonia does not support safely). Used to
+    /// disable "Show Scene Viewer" while one is already floating, and to know whether Low
+    /// Memory Mode needs to ask MainWindow to close that floating instance too.
+    /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanOpenSceneViewer))]
+    private bool _isSceneViewerDetached;
+
+    /// <summary>
+    /// Raised when the floating Scene Viewer window must be closed (e.g. Low Memory Mode being
+    /// enabled while it's detached). MainWindow's code-behind owns that floating window/VM,
+    /// since they're never tracked by <see cref="SceneViewer"/>.
+    /// </summary>
+    public event EventHandler? ForceCloseFloatingSceneViewerRequested;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanOpenSceneViewer))]
     private bool _isLowMemoryModeEnabled;
+
+    /// <summary>Whether "Show Scene Viewer" should be enabled — blocked by Low Memory Mode, and
+    /// while a floating instance already exists (opening docked too would double the GPU/streaming cost).</summary>
+    public bool CanOpenSceneViewer => !IsLowMemoryModeEnabled && !IsSceneViewerDetached;
 
     [ObservableProperty]
     private bool _isRegionTabOpen;
@@ -245,7 +269,14 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
             IsLowMemoryModeEnabled = enabled;
-            if (enabled) CloseSceneViewer();
+            if (!enabled) return;
+
+            // The docked instance (if any) is closed here directly; the floating instance
+            // (if any) is owned entirely by MainWindow's code-behind, so ask it to close that
+            // one too rather than reopening it docked.
+            if (IsSceneViewerDetached)
+                ForceCloseFloatingSceneViewerRequested?.Invoke(this, EventArgs.Empty);
+            CloseSceneViewer();
         });
     }
 
@@ -263,7 +294,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (_instance.LowMemoryModeEnabled) return;
         if (SceneViewer == null)
         {
-            var vm = new SceneViewerViewModel(_instance);
+            var vm = new SceneViewerViewModel(_instance, Chat);
             vm.CloseRequested += (_, _) => CloseSceneViewer();
             SceneViewer = vm;
         }

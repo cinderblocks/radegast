@@ -541,6 +541,43 @@ public class GlViewportControl : Panel
     private bool  _dragged;
     private volatile bool _pickRequested;
     private Point _pickPoint;
+    // Click count of the press that produced the pending pick, captured on press since
+    // PointerReleasedEventArgs carries no click-count of its own.
+    private int _pressClickCount;
+    // Set alongside _pickRequested when the pending pick came from a double-click; consumed
+    // by the pick-processing pass to raise GroundClicked instead of FaceClicked when the
+    // pick buffer comes back empty (terrain doesn't render into the pick pass, so an empty
+    // result under a double-click means "ground", not "nothing here").
+    private volatile bool _groundPickRequested;
+    // Supplies terrain height (metres) for a given sim-local (x,y), or null if out of bounds
+    // / no terrain data yet. Wired by SceneViewerViewModel so this control stays decoupled
+    // from LibreMetaverse's Simulator/TerrainManager types.
+    public Func<int, int, float?>? TerrainHeightProvider { get; set; }
+    /// <summary>Raised (on the UI thread) with a sim-local world position when the user double-clicks empty ground.</summary>
+    public event Action<Vector3>? GroundClicked;
+
+    // ── Mouselook ─────────────────────────────────────────────────────────────────
+    private bool _mouselookActive;
+    /// <summary>True while the viewport is in first-person mouselook (cursor hidden, mouse directly rotates the view).</summary>
+    public bool MouselookActive => _mouselookActive;
+    /// <summary>Raised when mouselook is entered (true) or exited (false).</summary>
+    public event Action<bool>? MouselookChanged;
+
+    public void EnterMouselook()
+    {
+        if (_mouselookActive) return;
+        _mouselookActive = true;
+        Cursor = new Cursor(StandardCursorType.None);
+        MouselookChanged?.Invoke(true);
+    }
+
+    public void ExitMouselook()
+    {
+        if (!_mouselookActive) return;
+        _mouselookActive = false;
+        Cursor = Cursor.Default;
+        MouselookChanged?.Invoke(false);
+    }
     // ── Saved bounds for camera reset ────────────────────────────────────────────
 
     private Vector3 _lastBoundsMin = new Vector3(-0.5f);
@@ -638,6 +675,7 @@ public class GlViewportControl : Panel
         Focus();
         _lastPointer  = e.GetPosition(this);
         _pressPointer = _lastPointer;
+        _pressClickCount = e.ClickCount;
         _dragged       = false;
         _cameraGesture = false;
         var props = e.GetCurrentPoint(this).Properties;
@@ -649,13 +687,26 @@ public class GlViewportControl : Panel
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        bool alt = (e.KeyModifiers & KeyModifiers.Alt) != 0;
+        if (_mouselookActive)
+        {
+            // Mouselook aims from screen-center (the fixed reticle position) rather than
+            // wherever the hidden cursor happens to be.
+            if (_leftDown)
+            {
+                _pickPoint           = new Point(Bounds.Width / 2, Bounds.Height / 2);
+                _pickRequested       = true;
+                _groundPickRequested = _pressClickCount == 2;
+                _core.RequestNextFrameRendering();
+            }
+        }
         // Only fire a pick if it was a plain left-click with no drag and no Alt held
         // (Alt+drag is a camera gesture and must not trigger object interaction).
-        bool alt = (e.KeyModifiers & KeyModifiers.Alt) != 0;
-        if (_leftDown && !_dragged && !alt && !_cameraGesture)
+        else if (_leftDown && !_dragged && !alt && !_cameraGesture)
         {
-            _pickPoint     = _pressPointer;
-            _pickRequested = true;
+            _pickPoint           = _pressPointer;
+            _pickRequested       = true;
+            _groundPickRequested = _pressClickCount == 2;
             _core.RequestNextFrameRendering();
         }
         _leftDown      = false;
@@ -671,6 +722,14 @@ public class GlViewportControl : Panel
         float dx   = (float)(pos.X - _lastPointer.X);
         float dy   = (float)(pos.Y - _lastPointer.Y);
         _lastPointer = pos;
+
+        if (_mouselookActive)
+        {
+            // Mouselook looks around on plain mouse movement, no button/Alt required.
+            _camera.OrbitDrag(dx, dy);
+            _core.RequestNextFrameRendering();
+            return;
+        }
 
         if (!_leftDown && !_rightDown) return;
 
@@ -1608,6 +1667,19 @@ public class GlViewportControl : Panel
                         Avalonia.Threading.Dispatcher.UIThread.Post(
                             () => FaceClicked?.Invoke(primLocalId, faceIndex, hitInfo));
                     }
+                    _groundPickRequested = false;
+                }
+                else if (_groundPickRequested)
+                {
+                    // Nothing in the pick buffer under a double-click — terrain doesn't render
+                    // into this pass, so an empty result here means the user double-clicked
+                    // ground. Resolve the world-space hit with a CPU heightfield raymarch.
+                    _groundPickRequested = false;
+                    if (TryGetGroundHit(px, py, w, h, out var groundPos))
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(
+                            () => GroundClicked?.Invoke(groundPos));
+                    }
                 }
                 // Release CPU vertex/index arrays immediately after pick — they are
                 // only needed inside ComputeHitInfo above.  Keeping them allocated
@@ -1752,6 +1824,55 @@ public class GlViewportControl : Panel
             nuv[j + 4] = interleaved[i + 7]; // v
         }
         return nuv;
+    }
+
+    /// <summary>
+    /// CPU ray-vs-heightfield intersection for a double-click that missed every object in the
+    /// pick buffer. Marches the same screen-to-world ray used by <see cref="ComputeHitInfo"/>
+    /// in 1 m steps via <see cref="TerrainHeightProvider"/> until it crosses the terrain
+    /// surface, then linearly interpolates between the two straddling samples.
+    /// </summary>
+    private bool TryGetGroundHit(int px, int py, int w, int h, out Vector3 worldPos)
+    {
+        worldPos = default;
+        var heightAt = TerrainHeightProvider;
+        if (heightAt == null) return false;
+
+        float ndcX = (2f * px / w) - 1f;
+        float ndcY = (2f * py / h) - 1f;
+        Matrix4x4.Invert(_lastView * _lastProj, out var invVP);
+        var nearH = Vector4.Transform(new Vector4(ndcX, ndcY, -1f, 1f), invVP);
+        var farH  = Vector4.Transform(new Vector4(ndcX, ndcY,  1f, 1f), invVP);
+        nearH /= nearH.W;
+        farH  /= farH.W;
+        var rayOrigin = new Vector3(nearH.X, nearH.Y, nearH.Z);
+        var rayDir    = Vector3.Normalize(new Vector3(farH.X, farH.Y, farH.Z) - rayOrigin);
+
+        const float step    = 1f;
+        const float maxDist = 512f;
+        float   prevDiff = float.NaN;
+        Vector3 prevPos  = rayOrigin;
+        for (float t = 0f; t <= maxDist; t += step)
+        {
+            var p = rayOrigin + rayDir * t;
+            float? terrainH = heightAt((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y));
+            if (terrainH == null)
+            {
+                if (!float.IsNaN(prevDiff)) break; // left the region after a valid sample
+                continue;
+            }
+            float diff = p.Z - terrainH.Value;
+            if (!float.IsNaN(prevDiff) && prevDiff > 0f && diff <= 0f)
+            {
+                float denom = prevDiff - diff;
+                float frac  = denom > 1e-6f ? prevDiff / denom : 0f;
+                worldPos = Vector3.Lerp(prevPos, p, frac);
+                return true;
+            }
+            prevDiff = diff;
+            prevPos  = p;
+        }
+        return false;
     }
 
     private FaceHitInfo ComputeHitInfo(int pickIdx, int px, int py, int w, int h)

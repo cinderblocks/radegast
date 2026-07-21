@@ -17,6 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -48,19 +49,57 @@ public partial class SceneViewerPanel : UserControl
             // Steal keyboard focus to this panel whenever the user clicks the viewport,
             // so that WASD / arrow keys are dispatched to our OnKeyDown handler.
             Viewport.PointerPressed += (_, _) => Focus();
+
+            // Focusing isn't bindable from XAML, so grab it here whenever the chat
+            // input box is revealed (Enter in the viewport, or the toolbar button).
+            vm.PropertyChanged += OnViewModelPropertyChanged;
+        }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(SceneViewerViewModel.ChatInputVisible)
+            && DataContext is SceneViewerViewModel { ChatInputVisible: true })
+        {
+            ChatInputBox.Focus();
         }
     }
 
     private void OnTunnelKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        // The chat box is inside this same panel, so the tunnel phase reaches it before
+        // its own bubble-phase handler does — bail out here and let ChatInputBox_KeyDown
+        // (and ordinary text entry) handle the keystroke instead of treating it as movement.
+        if (ChatInputBox.IsFocused) return;
 
         var vm = DataContext as SceneViewerViewModel;
 
-        // Escape resets the camera to behind the avatar.
+        // Enter opens (or refocuses) the chat input, mirroring SL's viewport chat bar.
+        if (e.Key == Key.Enter)
+        {
+            if (vm != null) vm.ChatInputVisible = true;
+            ChatInputBox.Focus();
+            e.Handled = true;
+            return;
+        }
+
+        // Escape: close mouselook first if active, otherwise reset the camera.
         if (e.Key == Key.Escape)
         {
-            vm?.ResetCameraCommand.Execute(null);
+            if (Viewport.MouselookActive)
+                Viewport.ExitMouselook();
+            else
+                vm?.ResetCameraCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
+
+        // M toggles mouselook (view-only in this slice — see Camera3D.MouselookMode doc).
+        if (e.Key == Key.M)
+        {
+            if (Viewport.MouselookActive) Viewport.ExitMouselook();
+            else Viewport.EnterMouselook();
             e.Handled = true;
             return;
         }
@@ -90,6 +129,7 @@ public partial class SceneViewerPanel : UserControl
     private void OnTunnelKeyUp(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
+        if (ChatInputBox.IsFocused) return;
 
         var vm = DataContext as SceneViewerViewModel;
 
@@ -104,6 +144,40 @@ public partial class SceneViewerPanel : UserControl
         if (dir is null) return;
         vm?.EndMove(dir.Value);
         e.Handled = true;
+    }
+
+    private void ChatInputBox_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not SceneViewerViewModel vm) return;
+
+        switch (e.Key)
+        {
+            case Key.Escape:
+                vm.ChatInputVisible = false;
+                Focus(); // hand keyboard focus back to the panel so WASD resumes immediately
+                e.Handled = true;
+                break;
+            case Key.Enter when e.KeyModifiers == KeyModifiers.None:
+                vm.SendChatFromViewportCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case Key.Enter when e.KeyModifiers == KeyModifiers.Shift:
+                vm.SendWhisperFromViewportCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case Key.Enter when e.KeyModifiers == KeyModifiers.Control:
+                vm.SendShoutFromViewportCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case Key.Up when e.KeyModifiers == KeyModifiers.Control:
+                vm.ChatHistoryPrevInViewport();
+                e.Handled = true;
+                break;
+            case Key.Down when e.KeyModifiers == KeyModifiers.Control:
+                vm.ChatHistoryNextInViewport();
+                e.Handled = true;
+                break;
+        }
     }
 
     private static MoveDirection? KeyToDirection(Key key) => key switch
