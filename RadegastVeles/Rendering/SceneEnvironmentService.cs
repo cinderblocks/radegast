@@ -221,6 +221,25 @@ public sealed class SceneEnvironmentService : IDisposable
 
         _skyTrack   = skyKeys  .Count > 0 ? (IReadOnlyList<(double, ParsedSkyFrame)>)skyKeys   : MakeDefaultSkyTrack();
         _waterTrack = waterKeys.Count > 0 ? (IReadOnlyList<(double, ParsedWaterFrame)>)waterKeys : MakeDefaultWaterTrack();
+
+        // Region WL/EEP params vary wildly (ambient-dominant skies, extreme
+        // densities…) and have repeatedly been the root cause of sky-rendering
+        // bugs; one line per environment update makes the actual inputs visible.
+        // Keyframe times + current progress let the rendered time-of-day be
+        // checked against the sim's (frame0 is usually the midnight key, so a
+        // "wrong-looking" sky is often just the cycle sitting near night).
+        if (skyKeys.Count > 0)
+        {
+            var f = skyKeys[0].Item2;
+            var keyTimes = string.Join(",", skyKeys.ConvertAll(k => k.Item1.ToString("0.###")));
+            LibreMetaverse.Logger.Debug(
+                $"SceneEnvironmentService: {skyKeys.Count} sky keyframe(s) at [{keyTimes}]; " +
+                $"dayLength={_dayLength}s dayOffset={_dayOffset}s progressNow={ComputeProgress():0.###}; frame0 " +
+                $"blueHorizon={f.BlueHorizon} blueDensity={f.BlueDensity} " +
+                $"hazeHorizon={f.HazeHorizon} hazeDensity={f.HazeDensity} " +
+                $"sun={f.SunlightColor} ambient={f.Ambient} cloudColor={f.CloudColor} " +
+                $"cloudPd1={f.CloudPosDensity1} cloudPd2={f.CloudPosDensity2}");
+        }
     }
 
     private static void CollectSkyKeyframes(

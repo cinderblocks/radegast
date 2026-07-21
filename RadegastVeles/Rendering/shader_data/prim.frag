@@ -6,6 +6,7 @@ in  vec3 vViewPos;
 in  vec2 vTexCoord;
 in  vec3 vObjPos;     // object-space position — terrain triplanar path only
 in  vec3 vObjNormal;  // object-space normal   — terrain triplanar path only
+in  vec3 vWorldPos;   // world-space position  — shadow-map projection only
 
 // Per-face / per-instance data forwarded from prim.vert.
 // For non-instanced draws these mirror the per-face uniforms; for instanced draws
@@ -74,6 +75,42 @@ uniform vec3 uSunDir;       // view-space unit vector toward sun
 uniform vec3 uSunColor;     // sun/moon colour (EEP sun_moon_color)
 uniform vec3 uAmbientColor; // sky ambient colour (EEP sky_ambient)
 const float kKey       = 0.70;
+
+// Shared atmosphere model — only atmHazeColor() is used here, as the distance-
+// haze target colour. Sharing the formula with sky.frag/water.frag keeps hazed
+// geometry converging on the exact colour the sky shows at the horizon.
+#include "atmosphere.glsl"
+
+// Per-metre atmospheric haze density. 0 disables (studio viewers, toggle off).
+uniform float uFogDensity;
+
+// Shared shadow-mapping helpers (sampleDirShadow/samplePointShadow) — see
+// shadow.glsl. Declares its own uShadowsOn/uLightVp/uShadowMap/uPointShadow*
+// uniforms.
+#include "shadow.glsl"
+
+// Local point lights (SL "Light" prims) — nearest few to the camera, collected
+// by SceneLightStreamer and selected per-frame in GlViewportControl. Colour is
+// already premultiplied by Intensity (see LocalLight.Color); Radius/Falloff
+// drive the smooth-cutoff attenuation curve below, mirroring the LightData
+// params an SL builder actually sets in the edit UI.
+const int kMaxLocalLights = 4;
+uniform int   uPointLightCount;
+uniform vec3  uPointLightPos[kMaxLocalLights];
+uniform vec3  uPointLightColor[kMaxLocalLights];
+uniform float uPointLightRadius[kMaxLocalLights];
+uniform float uPointLightFalloff[kMaxLocalLights];
+
+// Distance haze (aerial perspective). Applied to every lit and fullbright path —
+// atmosphere doesn't care what it's in front of. Operates on display-space
+// colour (post-tonemap/gamma), matching how the WL colour params are treated
+// throughout this renderer.
+vec3 applyFog(vec3 col)
+{
+    if (uFogDensity <= 0.0) return col;
+    float f = 1.0 - exp(-length(vViewPos) * uFogDensity);
+    return mix(col, atmHazeColor(), f);
+}
 
 // Fill light - cool, lower-left of camera (view space, pre-normalised)
 const vec3  kFillDir   = vec3(-0.8893, -0.2540, 0.3810); // normalize(-0.7,-0.2, 0.3)
@@ -149,6 +186,15 @@ vec3 terrainAlbedo()
     const float kTileScale = 1.0 / 32.0;
     vec3 p = vObjPos * kTileScale;
 
+    // Anti-tiling: a very-low-frequency (~260 m repeat) pass over the first detail
+    // texture drives a subtle domain warp of the sample position plus a macro
+    // brightness modulation below. Either alone still shows the 32 m repeat grid
+    // at middle distance; together the repetition stops being findable. Warp
+    // amplitude is deliberately small — at 0.35 it produced obvious marbled
+    // swirls across the whole ground.
+    vec3 vary = triplanarSample(uAlbedo, p * 0.123, blend);
+    p += (vary - 0.5) * 0.10;
+
     vec3 c0 = triplanarSample(uAlbedo,              p, blend);
     vec3 c1 = triplanarSample(uNormalMap,            p, blend);
     vec3 c2 = triplanarSample(uSpecularMap,          p, blend);
@@ -162,7 +208,11 @@ vec3 terrainAlbedo()
     float w2 = clamp(1.0 - abs(layer - 2.0), 0.0, 1.0);
     float w3 = clamp(1.0 - abs(layer - 3.0), 0.0, 1.0);
     float wSum = w0 + w1 + w2 + w3;
-    return (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / max(wSum, 0.0001);
+    vec3 albedo = (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / max(wSum, 0.0001);
+
+    // Macro variation: large-scale brightness undulation (second half of the
+    // anti-tiling scheme above) — reads as natural ground patchiness.
+    return albedo * (0.90 + 0.20 * vary.r);
 }
 
 // ── PBR helpers (GGX / Cook-Torrance) ────────────────────────────────────────
@@ -192,6 +242,48 @@ vec3 fresnelSchlick(float cosTheta, vec3 F0)
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// Local point lights, Cook-Torrance (mirrors the sun's key-light block in
+// pbrLighting below, just summed over up to kMaxLocalLights local sources).
+vec3 pointLightsPBR(vec3 albedo, float metallic, float roughness, vec3 F0,
+                     vec3 n, vec3 v, float NdotV)
+{
+    vec3 Lo = vec3(0.0);
+    for (int i = 0; i < kMaxLocalLights; i++)
+    {
+        if (i >= uPointLightCount) break;
+
+        vec3  toLight = uPointLightPos[i] - vWorldPos;
+        float dist    = length(toLight);
+        vec3  L       = toLight / max(dist, 0.001);
+
+        // Smooth-cutoff falloff driven by the light's own Radius/Falloff (from
+        // Primitive.LightData): 1 at the source, 0 at Radius, curve shaped by
+        // Falloff. Squaring softens the cutoff so it doesn't read as a hard edge.
+        float atten = clamp(1.0 - pow(dist / max(uPointLightRadius[i], 0.001),
+                                       max(uPointLightFalloff[i], 0.001)), 0.0, 1.0);
+        atten *= atten;
+        if (atten <= 0.0) continue;
+
+        float shadow = samplePointShadow(i, vWorldPos);
+        vec3  radiance = uPointLightColor[i] * atten * shadow;
+
+        vec3  H     = normalize(L + v);
+        float NdotL = max(dot(n, L), 0.0);
+        float NdotH = max(dot(n, H), 0.0);
+        float HdotV = max(dot(H, v), 0.0);
+
+        float D = distributionGGX(NdotH, roughness);
+        float G = geometrySmith(NdotV, NdotL, roughness);
+        vec3  F = fresnelSchlick(HdotV, F0);
+
+        vec3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.001);
+        vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+
+        Lo += (kD * albedo / PI + specular) * radiance * NdotL;
+    }
+    return Lo;
+}
+
 // ── PBR lighting path ────────────────────────────────────────────────────────
 
 void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
@@ -203,6 +295,7 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     float NdotV = max(dot(n, v), 0.001);
 
     vec3 Lo = vec3(0.0);
+    float sunShadow = 1.0;
 
     // Key light (sun)
     {
@@ -219,8 +312,17 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
         vec3 specular = (D * G * F) / (4.0 * NdotV * NdotL + 0.001);
         vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
 
-        Lo += (kD * albedo / PI + specular) * uSunColor * kKey * NdotL;
+        // Shadow attenuates the direct/key term fully, and (below, applied to
+        // `ambient`) dims indirect light partially — see the matching comment on
+        // ambientShadow in the legacy Blinn-Phong path for why pure sun-only
+        // attenuation isn't enough to read as a visible shadow in every environment.
+        sunShadow = sampleDirShadow(vWorldPos, n, NdotL);
+
+        Lo += (kD * albedo / PI + specular) * uSunColor * kKey * NdotL * sunShadow;
     }
+
+    // Local point lights (SL "Light" prims).
+    Lo += pointLightsPBR(albedo, metallic, roughness, F0, n, v, NdotV);
 
     // Fill light
     {
@@ -259,7 +361,8 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     vec3  kD_amb     = (vec3(1.0) - F_amb) * (1.0 - metallic);
     // Specular ambient response: smooth surfaces reflect more of the environment.
     float specScale  = mix(0.04, 0.50, 1.0 - roughness * roughness);
-    vec3 ambient     = uAmbientColor * (kD_amb * albedo + F_amb * specScale) * occlusion * ssao;
+    float ambientShadow = mix(0.35, 1.0, sunShadow);
+    vec3 ambient     = uAmbientColor * (kD_amb * albedo + F_amb * specScale) * occlusion * ssao * ambientShadow;
 
     vec3 col = ambient + Lo + emissive;
 
@@ -269,6 +372,37 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     col = pow(col, vec3(1.0 / 2.2));
 
     result = vec4(col, alpha);
+}
+
+// Local point lights, legacy Lambert + Blinn-Phong (mirrors the sun key-light
+// term in main() below). Returns a fully-weighted colour (albedo/specTint
+// already applied) ready to add directly into `col`.
+vec3 pointLightsLegacy(vec3 albedo, vec3 n, vec3 v, vec3 specTint, float shininess)
+{
+    vec3 result = vec3(0.0);
+    for (int i = 0; i < kMaxLocalLights; i++)
+    {
+        if (i >= uPointLightCount) break;
+
+        vec3  toLight = uPointLightPos[i] - vWorldPos;
+        float dist    = length(toLight);
+        vec3  L       = toLight / max(dist, 0.001);
+
+        float atten = clamp(1.0 - pow(dist / max(uPointLightRadius[i], 0.001),
+                                       max(uPointLightFalloff[i], 0.001)), 0.0, 1.0);
+        atten *= atten;
+        if (atten <= 0.0) continue;
+
+        float shadow  = samplePointShadow(i, vWorldPos);
+        vec3  contrib = uPointLightColor[i] * atten * shadow;
+
+        float diff = max(dot(n, L), 0.0);
+        vec3  h    = normalize(L + v);
+        float spec = pow(max(dot(n, h), 0.0), shininess);
+
+        result += albedo * contrib * diff + specTint * contrib * spec;
+    }
+    return result;
 }
 
 void main()
@@ -302,7 +436,7 @@ void main()
         if (fullbright)
         {
             vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
-            fragColor = vec4(glowCol, (alphaMode == 1) ? base.a : 1.0);
+            fragColor = vec4(applyFog(glowCol), (alphaMode == 1) ? base.a : 1.0);
             return;
         }
 
@@ -370,7 +504,7 @@ void main()
         vec4 result;
         pbrLighting(albedo, metallic, roughness, occlusion, emissive, n, v,
                     (alphaMode == 1) ? base.a : 1.0, result);
-        fragColor = result;
+        fragColor = vec4(applyFog(result.rgb), result.a);
         return;
     }
 
@@ -396,7 +530,7 @@ void main()
         // Glow adds extra brightness on top of the fully-lit base colour,
         // approximating the emission the face would contribute to a bloom pass.
         vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
-        fragColor = vec4(glowCol, (alphaMode == 1) ? base.a : 1.0);
+        fragColor = vec4(applyFog(glowCol), (alphaMode == 1) ? base.a : 1.0);
         return;
     }
 
@@ -440,11 +574,15 @@ void main()
         vec3 nmSample = texture(uNormalMap, nmUv).rgb * 2.0 - 1.0;
         n = normalize(T * nmSample.x + B * nmSample.y + n * nmSample.z);
     }
-    // Legacy bump: perturb the surface normal using luminance gradient.
-    else if (uHasBump != 0 && hasTBN)
+    // Legacy bump: perturb the surface normal using luminance gradient. Terrain
+    // (which carries no tangent data — T/B come from the derivative fallback)
+    // opts in too: the splat detail's luminance doubles as a cheap height field,
+    // giving ground relief that catches the sun instead of shading dead-flat.
+    else if ((uHasBump != 0 && hasTBN) || uIsTerrain != 0)
     {
-        float lum = dot(albedo, vec3(0.299, 0.587, 0.114));
-        n = normalize(n + (dFdx(lum) * T + dFdy(lum) * B) * 0.5);
+        float lum  = dot(albedo, vec3(0.299, 0.587, 0.114));
+        float amt  = uIsTerrain != 0 ? 0.7 : 0.5;
+        n = normalize(n + (dFdx(lum) * T + dFdy(lum) * B) * amt);
     }
 
     // Resolve specular parameters: material path or legacy TE shiny.
@@ -481,6 +619,9 @@ void main()
     vec3  keyH    = normalize(uSunDir + v);
     float keySpec = pow(max(dot(n, keyH), 0.0), shininess);
 
+    // Shadow only attenuates the direct/key term — fill, rim and ambient stay lit.
+    float sunShadow = sampleDirShadow(vWorldPos, n, keyDiff);
+
     // Fill light: clamped lambert, no specular
     float fillDiff = max(dot(n, kFillDir), 0.0);
 
@@ -490,11 +631,24 @@ void main()
     float ssao = (uHasSsao != 0)
         ? texture(uSsaoMap, gl_FragCoord.xy / uScreenSize).r
         : 1.0;
-    vec3 col = albedo * (uAmbientColor * ssao
-             + uSunColor   * kKey  * keyDiff
+    // Shadow also lightly dims ambient (never below 55%), on top of fully removing
+    // the key/sun term above. A "pure" shadow map should only attenuate direct
+    // light, but WL/EEP regions vary enormously in how much of the lighting budget
+    // is ambient vs. direct sun (verified in-world: one environment had ambient
+    // brighter than the sun itself, green channel exactly zero) — attenuating only
+    // the sun term made shadows real but visually imperceptible whenever ambient
+    // dominates. This keeps shadowed areas well short of pure black (physically
+    // reasonable — real shadows still receive bounce/sky light) while making the
+    // effect legible across environments instead of only in sun-dominant ones.
+    float ambientShadow = mix(0.35, 1.0, sunShadow);
+    vec3 col = albedo * (uAmbientColor * ssao * ambientShadow
+             + uSunColor   * kKey  * keyDiff * sunShadow
              + kFillColor  * kFill * fillDiff
              + kRimColor   * kRim  * rimDiff);
-    col     += uSunColor * specTint * keySpec;
+    col     += uSunColor * specTint * keySpec * sunShadow;
+
+    // Local point lights (SL "Light" prims).
+    col += pointLightsLegacy(albedo, n, v, specTint, shininess);
 
     // Fresnel environment reflection (material path).
     if (uHasMaterial != 0 && uEnvIntensity > 0.0)
@@ -516,10 +670,10 @@ void main()
     if (alphaMode == 3)
     {
         col += base.rgb * base.a;
-        fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+        fragColor = vec4(applyFog(clamp(col, 0.0, 1.0)), 1.0);
         return;
     }
 
-    fragColor = vec4(col, (alphaMode == 1) ? base.a : 1.0);
+    fragColor = vec4(applyFog(col), (alphaMode == 1) ? base.a : 1.0);
 }
 

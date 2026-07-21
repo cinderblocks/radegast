@@ -63,6 +63,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
     // Used to skip rebuilds when only position/rotation changed.
     private readonly ConcurrentDictionary<uint, int> _lastVisualParamHash = new();
 
+    // avatar LocalID → cached ground-anchor correction from the most recent successful
+    // mesh build (see AvatarMeshBuilder.ComputeGroundAdjustment). SL's network position
+    // is not feet height; ResolveAvatarWorldTransform subtracts this to place the avatar
+    // on the ground instead of floating. 0 until the first build completes.
+    private readonly ConcurrentDictionary<uint, float> _groundAdjustment = new();
+
     /// <summary>Number of avatar build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
 
@@ -350,6 +356,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _dirty.Clear();
         _rendered.Clear();
         _lastVisualParamHash.Clear();
+        _groundAdjustment.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         foreach (var (id, cts) in _inflight)
         {
@@ -436,6 +443,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _dirty.TryRemove(localId, out _);
         _rendered.TryRemove(localId, out _);
         _lastVisualParamHash.TryRemove(localId, out _);
+        _groundAdjustment.TryRemove(localId, out _);
         if (_inflight.TryRemove(localId, out var cts))
         {
             cts.Cancel();
@@ -621,8 +629,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
+                    {
                         patch.Bitmap?.Dispose();
-                    else
+                        return;
+                    }
+                    try
                     {
                         // The self-avatar's own bake textures get priority so they aren't
                         // stuck waiting behind the rest of the scene's texture-patch backlog
@@ -632,10 +643,25 @@ internal sealed class SceneAvatarStreamer : IDisposable
                             patch = patch with { HighPriority = true };
                         _viewport.PatchSceneObjectTexture(patch, token);
                     }
+                    catch (OperationCanceledException)
+                    {
+                        // Token was cancelled between the check above and PatchSceneObjectTexture's
+                        // internal gate.Wait(ct) — the bitmap was already disposed inside that call.
+                        // Progress<T> invokes this callback on a raw ThreadPool thread when
+                        // constructed off the UI thread, so an unhandled exception here would
+                        // crash the whole process rather than just failing this build.
+                    }
                 }))
                 .ConfigureAwait(false);
 
             if (token.IsCancellationRequested) return;
+
+            // Cache this avatar's ground-anchor correction from the freshly-built skeleton,
+            // then re-resolve worldPos/worldRot so this build places the mesh using the fresh
+            // value instead of whatever was cached (or 0) when the position was first read above.
+            _groundAdjustment[localId] = AvatarMeshBuilder.ComputeGroundAdjustment(result.BoneTransforms);
+            (rawWorldPos, worldRot) = ResolveAvatarWorldTransform(sim, avatarObj);
+            worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
             // Apply world-space position so the avatar stands at its sim-local coords.
             var submission = result.Submission;
@@ -749,18 +775,25 @@ internal sealed class SceneAvatarStreamer : IDisposable
         Simulator sim, Avatar avatar)
     {
         float hoverZ = avatar.HoverHeight.Z;
+        // SL's network position is not feet height — see AvatarMeshBuilder.ComputeGroundAdjustment.
+        // Subtracted uniformly (self, other, seated) so the avatar stands on the ground instead
+        // of floating by roughly its own pelvis-to-head-top distance. 0 (no correction) until this
+        // avatar's first mesh build completes and caches its real value.
+        float groundAdj = _groundAdjustment.TryGetValue(avatar.LocalID, out var adj) ? adj : 0f;
 
         if (avatar.LocalID == _client.Self.LocalID)
         {
-            var pos = _client.Self.SimPosition;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
-            return (pos, _client.Self.SimRotation);
+            // SimPosition already folds in self.HoverHeight.Z for the not-sitting case
+            // (see AgentManager.SimPosition) — adding hoverZ again here would double it.
+            var selfPos = _client.Self.SimPosition;
+            selfPos = new OmVector3(selfPos.X, selfPos.Y, selfPos.Z - groundAdj);
+            return (selfPos, _client.Self.SimRotation);
         }
 
         if (avatar.ParentID == 0)
         {
             var pos = avatar.Position;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ - groundAdj);
             return (pos, avatar.Rotation);
         }
 
@@ -769,7 +802,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (!sim.ObjectsPrimitives.TryGetValue(avatar.ParentID, out var seatPrim))
         {
             var pos = avatar.Position;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ - groundAdj);
             return (pos, avatar.Rotation);
         }
 
@@ -792,6 +825,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             }
         }
 
+        worldPos = new OmVector3(worldPos.X, worldPos.Y, worldPos.Z - groundAdj);
         return (worldPos, worldRot);
     }
 

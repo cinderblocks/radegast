@@ -901,7 +901,12 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
             }
 
             avatarsById.TryGetValue(entry.Id, out var foundAvi);
-            var unknownAltitude = NetCom.LoginOptions.Grid?.Platform == "SecondLife"
+            // NetCom (and, in principle, LoginOptions) can go null here: this update was
+            // queued on the network thread and dispatched to the UI thread via
+            // Dispatcher.UIThread.Post (see Grid_CoarseLocationUpdate above), so a
+            // logout/reconnect racing with that dispatch can tear down NetCom's state
+            // before this delegate runs.
+            var unknownAltitude = NetCom?.LoginOptions?.Grid?.Platform == "SecondLife"
                 ? pos.Z == 1020f : pos.Z == 0f;
 
             var globalPos = globalPositions.TryGetValue(entry.Id, out var gp)

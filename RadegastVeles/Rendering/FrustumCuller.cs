@@ -64,7 +64,17 @@ public static class FrustumCuller
         f.Right  = Normalize(r3 - r0);
         f.Bottom = Normalize(r3 + r1);
         f.Top    = Normalize(r3 - r1);
-        f.Near   = Normalize(r3 + r2);
+        // Near uses r2 alone, NOT r3+r2: System.Numerics' CreatePerspectiveFieldOfView/
+        // CreateOrthographicOffCenter (used everywhere a projection matrix is built in
+        // this renderer) produce NDC z in [0,1] (D3D convention), where the near-plane
+        // condition is z_clip >= 0, i.e. row2 alone. r3+r2 is the textbook Gribb-Hartmann
+        // formula for OpenGL-style NDC z in [-1,1] and is wrong for this codebase's
+        // matrices. For a typical camera frustum (near~0.1, far~1000) the wrong formula
+        // degrades into an always-passing test, so it was silently harmless for camera/
+        // SSAO/water culling; it is NOT harmless for a tight-near/far light frustum
+        // (e.g. the shadow map's near=1/far=300 ortho volume), where it can reject real
+        // geometry outright and leave the shadow map perpetually empty.
+        f.Near   = Normalize(r2);
         f.Far    = Normalize(r3 - r2);
         return f;
     }

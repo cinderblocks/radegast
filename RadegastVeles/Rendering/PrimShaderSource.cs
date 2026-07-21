@@ -32,8 +32,15 @@ internal static class ShaderLoader
     private const string Base = "avares://RadegastVeles/Rendering/shader_data/";
 
     /// <summary>Load a shader source file by name (e.g. "prim.vert").</summary>
-    public static string Load(string filename)
+    public static string Load(string filename) => Load(filename, 0);
+
+    private static string Load(string filename, int depth)
     {
+        // GLSL has no native #include; a shallow recursion cap catches accidental cycles.
+        if (depth > 4)
+            throw new InvalidOperationException(
+                $"Shader include depth exceeded while loading '{filename}' (include cycle?).");
+
         var uri = new Uri(Base + filename);
         try
         {
@@ -53,12 +60,42 @@ internal static class ShaderLoader
             var sb = new System.Text.StringBuilder(raw.Length);
             foreach (char c in raw)
                 if (c < 128) sb.Append(c);
-            return sb.ToString();
+
+            return ExpandIncludes(sb.ToString(), depth);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException)
         {
             throw new InvalidOperationException(
                 $"Failed to load shader '{uri}': {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Replaces lines of the form <c>#include "file.glsl"</c> with the named file's
+    /// contents (recursively). Included files must not contain a <c>#version</c>
+    /// directive of their own.
+    /// </summary>
+    private static string ExpandIncludes(string source, int depth)
+    {
+        if (!source.Contains("#include")) return source;
+
+        var outSb = new System.Text.StringBuilder(source.Length);
+        foreach (var line in source.Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+            if (trimmed.StartsWith("#include", StringComparison.Ordinal))
+            {
+                int q1 = trimmed.IndexOf('"');
+                int q2 = q1 >= 0 ? trimmed.IndexOf('"', q1 + 1) : -1;
+                if (q2 < 0)
+                    throw new InvalidOperationException($"Malformed shader #include line: '{line}'");
+                outSb.Append(Load(trimmed.Substring(q1 + 1, q2 - q1 - 1), depth + 1)).Append('\n');
+            }
+            else
+            {
+                outSb.Append(line).Append('\n');
+            }
+        }
+        return outSb.ToString();
     }
 }

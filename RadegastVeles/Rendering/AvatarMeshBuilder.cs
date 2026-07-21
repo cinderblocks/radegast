@@ -542,6 +542,56 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             m.M41, m.M42, m.M43, m.M44);
     }
 
+    /// <summary>
+    /// Computes how far above the avatar's true ground/feet position the SL network
+    /// position (<c>Avatar.Position.Z</c> / <c>AgentManager.SimPosition.Z</c>) sits.
+    /// <para>
+    /// SL's avatar position is <b>not</b> feet height — it's offset upward by roughly the
+    /// pelvis-to-head-top distance. The skeleton's own leg chain (mHip → mKnee → mAnkle →
+    /// mFoot) already returns to ~0 when the root (mPelvis) is placed at the network
+    /// position, so without this correction the whole avatar renders floating by that
+    /// same amount. Matches classic Radegast's <c>RenderAvatar.UpdateSize</c> /
+    /// <c>AdjustedPosition</c> (Radegast/GUI/Rendering/RenderAvatar.cs), which computes
+    /// this per-avatar from the same VP-morphed bone positions and subtracts it before
+    /// placing the OpenGL avatar transform.
+    /// </para>
+    /// Returns the classic-viewer fallback of 1.0m (its default Height=2.0/PelvisToFoot=1.0)
+    /// when any required bone is missing.
+    /// </summary>
+    public static float ComputeGroundAdjustment(Dictionary<string, BoneTransform>? boneTransforms)
+    {
+        const float FallbackAdjustment = 1.0f;
+        const float Sqrt2 = 1.4142135623730950488016887242097f;
+
+        if (boneTransforms == null ||
+            !boneTransforms.TryGetValue("mPelvis",   out var pelvis) ||
+            !boneTransforms.TryGetValue("mSkull",    out var skull) ||
+            !boneTransforms.TryGetValue("mNeck",     out var neck) ||
+            !boneTransforms.TryGetValue("mChest",    out var chest) ||
+            !boneTransforms.TryGetValue("mHead",     out var head) ||
+            !boneTransforms.TryGetValue("mTorso",    out var torso) ||
+            !boneTransforms.TryGetValue("mHipLeft",  out var hip) ||
+            !boneTransforms.TryGetValue("mKneeLeft", out var knee) ||
+            !boneTransforms.TryGetValue("mAnkleLeft",out var ankle) ||
+            !boneTransforms.TryGetValue("mFootLeft", out var foot))
+            return FallbackAdjustment;
+
+        float pelvisToFoot = hip.Position.Z   * pelvis.Scale.Z
+                            - knee.Position.Z  * hip.Scale.Z
+                            - ankle.Position.Z * knee.Scale.Z
+                            - foot.Position.Z  * ankle.Scale.Z;
+
+        float height = pelvisToFoot
+                     + Sqrt2 * (skull.Position.Z * head.Scale.Z)
+                     + head.Position.Z  * neck.Scale.Z
+                     + neck.Position.Z  * chest.Scale.Z
+                     + chest.Position.Z * torso.Scale.Z
+                     + torso.Position.Z * pelvis.Scale.Z;
+
+        float adjustment = height - pelvisToFoot;
+        return float.IsFinite(adjustment) && adjustment > 0f ? adjustment : FallbackAdjustment;
+    }
+
     private static Dictionary<string, Matrix4x4> BuildBoneWorldMatrices(
         LindenSkeleton                    skeleton,
         Dictionary<string, BoneTransform> boneTransforms)

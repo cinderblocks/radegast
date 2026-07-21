@@ -64,6 +64,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private SceneObjectStreamer?             _objectStreamer;
     private SceneAvatarStreamer?             _avatarStreamer;
     private SceneParticleStreamer?           _particleStreamer;
+    private SceneLightStreamer?              _lightStreamer;
     private SceneFlexiStreamer?              _flexiStreamer;
     private SceneAvatarAnimationStreamer?    _avatarAnimStreamer;
     private SceneAnimeshStreamer?            _animeshStreamer;
@@ -89,6 +90,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _showChatOverlay;
     [ObservableProperty] private bool   _frustumCullingEnabled = true;
     [ObservableProperty] private bool   _waterReflectionsEnabled = false;
+    [ObservableProperty] private bool   _atmosphericsEnabled = true;
+    [ObservableProperty] private bool   _shadowsEnabled = false;
     [ObservableProperty] private string _perfOverlayText = string.Empty;
 
     private const int ChatOverlayMaxLines = 10;
@@ -137,6 +140,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? instance.GlobalSettings["frustum_culling_enabled"].AsBoolean() : true;
         _waterReflectionsEnabled = instance.GlobalSettings["water_reflections_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["water_reflections_enabled"].AsBoolean() : false;
+        _atmosphericsEnabled = instance.GlobalSettings["atmospherics_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["atmospherics_enabled"].AsBoolean() : true;
+        _shadowsEnabled = instance.GlobalSettings["shadows_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["shadows_enabled"].AsBoolean() : false;
         _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? (float)instance.GlobalSettings["scene_draw_distance"].AsReal() : 96f;
     }
@@ -159,6 +166,16 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     partial void OnWaterReflectionsEnabledChanged(bool value)
     {
         if (_viewport != null) _viewport.WaterReflectionsEnabled = value;
+    }
+
+    partial void OnAtmosphericsEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.AtmosphericsEnabled = value;
+    }
+
+    partial void OnShadowsEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.ShadowsEnabled = value;
     }
 
     partial void OnShowPerfOverlayChanged(bool value)
@@ -189,7 +206,14 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.SsaoEnabled                = SsaoEnabled;
         _viewport.FrustumCullingEnabled      = FrustumCullingEnabled;
         _viewport.WaterReflectionsEnabled    = WaterReflectionsEnabled;
+        _viewport.AtmosphericsEnabled        = AtmosphericsEnabled;
+        _viewport.ShadowsEnabled              = ShadowsEnabled;
         _viewport.WaterHeight            = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
+
+        LibreMetaverse.Logger.Info(
+            $"[SceneViewer] Graphics settings at open: SSAO={SsaoEnabled} FrustumCulling={FrustumCullingEnabled} " +
+            $"WaterReflections={WaterReflectionsEnabled} Atmospherics={AtmosphericsEnabled} Shadows={ShadowsEnabled} " +
+            $"DrawDistance={DrawDistance}");
         _viewport.Stats.FrameCompleted  += OnFrameCompleted;
         _viewport.InitFailed += msg =>
         {
@@ -219,6 +243,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _objectStreamer       = new SceneObjectStreamer(_instance.Client, viewport, _buildScheduler);
         _avatarStreamer       = new SceneAvatarStreamer(_instance.Client, viewport, _buildScheduler);
         _particleStreamer    = new SceneParticleStreamer(_instance.Client, viewport);
+        _lightStreamer       = new SceneLightStreamer(_instance.Client);
+        _viewport.LightStreamer = _lightStreamer;
         _flexiStreamer       = new SceneFlexiStreamer(_instance.Client, viewport, _objectStreamer);
         _flexiStreamer.SetAvatarStreamer(_avatarStreamer);
         _avatarAnimStreamer  = new SceneAvatarAnimationStreamer(_instance.Client, viewport, _avatarStreamer);
@@ -290,6 +316,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         // Seed particle streamer with all root prims that have emitters.
         _particleStreamer?.SeedFromCurrentSim();
+
+        // Seed local-light streamer with all root prims that carry Light params.
+        _lightStreamer?.SeedFromCurrentSim();
     }
 
     /// <summary>
@@ -335,6 +364,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_objectStreamer == null || _disposed) return;
         _objectStreamer.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _particleStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
+        _lightStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
 
         // A full ObjectUpdate may carry a prim that is already (or will become) a
         // seat for one or more avatars.  When avatar ObjectUpdates arrive before
@@ -433,6 +463,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             // Fast-path prim position (translation only) without a full mesh rebuild.
             _objectStreamer?.OnTerseObjectUpdate(e.Simulator, e.Prim);
             _particleStreamer?.OnTerseObjectUpdate(e.Simulator, e.Prim);
+            _lightStreamer?.OnTerseObjectUpdate(e.Simulator, e.Prim);
 
             // If this prim is a vehicle/seat root, re-push world transforms for any
             // avatars currently seated on it so they move with the vehicle.
@@ -447,6 +478,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _objectStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _avatarStreamer?.OnKillAvatar(e.Simulator, e.ObjectLocalID);
         _particleStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
+        _lightStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _flexiStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _avatarAnimStreamer?.OnKillAvatar(e.Simulator, e.ObjectLocalID);
         _animeshStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
@@ -481,6 +513,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _objectStreamer?.Clear();
             _avatarStreamer?.Clear();
             _particleStreamer?.Clear();
+            _lightStreamer?.Clear();
             _flexiStreamer?.Clear();
             _avatarAnimStreamer?.Clear();
             _animeshStreamer?.Clear();
@@ -1219,6 +1252,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         _particleStreamer?.Dispose();
         _particleStreamer = null;
+
+        _lightStreamer?.Dispose();
+        _lightStreamer = null;
 
         _flexiStreamer?.Dispose();
         _flexiStreamer = null;
