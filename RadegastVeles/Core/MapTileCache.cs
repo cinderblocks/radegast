@@ -28,12 +28,26 @@ public static class MapTileCache
 {
     // Small JPEGs (map-1-*-objects.jpg); a generous bound is cheap and keeps a long-running
     // bot session (or one that visits many regions) from growing this cache unboundedly.
-    private const int CacheCapacity = 512;
+    private const int DefaultCacheCapacity = 512;
 
     private static readonly LruCache<(uint, uint), Bitmap> Cache =
-        new(CacheCapacity, onEvicted: static (_, bmp) => bmp.Dispose());
+        new(DefaultCacheCapacity, onEvicted: static (_, bmp) => bmp.Dispose());
     private static readonly object _lock = new();
     private static readonly Dictionary<string, List<Action>> _pendingCallbacks = new();
+
+    /// <summary>
+    /// Gets or sets the maximum number of decoded tile bitmaps held in memory. This is the
+    /// sole owner of tile bitmaps (see the cacheResult:false note in RequestTile below), so
+    /// this is what backs the Preferences "Texture Bitmap Memory Cache" setting.
+    /// </summary>
+    public static int CacheCapacity
+    {
+        get => Cache.Capacity;
+        set => Cache.Capacity = value;
+    }
+
+    /// <summary>Number of decoded tile bitmaps currently held in memory.</summary>
+    public static int CacheCount => Cache.Count;
 
     public static Bitmap? GetTile(uint gridX, uint gridY)
     {
@@ -69,6 +83,11 @@ public static class MapTileCache
             // If a download is already in-flight, the callback is now registered; nothing else to do.
             if (TextureDownloadQueue.Instance.IsPending(queueKey)) return;
 
+            // cacheResult: false — this class is the sole owner of the decoded tile bitmaps
+            // (see the Cache field above). Letting TextureDownloadQueue's own internal cache
+            // also hold a reference would give the same Bitmap instance to two independently
+            // evicting/disposing LRU caches, which could dispose a tile out from under a live
+            // GetTile() result mid-render (ObjectDisposedException in GridMapControl.Render).
             var url = $"https://map.secondlife.com/map-1-{gridX}-{gridY}-objects.jpg";
             TextureDownloadQueue.Instance.Enqueue(queueKey, url, bitmap =>
             {
@@ -85,7 +104,7 @@ public static class MapTileCache
                 if (toFire != null)
                     foreach (var cb in toFire)
                         Dispatcher.UIThread.Post(cb);
-            }, TexturePriority.Low);
+            }, TexturePriority.Low, cacheResult: false);
         }
     }
 }

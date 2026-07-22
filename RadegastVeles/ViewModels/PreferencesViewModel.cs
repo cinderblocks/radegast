@@ -116,12 +116,12 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private int _textureBitmapCacheCapacity = 2500;
 
     /// <summary>Live entry count read from the LRU cache; refreshed every second by <see cref="_cacheCountTimer"/>.</summary>
-    public int TextureBitmapCacheCount => TextureDownloadQueue.Instance.CacheCount;
+    public int TextureBitmapCacheCount => MapTileCache.CacheCount;
 
     /// <summary>Fill fraction (0.0–1.0) of the bitmap cache: count ÷ capacity.</summary>
     public double TextureBitmapCacheFill =>
         TextureBitmapCacheCapacity > 0
-            ? Math.Min(1.0, (double)TextureDownloadQueue.Instance.CacheCount / TextureBitmapCacheCapacity)
+            ? Math.Min(1.0, (double)MapTileCache.CacheCount / TextureBitmapCacheCapacity)
             : 0.0;
 
     private readonly DispatcherTimer _cacheCountTimer;
