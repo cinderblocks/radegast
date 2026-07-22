@@ -88,7 +88,6 @@ namespace Radegast
         private readonly RadegastInstanceForms Instance;
         private INetCom NetCom => Instance.NetCom;
         private GridClient Client => Instance.Client;
-        private TabsConsole tabConsole;
 
         internal VoiceManager voice;
         private readonly Dictionary<UUID, ListViewItem> participantItems = new Dictionary<UUID, ListViewItem>();
@@ -115,7 +114,6 @@ namespace Radegast
             Instance = instance;
 
             NetCom.ClientLoginStatus += NetComClientLoginStatus;
-            Instance.MainForm.Load += MainForm_Load;
 
             foreach (var choice in PttKeyOptions)
                 pttKeyCombo.Items.Add(choice);
@@ -140,6 +138,15 @@ namespace Radegast
                 var candidate = new VoiceManager(Instance.Client);
                 if (!candidate.AudioDevice.IsAvailable)
                 {
+                    // VoiceManager's constructor unconditionally subscribes to
+                    // Client.Network.SimChanged/Self.TeleportProgress and registers CAPS event
+                    // callbacks regardless of audio availability — the only thing that ever
+                    // unhooks them is Disconnect(). Every retry here (Reconnect button, toggling
+                    // chkVoiceEnable, a fresh login while hardware is still unavailable) used to
+                    // leave `candidate` simply dropped, permanently leaking those subscriptions
+                    // against the live GridClient for the rest of the session.
+                    candidate.Disconnect();
+
                     // Leave voice null so the next Start() (e.g. next login, or the
                     // user re-toggling chkVoiceEnable) retries from scratch instead of
                     // being stuck thinking voice is already (half-)initialized.
@@ -671,11 +678,6 @@ namespace Radegast
                 }
             }
             catch { }
-        }
-
-        private void MainForm_Load(object sender, EventArgs e)
-        {
-            tabConsole = Instance.TabConsole;
         }
 
         private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)
