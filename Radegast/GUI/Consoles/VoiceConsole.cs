@@ -191,6 +191,9 @@ namespace Radegast
             }
             catch
             {
+                // The failure reason itself is now logged inside VoiceSession.PostCapsWithRetries
+                // (and other library-level failure points) via IVoiceLogger — this catch only
+                // needs to update the UI, not duplicate that logging here.
                 SetStatus(VoiceStatus.Disconnected);
             }
         }
