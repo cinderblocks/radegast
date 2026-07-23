@@ -234,7 +234,9 @@
                 <!-- Connect / disconnect -->
                 <Button Content="{Binding Voice.ConnectLabel}"
                         Command="{Binding Voice.ToggleConnectCommand}"
+                        IsEnabled="{Binding Voice.CanToggleConnect}"
                         MinHeight="20" Padding="6,1" FontSize="11"
+                        ToolTip.Tip="{Binding Voice.ConnectButtonTooltip}"
                         AutomationProperties.Name="{Binding Voice.ConnectLabel}" />
             </StackPanel>
 

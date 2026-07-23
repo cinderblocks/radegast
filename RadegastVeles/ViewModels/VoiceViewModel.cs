@@ -53,6 +53,8 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(ConnectLabel))]
     [NotifyPropertyChangedFor(nameof(PushToTalkButtonVisible))]
     [NotifyPropertyChangedFor(nameof(MicMuteButtonVisible))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
     private bool _isConnected;
 
     /// <summary>True when the local microphone is muted.</summary>
@@ -68,6 +70,18 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsVisibleInUI))]
     private bool _voiceEnabled = true;
+
+    /// <summary>
+    /// True when the current parcel/estate actually permits voice. Mirrors
+    /// <see cref="VoiceManager.VoiceAllowedHere"/>; kept in sync via <c>OnVoicePermissionChanged</c>
+    /// so the Join Voice control can be disabled instead of letting the user press it and get a
+    /// confusing generic connect failure for what is really a permissions issue.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ConnectLabel))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    private bool _isVoiceAllowedHere = true;
 
     /// <summary>When true, the mic is always muted and the PTT button must be held to speak.</summary>
     [ObservableProperty]
@@ -91,8 +105,19 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     private bool _isMicTestActive;
 
-    public string ConnectLabel => IsConnected ? "Leave Voice" : "Join Voice";
+    public string ConnectLabel => IsConnected ? "Leave Voice" : IsVoiceAllowedHere ? "Join Voice" : "Voice Unavailable";
     public string MicIcon      => IsMicMuted  ? "Muted"        : "Talk";
+
+    /// <summary>
+    /// Disables the Join Voice control when voice isn't permitted here — leaving is always
+    /// allowed (e.g. a still-active session from before crossing into a no-voice parcel).
+    /// </summary>
+    public bool CanToggleConnect => IsConnected || IsVoiceAllowedHere;
+
+    /// <summary>Tooltip for the Join/Leave Voice button, explaining why it's disabled if it is.</summary>
+    public string ConnectButtonTooltip => CanToggleConnect
+        ? (IsConnected ? "Leave voice" : "Join voice")
+        : "Voice is disabled on this parcel or estate";
 
     /// <summary>Label displayed on the PTT button (mic emoji + state).</summary>
     public string PttButtonLabel => IsPushToTalking ? "🎙 Live" : "🎙 Talk";
@@ -418,13 +443,21 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     private async Task Connect()
     {
         if (_voice == null || !IsAvailable) return;
+        if (!_voice.VoiceAllowedHere)
+        {
+            // Mirrors the button already being disabled via CanToggleConnect — reached only if
+            // something invokes Connect() directly (e.g. TryAutoConnectAsync) rather than via
+            // the button click.
+            StatusText = "Voice unavailable in this area";
+            return;
+        }
         StatusText = "Connecting...";
         try
         {
             bool ok = await _voice.ConnectPrimaryRegionAsync();
             if (!ok)
             {
-                StatusText = "Failed to connect";
+                StatusText = _voice.VoiceAllowedHere ? "Failed to connect" : "Voice unavailable in this area";
                 IsConnected = false;
             }
         }
@@ -455,6 +488,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.PeerConnectionClosed         += OnConnectionClosed;
         _voice.OnRegionTransitionCompleted  += OnRegionTransitionCompleted;
         _voice.OnRegionTransitionFailed     += OnRegionTransitionFailed;
+        _voice.OnVoicePermissionChanged     += OnVoicePermissionChanged;
         _voice.PeerJoined                   += OnPeerJoined;
         _voice.PeerLeft                     += OnPeerLeft;
         _voice.PeerAudioUpdated             += OnPeerAudioUpdated;
@@ -480,6 +514,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.PeerConnectionClosed         -= OnConnectionClosed;
         _voice.OnRegionTransitionCompleted  -= OnRegionTransitionCompleted;
         _voice.OnRegionTransitionFailed     -= OnRegionTransitionFailed;
+        _voice.OnVoicePermissionChanged     -= OnVoicePermissionChanged;
         _voice.PeerJoined                   -= OnPeerJoined;
         _voice.PeerLeft                     -= OnPeerLeft;
         _voice.PeerAudioUpdated             -= OnPeerAudioUpdated;
@@ -576,7 +611,9 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             // guaranteed. RecomputeIsConnected reads live state rather than assuming this event
             // fires after (or before) PeerConnectionReady.
             RecomputeIsConnected();
-            StatusText = IsConnected ? "Connected" : "Reconnecting...";
+            StatusText = IsConnected ? "Connected"
+                        : !(_voice?.VoiceAllowedHere ?? true) ? "Voice unavailable in this area"
+                        : "Reconnecting...";
             // VoiceManager.ReprovisionForNewRegion() already created and provisioned the new
             // session before firing this event. Do NOT call ConnectPrimaryRegion() here —
             // that would race a second session against the one the manager already started.
@@ -587,6 +624,13 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         {
             StatusText = $"Voice failed: {ex.Message}";
             RecomputeIsConnected();
+        });
+
+    private void OnVoicePermissionChanged(bool allowed)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            IsVoiceAllowedHere = allowed;
+            if (!allowed && !IsConnected) StatusText = "Voice unavailable in this area";
         });
 
     private void OnPeerJoined(UUID peerId)
