@@ -48,6 +48,7 @@ namespace Radegast
         private System.Threading.Timer configTimer;
         private const int saveConfigTimeout = 1000;
         private bool playing;
+        private bool userStopped;
         private string currentURL;
         private Stream parcelStream;
         private readonly object parcelMusicLock = new object();
@@ -348,7 +349,7 @@ namespace Radegast
                         Play();
                     }
                 }
-                else if (cbPlayAudioStream.Checked)
+                else if (cbPlayAudioStream.Checked && !userStopped)
                 {
                     currentURL = txtAudioURL.Text;
                     Play();
@@ -375,6 +376,7 @@ namespace Radegast
             {
                 Stop();
                 playing = true;
+                userStopped = false;
                 parcelStream = new Stream { Volume = audioVolume };
                 parcelStream.OnStreamInfo += ParcelMusic_OnStreamInfo;
                 parcelStream.PlayStream(currentURL);
@@ -497,6 +499,7 @@ namespace Radegast
             {
                 currentURL = string.Empty;
                 Stop();
+                userStopped = true;
             }
         }
 

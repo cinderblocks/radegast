@@ -38,6 +38,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private Stream? _parcelStream;
     private readonly object _parcelMusicLock = new();
     private bool _playing;
+    private bool _userStopped;
     private string _currentURL = string.Empty;
     private string _lastArtistTag = string.Empty;
 
@@ -288,6 +289,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
             if (!_playing) return;
             _currentURL = string.Empty;
             Stop();
+            _userStopped = true;
         }
     }
 
@@ -347,6 +349,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     {
         Stop();
         _playing = true;
+        _userStopped = false;
         IsPlaying = true;
         _parcelStream = new Stream { Volume = StreamVolume / 100f };
         _parcelStream.OnStreamInfo += OnStreamInfo;
@@ -408,7 +411,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
                         Play();
                     }
                 }
-                else if (AutoPlay)
+                else if (AutoPlay && !_userStopped)
                 {
                     _currentURL = StreamUrl;
                     Play();
