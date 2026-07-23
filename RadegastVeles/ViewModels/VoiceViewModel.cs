@@ -55,7 +55,27 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(MicMuteButtonVisible))]
     [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
     [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
     private bool _isConnected;
+
+    /// <summary>
+    /// True while a connect/reconnect attempt is actively in flight — covers both an explicit
+    /// Join Voice click and an automatic post-region-crossing reprovision (set from
+    /// <see cref="OnRegionTransitionCompleted"/> when it lands on "still not connected yet").
+    /// Drives the "Connecting…" indicator and disables Join Voice so an impatient repeat click
+    /// can't fire a second overlapping connect attempt while one is already running.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ConnectLabel))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
+    private bool _isConnecting;
+
+    /// <summary>True when the most recent connect/reconnect attempt ended in a genuine failure (not just "someone else already has the lock").</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
+    private bool _hasConnectionError;
 
     /// <summary>True when the local microphone is muted.</summary>
     [ObservableProperty]
@@ -105,19 +125,33 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     private bool _isMicTestActive;
 
-    public string ConnectLabel => IsConnected ? "Leave Voice" : IsVoiceAllowedHere ? "Join Voice" : "Voice Unavailable";
+    public string ConnectLabel => IsConnecting ? "Cancel" : IsConnected ? "Leave Voice" : IsVoiceAllowedHere ? "Join Voice" : "Voice Unavailable";
     public string MicIcon      => IsMicMuted  ? "Muted"        : "Talk";
 
     /// <summary>
-    /// Disables the Join Voice control when voice isn't permitted here — leaving is always
-    /// allowed (e.g. a still-active session from before crossing into a no-voice parcel).
+    /// Disables the control only when voice isn't permitted here and nothing is connected or in
+    /// flight — leaving/cancelling is always allowed once connected or while connecting (e.g. a
+    /// still-active session from before crossing into a no-voice parcel, or bailing out of a
+    /// stuck connect attempt).
     /// </summary>
-    public bool CanToggleConnect => IsConnected || IsVoiceAllowedHere;
+    public bool CanToggleConnect => IsConnected || IsConnecting || IsVoiceAllowedHere;
 
-    /// <summary>Tooltip for the Join/Leave Voice button, explaining why it's disabled if it is.</summary>
-    public string ConnectButtonTooltip => CanToggleConnect
-        ? (IsConnected ? "Leave voice" : "Join voice")
-        : "Voice is disabled on this parcel or estate";
+    /// <summary>Tooltip for the Join/Leave/Cancel Voice button, explaining why it's disabled if it is.</summary>
+    public string ConnectButtonTooltip => IsConnecting
+        ? "Cancel connecting to voice"
+        : CanToggleConnect
+            ? (IsConnected ? "Leave voice" : "Join voice")
+            : "Voice is disabled on this parcel or estate";
+
+    /// <summary>
+    /// Simple traffic-light color for a compact connection-status dot: green = connected,
+    /// amber = connecting/reconnecting, red = the last attempt genuinely failed, gray = idle.
+    /// </summary>
+    public string StatusIndicatorColor =>
+        IsConnected        ? "#33AA33"
+        : IsConnecting     ? "#DDAA22"
+        : HasConnectionError ? "#CC3333"
+        : "#888888";
 
     /// <summary>Label displayed on the PTT button (mic emoji + state).</summary>
     public string PttButtonLabel => IsPushToTalking ? "🎙 Live" : "🎙 Talk";
@@ -341,8 +375,27 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [RelayCommand]
     private async Task ToggleConnect()
     {
-        if (IsConnected) Disconnect();
-        else await Connect();
+        if (IsConnected)
+        {
+            Disconnect();
+        }
+        else if (IsConnecting)
+        {
+            // The in-flight VoiceManager connect/reprovision attempt holds its region-transition
+            // lock and is actively mutating session state for its whole retry loop — calling
+            // VoiceManager.Disconnect() concurrently with it would race that same state
+            // unsynchronized (Disconnect() doesn't take the lock at all). So "Cancel" only gives
+            // up on watching this attempt from the UI; it can't safely abort the attempt itself.
+            // If it succeeds a few seconds later anyway, OnConnectionReady will still fire and
+            // correctly flip the UI back to Connected.
+            IsConnecting = false;
+            HasConnectionError = false;
+            StatusText = "Cancelled";
+        }
+        else
+        {
+            await Connect();
+        }
     }
 
     [RelayCommand]
@@ -443,6 +496,7 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     private async Task Connect()
     {
         if (_voice == null || !IsAvailable) return;
+        if (IsConnecting) return; // already trying — ignore a repeat click instead of racing it
         if (!_voice.VoiceAllowedHere)
         {
             // Mirrors the button already being disabled via CanToggleConnect — reached only if
@@ -451,23 +505,53 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             StatusText = "Voice unavailable in this area";
             return;
         }
+        IsConnecting = true;
+        HasConnectionError = false;
         StatusText = "Connecting...";
         try
         {
             bool ok = await _voice.ConnectPrimaryRegionAsync();
+            // If the user hit "Cancel" while this was in flight, IsConnecting is already false
+            // and Disconnect()/the cancel handler already set the status — don't stomp it with a
+            // stale result from the attempt that was just abandoned.
+            if (!IsConnecting) return;
             if (!ok)
             {
-                StatusText = _voice.VoiceAllowedHere ? "Failed to connect" : "Voice unavailable in this area";
-                IsConnected = false;
+                if (_voice.IsTransitioning)
+                {
+                    // Not a real failure — a region-crossing reprovision (or another connect
+                    // attempt) already holds the connect lock, so this call was just dropped.
+                    // Leave the "Connecting..." status up rather than reporting a false failure
+                    // that would invite the user to click Join Voice again and repeat this.
+                    StatusText = "Connecting...";
+                }
+                else
+                {
+                    StatusText = _voice.VoiceAllowedHere ? "Failed to connect" : "Voice unavailable in this area";
+                    HasConnectionError = _voice.VoiceAllowedHere;
+                    IsConnected = false;
+                    IsConnecting = false;
+                }
+                return;
             }
+            // ConnectPrimaryRegionAsync() returning true only means the SDP offer/answer was
+            // provisioned — the ICE handshake for the new session is still in flight at this
+            // point and can take several more seconds (see OnConnectionReady). Deliberately leave
+            // IsConnecting = true here (same as the region-crossing "Reconnecting…" path) so the
+            // button stays on "Cancel" instead of flipping back to a clickable "Join Voice" that
+            // would tear down this still-forming session and restart the whole attempt.
+            StatusText = "Connecting...";
         }
         catch (Exception ex)
         {
+            if (!IsConnecting) return;
             // The failure reason itself is now logged inside VoiceSession.PostCapsWithRetries
             // (and other library-level failure points) via IVoiceLogger — this catch only needs
             // to update the UI, not duplicate that logging here.
             StatusText  = $"Error: {ex.Message}";
+            HasConnectionError = true;
             IsConnected = false;
+            IsConnecting = false;
         }
     }
 
@@ -479,6 +563,8 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         RecomputeIsConnected();
         Participants.Clear();
         StatusText = "Disconnected";
+        IsConnecting = false;
+        HasConnectionError = false;
     }
 
     private void WireEvents()
@@ -555,6 +641,14 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
                             || (_voice?.GetActiveGroupVoiceSessions().Count > 0)
                             || (_voice?.GetActiveP2PCalls().Count > 0);
         IsConnected = nowConnected;
+        if (nowConnected)
+        {
+            // Reaching a genuinely connected state always supersedes any in-flight "connecting"
+            // indicator or stale failure flag, regardless of which path (manual Join Voice or an
+            // automatic region-crossing reprovision) got it there.
+            IsConnecting = false;
+            HasConnectionError = false;
+        }
 
         if (!wasConnected && nowConnected && _voice != null)
         {
@@ -611,9 +705,22 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             // guaranteed. RecomputeIsConnected reads live state rather than assuming this event
             // fires after (or before) PeerConnectionReady.
             RecomputeIsConnected();
-            StatusText = IsConnected ? "Connected"
-                        : !(_voice?.VoiceAllowedHere ?? true) ? "Voice unavailable in this area"
-                        : "Reconnecting...";
+            if (IsConnected)
+            {
+                StatusText = "Connected";
+            }
+            else if (!(_voice?.VoiceAllowedHere ?? true))
+            {
+                StatusText = "Voice unavailable in this area";
+                IsConnecting = false;
+            }
+            else
+            {
+                // The new session's ICE handshake is still in flight — OnConnectionReady (via
+                // PeerConnectionReady) or OnRegionTransitionFailed will resolve this shortly.
+                StatusText = "Reconnecting...";
+                IsConnecting = true;
+            }
             // VoiceManager.ReprovisionForNewRegion() already created and provisioned the new
             // session before firing this event. Do NOT call ConnectPrimaryRegion() here —
             // that would race a second session against the one the manager already started.
@@ -623,6 +730,8 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         => Dispatcher.UIThread.Post(() =>
         {
             StatusText = $"Voice failed: {ex.Message}";
+            HasConnectionError = true;
+            IsConnecting = false;
             RecomputeIsConnected();
         });
 
@@ -758,12 +867,15 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         => Dispatcher.UIThread.Post(() =>
         {
             StatusText = "Reconnected";
+            IsConnecting = false;
         });
 
     private void OnReprovisionFailed(Exception ex)
         => Dispatcher.UIThread.Post(() =>
         {
             StatusText = $"Voice reconnect failed: {ex.Message}";
+            HasConnectionError = true;
+            IsConnecting = false;
             RecomputeIsConnected();
             if (!IsConnected) Participants.Clear();
         });

@@ -154,7 +154,6 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.Voice = voice;
         _instance.Media = media;
         Chat.Voice = voice;
-        Chat.Media = media;
 
         // Forward status from Chat VM
         Chat.PropertyChanged += (_, e) =>

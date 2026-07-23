@@ -3,6 +3,7 @@
         xmlns:vm="using:Radegast.Veles.ViewModels"
         xmlns:models="using:Radegast.Veles.Models"
         xmlns:core="clr-namespace:Radegast;assembly=Radegast.Core"
+        xmlns:velescore="using:Radegast.Veles.Core"
         x:Class="Radegast.Veles.Views.LoginWindow"
         x:DataType="vm:LoginViewModel"
         Title="Radegast Veles - Login"
@@ -10,6 +11,26 @@
         CanResize="False"
         WindowStartupLocation="CenterScreen"
         Icon="/Assets/veles.ico">
+
+    <Window.Styles>
+        <Style Selector="Button.linkButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+        </Style>
+        <Style Selector="Button.linkButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="TextBlock.sidebarInfo">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </Window.Styles>
 
     <DockPanel>
         <Menu DockPanel.Dock="Top">
@@ -30,14 +51,87 @@
 
         <Grid ColumnDefinitions="185,*">
 
-            <!-- Sidebar artwork -->
-            <Border Grid.Column="0" ClipToBounds="True">
-                <Image Source="/Assets/sidebar.png"
-                       Stretch="UniformToFill"
-                       HorizontalAlignment="Center"
-                       VerticalAlignment="Top"
-                       AutomationProperties.Name="Radegast Veles" />
-            </Border>
+            <!-- Sidebar: artwork + live info panel -->
+            <DockPanel Grid.Column="0">
+
+                <Border DockPanel.Dock="Top" Height="260" ClipToBounds="True">
+                    <!-- Width AND Height are both fixed explicitly, matching the source image's
+                         native aspect ratio at the sidebar column's width (185, see the outer
+                         Grid's ColumnDefinitions - sidebar.png is 455x640, so 185 wide implies
+                         185*640/455=260 tall). Both must be hardcoded: if only Width is set,
+                         Avalonia's "Uniform" stretch shrinks to fit whatever height the parent
+                         happens to offer, squeezing the image far narrower than the column. The
+                         Border's own Height matches the Image's Height exactly (260) so the full
+                         logo shows with no crop - the info panel below simply starts lower,
+                         using space that was previously empty under it anyway. -->
+                    <Image Source="/Assets/sidebar.png"
+                           Stretch="Uniform"
+                           Width="185"
+                           Height="260"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Top"
+                           AutomationProperties.Name="Radegast Veles" />
+                </Border>
+
+                <Border Padding="10,8">
+                    <StackPanel Spacing="8">
+
+                        <!-- Version -->
+                        <StackPanel Spacing="1">
+                            <TextBlock Classes="sidebarInfo" Text="{Binding CurrentVersionText}" Opacity="0.8" />
+                            <Button Classes="linkButton" IsVisible="{Binding HasUpdateAvailable}"
+                                    Command="{Binding OpenUpdatePageCommand}"
+                                    AutomationProperties.Name="Update available">
+                                <TextBlock Classes="sidebarInfo" Text="{Binding LatestVersionText, StringFormat='{}{0} available'}"
+                                           TextDecorations="Underline" Foreground="DodgerBlue" />
+                            </Button>
+                            <TextBlock Classes="sidebarInfo" Text="{Binding LatestVersionText}"
+                                       IsVisible="{Binding !HasUpdateAvailable}" Opacity="0.6" />
+                        </StackPanel>
+
+                        <!-- Grid status -->
+                        <StackPanel Spacing="2" IsVisible="{Binding HasGridStatus}">
+                            <StackPanel Orientation="Horizontal" Spacing="5">
+                                <Ellipse Width="8" Height="8" Fill="{Binding GridStatusBrush}" VerticalAlignment="Center" />
+                                <TextBlock Classes="sidebarInfo" Text="{Binding GridStatusText}" />
+                            </StackPanel>
+                            <Button Classes="linkButton" IsVisible="{Binding HasRecentIncidents}"
+                                    AutomationProperties.Name="Recent grid status incidents">
+                                <TextBlock Classes="sidebarInfo" Text="Recent incidents" TextDecorations="Underline" Opacity="0.7" />
+                                <Button.Flyout>
+                                    <Flyout Placement="RightEdgeAlignedTop">
+                                        <ScrollViewer MaxHeight="300" MaxWidth="280">
+                                            <ItemsControl ItemsSource="{Binding RecentIncidents}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="velescore:IncidentSummary">
+                                                        <StackPanel Margin="0,0,0,8" Spacing="2">
+                                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap" FontSize="12" />
+                                                            <TextBlock Text="{Binding CreatedAt, StringFormat='{}{0:MMM d, yyyy}'}"
+                                                                       FontSize="11" Opacity="0.7" />
+                                                            <TextBlock Text="{Binding LatestUpdateBody}" TextWrapping="Wrap" FontSize="11" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                        </StackPanel>
+
+                        <!-- News -->
+                        <StackPanel Spacing="2" IsVisible="{Binding HasNews}">
+                            <TextBlock Classes="sidebarInfo" Text="Latest News" FontWeight="SemiBold" Opacity="0.8" />
+                            <Button Classes="linkButton" Command="{Binding OpenNewsCommand}"
+                                    AutomationProperties.Name="Open latest Radegast news">
+                                <TextBlock Classes="sidebarInfo" Text="{Binding LatestNewsTitle}" TextDecorations="Underline" />
+                            </Button>
+                        </StackPanel>
+
+                    </StackPanel>
+                </Border>
+
+            </DockPanel>
 
             <!-- Login form -->
             <Border Grid.Column="1" Padding="20,12">

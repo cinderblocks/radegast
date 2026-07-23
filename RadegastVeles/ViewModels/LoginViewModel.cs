@@ -22,11 +22,15 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using Avalonia.Media;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using LibreMetaverse;
 using Radegast.Veles.Core;
 using Radegast.Veles.Models;
+using Radegast.Veles.Views;
 
 namespace Radegast.Veles.ViewModels;
 
@@ -82,6 +86,40 @@ public partial class LoginViewModel : ObservableObject
     [ObservableProperty]
     private LoginLocationItem? _selectedLocationItem;
 
+    // --- Sidebar info panel (grid status / version / news) ---------------------------
+
+    [ObservableProperty]
+    private string _currentVersionText = AppVersionInfo.CurrentVersionString;
+
+    [ObservableProperty]
+    private string? _latestVersionText;
+
+    [ObservableProperty]
+    private bool _hasUpdateAvailable;
+
+    [ObservableProperty]
+    private string? _gridStatusText;
+
+    [ObservableProperty]
+    private bool _hasGridStatus;
+
+    [ObservableProperty]
+    private IBrush _gridStatusBrush = Brushes.Gray;
+
+    [ObservableProperty]
+    private bool _hasRecentIncidents;
+
+    [ObservableProperty]
+    private string? _latestNewsTitle;
+
+    [ObservableProperty]
+    private string? _latestNewsUrl;
+
+    [ObservableProperty]
+    private bool _hasNews;
+
+    public ObservableCollection<IncidentSummary> RecentIncidents { get; } = new();
+
     public ObservableCollection<Grid> Grids { get; } = new();
     public ObservableCollection<SavedAccount> SavedAccounts { get; } = new();
     public ObservableCollection<LoginLocationItem> LocationItems { get; } = new();
@@ -120,6 +158,92 @@ public partial class LoginViewModel : ObservableObject
         // Restore previously saved start-location selection
         var (savedIdx, savedCustom) = _credentialManager.LoadLoginPreferences();
         RestoreLocationPreference(savedIdx, savedCustom);
+
+        // Fire-and-forget: populates the sidebar info panel. Each fetch is independent
+        // and marshals its own result back to the UI thread, so a slow/failed one never
+        // delays the others or the login form itself.
+        _ = LoadVersionInfoAsync();
+        _ = LoadGridStatusAsync();
+        _ = LoadNewsAsync();
+    }
+
+    private async Task LoadVersionInfoAsync()
+    {
+        var latest = await VelesUpdateManager.GetLatestAvailableVersionAsync();
+        // No newer version known (either up to date, or the check failed/is unsupported
+        // on this platform) - show current as both, rather than hiding the line.
+        var hasUpdate = !string.IsNullOrEmpty(latest) &&
+                         Version.TryParse(latest, out var latestVer) &&
+                         AppVersionInfo.Current != null &&
+                         latestVer > AppVersionInfo.Current;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            HasUpdateAvailable = hasUpdate;
+            LatestVersionText = hasUpdate ? $"v{latest}" : "Up to date";
+        });
+    }
+
+    private async Task LoadGridStatusAsync()
+    {
+        var status = await GridStatusService.GetStatusAsync();
+        if (status == null) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            var active = status.ActiveIncident;
+            GridStatusText = active != null
+                ? $"{active.Name}"
+                : status.Description;
+            HasGridStatus = true;
+            GridStatusBrush = status.Indicator switch
+            {
+                GridStatusIndicator.None => Brushes.MediumSeaGreen,
+                GridStatusIndicator.Minor => Brushes.Goldenrod,
+                GridStatusIndicator.Major => Brushes.OrangeRed,
+                GridStatusIndicator.Critical => Brushes.Crimson,
+                GridStatusIndicator.Maintenance => Brushes.SteelBlue,
+                _ => Brushes.Gray
+            };
+
+            RecentIncidents.Clear();
+            foreach (var incident in status.Recent)
+                RecentIncidents.Add(incident);
+            HasRecentIncidents = RecentIncidents.Count > 0;
+        });
+    }
+
+    private async Task LoadNewsAsync()
+    {
+        var items = await RadegastNewsService.GetLatestAsync(1);
+        var item = items.FirstOrDefault();
+        if (item == null) return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            LatestNewsTitle = item.Title;
+            LatestNewsUrl = item.Link;
+            HasNews = true;
+        });
+    }
+
+    [RelayCommand]
+    private void OpenNews()
+    {
+        if (!string.IsNullOrEmpty(LatestNewsUrl))
+            AboutWindow.OpenUrl(LatestNewsUrl);
+    }
+
+    [RelayCommand]
+    private void OpenGridStatusPage()
+    {
+        AboutWindow.OpenUrl("https://status.secondlifegrid.net/");
+    }
+
+    [RelayCommand]
+    private void OpenUpdatePage()
+    {
+        AboutWindow.OpenUrl("https://radegast.life/");
     }
 
     private void EnsureInstance()

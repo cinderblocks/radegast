@@ -152,67 +152,6 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         }
     }
 
-    private MediaViewModel? _media;
-    /// <summary>Media ViewModel — set by MainViewModel after both are constructed.</summary>
-    public MediaViewModel? Media
-    {
-        get => _media;
-        internal set
-        {
-            if (_media != null) _media.PropertyChanged -= OnMediaPropertyChanged;
-            _media = value;
-            if (_media != null) _media.PropertyChanged += OnMediaPropertyChanged;
-            IsMediaAvailable = _media != null;
-            UpdateNowPlaying();
-        }
-    }
-
-    [ObservableProperty]
-    private string _nowPlayingText = string.Empty;
-
-    [ObservableProperty]
-    private bool _isStreamPlaying;
-
-    private bool _isMediaAvailable;
-    public bool IsMediaAvailable
-    {
-        get => _isMediaAvailable;
-        private set => SetProperty(ref _isMediaAvailable, value);
-    }
-
-    private void OnMediaPropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (e.PropertyName is nameof(MediaViewModel.SongTitle) or nameof(MediaViewModel.StationName))
-            UpdateNowPlaying();
-        else if (e.PropertyName == nameof(MediaViewModel.IsPlaying))
-        {
-            IsStreamPlaying = _media?.IsPlaying ?? false;
-            if (!IsStreamPlaying) NowPlayingText = string.Empty;
-        }
-    }
-
-    private void UpdateNowPlaying()
-    {
-        if (_media == null) { NowPlayingText = string.Empty; IsStreamPlaying = false; return; }
-        IsStreamPlaying = _media.IsPlaying;
-        var station = _media.StationName;
-        var song = _media.SongTitle;
-        if (!string.IsNullOrEmpty(song) && !string.IsNullOrEmpty(station))
-            NowPlayingText = $"{station} - {song}";
-        else if (!string.IsNullOrEmpty(song))
-            NowPlayingText = song;
-        else if (!string.IsNullOrEmpty(station))
-            NowPlayingText = station;
-        else
-            NowPlayingText = string.Empty;
-    }
-
-    [RelayCommand]
-    private void PlayStream() => _media?.PlayStreamCommand.Execute(null);
-
-    [RelayCommand]
-    private void StopStream() => _media?.StopStreamCommand.Execute(null);
-
     public override string UnreadTabLabel => HasUnread ? "Chat, new messages" : "Chat";
 
     [ObservableProperty]
@@ -258,7 +197,6 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
 
     public override void Dispose()
     {
-        if (_media != null) _media.PropertyChanged -= OnMediaPropertyChanged;
         NetCom.ChatReceived -= NetCom_ChatReceived;
         NetCom.ChatSent -= NetCom_ChatSent;
         NetCom.AlertMessageReceived -= NetCom_AlertMessageReceived;

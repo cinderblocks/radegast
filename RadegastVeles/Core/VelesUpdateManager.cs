@@ -17,7 +17,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
+using System.Linq;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using NetSparkleUpdater;
 using NetSparkleUpdater.Enums;
 using NetSparkleUpdater.SignatureVerifiers;
@@ -62,6 +65,27 @@ public static class VelesUpdateManager
     public static void CheckForUpdatesAtUserRequest()
     {
         _updater?.CheckForUpdatesAtUserRequest();
+    }
+
+    /// <summary>
+    /// Quietly asks the already-running updater (shares its cached appcast fetch/signature
+    /// verification, no separate HTTP call, no UI shown) for the newest version it knows about.
+    /// Returns null on Linux (no updater started) or on any failure - callers should treat
+    /// null as "unknown", not "no update available".
+    /// </summary>
+    public static async Task<string?> GetLatestAvailableVersionAsync()
+    {
+        if (_updater == null) return null;
+
+        try
+        {
+            var info = await _updater.CheckForUpdatesQuietly(false);
+            return info?.Updates?.FirstOrDefault()?.Version?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? GetAppcastUrl()

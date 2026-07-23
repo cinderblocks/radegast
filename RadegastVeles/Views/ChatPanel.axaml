@@ -155,32 +155,6 @@
                 </StackPanel>
             </Border>
 
-            <!-- Media controls + Now Playing ticker -->
-            <Border DockPanel.Dock="Bottom" Padding="4,3,4,3"
-                    IsVisible="{Binding IsMediaAvailable}"
-                    AutomationProperties.Name="Media controls">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <Button Content="&#x25B6;" Command="{Binding PlayStreamCommand}"
-                            IsVisible="{Binding !IsStreamPlaying}"
-                            MinWidth="20" MinHeight="16" Padding="3,0" FontSize="10"
-                            ToolTip.Tip="Play stream"
-                            AutomationProperties.Name="Play stream" />
-                    <Button Content="&#x23F8;" Command="{Binding StopStreamCommand}"
-                            IsVisible="{Binding IsStreamPlaying}"
-                            MinWidth="20" MinHeight="16" Padding="3,0" FontSize="10"
-                            ToolTip.Tip="Stop stream"
-                            AutomationProperties.Name="Stop stream" />
-                    <TextBlock Text="&#x266B;" FontSize="11" Opacity="0.6" VerticalAlignment="Center"
-                               IsVisible="{Binding IsStreamPlaying}" />
-                    <TextBlock Text="{Binding NowPlayingText}" FontSize="11"
-                               TextTrimming="CharacterEllipsis"
-                               VerticalAlignment="Center"
-                               ToolTip.Tip="{Binding NowPlayingText}"
-                               IsVisible="{Binding IsStreamPlaying}"
-                               AutomationProperties.Name="Now playing text" />
-                </StackPanel>
-            </Border>
-
             <!-- Nearby avatars -->
             <Border Padding="4,2,4,4" AutomationProperties.Name="Nearby avatars area">
                 <DockPanel>

@@ -59,6 +59,15 @@
     <PackageReference Include="SharpCompress" Version="0.49.1" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
   </ItemGroup>
+  <!-- Bakes every PackageReference's id+version into the assembly's metadata attributes so the
+       About dialog's Libraries tab (AboutWindow.axaml.cs, PopulateLibraries) can list them at
+       runtime without ever going stale. Metadata-batching (%(...)) only expands inside a
+       Target, so this has to run as a Target rather than a bare ItemGroup. -->
+  <Target Name="EmbedPackageReferenceMetadata" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <AssemblyMetadata Include="PackageRef_%(PackageReference.Identity)" Value="%(PackageReference.Version)" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
     <ProjectReference Include="..\Radegast.Veles.PluginApi\Radegast.Veles.PluginApi.csproj" />
