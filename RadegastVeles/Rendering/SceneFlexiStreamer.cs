@@ -116,16 +116,13 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
     {
         if (_disposed) return;
+        // The initial world position is already seeded directly onto each FlexiPrimInfo's
+        // ExternalTransform by SceneAvatarStreamer.BuildAsync before this event fires
+        // (SceneAvatarStreamer.cs, AvatarWorldMatrix seeding block) — no separate seed
+        // needed here. (A prior attempt to seed via OnFlexiWorldUpdate at this point was
+        // always a no-op: this handler runs before SceneAvatarAnimationStreamer's, so the
+        // target SceneAvatarAnimator does not exist yet.)
         StartAnimator(sceneKey, result.Submission, sceneKey: sceneKey, avatarLocalId: localId);
-
-        // Seed the initial world matrix so the flexi attachment appears at the correct
-        // world position from the very first tick, rather than snapping from origin
-        // until the next terse avatar update arrives.
-        if (_avatarStreamer != null && _animationStreamer != null)
-        {
-            var worldMatrix = _avatarStreamer.GetCurrentWorldMatrix(localId);
-            _animationStreamer.OnFlexiWorldUpdate(localId, worldMatrix);
-        }
     }
 
     private void StartAnimator(ulong key, PrimRenderSubmission submission, ulong sceneKey,

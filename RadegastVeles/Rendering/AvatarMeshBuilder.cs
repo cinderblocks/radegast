@@ -281,6 +281,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                         : (origFace.Vertices?.Length ?? 0);
                     int nv            = vFloats / 12;
                     var rigged        = attRiggedSkins[i];
+                    // nv > 0 implies VerticesLength/Vertices.Length was > 0, so Vertices is populated.
+                    var srcVerts      = origFace.Vertices!;
 
                     // Attachment vertices are stored in prim-local space by PrimMeshBuilder;
                     // the shader always applies face.Transform as the model matrix.
@@ -296,20 +298,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     {
                         int o  = vi * 12;
                         var wp = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o],     origFace.Vertices[o + 1],
-                                        origFace.Vertices[o + 2], 1f), faceTransform);
+                            new Vector4(srcVerts[o],     srcVerts[o + 1],
+                                        srcVerts[o + 2], 1f), faceTransform);
                         var wn = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o + 3], origFace.Vertices[o + 4],
-                                        origFace.Vertices[o + 5], 0f), faceTransform);
+                            new Vector4(srcVerts[o + 3], srcVerts[o + 4],
+                                        srcVerts[o + 5], 0f), faceTransform);
                         var wt = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o + 8], origFace.Vertices[o + 9],
-                                        origFace.Vertices[o + 10], 0f), faceTransform);
+                            new Vector4(srcVerts[o + 8], srcVerts[o + 9],
+                                        srcVerts[o + 10], 0f), faceTransform);
                         worldVerts[o]      = wp.X; worldVerts[o + 1]  = wp.Y; worldVerts[o + 2]  = wp.Z;
                         worldVerts[o + 3]  = wn.X; worldVerts[o + 4]  = wn.Y; worldVerts[o + 5]  = wn.Z;
-                        worldVerts[o + 6]  = origFace.Vertices[o + 6];
-                        worldVerts[o + 7]  = origFace.Vertices[o + 7];
+                        worldVerts[o + 6]  = srcVerts[o + 6];
+                        worldVerts[o + 7]  = srcVerts[o + 7];
                         worldVerts[o + 8]  = wt.X; worldVerts[o + 9]  = wt.Y; worldVerts[o + 10] = wt.Z;
-                        worldVerts[o + 11] = origFace.Vertices[o + 11]; // handedness invariant
+                        worldVerts[o + 11] = srcVerts[o + 11]; // handedness invariant
                     }
 
                     attFaces[i] = new PrimRenderFace
@@ -421,7 +423,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                          ai.JointOffset, ai.JointRotation, new List<(int, float[])>());
                                 pendingFlexi[srcPrim.LocalID] = entry;
                             }
-                            entry.faceList.Add((bodyFaceCount + i, origFace.Vertices));
+                            entry.faceList.Add((bodyFaceCount + i, srcVerts));
                         }
                         else
                         {
@@ -468,7 +470,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     // animator can re-apply it after each deformation tick.
                     var baseVerts = faceList.Select(f => (float[])f.verts.Clone()).ToArray();
                     int segments  = FlexiPrimAnimator.ComputeSegmentCount(flexPrim.Flexible!.Softness);
-                    flexiInfos.Add(new FlexiPrimInfo
+                    var flexiInfo = new FlexiPrimInfo
                     {
                         Prim               = flexPrim,
                         FaceStart          = faceStart,
@@ -482,7 +484,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         AttachJointName    = jointName.Length > 0 ? jointName : null,
                         AttachJointOffset  = jointOffset,
                         AttachJointRotation = jointRot,
-                    });
+                    };
+                    flexiInfos.Add(flexiInfo);
+                    // Lets the frustum-cull path read this prim's live world bounds
+                    // (see PrimRenderFace.FlexiOwner) instead of the stale bind-pose AABB.
+                    foreach (var (faceIdx, _) in faceList)
+                        faces[faceIdx].FlexiOwner = flexiInfo;
                 }
                 if (aBMin.X < float.MaxValue)
                 {

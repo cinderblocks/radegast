@@ -337,6 +337,42 @@ internal sealed class FlexiPrimAnimator : IDisposable
             if (vel.LengthSquared() > 1f) vel = Vector3.Normalize(vel);
         }
 
+        // ── Publish a live world-space AABB for the frustum-culler ───────────────
+        //
+        // Flexi faces write their deformed vertices directly into the VBO and never
+        // update PrimRenderFace.Transform, so GlViewportControl can't use the normal
+        // cached-AABB × Transform cull test for them (see PrimRenderFace.IsFlexi). It
+        // reads FlexiPrimInfo.WorldBounds instead, computed here from the spine —
+        // exact for the centerline (spine positions are already in physical metres and
+        // normalizing by scale before applying attachTx exactly undoes the scaling
+        // AttachTransform re-applies, matching the per-vertex convention below), then
+        // padded by the profile's worst-case half-diagonal so any cross-section vertex
+        // (which the shader/CPU path additionally rotates away from the centerline by
+        // the local spine tangent) is guaranteed to still land inside the box. A little
+        // loose beats culling something that's actually on screen.
+        {
+            var spineWorldMin = new Vector3(float.MaxValue);
+            var spineWorldMax = new Vector3(float.MinValue);
+            for (int i = 0; i <= n; i++)
+            {
+                var sp = state.Positions[i];
+                var spN = new Vector3(
+                    sx > 1e-6f ? sp.X / sx : sp.X,
+                    sy > 1e-6f ? sp.Y / sy : sp.Y,
+                    sz > 1e-6f ? sp.Z / sz : sp.Z);
+                var wp = Vector3.Transform(spN, attachTx);
+                spineWorldMin = Vector3.Min(spineWorldMin, wp);
+                spineWorldMax = Vector3.Max(spineWorldMax, wp);
+            }
+            float pad = 0.5f * MathF.Sqrt(sx * sx + sy * sy);
+            var padVec = new Vector3(pad);
+            info.WorldBounds = new FlexiWorldBounds
+            {
+                Min = spineWorldMin - padVec,
+                Max = spineWorldMax + padVec,
+            };
+        }
+
         // ── Deform vertex buffers ────────────────────────────────────────────────
         //
         // GPU compute path: if GpuData is registered (set by GlViewportControl on the

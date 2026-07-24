@@ -118,32 +118,6 @@ internal sealed class SceneAvatarStreamer : IDisposable
     public void SetAnimationStreamer(SceneAvatarAnimationStreamer animationStreamer)
         => _animationStreamer = animationStreamer;
 
-    /// <summary>
-    /// Computes the current world matrix for the avatar with the given local ID.
-    /// Returns <see cref="Matrix4x4"/> identity if the avatar is not found.
-    /// Used by <see cref="SceneFlexiStreamer"/> to seed <c>ExternalTransform</c>
-    /// on a freshly-built flexi animator so attachments appear at the correct
-    /// world position from the very first tick rather than snapping from origin.
-    /// </summary>
-    public Matrix4x4 GetCurrentWorldMatrix(uint localId)
-    {
-        var sim = _client.Network.CurrentSim;
-        if (sim == null) return Matrix4x4.Identity;
-
-        if (localId == _client.Self.LocalID)
-        {
-            var p = _client.Self.SimPosition;
-            var r = _client.Self.SimRotation;
-            return AvatarWorldMatrix(new Vector3(p.X, p.Y, p.Z), r);
-        }
-
-        if (!sim.ObjectsAvatars.TryGetValue(localId, out var av))
-            return Matrix4x4.Identity;
-
-        var (wp, wr) = ResolveAvatarWorldTransform(sim, av);
-        return AvatarWorldMatrix(new Vector3(wp.X, wp.Y, wp.Z), wr);
-    }
-
     public SceneAvatarStreamer(GridClient client, GlViewportControl viewport,
         SceneBuildScheduler scheduler)
     {
@@ -189,7 +163,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // Re-resolve and push the updated world transform.
             var (resolvedPos, resolvedRot) = ResolveAvatarWorldTransform(sim, av);
             var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
-            _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(wp, resolvedRot));
+            var worldMatrix = AvatarWorldMatrix(wp, resolvedRot);
+            _viewport.SetSceneObjectTransform(SceneKey(localId), worldMatrix);
+            // Keep flexi attachments (hair, skirts, tails, ...) in sync with the seat's
+            // motion — without this they stay frozen at the last terse-update position
+            // while the body rides along with the moving prim (vehicle / animated seat).
+            _animationStreamer?.OnFlexiWorldUpdate(localId, worldMatrix);
         }
 
         // Also update self-avatar if seated on this linkset.
@@ -208,7 +187,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var resolvedPos = _client.Self.SimPosition;
                 var resolvedRot = _client.Self.SimRotation;
                 var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
-                _viewport.SetSceneObjectTransform(SceneKey(selfId), AvatarWorldMatrix(wp, resolvedRot));
+                var selfWorldMatrix = AvatarWorldMatrix(wp, resolvedRot);
+                _viewport.SetSceneObjectTransform(SceneKey(selfId), selfWorldMatrix);
+                _animationStreamer?.OnFlexiWorldUpdate(selfId, selfWorldMatrix);
             }
         }
     }
@@ -722,7 +703,18 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var (freshPos, freshRot) = ResolveAvatarWorldTransform(sim, postBuildAv);
                 var freshWorldPos = new Vector3(freshPos.X, freshPos.Y, freshPos.Z);
                 if (Vector3.DistanceSquared(freshWorldPos, worldPos) > 0.01f)
-                    _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(freshWorldPos, freshRot));
+                {
+                    var freshWorldMatrix = AvatarWorldMatrix(freshWorldPos, freshRot);
+                    _viewport.SetSceneObjectTransform(SceneKey(localId), freshWorldMatrix);
+                    // AvatarBuilt hasn't fired yet at this point in the build, so the
+                    // SceneAvatarAnimator this avatar's flexi prims will be driven by
+                    // doesn't exist yet — OnFlexiWorldUpdate would silently no-op (same
+                    // event-ordering trap as the seed call removed from SceneFlexiStreamer.
+                    // OnAvatarBuilt). Write ExternalTransform directly onto the FlexiPrims
+                    // the animator will read once it's created, mirroring the seed above.
+                    foreach (var fp in submission.FlexiPrims)
+                        fp.ExternalTransform = freshWorldMatrix;
+                }
             }
 
             // Record the visual-param hash so OnAvatarUpdate can skip redundant rebuilds

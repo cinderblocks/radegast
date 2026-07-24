@@ -316,7 +316,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             int end = Math.Min(fp.FaceStart + fp.FaceCount, faces.Count);
             for (int fi = fp.FaceStart; fi < end; fi++)
-                faces[fi].IsFlexi = true;
+            {
+                faces[fi].IsFlexi    = true;
+                // Lets the frustum-cull path read this prim's live world bounds
+                // (see PrimRenderFace.FlexiOwner) instead of the stale bind-pose AABB.
+                faces[fi].FlexiOwner = fp;
+            }
         }
 
         var submission = new PrimRenderSubmission

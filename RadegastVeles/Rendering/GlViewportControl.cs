@@ -4527,6 +4527,35 @@ public class GlViewportControl : Panel
     private GlShader?            _primLocsShader;
     private PrimShaderLocations? _primLocs;
 
+    /// <summary>
+    /// True if <paramref name="face"/> should be skipped for this frame: either its
+    /// owning scene object isn't in the visible set, or its world-space bounds don't
+    /// intersect <paramref name="frustum"/>.
+    /// <para>
+    /// Flexi faces never update <see cref="PrimRenderFace.Transform"/> (their vertices
+    /// are written directly into the VBO each tick), so the normal cached-AABB × Transform
+    /// test would test the stale bind pose and always reject them. For those faces this
+    /// uses the animator's live <see cref="FlexiPrimInfo.WorldBounds"/> instead — and
+    /// treats the face as visible (no cull) until that bounds value exists, e.g. the
+    /// first tick or two after a rebuild, rather than risk a false-negative pop.
+    /// </para>
+    /// </summary>
+    private static bool IsFaceCulled(PrimRenderFace face, in Frustum frustum, HashSet<ulong>? visibleSceneKeys)
+    {
+        if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+            return true;
+
+        if (face.IsFlexi)
+        {
+            var bounds = face.FlexiOwner?.WorldBounds;
+            if (bounds == null) return false;
+            return !FrustumCuller.IntersectsAabb(frustum, bounds.Min, bounds.Max);
+        }
+
+        face.GetWorldAabb(out var min, out var max);
+        return !FrustumCuller.IntersectsAabb(frustum, min, max);
+    }
+
     private void DrawFaces(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
         GlShader shader,
@@ -4770,25 +4799,11 @@ public class GlViewportControl : Panel
             // (empty vertex buffer) fall through with a zero-extent AABB at the face origin,
             // which the positive-vertex test handles correctly.
             stats?.RecordFaceConsidered();
-            // Flexi faces are deformed every tick by FlexiPrimAnimator and end up in world
-            // space, but their cached local AABB and Transform reflect the bind pose / prim-local
-            // frame (Identity for avatar attachments). Frustum culling against that stale AABB
-            // would always reject them. Skip the cull for flexi faces — they are small and rare.
-            if (frustum.HasValue && !face.IsFlexi)
+            if (frustum.HasValue && IsFaceCulled(face, frustum.Value, visibleSceneKeys))
             {
-                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
-                {
-                    stats?.RecordFaceCulled();
-                    _i++;
-                    continue;
-                }
-                face.GetWorldAabb(out var amin, out var amax);
-                if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
-                {
-                    stats?.RecordFaceCulled();
-                    _i++;
-                    continue;
-                }
+                stats?.RecordFaceCulled();
+                _i++;
+                continue;
             }
 
             if (manageCulling)
@@ -5021,15 +5036,10 @@ public class GlViewportControl : Panel
         var viewInv3 = new Matrix3x3(new Vector3(viewInvFull.M11, viewInvFull.M12, viewInvFull.M13), new Vector3(viewInvFull.M21, viewInvFull.M22, viewInvFull.M23), new Vector3(viewInvFull.M31, viewInvFull.M32, viewInvFull.M33));
         foreach (var (mesh, _, _, _, _, _, face) in list)
         {
-            // Same flexi exemption as DrawFaces: their cached AABB is bind-pose.
-            if (frustum.HasValue && !face.IsFlexi)
-            {
-                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
-                    continue;
-                face.GetWorldAabb(out var amin, out var amax);
-                if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
-                    continue;
-            }
+            // Same cull test as DrawFaces (see IsFaceCulled — handles flexi faces via
+            // their live world bounds instead of the stale bind-pose AABB).
+            if (frustum.HasValue && IsFaceCulled(face, frustum.Value, visibleSceneKeys))
+                continue;
             var mv  = face.Transform * view;
             var mvp = mv * proj;
             var normalMat = viewInv3 * face.ModelInverse3;
@@ -5062,14 +5072,8 @@ public class GlViewportControl : Panel
         int drawn = 0;
         foreach (var (mesh, _, _, _, _, _, face) in list)
         {
-            if (frustum.HasValue && !face.IsFlexi)
-            {
-                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
-                    continue;
-                face.GetWorldAabb(out var amin, out var amax);
-                if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
-                    continue;
-            }
+            if (frustum.HasValue && IsFaceCulled(face, frustum.Value, visibleSceneKeys))
+                continue;
             var mvp = face.Transform * lightViewProj;
             shader.Set(mvpLoc, ref mvp);
             mesh.Draw();
