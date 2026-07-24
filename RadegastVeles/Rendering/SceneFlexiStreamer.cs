@@ -45,6 +45,11 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private readonly ConcurrentDictionary<ulong, FlexiPrimAnimator> _animators  = new();
     private readonly ConcurrentDictionary<uint, ulong>              _localToKey = new();
 
+    // Ticks every animator in _animators from one shared timer/task instead of each one
+    // owning its own — a scene can have dozens of flexi objects (grass, trees, attachments)
+    // and also applies distance-based tick throttling (see FlexiSceneScheduler).
+    private readonly FlexiSceneScheduler _scheduler;
+
     private bool _disposed;
 
     public SceneFlexiStreamer(GridClient client, GlViewportControl viewport,
@@ -53,6 +58,8 @@ internal sealed class SceneFlexiStreamer : IDisposable
         _client        = client;
         _viewport      = viewport;
         _objectStreamer = objectStreamer;
+        _scheduler     = new FlexiSceneScheduler(client);
+        _scheduler.Start();
 
         _objectStreamer.ObjectBuilt += OnObjectBuilt;
     }
@@ -90,7 +97,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     public void Clear()
     {
         foreach (var kv in _animators)
+        {
+            _scheduler.Unregister(kv.Value);
             kv.Value.Dispose();
+        }
         _animators.Clear();
         _localToKey.Clear();
     }
@@ -103,6 +113,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         if (_avatarStreamer != null)
             _avatarStreamer.AvatarBuilt -= OnAvatarBuilt;
         Clear();
+        _scheduler.Dispose();
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────────
@@ -140,12 +151,13 @@ internal sealed class SceneFlexiStreamer : IDisposable
         var vp = _viewport;
         // ScheduleSceneVertexUpdate takes uint; safe cast because object keys are current-sim localIds
         // (uint range) and avatar keys (AvatarKeyOffset + localId) also fit in uint.
-        Action<int, float[]> schedule = sceneKey != 0
-            ? (faceIndex, verts) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, verts.Length, isPoolRented: false)
-            : vp.ScheduleVertexUpdate;
+        Action<int, float[], int, bool> schedule = sceneKey != 0
+            ? (faceIndex, verts, len, pooled) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
+            : FlexiPrimAnimator.CreateSingleObjectScheduler(vp);
 
         var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute);
-        animator.Start();
+        // Registered with the shared scheduler, not animator.Start() — see FlexiSceneScheduler.
+        _scheduler.Register(animator);
         _animators[key] = animator;
 
         // For avatar attachments: register the reverse mapping and push the flexi
@@ -161,7 +173,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private void RemoveAnimator(ulong rootId)
     {
         if (_animators.TryRemove(rootId, out var anim))
+        {
+            _scheduler.Unregister(anim);
             anim.Dispose();
+        }
         // If this was an avatar key, remove the reverse mapping.
         foreach (var kv in _localToKey)
         {

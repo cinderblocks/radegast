@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading;
@@ -91,8 +92,10 @@ internal sealed class FlexiPrimAnimator : IDisposable
     }
 
     private readonly FlexiPrimInfo[]           _flexiPrims;
+    private readonly FlexiState[]              _states;
     // CPU path: delivers a pre-deformed vertex buffer for one face to the viewport.
-    private readonly Action<int, float[]>      _scheduleUpdate;
+    // Args: faceIndex, buffer, logical length (buffer may be ArrayPool-oversized), isPoolRented.
+    private readonly Action<int, float[], int, bool> _scheduleUpdate;
     // GPU compute path (optional): delivers spine positions + transform for GL dispatch.
     // When non-null and GpuData is set on the FlexiPrimInfo, the compute path is taken;
     // otherwise the CPU path is used as a fallback.
@@ -107,26 +110,50 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// </summary>
     /// <param name="submission">The render submission whose <see cref="PrimRenderSubmission.FlexiPrims"/> will be animated.</param>
     /// <param name="scheduleUpdate">
-    /// Delegate invoked each tick for each face of each flexi prim.  The first argument
-    /// is the zero-based face index within the submission's <see cref="PrimRenderSubmission.Faces"/> array;
-    /// the second is the pre-copied, deformed vertex buffer (ownership transferred to the delegate).
-    /// Typically one of <see cref="GlViewportControl.ScheduleVertexUpdate(int, float[])"/> or a
-    /// lambda wrapping <see cref="GlViewportControl.ScheduleSceneVertexUpdate"/>.
+    /// CPU-path delegate (always required as fallback), invoked each tick for each face of
+    /// each flexi prim: face index, the deformed vertex buffer, its logical length (the
+    /// buffer itself may be an ArrayPool-oversized rental), and whether it must be returned
+    /// to <see cref="ArrayPool{T}.Shared"/> after use. Use
+    /// <see cref="CreateSingleObjectScheduler"/> for PrimViewer / AvatarViewer, or a lambda
+    /// wrapping <see cref="GlViewportControl.ScheduleSceneVertexUpdate"/> for the scene viewer.
     /// </param>
-    /// <param name="scheduleUpdate">CPU-path delegate (always required as fallback).</param>
     /// <param name="scheduleCompute">
     /// Optional GPU-path delegate.  When non-null and <see cref="FlexiPrimInfo.GpuData"/>
     /// is set (registered after GL upload), spine positions are enqueued for compute-shader
     /// deformation instead of being processed on the CPU.
     /// </param>
-    public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[]> scheduleUpdate,
+    public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[], int, bool> scheduleUpdate,
         Action<FlexiComputeJob>? scheduleCompute = null)
     {
         _flexiPrims      = submission.FlexiPrims;
         _scheduleUpdate  = scheduleUpdate;
         _scheduleCompute = scheduleCompute;
+        _states = new FlexiState[_flexiPrims.Length];
+        for (int i = 0; i < _flexiPrims.Length; i++)
+            _states[i] = new FlexiState(_flexiPrims[i]);
     }
 
+    /// <summary>
+    /// Builds a CPU-path scheduler delegate for the single-object viewers (PrimViewer,
+    /// AvatarViewer). Those route through <see cref="GlViewportControl.ScheduleVertexUpdate(int, ReadOnlySpan{float})"/>,
+    /// which copies into an exact-size array itself, so the pooled buffer this animator
+    /// rents can be returned immediately after that copy.
+    /// </summary>
+    public static Action<int, float[], int, bool> CreateSingleObjectScheduler(GlViewportControl vp)
+        => (faceIndex, verts, vertsLength, isPoolRented) =>
+        {
+            vp.ScheduleVertexUpdate(faceIndex, verts.AsSpan(0, vertsLength));
+            if (isPoolRented) ArrayPool<float>.Shared.Return(verts);
+        };
+
+    /// <summary>
+    /// Starts this animator's own self-driven ~30 Hz loop. Used by PrimViewer / AvatarViewer,
+    /// where each viewer owns exactly one flexi-carrying object and a dedicated timer per
+    /// instance is cheap. Do not call this for scene-viewer objects — <see cref="SceneFlexiStreamer"/>
+    /// instead registers the animator with a single shared <see cref="FlexiSceneScheduler"/> and
+    /// drives it via <see cref="Tick"/>, so dozens/hundreds of flexi objects in a scene don't each
+    /// spin up their own timer and background task.
+    /// </summary>
     public void Start()
     {
         if (_flexiPrims.Length == 0) return;
@@ -176,14 +203,28 @@ internal sealed class FlexiPrimAnimator : IDisposable
         _cts = null;
     }
 
+    /// <summary>
+    /// Lets <see cref="FlexiSceneScheduler"/> prune a disposed animator from its registry
+    /// instead of writing its throttle counter back — a plain "is it still registered" check
+    /// isn't enough because disposal can race a <see cref="Tick"/> already in flight (see
+    /// <c>SceneFlexiStreamer.RemoveAnimator</c>, which unregisters and disposes together).
+    /// </summary>
+    internal bool IsDisposed => _disposed;
+
+    /// <summary>
+    /// Cheap proxy for "where is this flexi object right now" — the world-space translation
+    /// baked into its first flexi prim's <see cref="FlexiPrimInfo.ExternalTransform"/>
+    /// (kept current by <see cref="SetExternalTransform"/> / the avatar-follow fixes in
+    /// <c>SceneAvatarStreamer</c>). Used by <see cref="FlexiSceneScheduler"/> to bucket
+    /// animators into distance-based tick rates — not precise enough for anything else.
+    /// </summary>
+    internal Vector3 ApproximateWorldPosition =>
+        _flexiPrims.Length > 0 ? _flexiPrims[0].ExternalTransform.Translation : Vector3.Zero;
+
     // ── Simulation loop ───────────────────────────────────────────────────────────
 
     private async Task RunAsync(CancellationToken ct)
     {
-        var states = new FlexiState[_flexiPrims.Length];
-        for (int i = 0; i < _flexiPrims.Length; i++)
-            states[i] = new FlexiState(_flexiPrims[i]);
-
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(SimTickRate));
         var sw   = Stopwatch.StartNew();
         float prev = 0f;
@@ -195,20 +236,30 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
-
-                if (!AnimationEnabled) continue;
-
-                foreach (var state in states)
-                    TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute);
+                Tick(dt);
             }
         }
         catch (OperationCanceledException) { }
     }
 
+    /// <summary>
+    /// Runs one simulation step for every flexi prim in this animator and pushes the
+    /// deformed geometry to the viewport. Called at ~30 Hz either by this instance's own
+    /// loop (<see cref="Start"/>) or externally by <see cref="FlexiSceneScheduler"/>, which
+    /// may pass a larger <paramref name="dt"/> when it has throttled this animator to less
+    /// than every tick (see the scheduler's distance-based tick divisor).
+    /// </summary>
+    public void Tick(float dt)
+    {
+        if (_disposed || !AnimationEnabled) return;
+        foreach (var state in _states)
+            TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute);
+    }
+
     // ── Simulation tick + vertex upload ──────────────────────────────────────────
 
     private static void TickAndUpload(FlexiState state, float dt,
-        Action<int, float[]> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute)
+        Action<int, float[], int, bool> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute)
     {
         var info   = state.Info;
         var flex   = info.Prim.Flexible!;
@@ -415,12 +466,13 @@ internal sealed class FlexiPrimAnimator : IDisposable
         for (int fi = 0; fi < info.FaceCount; fi++)
         {
             var src    = info.BaseVertices[fi];
-            // Must be exactly src.Length: AvatarViewer / PrimViewer route this buffer
-            // through GlMesh.UpdateVertices(float[]) which uploads verts.Length*sizeof(float)
-            // bytes via glBufferSubData. ArrayPool.Rent returns an over-sized array
-            // (next power-of-two bucket); a larger buffer triggers GL_INVALID_VALUE,
-            // silently dropping the update and freezing the attachment in its bind pose.
-            var dst    = new float[src.Length];
+            // Rented, not `new float[]`: this runs at ~30 Hz per face per flexi prim, and a
+            // scene can have dozens of them, so a fresh allocation each tick is steady GC
+            // pressure. ArrayPool.Rent returns an over-sized (next power-of-two) array, which
+            // is why scheduleUpdate takes the true logical length (src.Length) as a separate
+            // argument instead of relying on the buffer's own .Length — GlMesh.UpdateVertices
+            // would otherwise upload the oversized tail as garbage vertex data.
+            var dst    = ArrayPool<float>.Shared.Rent(src.Length);
             int vCount = src.Length / 12;
 
             for (int vi = 0; vi < vCount; vi++)
@@ -475,7 +527,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 dst[o + 11] = src[o + 11];                      // handedness invariant
             }
 
-            scheduleUpdate(info.FaceStart + fi, dst);
+            scheduleUpdate(info.FaceStart + fi, dst, src.Length, true);
         }
     }
 

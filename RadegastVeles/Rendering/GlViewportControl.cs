@@ -1226,9 +1226,10 @@ public class GlViewportControl : Panel
                 _faceMeshes[upd.FaceIndex].UpdateVertices(upd.Verts);
         }
 
-        // Apply per-scene-object vertex updates (e.g. LBS-animated avatars).
-        // SceneAvatarAnimator rents buffers from ArrayPool and sets IsPoolRented=true;
-        // FlexiPrimAnimator allocates exact-size buffers with new[] (IsPoolRented=false).
+        // Apply per-scene-object vertex updates (e.g. LBS-animated avatars, flexi prims).
+        // Both SceneAvatarAnimator and FlexiPrimAnimator rent buffers from ArrayPool and
+        // set IsPoolRented=true; VertsLength carries the true logical length since a
+        // rented buffer's own .Length may be a larger (next power-of-two) bucket size.
         while (_pendingSceneVertexUpdates.TryDequeue(out var su))
         {
             if (_sceneObjects.TryGetValue((ulong)su.RootId, out var scFaces))

@@ -232,7 +232,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             if (_flexi == null && _lastSubmission.FlexiPrims.Length > 0)
             {
                 var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(_lastSubmission, vp.ScheduleVertexUpdate);
+                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
                 _flexi.Start();
             }
         }
@@ -430,7 +430,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             if (result.Submission.FlexiPrims.Length > 0 && _viewport != null)
             {
                 var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(result.Submission, vp.ScheduleVertexUpdate);
+                _flexi = new FlexiPrimAnimator(result.Submission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
                 _flexi.Start();
             }
             else

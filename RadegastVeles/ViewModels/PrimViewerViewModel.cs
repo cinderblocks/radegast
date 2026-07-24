@@ -114,7 +114,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             if (_flexi == null && _lastSubmission.FlexiPrims.Length > 0)
             {
                 var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(_lastSubmission, vp.ScheduleVertexUpdate);
+                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
                 _flexi.Start();
             }
         }
@@ -185,7 +185,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             if (submission.FlexiPrims.Length > 0 && _viewport != null)
             {
                 var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(submission, vp.ScheduleVertexUpdate);
+                _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
                 _flexi.Start();
             }
 
