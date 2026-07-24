@@ -20,15 +20,14 @@ so there's nothing else to install first.
 
 ### Windows
 
-Two install options:
+Two install options, for x86, x64, and ARM64:
 
 - **`RadegastVelesSetup_<arch>_<version>.msi`** — the standard installer
   (recommended). Installs Veles under Program Files and registers it for
-  auto-update. Installer builds are published for **x64** and **ARM64**.
+  auto-update.
 - **`RadegastVeles_<arch>_<version>.tbz`** — a portable archive. Extract
   anywhere and run `RadegastVeles.exe` directly; no install step, no
-  registry changes. Portable archives are published for **x86**, **x64**,
-  and **ARM64**.
+  registry changes.
 
 ### macOS
 
