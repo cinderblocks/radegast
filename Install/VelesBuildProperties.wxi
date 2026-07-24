@@ -7,4 +7,20 @@
   <?define copyright="Copyright (c) 2006-2026 Sjofn LLC."?>
   <?define totalFileSize="100"?>
 
+  <!-- $(var.Platform) (x86/x64/ARM64) is the MSBuild Platform forwarded by the wixproj.
+       NetRid is the lowercase RID arch dotnet's own registry/runtime-search layout uses
+       (SOFTWARE\dotnet\Setup\InstalledVersions\<NetRid>\..., netfx:DotNetCoreSearch Platform=).
+       ProgramFilesVar picks the Program Files variable a process of this bitness actually sees:
+       a 32-bit (x86) process never has ProgramFiles64Folder in view. -->
+  <?if $(var.Platform) = x86 ?>
+  <?define NetRid = "x86" ?>
+  <?define ProgramFilesVar = "ProgramFilesFolder" ?>
+  <?elseif $(var.Platform) = ARM64 ?>
+  <?define NetRid = "arm64" ?>
+  <?define ProgramFilesVar = "ProgramFiles64Folder" ?>
+  <?else?>
+  <?define NetRid = "x64" ?>
+  <?define ProgramFilesVar = "ProgramFiles64Folder" ?>
+  <?endif?>
+
 </Include>

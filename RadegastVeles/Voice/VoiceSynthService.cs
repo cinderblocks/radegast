@@ -20,6 +20,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
@@ -66,6 +67,15 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
 
     /// <inheritdoc/>
     public bool IsReady { get; private set; }
+
+    /// <summary>
+    /// False on 32-bit (x86) builds: org.k2fsa.sherpa.onnx has no win-x86 native runtime
+    /// package, so text-to-speech can never load a model on that architecture regardless
+    /// of the model directory. Checked by <see cref="LoadModel"/> and surfaced by
+    /// <c>VoiceSynthViewModel.ModelStatusText</c> so this shows as an explicit notice
+    /// rather than a generic "failed to load model" error.
+    /// </summary>
+    public static bool NativeRuntimeAvailable => RuntimeInformation.ProcessArchitecture != Architecture.X86;
 
     // ── Events ────────────────────────────────────────────────────────────
 
@@ -147,6 +157,16 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
                 _tts?.Dispose();
                 _tts = null;
                 IsReady = false;
+
+                if (!NativeRuntimeAvailable)
+                {
+                    _log.LogError(
+                        "VoiceSynth: text-to-speech is not available on 32-bit (x86) builds - " +
+                        "sherpa-onnx does not publish a win-x86 native runtime. Install the 64-bit " +
+                        "or ARM64 build of Radegast Veles to use this feature.");
+                    ReadyChanged?.Invoke(false);
+                    return;
+                }
 
                 if (string.IsNullOrWhiteSpace(ModelDirectory) || !Directory.Exists(ModelDirectory))
                 {

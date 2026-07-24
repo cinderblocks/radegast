@@ -2,6 +2,6 @@
   <?include ..\VelesBuildProperties.wxi?>
 
   <String Id="DowngradeError" Value="A newer version of [ProductName] is already installed." />
-  <String Id="MissingDotNet8" Value="$(var.productName) requires the .NET 8 Desktop Runtime. Please install it from https://dotnet.microsoft.com/download/dotnet/8.0 and run this installer again." />
+  <String Id="MissingDotNet10" Value="$(var.productName) requires the .NET 10 Desktop Runtime. Please install it from https://dotnet.microsoft.com/download/dotnet/10.0 and run this installer again." />
 
 </WixLocalization>

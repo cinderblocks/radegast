@@ -50,18 +50,19 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch $(var.productName)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- .NET 8 Desktop Runtime detection via registry.
-         RadegastVeles targets net8.0 (framework-dependent by default).
-         For self-contained publish builds this check can be omitted. -->
-    <Property Id="DOTNET8INSTALLED">
-      <RegistrySearch Id="DotNet8DesktopSearch"
+    <!-- .NET 10 Desktop Runtime detection via registry, matching this MSI's own architecture
+         (NetRid, defined in ..\VelesBuildProperties.wxi). A 32-bit MSI only ever sees the
+         32-bit-view install under InstalledVersions\x86\...; an ARM64/x64 MSI sees its own
+         native view directly - so no explicit Win64 override is needed here, just the right key. -->
+    <Property Id="DOTNET10INSTALLED">
+      <RegistrySearch Id="DotNet10DesktopSearch"
                       Root="HKLM"
-                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App"
+                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\$(var.NetRid)\sharedfx\Microsoft.WindowsDesktop.App"
                       Type="raw" />
     </Property>
     <Launch
-      Condition="Installed OR DOTNET8INSTALLED"
-      Message="!(loc.MissingDotNet8)" />
+      Condition="Installed OR DOTNET10INSTALLED"
+      Message="!(loc.MissingDotNet10)" />
 
     <util:CloseApplication Id="CloseVeles"
                            Target="RadegastVeles.exe"

@@ -14,12 +14,18 @@
     <PackageReference Include="WixToolset.Bal.wixext" Version="7.0.0" />
   </ItemGroup>
   <PropertyGroup>
-    <DotNet10RuntimeLocalPath>$(MSBuildProjectDirectory)\windowsdesktop-runtime-10.0-win-x64.exe</DotNet10RuntimeLocalPath>
+    <!-- Must match the Platform -> NetRid mapping in Bundle.wxs: the bundle only ever installs
+         the desktop runtime for its own architecture, so the cached/downloaded installer exe
+         has to be the matching win-x86/win-x64/win-arm64 build, not always win-x64. -->
+    <NetRid Condition="'$(Platform)' == 'x86'">x86</NetRid>
+    <NetRid Condition="'$(Platform)' == 'ARM64'">arm64</NetRid>
+    <NetRid Condition="'$(NetRid)' == ''">x64</NetRid>
+    <DotNet10RuntimeLocalPath>$(MSBuildProjectDirectory)\windowsdesktop-runtime-10.0-win-$(NetRid).exe</DotNet10RuntimeLocalPath>
     <DefineConstants>$(DefineConstants);DotNet10RuntimeLocalPath=$(DotNet10RuntimeLocalPath)</DefineConstants>
   </PropertyGroup>
   <Target Name="DownloadDotNet10Runtime" BeforeTargets="CoreCompile">
     <Exec Condition="!Exists('$(DotNet10RuntimeLocalPath)')"
-          Command="powershell -NoProfile -Command &quot;Invoke-WebRequest -Uri 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe' -OutFile '$(DotNet10RuntimeLocalPath)'&quot;" />
+          Command="powershell -NoProfile -Command &quot;Invoke-WebRequest -Uri 'https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-$(NetRid).exe' -OutFile '$(DotNet10RuntimeLocalPath)'&quot;" />
   </Target>
   <ItemGroup>
     <None Include="..\VelesBuildProperties.wxi" />
