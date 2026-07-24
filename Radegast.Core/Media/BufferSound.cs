@@ -211,11 +211,22 @@ namespace Radegast.Media
         }
 
         /// <summary>
+        /// Asset IDs that FMOD has already rejected with a decode/format error. Second Life
+        /// occasionally has legitimately malformed sound assets in-world (bad upload, unusual
+        /// encoder quirk); once one is confirmed bad there is no point re-running createSound
+        /// and re-logging an exception on every retrigger (e.g. every footstep on top of it).
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<UUID, byte> knownBadSoundIds = new();
+
+        /// <summary>
         /// Process sound data (either from cache or freshly downloaded)
         /// </summary>
         private void ProcessSoundData(byte[] data)
         {
             if (data == null || data.Length == 0)
+                return;
+
+            if (knownBadSoundIds.ContainsKey(Id))
                 return;
 
             if (!LooksLikeAudio(data))
@@ -245,10 +256,21 @@ namespace Radegast.Media
                         mode,
                         ref extraInfo,
                         out sound));
+                }
+                catch (Exception ex)
+                {
+                    // A createSound failure means the asset itself is unplayable (bad/corrupt
+                    // upload), not a transient device/channel issue - remember it so repeated
+                    // triggers of the same object don't keep hammering FMOD and the log.
+                    knownBadSoundIds[Id] = 0;
+                    Logger.Error("Error playing sound", ex);
+                    return;
+                }
 
+                try
+                {
                     // Register for callbacks.
                     RegisterSound(sound);
-
 
                     // If looping is requested, loop the entire thing.
                     if (loopSound)
