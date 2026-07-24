@@ -454,8 +454,30 @@ namespace Radegast
             Client = new GridClient();
             InitializeClient(Client);
             lock (_groupsLock) { Groups.Clear(); }
-            OnClientChanged(new ClientChangedEventArgs(oldClient!, Client));
-            NetCom.Login();
+
+            try
+            {
+                // ClientChanged fans out to every UI console and loaded plugin. One misbehaving
+                // subscriber must not prevent the login attempt below - that's the one thing that
+                // actually has to happen for reconnect to succeed.
+                OnClientChanged(new ClientChangedEventArgs(oldClient!, Client));
+            }
+            catch (Exception ex)
+            {
+                Logger.Error("A ClientChanged subscriber threw during reconnect", ex, Client);
+            }
+
+            try
+            {
+                NetCom.Login();
+            }
+            catch (Exception ex)
+            {
+                // NetCom.Login() normally reports failure via ClientLoginStatus rather than
+                // throwing, so reaching here means something unexpected broke before that event
+                // could fire. Log it so it doesn't look like reconnect silently did nothing.
+                Logger.Error("Reconnect failed to start a login attempt", ex, Client);
+            }
         }
 
         public virtual void CleanUp()

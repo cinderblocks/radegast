@@ -34,13 +34,16 @@ namespace Radegast.Veles.Rendering;
 public sealed class SkySettings
 {
     /// <summary>Sky colour at the horizon (WL <c>blue_horizon</c>, RGB).</summary>
-    public Vector3 BlueHorizon { get; set; } = new Vector3(0.4f, 0.4f, 0.9f);
+    public Vector3 BlueHorizon { get; set; } = new Vector3(0.24f, 0.35f, 0.75f);
 
     /// <summary>
     /// Rayleigh scattering density per colour channel (WL <c>blue_density</c>, RGB).
-    /// Higher values darken the zenith and deepen the blue.
+    /// <see cref="GlViewportControl"/>'s sky shader computes
+    /// <c>BlueHorizon * exp(-BlueDensity / sinElevation)</c> — HIGHER density means
+    /// MORE attenuation (less of that channel gets through), so for a blue-dominant
+    /// sky the blue channel needs the LOWEST density here, not the highest.
     /// </summary>
-    public Vector3 BlueDensity { get; set; } = new Vector3(0.2f, 0.4f, 0.4f);
+    public Vector3 BlueDensity { get; set; } = new Vector3(0.15f, 0.25f, 0.35f);
 
     /// <summary>Mie (haze) scattering contribution at the horizon (WL <c>haze_horizon</c>).</summary>
     public float HazeHorizon { get; set; } = 0.19f;
@@ -49,17 +52,19 @@ public sealed class SkySettings
     public float HazeDensity { get; set; } = 0.7f;
 
     /// <summary>Sun / moon colour (WL <c>sun_moon_color</c>, RGB).</summary>
-    public Vector3 SunlightColor { get; set; } = new Vector3(0.8f, 0.8f, 0.8f);
+    public Vector3 SunlightColor { get; set; } = new Vector3(0.73f, 0.78f, 0.90f);
 
     /// <summary>Ambient sky light (WL <c>sky_ambient</c>, RGB).</summary>
     public Vector3 Ambient { get; set; } = new Vector3(0.25f, 0.25f, 0.25f);
 
     /// <summary>
     /// World-space unit vector pointing toward the sun (Z-up convention).
-    /// Default: 45° elevation facing positive Y (south in SL).
+    /// Default: 60° elevation facing positive Y (south in SL) — SL's own midday
+    /// preset keeps the noon sun well short of straight-up zenith so terrain
+    /// shading reads correctly.
     /// Set this each frame from the day-cycle angle when EEP is active.
     /// </summary>
-    public Vector3 SunDirection { get; set; } = Vector3.Normalize(new Vector3(0f, 1f, 1f));
+    public Vector3 SunDirection { get; set; } = new Vector3(0f, 0.5f, 0.8660254f);
 
     /// <summary>
     /// Sun glow sharpness (WL <c>glow.x / 20</c>).
@@ -72,6 +77,38 @@ public sealed class SkySettings
     /// Higher values produce a brighter, wider corona.
     /// </summary>
     public float SunGlowSize { get; set; } = 1.75f;
+
+    // ── Cloud layer (EEP cloud_* fields) ────────────────────────────────────────
+    // These describe SL's single flat cloud layer; GlViewportControl synthesizes
+    // several visual layers from them (altitude/scale/scroll offsets applied in
+    // the sky shader) rather than the protocol describing multiple layers itself.
+
+    /// <summary>Cloud tint (WL <c>cloud_color</c>, RGB).</summary>
+    public Vector3 CloudColor { get; set; } = new Vector3(1f, 1f, 1f);
+
+    /// <summary>
+    /// Base cloud octave (WL <c>cloud_pos_density1</c>): xyz = scroll offset / octave
+    /// weighting, w = coverage/density threshold.
+    /// </summary>
+    public Vector4 CloudPosDensity1 { get; set; } = new Vector4(1f, 0.5f, 1f, 0.35f);
+
+    /// <summary>
+    /// Secondary/detail cloud octave (WL <c>cloud_pos_density2</c>), same layout as
+    /// <see cref="CloudPosDensity1"/>.
+    /// </summary>
+    public Vector4 CloudPosDensity2 { get; set; } = new Vector4(1f, 0.5f, 1f, 0.35f);
+
+    /// <summary>Cloud noise tiling frequency (WL <c>cloud_scale</c>).</summary>
+    public float CloudScale { get; set; } = 0.42f;
+
+    /// <summary>Flat darkening clouds contribute to their own underside (WL <c>cloud_shadow</c>).</summary>
+    public float CloudShadow { get; set; } = 0.27f;
+
+    /// <summary>Cloud texture-space scroll speed, simulating wind (WL <c>cloud_scroll_rate</c>).</summary>
+    public Vector2 CloudScrollRate { get; set; } = new Vector2(0.2f, 0.01f);
+
+    /// <summary>Extra per-region noise turbulence on top of the base pattern (EEP <c>cloud_variance</c>).</summary>
+    public float CloudVariance { get; set; }
 
     /// <summary>Returns a new <see cref="SkySettings"/> with SL default midday values.</summary>
     public static SkySettings Default => new();

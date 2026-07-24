@@ -510,6 +510,12 @@ public partial class InventoryPanel : UserControl
         var editorArea = this.FindControl<ContentControl>("EditorArea");
         editorArea?.Content = null;
 
+        // Editor ViewModels (Landmark, Notecard, Texture, etc.) subscribe to global
+        // GridClient events in their constructors and only unsubscribe in Dispose().
+        // Without this, closing an editor panel leaks that subscription for the rest
+        // of the session, and the dead ViewModel keeps reacting to every server reply.
+        (_activeEditorPanel?.DataContext as IDisposable)?.Dispose();
+
         _activeEditorPanel = null;
         _vm?.HasActiveEditor = false;
     }

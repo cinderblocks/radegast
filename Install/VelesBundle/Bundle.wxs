@@ -26,22 +26,22 @@
         LogoSideFile="$(var.VelesSetup.ProjectDir)assets\dialog.png" />
     </BootstrapperApplication>
 
-    <!-- .NET 8 Desktop Runtime detection.
+    <!-- .NET 10 Desktop Runtime detection, matching this bundle's own architecture.
          If the runtime is absent the bundle will install it automatically. -->
     <netfx:DotNetCoreSearch RuntimeType="desktop"
-                            Platform="x64"
+                            Platform="$(var.NetRid)"
                             MajorVersion="10"
                             Variable="DotNet10DesktopFound" />
 
-    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]$(var.productName)" Persisted="yes" />
+    <Variable Name="InstallFolder" Type="formatted" Value="[$(var.ProgramFilesVar)]$(var.productName)" Persisted="yes" />
     <Variable Name="LaunchAfterInstall" Type="numeric" Value="1" Persisted="yes" />
 
     <Chain>
-      <!-- .NET 10 Desktop Runtime prerequisite.
+      <!-- .NET 10 Desktop Runtime prerequisite, matching this bundle's own architecture.
            Downloads the latest 10.0.x runtime when not already installed. -->
-      <ExePackage Id="DotNet100DesktopRuntime_x64"
+      <ExePackage Id="DotNet100DesktopRuntime"
                   SourceFile="$(var.DotNet10RuntimeLocalPath)"
-                  DownloadUrl="https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-x64.exe"
+                  DownloadUrl="https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-$(var.NetRid).exe"
                   DetectCondition="DotNet10DesktopFound"
                   InstallCondition="NOT DotNet10DesktopFound"
                   InstallArguments="/install /quiet /norestart"
@@ -58,7 +58,7 @@
                   Vital="yes"
                   ForcePerMachine="yes"
                   EnableFeatureSelection="yes"
-                  After="DotNet100DesktopRuntime_x64">
+                  After="DotNet100DesktopRuntime">
         <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
         <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
       </MsiPackage>

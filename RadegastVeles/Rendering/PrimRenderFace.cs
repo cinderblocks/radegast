@@ -112,6 +112,16 @@ public sealed class PrimRenderFace
     public          int      FaceIndex   { get; init; }
 
     /// <summary>
+    /// Scene key (simIndex in upper 32 bits, root localId in lower 32 bits) of the root
+    /// object this face belongs to in <c>GlViewportControl._sceneObjects</c>. Zero for
+    /// faces outside the scene-object layer (the standalone single-object preview path).
+    /// Set by <see cref="Rendering.GlViewportControl"/> when a face is added to the scene,
+    /// so the per-frame spatial-grid pre-filter can map a face back to its owning object
+    /// without a reverse lookup.
+    /// </summary>
+    public          ulong    RootSceneKey { get; set; }
+
+    /// <summary>
     /// Optional texture bitmap. Consumed and disposed after the GL upload;
     /// callers must not use it afterward.
     /// </summary>
@@ -273,6 +283,14 @@ public sealed class PrimRenderFace
 
     /// <summary>UV transform for the specular map texture.</summary>
     public          UvTransform SpecularUvXform       { get; init; } = UvTransform.Default;
+
+    /// <summary>
+    /// True for the single terrain face built by <see cref="SceneTerrainBuilder"/>. The
+    /// five texture slots below carry the region's four raw detail textures plus a
+    /// baked layer-select map (not PBR material data) — see
+    /// <see cref="GlViewportControl"/>'s terrain triplanar-blend path in prim.frag.
+    /// </summary>
+    public          bool        IsTerrain                  { get; init; }
 
     // ── PBR (GLTF metallic-roughness) fields ─────────────────────────────────────
 
@@ -448,6 +466,7 @@ public sealed class PrimRenderFace
             Texture                    = Texture,
             Transform                  = worldTransform,
             IsFlexi                    = IsFlexi,
+            IsTerrain                  = IsTerrain,
             Centroid                   = worldCentroid,
             IsTwoSided                 = IsTwoSided,
             AlphaCutoff                = AlphaCutoff,
@@ -713,4 +732,14 @@ public sealed record SceneTexturePatch(
     /// and schedule upgrades when the object moves closer to the camera.
     /// </summary>
     public int ResolutionLevel { get; init; } = -1;
+
+    /// <summary>
+    /// When true, <see cref="GlViewportControl.PatchSceneObjectTexture"/> routes this patch
+    /// through a small dedicated queue that is fully drained every frame instead of the
+    /// normal budgeted queue. Set by <see cref="Rendering.SceneAvatarStreamer"/> for the
+    /// self-avatar's own bake-texture patches, so they aren't stuck waiting behind a
+    /// scene-load's texture-patch backlog (which can run into the tens of thousands of
+    /// entries) — the rest of the scene's patches are unaffected.
+    /// </summary>
+    public bool HighPriority { get; init; }
 }

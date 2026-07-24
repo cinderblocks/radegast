@@ -17,6 +17,11 @@ uniform mat4 uMvp;
 uniform mat4 uModelView;
 uniform mat3 uNormalMat;
 uniform bool uInstanced;
+// Full view-space -> world-space inverse, constant for every face in a draw list
+// (set once per DrawFaces call, like uSunDir/uAmbientColor). Recovers world
+// position from the already-computed vViewPos below without adding a per-face/
+// per-instance world-matrix uniform or growing the instance buffer.
+uniform mat4 uViewInv;
 
 // Per-face uniforms — read in the non-instanced path to populate varyings.
 uniform vec4  uColor;
@@ -36,6 +41,18 @@ out vec3 vNormal;
 out vec3 vViewPos;
 out vec2 vTexCoord;
 out vec4 vTangent;  // view-space tangent xyz + handedness w
+// Object-space position/normal, used only by prim.frag's terrain triplanar path (see
+// uIsTerrain). View-space vNormal/vViewPos above would make the triplanar projection
+// swim as the camera moves; object space is a stable frame instead. Terrain's own
+// transform is translation-only, so object space and world space coincide for it —
+// pure pass-through of the raw attributes, zero extra cost for every other face too.
+out vec3 vObjPos;
+out vec3 vObjNormal;
+
+// World-space position, used only by prim.frag's shadow sampling (light-space
+// projection needs world space; vViewPos is camera-view space and uLightVp is a
+// different camera entirely).
+out vec3 vWorldPos;
 
 void main()
 {
@@ -61,5 +78,10 @@ void main()
         vInstAlphaMode = uAlphaMode;
         vTangent = vec4(normalize(mat3(uModelView) * aTangent.xyz), aTangent.w);
     }
-    vTexCoord = aTexCoord;
+    vObjPos    = aPosition;
+    vObjNormal = aNormal;
+    vTexCoord  = aTexCoord;
+
+    // Common to both branches above: vViewPos was just set by whichever path ran.
+    vWorldPos = vec3(uViewInv * vec4(vViewPos, 1.0));
 }

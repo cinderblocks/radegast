@@ -67,22 +67,30 @@ internal sealed class SceneTerrainBuilder
         var heightmap = await Task.Run(() => SampleHeightmap(sim), ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
 
-        // ── Composite terrain texture ─────────────────────────────────────────
-        SKBitmap splatBmp;
+        // ── Fetch terrain detail textures + layer map ─────────────────────────
+        // Success: real triplanar terrain (5 texture slots, see face assembly below).
+        // Failure: fall back to a single flat height-gradient texture, rendered as an
+        // ordinary (non-terrain) textured face — matches the pre-triplanar behaviour.
+        SKBitmap[]? detail = null;
+        SKBitmap?   layerMap = null;
+        SKBitmap?   fallbackBmp = null;
         try
         {
-            splatBmp = await TerrainSplat.SplatAsync(
+            var layers = await TerrainSplat.BuildLayersAsync(
                 _client,
                 heightmap,
                 [sim.TerrainDetail0, sim.TerrainDetail1, sim.TerrainDetail2, sim.TerrainDetail3],
                 [sim.TerrainStartHeight00, sim.TerrainStartHeight01, sim.TerrainStartHeight10, sim.TerrainStartHeight11],
                 [sim.TerrainHeightRange00, sim.TerrainHeightRange01, sim.TerrainHeightRange10, sim.TerrainHeightRange11],
                 ct).ConfigureAwait(false);
+            detail   = layers.Detail;
+            layerMap = layers.LayerMap;
         }
         catch (OperationCanceledException) { throw; }
-        catch
+        catch (Exception ex)
         {
-            splatBmp = TerrainSplat.SplatSimple(heightmap);
+            LibreMetaverse.Logger.Debug("SceneTerrainBuilder: TerrainSplat.BuildLayersAsync failed, falling back to SplatSimple.", ex);
+            fallbackBmp = TerrainSplat.SplatSimple(heightmap);
         }
 
         ct.ThrowIfCancellationRequested();
@@ -105,7 +113,6 @@ internal sealed class SceneTerrainBuilder
             Indices     = terrainFace.Indices.ToArray(),
             Color       = Vector4.One,
             Transform   = offsetMat,
-            Texture     = splatBmp,
             Fullbright  = false,
             Glow        = 0f,
             HasAlpha    = false,
@@ -113,6 +120,19 @@ internal sealed class SceneTerrainBuilder
             PrimLocalId = 0,
             FaceIndex   = 0,
             Centroid    = terrainCentroid,
+            // Real triplanar terrain: reuse the PBR material texture slots to carry the
+            // four raw detail textures + baked layer map (not PBR data) — see
+            // GlViewportControl's terrain path in prim.frag. HasMaterial=false and
+            // IsPBR=false (default) keep the legacy-material specular/normal-map lighting
+            // code from misinterpreting these slots; prim.frag's uIsTerrain gate is the
+            // authoritative guard.
+            IsTerrain                = detail != null,
+            HasMaterial              = false,
+            Texture                  = detail?[0] ?? fallbackBmp,
+            NormalMapTexture         = detail?[1],
+            SpecularMapTexture       = detail?[2],
+            MetallicRoughnessTexture = detail?[3],
+            EmissiveTexture          = layerMap,
         };
 
         bMin += regionOffset;

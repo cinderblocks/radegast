@@ -176,6 +176,10 @@ public class GlViewportControl : Panel
     // Precomputed hemisphere kernel and 4×4 noise texture.
     private Vector3[]? _ssaoKernel;
     private uint _ssaoNoiseTex;
+    // Tiling cloud-noise texture, built once at sky-init time. See BuildCloudNoiseTex.
+    private uint _cloudNoiseTex;
+    private float _cloudTime;
+    private long  _cloudLastTick;
     // Whether SSAO compiled successfully.
     private bool _ssaoReady;
     /// <summary>Enable or disable SSAO. Change takes effect on the next frame.</summary>
@@ -190,6 +194,105 @@ public class GlViewportControl : Panel
     /// and keep SSAO. Set to <see cref="int.MaxValue"/> to never auto-skip.
     /// </summary>
     public int SsaoMaxOpaqueFaces { get; set; } = 1500;
+
+    // ── Shadow resources (GL thread only) ────────────────────────────────────────
+    // Directional (sun/moon) shadow map: one samplable depth texture, camera-following
+    // ortho volume rebuilt every frame from Sky.SunDirection.
+    private GlShader? _shadowShader;
+    private uint _shadowFbo, _shadowDepthTex;
+    private bool _shadowReady;
+    private Matrix4x4 _shadowLightVp;
+    private bool _hasDirShadow;
+    private const int   ShadowMapSize      = 2048;
+    // Metres, half-extent of the camera-following ortho volume. 48m made the volume's
+    // edge (and its fade-to-unshadowed zone, see shadow.glsl's sampleDirShadow) visible
+    // within a typical scene-viewer camera frame at ordinary draw distances (96m+) —
+    // a soft circular patch of darkening re-centring on the camera every frame reads as
+    // "clouds bleeding across the ground" as the camera moves. 96m matches the default
+    // draw distance closely enough that the boundary is rarely on-screen. Must be kept
+    // in sync with shadow.glsl's kShadowTexelWorldSize.
+    private const float ShadowRadius       = 96f;
+    private const float ShadowDepthMargin  = 150f; // metres, ortho far plane past the volume
+
+    // Local point-light shadow cubemaps — up to MaxLocalLightsShadowed rendered concurrently,
+    // the first cubemap FBO usage in Veles (no existing pattern to copy from elsewhere here).
+    public const int MaxLocalLightsLit      = 4;
+    public const int MaxLocalLightsShadowed = 2;
+    private const float LocalLightRange         = 32f; // metres; lit but not necessarily shadowed
+    private const float LocalLightShadowRange   = 20f; // metres; nearest lights within this cast shadows
+    private const int   PointShadowMapSize      = 512;
+    private const float PointShadowNear         = 0.1f;
+    private uint _pointShadowFbo;
+    private readonly uint[] _pointShadowTex = new uint[MaxLocalLightsShadowed];
+    private bool _pointShadowReady;
+
+    // Per-frame light-selection scratch (avoids per-frame allocation). _litLights is
+    // kept sorted nearest-first; the first _shadowLightCount of those _litLightCount
+    // entries are the ones actually casting a shadow this frame (nearest within
+    // LocalLightShadowRange, capped at MaxLocalLightsShadowed).
+    private readonly LocalLight[] _litLights = new LocalLight[MaxLocalLightsLit];
+    private int _litLightCount;
+    private int _shadowLightCount;
+    private readonly List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> _pointShadowCandidates = new();
+
+    // Scratch buffers for the per-draw-list array-uniform upload in DrawFaces (GlShader
+    // has no array-value caching, so these are just reused to avoid per-call allocation).
+    private readonly Vector3[] _pointLightPosBuf     = new Vector3[MaxLocalLightsLit];
+    private readonly Vector3[] _pointLightColorBuf   = new Vector3[MaxLocalLightsLit];
+    private readonly float[]   _pointLightRadiusBuf  = new float[MaxLocalLightsLit];
+    private readonly float[]   _pointLightFalloffBuf = new float[MaxLocalLightsLit];
+    private readonly Vector3[] _pointShadowPosBuf    = new Vector3[MaxLocalLightsShadowed];
+    private readonly float[]   _pointShadowFarBuf    = new float[MaxLocalLightsShadowed];
+
+    private static readonly Vector3[] s_cubeFaceDirs =
+    {
+        Vector3.UnitX, -Vector3.UnitX,
+        Vector3.UnitY, -Vector3.UnitY,
+        Vector3.UnitZ, -Vector3.UnitZ,
+    };
+    // Any vector not parallel to the matching look direction works — these don't need
+    // to match GL's "canonical" per-face cubemap orientation (that only matters for
+    // sampling colour data). We only ever sample depth by direction vector, and the
+    // depth-pass write and the shadow-test read both go through the same hardware
+    // face-selection logic, so any valid view orientation per face is self-consistent.
+    private static readonly Vector3[] s_cubeFaceUps =
+    {
+        Vector3.UnitZ, Vector3.UnitZ,
+        Vector3.UnitZ, Vector3.UnitZ,
+        Vector3.UnitY, Vector3.UnitY, // +Z/-Z: UnitZ would be parallel to the look direction
+    };
+
+    /// <summary>
+    /// Enables real-time shadows: a directional shadow map from the sun/moon plus
+    /// cubemap shadows from the nearest <see cref="MaxLocalLightsShadowed"/> in-world
+    /// "Light" prims (see <see cref="LightStreamer"/>). Entirely GPU work — depth-only
+    /// render passes plus hardware PCF/percentage-closer sampling — no CPU-side shadow
+    /// computation. Defaults to <c>false</c>: a full extra scene depth pass plus up to
+    /// <see cref="MaxLocalLightsShadowed"/>×6 small cube-face passes every frame is
+    /// meaningful extra GPU cost.
+    /// </summary>
+    public bool ShadowsEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Skip the shadow pass on scenes above this opaque-face count, even when
+    /// <see cref="ShadowsEnabled"/> is true. A defensive cap for truly extreme scenes,
+    /// not a routine limit: unlike <see cref="SsaoMaxOpaqueFaces"/>'s G-buffer pre-pass
+    /// (which re-shades a full view-space normal per face), the shadow depth pass only
+    /// writes <c>gl_Position</c> — a single matrix-multiply per face, no fragment work —
+    /// so it tolerates a much higher face count for the same CPU/GPU cost. The original
+    /// default (4000, copied from SsaoMaxOpaqueFaces without recalibrating) triggered on
+    /// an ordinary ~5000-face scene, and a hard on/off cutoff right at a typical face
+    /// count meant shadows visibly flickered on and off as objects streamed in and out
+    /// crossed the threshold — worse than either always running or never running.
+    /// </summary>
+    public int ShadowsMaxOpaqueFaces { get; set; } = 30000;
+
+    /// <summary>
+    /// When set, the per-frame shadow/local-light pass queries this streamer for
+    /// currently tracked "Light" prims. Null (the default) means no local lights —
+    /// only the directional sun/moon shadow renders.
+    /// </summary>
+    public SceneLightStreamer? LightStreamer { get; set; }
 
     // ── Water resources (GL thread only) ─────────────────────────────────────────
     private GlShader? _waterShader;
@@ -280,6 +383,16 @@ public class GlViewportControl : Panel
     // ── Scene-object layer (additive over the base terrain submission) ────────────
     // keyed by scene key (ulong: upper 32 bits = sim index, lower 32 bits = localId)
     private readonly Dictionary<ulong, List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)>> _sceneObjects = new();
+    // Coarse spatial pre-filter over _sceneObjects world AABBs, used to skip the exact
+    // per-face frustum test for objects trivially outside the frustum. GL thread only,
+    // kept in sync with _sceneObjects at every add/remove/transform-update site.
+    private readonly SceneSpatialGrid _spatialGrid = new();
+    // Separate persistent result sets for the main-camera and water-reflection-camera
+    // queries — SceneSpatialGrid.QueryVisible takes a caller-owned set specifically so
+    // these two per-frame queries (different frustums) can't alias and clobber each other.
+    private readonly HashSet<ulong> _visibleSceneKeys = new();
+    private readonly HashSet<ulong> _reflVisibleSceneKeys = new();
+    private readonly HashSet<ulong> _shadowVisibleSceneKeys = new();
     // Reference counts for every GlTexture held by scene-object face slots, one count per
     // slot occurrence. Replaces the previous "scan every other object's faces on removal"
     // approach (O(total scene faces) per removed object) with O(faces of removed object),
@@ -367,6 +480,11 @@ public class GlViewportControl : Panel
 
     // Pending single-texture patches for already-live scene objects (progressive texture streaming).
     private readonly ConcurrentQueue<SceneTexturePatch> _pendingTexturePatches = new();
+    // High-priority patches (currently: self-avatar bake textures, see SceneTexturePatch.HighPriority)
+    // bypass the normal per-frame budget entirely and are drained unconditionally every frame —
+    // see ApplyTexturePatches. Volume through here is always small (one avatar's bake layers).
+    private readonly ConcurrentQueue<SceneTexturePatch> _highPriorityTexturePatches = new();
+    private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredHighPriorityPatches = new();
     // Back-pressure gate: limits _pendingTexturePatches to 200 entries without spin-waiting.
     // Each WaitAsync/Wait in PatchSceneObjectTexture consumes a permit; each dequeue in
     // ApplyTexturePatches releases one.  Initial count matches the queue-depth limit.
@@ -392,6 +510,8 @@ public class GlViewportControl : Panel
     // Set when a texture patch upgraded a legacy face to the alpha pass; triggers a single
     // RebuildSceneFlatLists() at the end of ApplyTexturePatches so the face moves draw lists.
     private bool _alphaReclassNeeded;
+    // Frame counter for the periodic [SceneLoad] pipeline telemetry log.
+    private int _loadTelemetryFrame;
     // Submission patches that arrived before UploadSubmission ran; retried for up to ~30 s.
     private readonly List<(SceneTexturePatch patch, int retriesLeft)> _deferredSubmissionPatches = new();
 
@@ -421,6 +541,43 @@ public class GlViewportControl : Panel
     private bool  _dragged;
     private volatile bool _pickRequested;
     private Point _pickPoint;
+    // Click count of the press that produced the pending pick, captured on press since
+    // PointerReleasedEventArgs carries no click-count of its own.
+    private int _pressClickCount;
+    // Set alongside _pickRequested when the pending pick came from a double-click; consumed
+    // by the pick-processing pass to raise GroundClicked instead of FaceClicked when the
+    // pick buffer comes back empty (terrain doesn't render into the pick pass, so an empty
+    // result under a double-click means "ground", not "nothing here").
+    private volatile bool _groundPickRequested;
+    // Supplies terrain height (metres) for a given sim-local (x,y), or null if out of bounds
+    // / no terrain data yet. Wired by SceneViewerViewModel so this control stays decoupled
+    // from LibreMetaverse's Simulator/TerrainManager types.
+    public Func<int, int, float?>? TerrainHeightProvider { get; set; }
+    /// <summary>Raised (on the UI thread) with a sim-local world position when the user double-clicks empty ground.</summary>
+    public event Action<Vector3>? GroundClicked;
+
+    // ── Mouselook ─────────────────────────────────────────────────────────────────
+    private bool _mouselookActive;
+    /// <summary>True while the viewport is in first-person mouselook (cursor hidden, mouse directly rotates the view).</summary>
+    public bool MouselookActive => _mouselookActive;
+    /// <summary>Raised when mouselook is entered (true) or exited (false).</summary>
+    public event Action<bool>? MouselookChanged;
+
+    public void EnterMouselook()
+    {
+        if (_mouselookActive) return;
+        _mouselookActive = true;
+        Cursor = new Cursor(StandardCursorType.None);
+        MouselookChanged?.Invoke(true);
+    }
+
+    public void ExitMouselook()
+    {
+        if (!_mouselookActive) return;
+        _mouselookActive = false;
+        Cursor = Cursor.Default;
+        MouselookChanged?.Invoke(false);
+    }
     // ── Saved bounds for camera reset ────────────────────────────────────────────
 
     private Vector3 _lastBoundsMin = new Vector3(-0.5f);
@@ -452,16 +609,25 @@ public class GlViewportControl : Panel
     public bool WaterReflectionsEnabled { get; set; } = false;
 
     /// <summary>
-    /// Enables instanced batching (<see cref="GlInstanceDrawer"/>) for opaque faces that
-    /// share a deduplicated mesh. Defaults to <c>false</c>: scene-object mesh dedup only
-    /// started producing shared meshes once VerticesLength survived face translation
-    /// (before that, dedup hashes covered pool garbage and never matched), and the very
-    /// first real workload — linksets of identical prims — renders exploded geometry, so
-    /// the instanced path has a latent defect that was never exercised. The per-face
-    /// uniform path is proven correct; re-enable this only once the instanced path is
-    /// validated against a dense identical-prim scene.
+    /// Enables atmospheric distance haze (aerial perspective) on scene geometry:
+    /// terrain and prims fade toward the sky's horizon-haze colour with distance,
+    /// tying ground, water and sky together at the horizon. Cheap (a few ALU ops
+    /// per fragment). Only active when <see cref="ShowSky"/> is also true.
+    /// Defaults to <c>true</c>.
     /// </summary>
-    public bool InstancingEnabled { get; set; } = false;
+    public bool AtmosphericsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Enables instanced batching (<see cref="GlInstanceDrawer"/>) for opaque faces that
+    /// share a deduplicated mesh. The 2026-07-11 "exploded geometry" regression that
+    /// forced this off was root-caused to WriteInstanceData double-transposing the
+    /// per-instance matrices (the raw System.Numerics bytes already read as the correct
+    /// column-vector matrix on the GL side, matching the uniform path); with that fixed,
+    /// the instanced path is back on. History: the defect was latent because mesh dedup
+    /// never produced shared meshes until VerticesLength survived face translation, so
+    /// the path first ran against real workloads only after that fix.
+    /// </summary>
+    public bool InstancingEnabled { get; set; } = true;
 
     /// <summary>Number of scene object submissions waiting to be uploaded to the GPU this frame. Zero-cost snapshot.</summary>
     public int PendingUploadCount => _pendingSceneObjects.Count;
@@ -509,6 +675,7 @@ public class GlViewportControl : Panel
         Focus();
         _lastPointer  = e.GetPosition(this);
         _pressPointer = _lastPointer;
+        _pressClickCount = e.ClickCount;
         _dragged       = false;
         _cameraGesture = false;
         var props = e.GetCurrentPoint(this).Properties;
@@ -520,13 +687,26 @@ public class GlViewportControl : Panel
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
+        bool alt = (e.KeyModifiers & KeyModifiers.Alt) != 0;
+        if (_mouselookActive)
+        {
+            // Mouselook aims from screen-center (the fixed reticle position) rather than
+            // wherever the hidden cursor happens to be.
+            if (_leftDown)
+            {
+                _pickPoint           = new Point(Bounds.Width / 2, Bounds.Height / 2);
+                _pickRequested       = true;
+                _groundPickRequested = _pressClickCount == 2;
+                _core.RequestNextFrameRendering();
+            }
+        }
         // Only fire a pick if it was a plain left-click with no drag and no Alt held
         // (Alt+drag is a camera gesture and must not trigger object interaction).
-        bool alt = (e.KeyModifiers & KeyModifiers.Alt) != 0;
-        if (_leftDown && !_dragged && !alt && !_cameraGesture)
+        else if (_leftDown && !_dragged && !alt && !_cameraGesture)
         {
-            _pickPoint     = _pressPointer;
-            _pickRequested = true;
+            _pickPoint           = _pressPointer;
+            _pickRequested       = true;
+            _groundPickRequested = _pressClickCount == 2;
             _core.RequestNextFrameRendering();
         }
         _leftDown      = false;
@@ -542,6 +722,14 @@ public class GlViewportControl : Panel
         float dx   = (float)(pos.X - _lastPointer.X);
         float dy   = (float)(pos.Y - _lastPointer.Y);
         _lastPointer = pos;
+
+        if (_mouselookActive)
+        {
+            // Mouselook looks around on plain mouse movement, no button/Alt required.
+            _camera.OrbitDrag(dx, dy);
+            _core.RequestNextFrameRendering();
+            return;
+        }
 
         if (!_leftDown && !_rightDown) return;
 
@@ -873,6 +1061,34 @@ public class GlViewportControl : Panel
                 _ssaoReady = false;
             }
 
+            // ── Shadow shader + FBOs (best-effort; shadows disabled if unsupported) ──
+            // Allocated unconditionally, regardless of ShadowsEnabled: _primShader's
+            // prim.frag statically declares the shadow sampler uniforms (sampler2DShadow/
+            // samplerCubeShadow, via shadow.glsl) whether or not shadows are on, and at
+            // least the D3D11 ANGLE backend requires every texture unit a shader
+            // statically references to have SOME resource bound before it will execute a
+            // draw call — even when the shader's own dynamic branch (uShadowsOn == 0)
+            // never actually samples it. Leaving units 5-7 unbound while shadows are off
+            // made every _primShader draw call silently no-op (scene geometry vanished
+            // entirely; sky/water kept rendering since they're separate programs that
+            // don't reference these uniforms). The textures' *content* is only
+            // meaningful once ShadowsEnabled populates them — DrawFaces still gates that
+            // via uShadowsOn/uPointShadowCount.
+            try
+            {
+                _shadowShader = GlShader.Compile(ShaderLoader.Load("prim.vert"), ShaderLoader.Load("shadow_depth.frag"));
+                EnsureShadowFbo();
+                EnsurePointShadowFbo();
+            }
+            catch (Exception ex)
+            {
+                LibreMetaverse.Logger.Warn("GlViewportControl: shadow subsystem init failed; shadows disabled.", ex);
+                _shadowShader = null;
+            }
+            LibreMetaverse.Logger.Info(
+                $"[GlInit] Shadow subsystem: shader={(_shadowShader != null ? "ok" : "FAILED")} " +
+                $"dirShadowFbo={(_shadowReady ? "ok" : "FAILED")} pointShadowFbo={(_pointShadowReady ? "ok" : "FAILED")}");
+
             // Flexi-prim compute deformer (best-effort; falls back to CPU when unavailable).
             try
             {
@@ -895,11 +1111,19 @@ public class GlViewportControl : Panel
 
             // Water rendering (best-effort; viewer works fine without it)
             try { InitWater(); }
-            catch { _waterReady = false; }
+            catch (Exception ex)
+            {
+                _waterReady = false;
+                LibreMetaverse.Logger.Warn("GlViewportControl: water shader init failed; water disabled.", ex);
+            }
 
             // Sky rendering (best-effort; falls back to solid clear colour)
             try { InitSky(); }
-            catch { _skyReady = false; }
+            catch (Exception ex)
+            {
+                _skyReady = false;
+                LibreMetaverse.Logger.Warn("GlViewportControl: sky shader init failed; using solid clear colour.", ex);
+            }
 
             // Notify listeners (on the UI thread) that a fresh GL context is ready.
             // On a first open this fires immediately; on tab-switch re-attaches it
@@ -936,10 +1160,13 @@ public class GlViewportControl : Panel
             UploadSubmission(pending);
 
         // Process scene-object layer updates (additive on top of the base submission).
-        // Cap uploads per frame so a large burst (e.g. scene entry / teleport) is spread
-        // across many frames instead of stalling the GL thread. Each upload can involve
-        // several glTexImage2D calls, so even 5 per frame can take ~10 ms on a mid-range GPU.
-        const int MaxSceneUploadsPerFrame = 5;
+        // Time-budget uploads per frame so a large burst (e.g. scene entry / teleport) is
+        // spread across frames without capping throughput artificially: a fixed count cap
+        // (formerly 5/frame) throttled scene loading to ~150 objects/sec at 30 fps even
+        // when the uploads were cheap single prims, while a heavy mesh linkset could still
+        // blow the frame at count 1. The budget always admits at least one upload per
+        // frame so progress is guaranteed.
+        const double MaxSceneUploadMillis = 6.0;
         if (_initError == null)
         {
             if (_pendingClearScene)
@@ -948,14 +1175,17 @@ public class GlViewportControl : Panel
                 FreeSceneObjectResources();
             }
             bool sceneListDirty = false;
-            int uploadsThisFrame = 0;
             if (!_pendingSceneObjects.IsEmpty)
             {
-                // Snapshot at most MaxSceneUploadsPerFrame keys so the foreach is bounded.
+                long uploadStart = System.Diagnostics.Stopwatch.GetTimestamp();
+                double ticksPerMs = System.Diagnostics.Stopwatch.Frequency / 1000.0;
+                int uploadsThisFrame = 0;
                 // ConcurrentDictionary.Keys is a snapshot enumerable; TryRemove is safe mid-loop.
                 foreach (var key in _pendingSceneObjects.Keys)
                 {
-                    if (uploadsThisFrame >= MaxSceneUploadsPerFrame) break;
+                    if (uploadsThisFrame > 0 &&
+                        (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStart) / ticksPerMs >= MaxSceneUploadMillis)
+                        break;
                     if (!_pendingSceneObjects.TryRemove(key, out var sub)) continue;
                     if (sub == null)
                         RemoveSceneObjectGpuNoRebuild(key);
@@ -970,6 +1200,23 @@ public class GlViewportControl : Panel
                 _core.RequestNextFrameRendering();
             if (sceneListDirty)
                 RebuildSceneFlatLists();
+
+            // Periodic scene-load pipeline telemetry (~every 5 s at 30 fps) while work is
+            // pending, so "loading feels slow" is diagnosable from Veles.log: it shows
+            // which stage is deep — GPU upload queue vs texture patches vs deferrals —
+            // and whether the decoded-mesh cache is earning its keep.
+            if (++_loadTelemetryFrame >= 150)
+            {
+                _loadTelemetryFrame = 0;
+                int up = _pendingSceneObjects.Count;
+                int qp = _pendingTexturePatches.Count;
+                int dp = _deferredPatches.Count;
+                if (up > 0 || qp > 50 || dp > 50)
+                    LibreMetaverse.Logger.Debug(
+                        $"[SceneLoad] pendingUploads={up} queuedPatches={qp} deferredPatches={dp} " +
+                        $"sceneFaces={_sceneOpaque.Count + _sceneAlpha.Count} " +
+                        $"meshCache={PrimMeshBuilder.MeshCacheHits}h/{PrimMeshBuilder.MeshCacheMisses}m");
+            }
         }
 
         // Apply per-face vertex updates queued by the animation thread.
@@ -1072,6 +1319,18 @@ public class GlViewportControl : Panel
         // face.Transform this frame.
         ExtrapolateMovingSceneObjects();
 
+        // Coarse spatial pre-filter for this frame's scene-object passes (G-buffer, main,
+        // alpha). Computed once here, after transforms/motion have landed, so every pass
+        // sees the same candidate set. Null when culling is disabled — every call site below
+        // treats null as "no pre-filter," falling back to the exact per-face test only,
+        // identical to pre-change behavior.
+        HashSet<ulong>? visibleSceneKeys = null;
+        if (frustum.HasValue)
+        {
+            _spatialGrid.QueryVisible(frustum.Value, _visibleSceneKeys);
+            visibleSceneKeys = _visibleSceneKeys;
+        }
+
         // ── EEP day-cycle update ──────────────────────────────────────────
         // Sample the environment service once per frame so sky and water colour
         // track the in-world day/night cycle.  Done before DrawSky so the sky
@@ -1086,6 +1345,13 @@ public class GlViewportControl : Panel
         // Drawn before everything else so it fills pixels not covered by geometry.
         if (ShowSky && _skyReady)
             DrawSky(ref view, ref proj, w, h);
+
+        // ── Shadow / local-light pre-pass ───────────────────────────────────
+        // Local-light selection always runs (lighting from nearby "Light" prims is an
+        // always-on correctness fix); the shadow depth passes themselves only render
+        // when ShadowsEnabled. Must run before DrawFaces below so uLightVp/uShadowMap/
+        // point-light uniforms are ready for this frame's main pass.
+        RenderShadowPasses(w, h);
 
         // ── SSAO pre-pass ─────────────────────────────────────────────────
         // 1. G-buffer: render opaque geometry to extract view-space normals
@@ -1115,7 +1381,7 @@ public class GlViewportControl : Panel
                 GlApi.Gl.Enable(EnableCap.CullFace);
                 GlApi.Gl.Disable(EnableCap.Blend);
                 DrawFacesNormal(_opaque,      _gnormShader!, ref view, ref proj, frustum);
-                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj, frustum);
+                DrawFacesNormal(_sceneOpaque, _gnormShader!, ref view, ref proj, frustum, visibleSceneKeys);
 
                 // — SSAO pass —
                 GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _ssaoFbo);
@@ -1187,7 +1453,7 @@ public class GlViewportControl : Panel
         ApplyTexturePatches();
 
         DrawFaces(_opaque,      _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
-        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref view, ref proj, ssaoTex: ssaoTex, screenSize: new Vector2(w, h), frustum: frustum, stats: _stats, sky: Sky, enableInstancing: InstancingEnabled, visibleSceneKeys: visibleSceneKeys);
 
         // ── Water surface ─────────────────────────────────────────────────
         // Drawn after opaque geometry (correct depth test) but before alpha
@@ -1205,7 +1471,7 @@ public class GlViewportControl : Panel
             // known-visible (it still records them in the frame stats).
             _mergedAlpha.Clear();
             AppendVisibleAlpha(_alpha,      frustum);
-            AppendVisibleAlpha(_sceneAlpha, frustum);
+            AppendVisibleAlpha(_sceneAlpha, frustum, visibleSceneKeys);
             var mergedAlpha = _mergedAlpha;
             if (mergedAlpha.Count > 1)
             {
@@ -1401,6 +1667,19 @@ public class GlViewportControl : Panel
                         Avalonia.Threading.Dispatcher.UIThread.Post(
                             () => FaceClicked?.Invoke(primLocalId, faceIndex, hitInfo));
                     }
+                    _groundPickRequested = false;
+                }
+                else if (_groundPickRequested)
+                {
+                    // Nothing in the pick buffer under a double-click — terrain doesn't render
+                    // into this pass, so an empty result here means the user double-clicked
+                    // ground. Resolve the world-space hit with a CPU heightfield raymarch.
+                    _groundPickRequested = false;
+                    if (TryGetGroundHit(px, py, w, h, out var groundPos))
+                    {
+                        Avalonia.Threading.Dispatcher.UIThread.Post(
+                            () => GroundClicked?.Invoke(groundPos));
+                    }
                 }
                 // Release CPU vertex/index arrays immediately after pick — they are
                 // only needed inside ComputeHitInfo above.  Keeping them allocated
@@ -1460,6 +1739,15 @@ public class GlViewportControl : Panel
         if (_gbufFbo != 0)       { GlApi.Gl.DeleteFramebuffer(_gbufFbo); _gbufFbo = 0; }
         if (_ssaoNoiseTex != 0)  { GlApi.Gl.DeleteTexture(_ssaoNoiseTex); _ssaoNoiseTex = 0; }
         if (_quadVao != 0)       { GlApi.Gl.DeleteVertexArray(_quadVao); _quadVao = 0; }
+        if (_shadowDepthTex != 0) { GlApi.Gl.DeleteTexture(_shadowDepthTex); _shadowDepthTex = 0; }
+        if (_shadowFbo != 0)      { GlApi.Gl.DeleteFramebuffer(_shadowFbo); _shadowFbo = 0; }
+        _shadowReady = false;
+        for (int i = 0; i < MaxLocalLightsShadowed; i++)
+        {
+            if (_pointShadowTex[i] != 0) { GlApi.Gl.DeleteTexture(_pointShadowTex[i]); _pointShadowTex[i] = 0; }
+        }
+        if (_pointShadowFbo != 0) { GlApi.Gl.DeleteFramebuffer(_pointShadowFbo); _pointShadowFbo = 0; }
+        _pointShadowReady = false;
         DeleteWaterResources();
         DeleteSkyResources();
         _primShader?.Dispose();     _primShader     = null;
@@ -1470,6 +1758,7 @@ public class GlViewportControl : Panel
         _gnormShader?.Dispose();    _gnormShader    = null;
         _ssaoShader?.Dispose();     _ssaoShader     = null;
         _ssaoBlurShader?.Dispose(); _ssaoBlurShader = null;
+        _shadowShader?.Dispose();   _shadowShader   = null;
         _particleBuf?.Dispose();    _particleBuf    = null;
         _instanceDrawer?.Dispose(); _instanceDrawer = null;
         _flexiDeformer?.Dispose();  _flexiDeformer  = null;
@@ -1535,6 +1824,55 @@ public class GlViewportControl : Panel
             nuv[j + 4] = interleaved[i + 7]; // v
         }
         return nuv;
+    }
+
+    /// <summary>
+    /// CPU ray-vs-heightfield intersection for a double-click that missed every object in the
+    /// pick buffer. Marches the same screen-to-world ray used by <see cref="ComputeHitInfo"/>
+    /// in 1 m steps via <see cref="TerrainHeightProvider"/> until it crosses the terrain
+    /// surface, then linearly interpolates between the two straddling samples.
+    /// </summary>
+    private bool TryGetGroundHit(int px, int py, int w, int h, out Vector3 worldPos)
+    {
+        worldPos = default;
+        var heightAt = TerrainHeightProvider;
+        if (heightAt == null) return false;
+
+        float ndcX = (2f * px / w) - 1f;
+        float ndcY = (2f * py / h) - 1f;
+        Matrix4x4.Invert(_lastView * _lastProj, out var invVP);
+        var nearH = Vector4.Transform(new Vector4(ndcX, ndcY, -1f, 1f), invVP);
+        var farH  = Vector4.Transform(new Vector4(ndcX, ndcY,  1f, 1f), invVP);
+        nearH /= nearH.W;
+        farH  /= farH.W;
+        var rayOrigin = new Vector3(nearH.X, nearH.Y, nearH.Z);
+        var rayDir    = Vector3.Normalize(new Vector3(farH.X, farH.Y, farH.Z) - rayOrigin);
+
+        const float step    = 1f;
+        const float maxDist = 512f;
+        float   prevDiff = float.NaN;
+        Vector3 prevPos  = rayOrigin;
+        for (float t = 0f; t <= maxDist; t += step)
+        {
+            var p = rayOrigin + rayDir * t;
+            float? terrainH = heightAt((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y));
+            if (terrainH == null)
+            {
+                if (!float.IsNaN(prevDiff)) break; // left the region after a valid sample
+                continue;
+            }
+            float diff = p.Z - terrainH.Value;
+            if (!float.IsNaN(prevDiff) && prevDiff > 0f && diff <= 0f)
+            {
+                float denom = prevDiff - diff;
+                float frac  = denom > 1e-6f ? prevDiff / denom : 0f;
+                worldPos = Vector3.Lerp(prevPos, p, frac);
+                return true;
+            }
+            prevDiff = diff;
+            prevPos  = p;
+        }
+        return false;
     }
 
     private FaceHitInfo ComputeHitInfo(int pickIdx, int px, int py, int w, int h)
@@ -1894,6 +2232,114 @@ public class GlViewportControl : Panel
         _gbufH = h;
     }
 
+    /// <summary>
+    /// Allocates the directional shadow map's depth-only FBO. Fixed size (unlike the
+    /// other Ensure* FBOs here, not tied to the viewport dimensions) so this is a
+    /// one-time lazy allocation — the <c>if (_shadowFbo != 0) return;</c> guard makes
+    /// repeat calls (once per frame from GlRenderCore) free after the first.
+    /// </summary>
+    private unsafe void EnsureShadowFbo()
+    {
+        if (_shadowFbo != 0) return;
+
+        _shadowDepthTex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _shadowDepthTex);
+        GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.DepthComponent24,
+            (uint)ShadowMapSize, (uint)ShadowMapSize, 0, PixelFormat.DepthComponent, PixelType.UnsignedInt, null);
+        // Linear + CompareRefToTexture gives free hardware bilinear PCF: each texture()
+        // tap in shadow.glsl's sampleDirShadow already blends 4 texels' compare results.
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.CompareRefToTexture);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureCompareFunc, (int)DepthFunction.Lequal);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+
+        _shadowFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _shadowFbo);
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            TextureTarget.Texture2D, _shadowDepthTex, 0);
+        // No colour attachment — tell the driver not to expect one (required by some
+        // ES 3.0 profiles for framebuffer completeness). glDrawBuffer (singular) is
+        // desktop-GL-only and isn't exported by an ES 3.0 context (confirmed via a
+        // Silk.NET SymbolLoadingException at runtime) — glDrawBuffers (plural) is the
+        // ES 3.0 core entry point; glReadBuffer (singular) is fine, it's core ES 3.0.
+        GlApi.Gl.DrawBuffers(stackalloc[] { GLEnum.None });
+        GlApi.Gl.ReadBuffer(GLEnum.None);
+
+        var status = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+        if (status != GLEnum.FramebufferComplete)
+        {
+            GlApi.Gl.DeleteFramebuffer(_shadowFbo);   _shadowFbo = 0;
+            GlApi.Gl.DeleteTexture(_shadowDepthTex);  _shadowDepthTex = 0;
+            _shadowReady = false;
+            return;
+        }
+
+        _shadowReady = true;
+    }
+
+    /// <summary>
+    /// Allocates <see cref="MaxLocalLightsShadowed"/> depth cubemaps sharing one FBO
+    /// (attachment is rebound to the relevant face/light each render). Fixed size,
+    /// one-time lazy allocation like <see cref="EnsureShadowFbo"/>.
+    /// </summary>
+    private unsafe void EnsurePointShadowFbo()
+    {
+        if (_pointShadowFbo != 0) return;
+
+        for (int i = 0; i < MaxLocalLightsShadowed; i++)
+        {
+            uint tex = GlApi.Gl.GenTexture();
+            GlApi.Gl.BindTexture(TextureTarget.TextureCubeMap, tex);
+            for (int face = 0; face < 6; face++)
+                GlApi.Gl.TexImage2D((TextureTarget)((int)TextureTarget.TextureCubeMapPositiveX + face), 0,
+                    InternalFormat.DepthComponent24, (uint)PointShadowMapSize, (uint)PointShadowMapSize, 0,
+                    PixelFormat.DepthComponent, PixelType.UnsignedInt, null);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapS, (int)TextureWrapMode.ClampToEdge);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapT, (int)TextureWrapMode.ClampToEdge);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureWrapR, (int)TextureWrapMode.ClampToEdge);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureCompareMode, (int)TextureCompareMode.CompareRefToTexture);
+            GlApi.Gl.TexParameter(TextureTarget.TextureCubeMap, TextureParameterName.TextureCompareFunc, (int)DepthFunction.Lequal);
+            GlApi.Gl.BindTexture(TextureTarget.TextureCubeMap, 0);
+            _pointShadowTex[i] = tex;
+        }
+
+        _pointShadowFbo = GlApi.Gl.GenFramebuffer();
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _pointShadowFbo);
+        // Completeness only needs checking once — every light's cubemap shares the same
+        // format/size, so if attaching light 0's +X face is complete, all of them are.
+        GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+            TextureTarget.TextureCubeMapPositiveX, _pointShadowTex[0], 0);
+        // glDrawBuffer (singular) is desktop-GL-only, not core ES 3.0 — see the matching
+        // fix/comment in EnsureShadowFbo (this call site was missed the first time
+        // around because the two functions' surrounding comments differ, so a
+        // comment-anchored find/replace only caught one of the two).
+        GlApi.Gl.DrawBuffers(stackalloc[] { GLEnum.None });
+        GlApi.Gl.ReadBuffer(GLEnum.None);
+
+        var status = GlApi.Gl.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+
+        if (status != GLEnum.FramebufferComplete)
+        {
+            for (int i = 0; i < MaxLocalLightsShadowed; i++)
+            {
+                if (_pointShadowTex[i] != 0) { GlApi.Gl.DeleteTexture(_pointShadowTex[i]); _pointShadowTex[i] = 0; }
+            }
+            GlApi.Gl.DeleteFramebuffer(_pointShadowFbo); _pointShadowFbo = 0;
+            _pointShadowReady = false;
+            return;
+        }
+
+        _pointShadowReady = true;
+    }
+
     private unsafe void EnsureSsaoFbos(int w, int h)
     {
         if (_ssaoFbo != 0 && _ssaoFboW == w && _ssaoFboH == h) return;
@@ -2074,6 +2520,10 @@ public class GlViewportControl : Panel
         var reflFrustum  = FrustumCuller.ExtractPlanes(reflViewProj);
         _lastReflViewProj = reflViewProj;
 
+        // Independent grid query into its own persistent set — must not reuse the main
+        // pass's _visibleSceneKeys, since the two frustums differ.
+        _spatialGrid.QueryVisible(reflFrustum, _reflVisibleSceneKeys);
+
         GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _waterReflFbo);
         GlApi.Gl.Viewport(0, 0, WaterReflSize, WaterReflSize);
         GlApi.Gl.ClearColor(0.39f, 0.58f, 0.93f, 1f);
@@ -2087,13 +2537,283 @@ public class GlViewportControl : Panel
         GlApi.Gl.FrontFace(FrontFaceDirection.CW);
 
         DrawFaces(_opaque,      _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
-        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled);
+        DrawFaces(_sceneOpaque, _primShader, ref reflView, ref proj, frustum: reflFrustum, sky: Sky, enableInstancing: InstancingEnabled, visibleSceneKeys: _reflVisibleSceneKeys);
 
         GlApi.Gl.FrontFace(FrontFaceDirection.Ccw);
         // Unbind reflection FBO; main scene pass will rebind _sceneFbo
         GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
         _reflLastTick = nowTick;
+    }
+
+    // ── Shadow / local-light passes ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Selects up to <see cref="MaxLocalLightsLit"/> nearest local "Light" prims to
+    /// the camera (within <see cref="LocalLightRange"/>) for forward-lighting, and —
+    /// only when <see cref="ShadowsEnabled"/> — flags the nearest of those within
+    /// <see cref="LocalLightShadowRange"/> (capped at <see cref="MaxLocalLightsShadowed"/>)
+    /// as shadow casters. Runs unconditionally (not gated on ShadowsEnabled) because
+    /// local-light lighting is an always-on correctness addition — only the
+    /// shadow-casting half of the feature is behind the preference.
+    /// <para>
+    /// Cost is bounded by how many lit prims <see cref="LightStreamer"/> is currently
+    /// tracking (already limited to its own stream radius), not scene size — this is
+    /// the one CPU-side piece of the whole shadow feature, and it is small.
+    /// </para>
+    /// </summary>
+    private void SelectLocalLights()
+    {
+        _litLightCount = 0;
+        _shadowLightCount = 0;
+        var streamer = LightStreamer;
+        if (streamer == null) return;
+
+        var eye = _camera.EyePosition;
+        Span<float> distSq = stackalloc float[MaxLocalLightsLit];
+
+        // Top-K selection via linear replacement of the current farthest pick — K is
+        // tiny (MaxLocalLightsLit), so this stays cheap even with dozens of candidates.
+        foreach (var light in streamer.Lights)
+        {
+            float d2 = Vector3.DistanceSquared(light.WorldPosition, eye);
+            if (d2 > LocalLightRange * LocalLightRange) continue;
+
+            if (_litLightCount < MaxLocalLightsLit)
+            {
+                _litLights[_litLightCount] = light;
+                distSq[_litLightCount] = d2;
+                _litLightCount++;
+            }
+            else
+            {
+                int worst = 0;
+                for (int i = 1; i < MaxLocalLightsLit; i++)
+                    if (distSq[i] > distSq[worst]) worst = i;
+                if (d2 < distSq[worst])
+                {
+                    _litLights[worst] = light;
+                    distSq[worst] = d2;
+                }
+            }
+        }
+
+        // Insertion sort nearest-first (N <= MaxLocalLightsLit) so the shadow-casting
+        // check below naturally prioritises the closest lights.
+        for (int i = 1; i < _litLightCount; i++)
+        {
+            var lightI = _litLights[i];
+            float dI = distSq[i];
+            int j = i - 1;
+            while (j >= 0 && distSq[j] > dI)
+            {
+                _litLights[j + 1] = _litLights[j];
+                distSq[j + 1] = distSq[j];
+                j--;
+            }
+            _litLights[j + 1] = lightI;
+            distSq[j + 1] = dI;
+        }
+
+        if (!ShadowsEnabled) return;
+        while (_shadowLightCount < _litLightCount && _shadowLightCount < MaxLocalLightsShadowed
+               && distSq[_shadowLightCount] <= LocalLightShadowRange * LocalLightShadowRange)
+            _shadowLightCount++;
+    }
+
+    /// <summary>
+    /// Renders this frame's shadow depth passes (directional + up to
+    /// <see cref="MaxLocalLightsShadowed"/> point-light cubemaps) and updates the
+    /// local-light selection. Called once per frame before the main opaque pass so
+    /// the results are ready for <see cref="DrawFaces"/>' per-frame uniform upload.
+    /// Restores the viewport/FBO/cull-face state the main passes expect before
+    /// returning.
+    /// </summary>
+    private void RenderShadowPasses(int w, int h)
+    {
+        SelectLocalLights();
+
+        _hasDirShadow = false;
+
+        if (!ShadowsEnabled)
+            return;
+
+        int opaqueFaceCount = _opaque.Count + _sceneOpaque.Count;
+        if (opaqueFaceCount == 0 || opaqueFaceCount > ShadowsMaxOpaqueFaces)
+            return;
+
+        EnsureShadowFbo();
+        if (_shadowShader != null && _shadowReady)
+        {
+            RenderDirectionalShadow();
+        }
+
+        if (_shadowLightCount > 0)
+        {
+            EnsurePointShadowFbo();
+            if (_shadowShader != null && _pointShadowReady)
+            {
+                RenderPointShadows();
+            }
+            else
+            {
+                // Point-shadow FBO/cubemaps failed to allocate (or no shadow shader) —
+                // the cubemap textures were never actually rendered into this frame, so
+                // reporting a nonzero count to DrawFaces would bind unit 6/7 to texture
+                // 0 (or stale content) and sample garbage. Selected lights still light
+                // the scene via uPointLightCount below; they just don't cast a shadow.
+                _shadowLightCount = 0;
+            }
+        }
+
+        // Shadow passes rebind their own FBOs/viewports and disable culling; restore
+        // what the main scene pass expects before returning.
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _sceneFbo);
+        GlApi.Gl.Viewport(0, 0, (uint)w, (uint)h);
+        GlApi.Gl.Enable(EnableCap.CullFace);
+        GlApi.Gl.CullFace(TriangleFace.Back);
+    }
+
+    private void RenderDirectionalShadow()
+    {
+        var eye = _camera.EyePosition;
+        // Sky.SunDirection is occasionally exactly zero for a frame or two around an
+        // EEP/day-cycle transition (SceneEnvironmentService falls back to the day-cycle
+        // interpolation only when the simulator's real-time value is non-zero) —
+        // Vector3.Normalize(Vector3.Zero) is NaN. A NaN light direction poisons every
+        // matrix built below, and critically, IEEE-754 NaN comparisons are always
+        // false, which silently defeats sampleDirShadow's "outside the shadow volume ->
+        // don't shadow" bounds check in the shader (none of its `<`/`>` tests fire for
+        // NaN operands) — every fragment then samples the shadow map with NaN texture
+        // coordinates, which resolved to "occluded" on the hardware this was tested on,
+        // blacking out the entire directly-lit scene for that frame. Bail out before
+        // touching anything GL-side; _hasDirShadow stays false (RenderShadowPasses'
+        // caller already defaults it there), so DrawFaces safely skips the shadow term
+        // exactly like any other frame shadows aren't ready.
+        if (!IsFinite(eye) || !IsFinite(Sky.SunDirection) || Sky.SunDirection.LengthSquared() < 1e-10f)
+            return;
+        var sunDir = Vector3.Normalize(Sky.SunDirection);
+        // Guard against a degenerate look-at when the sun sits at (or very near) the
+        // zenith — cross(sunDir, up) collapses to zero for the default Z-up "up".
+        var up = MathF.Abs(Vector3.Dot(sunDir, Vector3.UnitZ)) > 0.999f ? Vector3.UnitY : Vector3.UnitZ;
+
+        // Texel-snap the ortho volume's centre (in light space) so the shadow map's
+        // texel grid stays locked to fixed world-space increments instead of sliding
+        // continuously with the camera — without this, shadow edges shimmer as
+        // geometry crosses texel boundaries differently frame to frame.
+        var lightRotOnly = Matrix4x4.CreateLookAt(Vector3.Zero, -sunDir, up);
+        var centerLs = Vector3.Transform(eye, lightRotOnly);
+        float texelSize = (2f * ShadowRadius) / ShadowMapSize;
+        centerLs.X = MathF.Floor(centerLs.X / texelSize) * texelSize;
+        centerLs.Y = MathF.Floor(centerLs.Y / texelSize) * texelSize;
+        Matrix4x4.Invert(lightRotOnly, out var invRot);
+        var snappedCenter = Vector3.Transform(centerLs, invRot);
+
+        var lightEye  = snappedCenter + sunDir * ShadowDepthMargin;
+        var lightView = Matrix4x4.CreateLookAt(lightEye, snappedCenter, up);
+        var lightProj = Matrix4x4.CreateOrthographicOffCenter(
+            -ShadowRadius, ShadowRadius, -ShadowRadius, ShadowRadius, 1f, ShadowDepthMargin * 2f);
+        _shadowLightVp = lightView * lightProj;
+
+        // Defense in depth: bail if anything upstream (camera easing, EEP transition,
+        // near-degenerate look-at despite the up-vector guard above) still produced a
+        // non-finite matrix. See the NaN-propagation comment at the top of this method.
+        if (!IsFinite(_shadowLightVp))
+            return;
+
+        var lightFrustum = FrustumCuller.ExtractPlanes(_shadowLightVp);
+        // Independent grid query into its own persistent set — must not reuse the main
+        // pass's _visibleSceneKeys, since the two frustums differ (mirrors how the
+        // water reflection pass keeps its own _reflVisibleSceneKeys).
+        _spatialGrid.QueryVisible(lightFrustum, _shadowVisibleSceneKeys);
+
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _shadowFbo);
+        GlApi.Gl.Viewport(0, 0, (uint)ShadowMapSize, (uint)ShadowMapSize);
+        GlApi.Gl.Clear(ClearBufferMask.DepthBufferBit);
+        GlApi.Gl.Enable(EnableCap.DepthTest);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.DepthFunc(DepthFunction.Less);
+        // Both sides: single-sided planes (common in SL content) must still cast a
+        // shadow from whichever face the light happens to hit.
+        GlApi.Gl.Disable(EnableCap.CullFace);
+
+        DrawFacesDepth(_opaque,      _shadowShader!, ref _shadowLightVp, lightFrustum);
+        DrawFacesDepth(_sceneOpaque, _shadowShader!, ref _shadowLightVp, lightFrustum, _shadowVisibleSceneKeys);
+
+        _hasDirShadow = true;
+    }
+
+    private static bool IsFinite(Vector3 v) =>
+        float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+
+    private static bool IsFinite(in Matrix4x4 m) =>
+        float.IsFinite(m.M11) && float.IsFinite(m.M12) && float.IsFinite(m.M13) && float.IsFinite(m.M14) &&
+        float.IsFinite(m.M21) && float.IsFinite(m.M22) && float.IsFinite(m.M23) && float.IsFinite(m.M24) &&
+        float.IsFinite(m.M31) && float.IsFinite(m.M32) && float.IsFinite(m.M33) && float.IsFinite(m.M34) &&
+        float.IsFinite(m.M41) && float.IsFinite(m.M42) && float.IsFinite(m.M43) && float.IsFinite(m.M44);
+
+    private void RenderPointShadows()
+    {
+        GlApi.Gl.BindFramebuffer(FramebufferTarget.Framebuffer, _pointShadowFbo);
+        GlApi.Gl.Viewport(0, 0, (uint)PointShadowMapSize, (uint)PointShadowMapSize);
+        GlApi.Gl.Enable(EnableCap.DepthTest);
+        GlApi.Gl.DepthMask(true);
+        GlApi.Gl.DepthFunc(DepthFunction.Less);
+        GlApi.Gl.Disable(EnableCap.CullFace);
+        _shadowShader!.Use();
+        int mvpLoc = _shadowShader.GetLocation("uMvp");
+
+        for (int li = 0; li < _shadowLightCount; li++)
+        {
+            var light = _litLights[li];
+            var lightPos = light.WorldPosition;
+            float far = light.Radius;
+
+            // Small candidate list: opaque faces near this light, gathered once (not
+            // once per cube face) via a cheap distance filter — not additionally
+            // frustum-culled per face, since the candidate set is already small (a
+            // light's radius bounds how much nearby geometry there can be) and the
+            // GPU's own clipping handles anything outside a given face's 90 deg FOV.
+            _pointShadowCandidates.Clear();
+            CollectPointShadowCandidates(_opaque,      lightPos, far, _pointShadowCandidates);
+            CollectPointShadowCandidates(_sceneOpaque, lightPos, far, _pointShadowCandidates);
+            if (_pointShadowCandidates.Count == 0) continue;
+
+            var proj = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 2f, 1f, PointShadowNear, far);
+
+            for (int face = 0; face < 6; face++)
+            {
+                GlApi.Gl.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment,
+                    (TextureTarget)((int)TextureTarget.TextureCubeMapPositiveX + face), _pointShadowTex[li], 0);
+                GlApi.Gl.Clear(ClearBufferMask.DepthBufferBit);
+
+                var view = Matrix4x4.CreateLookAt(lightPos, lightPos + s_cubeFaceDirs[face], s_cubeFaceUps[face]);
+                var vp = view * proj;
+                foreach (var (mesh, _, _, _, _, _, cface) in _pointShadowCandidates)
+                {
+                    var mvp = cface.Transform * vp;
+                    _shadowShader.Set(mvpLoc, ref mvp);
+                    mesh.Draw();
+                }
+            }
+        }
+        _shadowShader.Unuse();
+    }
+
+    private static void CollectPointShadowCandidates(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> source,
+        Vector3 lightPos, float radius,
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> dest)
+    {
+        // Margin so a large caster whose centroid sits just outside the light's radius
+        // (but whose bounds still overlap it) isn't missed.
+        float maxReach = radius + 8f;
+        float maxReachSq = maxReach * maxReach;
+        foreach (var entry in source)
+        {
+            if (Vector3.DistanceSquared(entry.face.GetWorldCentroid(), lightPos) <= maxReachSq)
+                dest.Add(entry);
+        }
     }
 
     /// <summary>
@@ -2113,7 +2833,6 @@ public class GlViewportControl : Panel
         var eye       = _camera.EyePosition;
         var viewProj  = view * proj;
         Matrix4x4.Invert(viewProj, out var invVP);
-        var lightDir  = Vector3.Normalize(Sky.SunDirection);
 
         _waterShader.Use();
         _waterShader.Set("uViewProj",      ref viewProj);
@@ -2123,8 +2842,19 @@ public class GlViewportControl : Panel
         _waterShader.Set("uWaterHeight",   waterHeight);
         _waterShader.Set("uTime",          _waterTime);
         _waterShader.Set("uWaterColor",    WaterFogColor);
-        _waterShader.Set("uLightDir",      lightDir);
         _waterShader.Set("uHasReflection", (_waterReflFbo != 0 && WaterReflectionsEnabled) ? 1 : 0);
+
+        // Shared atmosphere-model uniforms (atmosphere.glsl): the water evaluates
+        // the sky gradient for its reflection fallback and horizon haze blend.
+        _waterShader.Set("uBlueHorizon",   Sky.BlueHorizon);
+        _waterShader.Set("uBlueDensity",   Sky.BlueDensity);
+        _waterShader.Set("uHazeHorizon",   Sky.HazeHorizon);
+        _waterShader.Set("uHazeDensity",   Sky.HazeDensity);
+        _waterShader.Set("uSunlightColor", Sky.SunlightColor);
+        _waterShader.Set("uAmbient",       Sky.Ambient);
+        _waterShader.Set("uSunDirection",  Vector3.Normalize(Sky.SunDirection));
+        _waterShader.Set("uSunGlowFocus",  Sky.SunGlowFocus);
+        _waterShader.Set("uSunGlowSize",   Sky.SunGlowSize);
 
         GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
         GlApi.Gl.BindTexture(TextureTarget.Texture2D, _waterReflColorTex);
@@ -2183,6 +2913,7 @@ public class GlViewportControl : Panel
         var vert = ShaderLoader.Load("sky.vert");
         var frag = ShaderLoader.Load("sky.frag");
         _skyShader = GlShader.Compile(vert, frag);
+        _cloudNoiseTex = BuildCloudNoiseTex();
         _skyReady  = true;
     }
 
@@ -2196,6 +2927,11 @@ public class GlViewportControl : Panel
 
         var vp    = view * proj;
         Matrix4x4.Invert(vp, out var invVP);
+
+        long  now = Environment.TickCount64;
+        float dt  = _cloudLastTick == 0 ? 0f : MathF.Min((now - _cloudLastTick) / 1000f, 0.1f);
+        _cloudLastTick = now;
+        _cloudTime    += dt;
 
         GlApi.Gl.DepthMask(false);
         GlApi.Gl.Disable(EnableCap.DepthTest);
@@ -2213,6 +2949,19 @@ public class GlViewportControl : Panel
         _skyShader.Set("uSunGlowFocus",  Sky.SunGlowFocus);
         _skyShader.Set("uSunGlowSize",   Sky.SunGlowSize);
 
+        GlApi.Gl.ActiveTexture(TextureUnit.Texture0);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, _cloudNoiseTex);
+        _skyShader.Set("uCloudNoise",       0);
+        _skyShader.Set("uCloudColor",       Sky.CloudColor);
+        _skyShader.Set("uCloudPosDensity1", Sky.CloudPosDensity1);
+        _skyShader.Set("uCloudPosDensity2", Sky.CloudPosDensity2);
+        _skyShader.Set("uCloudScale",       Sky.CloudScale);
+        _skyShader.Set("uCloudShadow",      Sky.CloudShadow);
+        _skyShader.Set("uCloudScrollRate",  Sky.CloudScrollRate);
+        _skyShader.Set("uCloudVariance",    Sky.CloudVariance);
+        _skyShader.Set("uCameraPos",        _camera.EyePosition);
+        _skyShader.Set("uTime",             _cloudTime);
+
         GlApi.Gl.BindVertexArray(_quadVao);
         GlApi.Gl.DrawArrays(PrimitiveType.Triangles, 0, 3);
         GlApi.Gl.BindVertexArray(0);
@@ -2228,6 +2977,7 @@ public class GlViewportControl : Panel
     private void DeleteSkyResources()
     {
         _skyShader?.Dispose(); _skyShader = null;
+        if (_cloudNoiseTex != 0) { GlApi.Gl.DeleteTexture(_cloudNoiseTex); _cloudNoiseTex = 0; }
         _skyReady = false;
     }
 
@@ -2282,6 +3032,81 @@ public class GlViewportControl : Panel
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
         GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
+        return tex;
+    }
+
+    /// <summary>
+    /// Builds a small tiling single-channel cloud-density noise texture (256×256, R8),
+    /// baked once in C# rather than computed per-pixel in the shader — a handful of
+    /// texture samples across the multi-layer cloud composite is cheaper than in-shader
+    /// FBM hashing for the same visual result. Tileable value noise: each of 4 octaves
+    /// uses a wrapping lattice (mod indices) so the result repeats seamlessly under
+    /// GL_REPEAT, smoothstep-interpolated between lattice points (classic value noise).
+    /// </summary>
+    private static unsafe uint BuildCloudNoiseTex()
+    {
+        const int size = 256;
+        const int octaves = 6;
+        var rng = new Random(1337);
+
+        var accum   = new float[size * size];
+        float amp   = 0.5f;
+        float ampSum = 0f;
+        for (int o = 0; o < octaves; o++)
+        {
+            int lattice = 4 << o; // 4 … 128 — all divide 256 evenly for a clean seam
+            var grid = new float[lattice, lattice];
+            for (int y = 0; y < lattice; y++)
+                for (int x = 0; x < lattice; x++)
+                    grid[y, x] = (float)rng.NextDouble();
+
+            for (int y = 0; y < size; y++)
+            {
+                float gy = (float)y / size * lattice;
+                int   y0 = (int)gy % lattice, y1 = (y0 + 1) % lattice;
+                float fy = gy - MathF.Floor(gy);
+                fy = fy * fy * (3f - 2f * fy); // smoothstep
+
+                for (int x = 0; x < size; x++)
+                {
+                    float gx = (float)x / size * lattice;
+                    int   x0 = (int)gx % lattice, x1 = (x0 + 1) % lattice;
+                    float fx = gx - MathF.Floor(gx);
+                    fx = fx * fx * (3f - 2f * fx);
+
+                    float v00 = grid[y0, x0], v10 = grid[y0, x1];
+                    float v01 = grid[y1, x0], v11 = grid[y1, x1];
+                    float vx0 = v00 + (v10 - v00) * fx;
+                    float vx1 = v01 + (v11 - v01) * fx;
+                    accum[y * size + x] += (vx0 + (vx1 - vx0) * fy) * amp;
+                }
+            }
+            ampSum += amp;
+            amp    *= 0.5f;
+        }
+
+        var data = new byte[size * size];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (byte)(Math.Clamp(accum[i] / ampSum, 0f, 1f) * 255f);
+
+        uint tex = GlApi.Gl.GenTexture();
+        GlApi.Gl.BindTexture(TextureTarget.Texture2D, tex);
+        fixed (byte* p = data)
+            GlApi.Gl.TexImage2D(TextureTarget.Texture2D, 0, InternalFormat.R8,
+                size, size, 0, PixelFormat.Red, PixelType.UnsignedByte, p);
+        // Mipmapped + trilinear: near-horizon cloud rays sample this texture at
+        // extreme minification (the ray-plane distance blows up as elevation → 0),
+        // which without mips aliased into flickering vertical streaks at the horizon.
+        // MAX_LOD is capped: the cloud shader THRESHOLDS this noise, and deep mips
+        // average it toward its ~0.5 mean, which sits below typical coverage
+        // thresholds — unclamped, distant sky lost its clouds entirely.
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.LinearMipmapLinear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMaxLod, 3.0f);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Linear);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapS, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureWrapT, (int)TextureWrapMode.Repeat);
+        GlApi.Gl.GenerateMipmap(TextureTarget.Texture2D);
         GlApi.Gl.BindTexture(TextureTarget.Texture2D, 0);
         return tex;
     }
@@ -2577,6 +3402,7 @@ public class GlViewportControl : Panel
         foreach (var tex in _sceneTexRefs.Keys) tex.Dispose();
         _sceneTexRefs.Clear();
         _sceneObjects.Clear();
+        _spatialGrid.Clear();
         _sceneObjectTransformOverrides.Clear();
         _sceneObjectMotion.Clear();
         while (_pendingSceneVertexUpdates.TryDequeue(out _)) { }
@@ -2593,8 +3419,11 @@ public class GlViewportControl : Panel
         // and must not be applied to new objects that may share the same local IDs.
         foreach (var (patch, _) in _deferredPatches) patch.Bitmap?.Dispose();
         _deferredPatches.Clear();
+        foreach (var (patch, _) in _deferredHighPriorityPatches) patch.Bitmap?.Dispose();
+        _deferredHighPriorityPatches.Clear();
         int purged = 0;
         while (_pendingTexturePatches.TryDequeue(out var p)) { p.Bitmap?.Dispose(); purged++; }
+        while (_highPriorityTexturePatches.TryDequeue(out var hp)) { hp.Bitmap?.Dispose(); purged++; }
         // Release all consumed gate permits so future PatchSceneObjectTexture calls are not starved.
         if (purged > 0) ReleasePatchGate(_texturePatchGate, purged);
         RebuildSceneFlatLists();
@@ -2619,6 +3448,7 @@ public class GlViewportControl : Panel
             SceneTexRelease(emTex);
         }
         _sceneObjects.Remove(rootId);
+        _spatialGrid.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
         _sceneObjectMotion.TryRemove(rootId, out _);
         if (_flexiGpuDataMap.Remove(rootId, out var gpuDatas))
@@ -2690,6 +3520,7 @@ public class GlViewportControl : Panel
 
         foreach (var face in sub.Faces)
         {
+            face.RootSceneKey = rootId;
             int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices!.Length;
             GlMesh mesh;
             if (!face.IsFlexi && !subAnimated)
@@ -2751,6 +3582,14 @@ public class GlViewportControl : Panel
         // first appears at its current position rather than its build-time position.
         if (_sceneObjectTransformOverrides.TryRemove(rootId, out var parkedTransform))
             ApplyTransformToFaces(faces, parkedTransform);
+
+        // Feed the spatial grid after any parked transform has landed, so the entry
+        // reflects the object's final position rather than its build-time pose.
+        if (faces.Count > 0)
+        {
+            var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+            _spatialGrid.Upsert(rootId, aabbMin, aabbMax);
+        }
 
         // Register flexi-prim GPU resources when compute deformation is available.
         if (_flexiDeformer != null && sub.FlexiPrims.Length > 0)
@@ -2933,6 +3772,22 @@ public class GlViewportControl : Panel
         // waiting for the GL thread to drain an available slot.
         // Ownership of patch.Bitmap transfers to the viewport only after Enqueue succeeds.
         // Dispose it here if we exit early so the caller is never responsible for cleanup.
+        // NEVER block on the gate from the UI thread: ApplyTexturePatches — the only permit
+        // producer — runs on that same thread, so a blocking Wait here can never be
+        // satisfied and freezes the whole app. Reachable when a Progress<T> constructed
+        // with the Avalonia SynchronizationContext delivers a patch callback to the
+        // dispatcher. Hop to the pool and apply back-pressure there instead.
+        if (Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
+        {
+            var deferred = patch;
+            _ = System.Threading.Tasks.Task.Run(() =>
+            {
+                try { PatchSceneObjectTexture(deferred, ct); }
+                catch (OperationCanceledException) { /* bitmap already disposed inside */ }
+            });
+            return;
+        }
+
         // Capture the gate into a local: GlDeinit swaps the field for a fresh instance,
         // and Wait/Release must operate on the same object.
         var gate = _texturePatchGate;
@@ -2965,7 +3820,10 @@ public class GlViewportControl : Panel
         {
             if (patch.Bitmap != null)
                 patch = patch with { Bitmap = GlTexture.Preprocess(patch.Bitmap) };
-            _pendingTexturePatches.Enqueue(patch);
+            if (patch.HighPriority)
+                _highPriorityTexturePatches.Enqueue(patch);
+            else
+                _pendingTexturePatches.Enqueue(patch);
         }
         catch
         {
@@ -3045,6 +3903,11 @@ public class GlViewportControl : Panel
                 ApplyTransformToFaces(faces, to.Transform);
                 // A fresher matrix supersedes any parked value for this root.
                 _sceneObjectTransformOverrides.TryRemove(to.RootId, out _);
+                if (faces.Count > 0)
+                {
+                    var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+                    _spatialGrid.Upsert(to.RootId, aabbMin, aabbMax);
+                }
             }
             else
             {
@@ -3093,6 +3956,11 @@ public class GlViewportControl : Panel
                           * Matrix4x4.CreateFromQuaternion(rotation)
                           * Matrix4x4.CreateTranslation(position);
             ApplyTransformToFaces(faces, transform);
+            if (faces.Count > 0)
+            {
+                var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+                _spatialGrid.Upsert(sceneKey, aabbMin, aabbMax);
+            }
         }
     }
 
@@ -3108,6 +3976,28 @@ public class GlViewportControl : Panel
     }
 
     /// <summary>
+    /// Unions <see cref="PrimRenderFace.GetWorldAabb"/> over every face in
+    /// <paramref name="faces"/> (including flexi faces — an object's overall visibility
+    /// should account for their extents even though individual flexi faces bypass the
+    /// fine-grained per-face cull). Used to feed <see cref="_spatialGrid"/>. Returns a
+    /// degenerate (min > max) box for an empty list; callers must check <c>faces.Count</c>
+    /// first.
+    /// </summary>
+    private static (Vector3 Min, Vector3 Max) ComputeObjectWorldAabb(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> faces)
+    {
+        var min = new Vector3(float.MaxValue);
+        var max = new Vector3(float.MinValue);
+        foreach (var entry in faces)
+        {
+            entry.face.GetWorldAabb(out var fMin, out var fMax);
+            min = Vector3.Min(min, fMin);
+            max = Vector3.Max(max, fMax);
+        }
+        return (min, max);
+    }
+
+    /// <summary>
     /// Drains <see cref="_pendingTexturePatches"/> and for each patch uploads the bitmap
     /// to a new <see cref="GlTexture"/>, then replaces the corresponding slot in the
     /// relevant flat draw-list entry.  The old texture is disposed.  Called once per
@@ -3115,10 +4005,42 @@ public class GlViewportControl : Panel
     /// </summary>
     private void ApplyTexturePatches()
     {
+        // High-priority patches (self-avatar bake textures) bypass the budget below
+        // entirely and are drained unconditionally first. Volume here is always small
+        // (one avatar's bake layers), so this can't cause the frame-time blowout the
+        // budget exists to prevent — it's what lets the self-avatar's own skin/clothing
+        // appear promptly instead of waiting behind the rest of the scene's patches.
+        if (_deferredHighPriorityPatches.Count > 0)
+        {
+            var stillDeferredHp = new List<(SceneTexturePatch patch, int retriesLeft)>(_deferredHighPriorityPatches.Count);
+            foreach (var (patch, retriesLeft) in _deferredHighPriorityPatches)
+            {
+                if (TryApplyTexturePatch(patch)) { /* applied — drop it */ }
+                else if (retriesLeft > 0) stillDeferredHp.Add((patch, retriesLeft - 1));
+                else patch.Bitmap?.Dispose();
+            }
+            _deferredHighPriorityPatches.Clear();
+            _deferredHighPriorityPatches.AddRange(stillDeferredHp);
+        }
+        while (_highPriorityTexturePatches.TryDequeue(out var hpPatch))
+        {
+            ReleasePatchGate(_texturePatchGate);
+            if (!TryApplyTexturePatch(hpPatch))
+                _deferredHighPriorityPatches.Add((hpPatch, 900));
+        }
+
         // Cap texture uploads per frame across BOTH deferred retries and new patches.
         // Each TexImage2D call can take ~0.5–2 ms; 20/frame ≈ 10–40 ms max.
-        const int MaxPatchesPerFrame = 20;
-        int budget = MaxPatchesPerFrame;
+        // Split into two independent halves rather than one shared counter: a single
+        // shared budget let a large deferred backlog (built up during a scene-load
+        // burst) exhaust the whole frame's budget on retries — which run first — before
+        // the incoming-queue loop below ever got a look. That starved brand-new patches
+        // of their (often successful, since their object may have *just* finished
+        // uploading) first attempt, forcing them straight into the deferred list too and
+        // compounding the backlog every frame instead of letting it drain.
+        const int MaxDeferredPerFrame = 10;
+        const int MaxIncomingPerFrame = 10;
+        int budget = MaxDeferredPerFrame;
 
         // Retry deferred patches from previous frames first (they may have geometry now).
         if (_deferredPatches.Count > 0)
@@ -3132,9 +4054,18 @@ public class GlViewportControl : Panel
                     stillDeferred.Add((patch, retriesLeft));
                     continue;
                 }
+                // Consume a budget slot for this attempt whether or not it succeeds: a
+                // miss still runs TryApplyTexturePatch's fallback scan over every scene
+                // face (see below), so letting failures go unmetered turned this foreach
+                // into an unbounded full-list, full-scene rescan every single frame once
+                // the deferred backlog grew past a few thousand entries (observed
+                // deferredPatches climbing past 5000 during a scene-load burst) — the
+                // budget<=0 bailout above almost never tripped because successes, not
+                // attempts, were what decremented it.
+                budget--;
                 if (TryApplyTexturePatch(patch))
                 {
-                    budget--;  // consumed a slot whether or not geometry was found
+                    // applied — drop it, do not re-add to stillDeferred
                 }
                 else
                 {
@@ -3148,22 +4079,44 @@ public class GlViewportControl : Panel
             _deferredPatches.AddRange(stillDeferred);
         }
 
-        // Drain from the incoming queue using remaining budget.
-        while (budget > 0 && _pendingTexturePatches.TryDequeue(out var patch))
+        // Drain the incoming queue every frame, releasing one gate permit per dequeued
+        // patch, so permits keep flowing even when the apply budget is spent: producers
+        // block on the gate, and during a scene-load burst the deferred backlog can
+        // consume the entire budget for many consecutive frames — leaving patches in the
+        // queue starved the gate and stalled every texture-streaming thread on Wait.
+        // Bounded to TexturePatchQueueDepth (the gate's own capacity) per frame rather
+        // than looping until the queue is momentarily empty: releasing a permit here can
+        // immediately wake a waiting producer, which re-enqueues before this loop's next
+        // TryDequeue check, so an unbounded "drain completely" loop can chase a fast
+        // producer burst (e.g. mesh-cache hits during scene load) and hold the GL thread
+        // for the whole burst instead of one frame — the exact freeze this queue depth
+        // was meant to bound. Dequeuing is cheap; only TryApplyTexturePatch's GL upload
+        // costs real time, and that still respects the budget — over-budget patches are
+        // parked in _deferredPatches, where over-budget work lives anyway. Any remainder
+        // left in the queue is picked up next frame via the re-request below.
+        int drained = 0;
+        int incomingBudget = MaxIncomingPerFrame;
+        while (drained < TexturePatchQueueDepth && _pendingTexturePatches.TryDequeue(out var patch))
         {
-            budget--;
+            drained++;
             ReleasePatchGate(_texturePatchGate);  // a slot is now free; wake any waiting producer
-            if (!TryApplyTexturePatch(patch))
+            if (incomingBudget > 0 && TryApplyTexturePatch(patch))
             {
-                // Scene object not yet uploaded — defer and retry each frame. The budget is
-                // generous (~30 s at 30 Hz): with the disk cache, textures often decode long
-                // before their object's mesh build finishes (login bursts, avatar wearable
-                // fetches), and a dropped patch leaves the face permanently untextured.
+                incomingBudget--;
+            }
+            else
+            {
+                // Out of budget, or scene object not yet uploaded — defer and retry each
+                // frame. The retry allowance is generous (~30 s at 30 Hz): with the disk
+                // cache, textures often decode long before their object's mesh build
+                // finishes (login bursts, avatar wearable fetches), and a dropped patch
+                // leaves the face permanently untextured.
                 _deferredPatches.Add((patch, 900));
             }
         }
         // If the queue still has patches, request another render tick to continue draining.
-        if (!_pendingTexturePatches.IsEmpty || _deferredPatches.Count > 0)
+        if (!_pendingTexturePatches.IsEmpty || _deferredPatches.Count > 0
+            || !_highPriorityTexturePatches.IsEmpty || _deferredHighPriorityPatches.Count > 0)
             Avalonia.Threading.Dispatcher.UIThread.Post(_core.RequestNextFrameRendering);
 
         // One or more faces were upgraded to the alpha pass after their texture decoded.
@@ -3443,7 +4396,8 @@ public class GlViewportControl : Panel
     /// </summary>
     private void AppendVisibleAlpha(
         List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> src,
-        Frustum? frustum)
+        Frustum? frustum,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         if (!frustum.HasValue)
         {
@@ -3456,6 +4410,12 @@ public class GlViewportControl : Panel
             var face = src[i].face;
             if (!face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                {
+                    _stats.RecordFaceConsidered();
+                    _stats.RecordFaceCulled();
+                    continue;
+                }
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(f, amin, amax))
                 {
@@ -3478,8 +4438,17 @@ public class GlViewportControl : Panel
     private sealed class PrimShaderLocations
     {
         public readonly int SsaoMap, HasSsao, ScreenSize, SunDir, SunColor, AmbientColor, Instanced;
+        // Atmosphere-include uniforms (see atmosphere.glsl): inputs to prim.frag's
+        // atmHazeColor() distance-haze target, plus the per-metre fog density.
+        public readonly int AtmBlueHorizon, AtmHazeHorizon, AtmHazeDensity, AtmSunlight, AtmAmbient, FogDensity;
+        // Shadow-include uniforms (see shadow.glsl). Array uniforms (uPointLightPos etc.)
+        // are set directly by name via GlShader.SetVec3Array/SetFloatArray in DrawFaces —
+        // no clean cached-int-location equivalent exists for arrays, matching how the
+        // existing SSAO kernel upload works.
+        public readonly int ViewInv, ShadowsOn, LightVp, ShadowMap;
+        public readonly int PointLightCount, PointShadowCount, PointShadowMap0, PointShadowMap1;
         public readonly int Mvp, ModelView, NormalMat, Color, Fullbright, Glow, AlphaCutoff, Shiny, HasBump, AlphaMode;
-        public readonly int HasTexture, Albedo, IsPBR, HasMaterial;
+        public readonly int HasTexture, Albedo, IsPBR, HasMaterial, IsTerrain;
         public readonly int BaseColorFactor, MetallicFactor, RoughnessFactor, EmissiveFactor, BaseColorUvST, BaseColorUvRot;
         public readonly int HasNormalMap, NormalMap, PbrNormalUvST, PbrNormalUvRot;
         public readonly int HasMRMap, MetallicRoughnessMap, MRUvST, MRUvRot;
@@ -3494,6 +4463,20 @@ public class GlViewportControl : Panel
             SunDir               = s.GetLocation("uSunDir");
             SunColor             = s.GetLocation("uSunColor");
             AmbientColor         = s.GetLocation("uAmbientColor");
+            AtmBlueHorizon       = s.GetLocation("uBlueHorizon");
+            AtmHazeHorizon       = s.GetLocation("uHazeHorizon");
+            AtmHazeDensity       = s.GetLocation("uHazeDensity");
+            AtmSunlight          = s.GetLocation("uSunlightColor");
+            AtmAmbient           = s.GetLocation("uAmbient");
+            FogDensity           = s.GetLocation("uFogDensity");
+            ViewInv              = s.GetLocation("uViewInv");
+            ShadowsOn            = s.GetLocation("uShadowsOn");
+            LightVp              = s.GetLocation("uLightVp");
+            ShadowMap            = s.GetLocation("uShadowMap");
+            PointLightCount      = s.GetLocation("uPointLightCount");
+            PointShadowCount     = s.GetLocation("uPointShadowCount");
+            PointShadowMap0      = s.GetLocation("uPointShadowMap0");
+            PointShadowMap1      = s.GetLocation("uPointShadowMap1");
             Instanced            = s.GetLocation("uInstanced");
             Mvp                  = s.GetLocation("uMvp");
             ModelView            = s.GetLocation("uModelView");
@@ -3509,6 +4492,7 @@ public class GlViewportControl : Panel
             Albedo               = s.GetLocation("uAlbedo");
             IsPBR                = s.GetLocation("uIsPBR");
             HasMaterial          = s.GetLocation("uHasMaterial");
+            IsTerrain            = s.GetLocation("uIsTerrain");
             BaseColorFactor      = s.GetLocation("uBaseColorFactor");
             MetallicFactor       = s.GetLocation("uMetallicFactor");
             RoughnessFactor      = s.GetLocation("uRoughnessFactor");
@@ -3554,7 +4538,8 @@ public class GlViewportControl : Panel
         Frustum? frustum = null,
         FrameStatsTracker? stats = null,
         SkySettings? sky = null,
-        bool enableInstancing = false)
+        bool enableInstancing = false,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         shader.Use();
 
@@ -3593,6 +4578,22 @@ public class GlViewportControl : Panel
             shader.Set(L.SunDir,       sunViewDir);
             shader.Set(L.SunColor,     s.SunlightColor);
             shader.Set(L.AmbientColor, s.Ambient);
+
+            // Distance-haze inputs (atmosphere.glsl's atmHazeColor). Density 0
+            // disables the haze entirely — studio viewers (ShowSky=false) and the
+            // preferences toggle both land here. uAmbient (the include's uniform,
+            // distinct from prim.frag's own uAmbientColor) feeds atmLight(): missing
+            // it rendered fog gray-dark against a bright sky in ambient-dominant
+            // regions — the exact seam this shared model exists to prevent.
+            shader.Set(L.AtmBlueHorizon, s.BlueHorizon);
+            shader.Set(L.AtmHazeHorizon, s.HazeHorizon);
+            shader.Set(L.AtmHazeDensity, s.HazeDensity);
+            shader.Set(L.AtmSunlight,    s.SunlightColor);
+            shader.Set(L.AtmAmbient,     s.Ambient);
+            float fogDensity = ShowSky && AtmosphericsEnabled
+                ? 0.0012f * Math.Clamp(s.HazeDensity, 0f, 2f)
+                : 0f;
+            shader.Set(L.FogDensity, fogDensity);
         }
 
         // View inverse (upper-3×3) is constant for every face this frame. The per-face
@@ -3601,6 +4602,80 @@ public class GlViewportControl : Panel
         // PrimRenderFace.ModelInverse3).
         Matrix4x4.Invert(view, out var viewInvFull);
         var viewInv3 = new Matrix3x3(new Vector3(viewInvFull.M11, viewInvFull.M12, viewInvFull.M13), new Vector3(viewInvFull.M21, viewInvFull.M22, viewInvFull.M23), new Vector3(viewInvFull.M31, viewInvFull.M32, viewInvFull.M33));
+
+        // Shadow map + local point lights — constant for the whole draw list, set once
+        // here rather than per face (mirrors the sun/ambient/atmosphere block above).
+        // uViewInv is the full 4x4 (not just the 3x3 used for the normal matrix above):
+        // prim.vert recovers each vertex's world position from it for the shadow-map
+        // projection (vWorldPos = uViewInv * vec4(vViewPos,1)).
+        {
+            shader.Set(L.ViewInv, ref viewInvFull);
+
+            // Texture units 5-7 (shadow samplers) are bound whenever the underlying
+            // textures exist, independent of ShadowsEnabled/uShadowsOn/uPointShadowCount:
+            // prim.frag statically declares sampler2DShadow/samplerCubeShadow uniforms
+            // (via shadow.glsl) regardless of the toggle, and at least the D3D11 ANGLE
+            // backend requires every texture unit a shader statically references to have
+            // a resource bound before it will execute the draw call at all — even when
+            // uShadowsOn/uPointShadowCount make the shader's own dynamic branches skip
+            // ever sampling it. Leaving a unit unbound here previously made every
+            // _primShader draw call silently no-op (all scene geometry vanished, while
+            // sky/water — separate programs with no such uniforms — kept rendering).
+            // The *content* is only meaningful once ShadowsEnabled populates it; that
+            // gating still happens via uShadowsOn/uPointShadowCount below.
+            if (_shadowDepthTex != 0)
+            {
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture5);
+                GlApi.Gl.BindTexture(TextureTarget.Texture2D, _shadowDepthTex);
+                shader.Set(L.ShadowMap, 5);
+            }
+            if (_pointShadowTex[0] != 0)
+            {
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture6);
+                GlApi.Gl.BindTexture(TextureTarget.TextureCubeMap, _pointShadowTex[0]);
+                shader.Set(L.PointShadowMap0, 6);
+            }
+            if (_pointShadowTex[1] != 0)
+            {
+                GlApi.Gl.ActiveTexture(TextureUnit.Texture7);
+                GlApi.Gl.BindTexture(TextureTarget.TextureCubeMap, _pointShadowTex[1]);
+                shader.Set(L.PointShadowMap1, 7);
+            }
+
+            bool hasDirShadow = ShadowsEnabled && _hasDirShadow;
+            shader.Set(L.ShadowsOn, hasDirShadow ? 1 : 0);
+            if (hasDirShadow)
+                shader.Set(L.LightVp, ref _shadowLightVp);
+
+            shader.Set(L.PointLightCount, _litLightCount);
+            if (_litLightCount > 0)
+            {
+                for (int i = 0; i < _litLightCount; i++)
+                {
+                    _pointLightPosBuf[i]     = _litLights[i].WorldPosition;
+                    _pointLightColorBuf[i]   = _litLights[i].Color;
+                    _pointLightRadiusBuf[i]  = _litLights[i].Radius;
+                    _pointLightFalloffBuf[i] = _litLights[i].Falloff;
+                }
+                shader.SetVec3Array("uPointLightPos",   _pointLightPosBuf);
+                shader.SetVec3Array("uPointLightColor", _pointLightColorBuf);
+                shader.SetFloatArray("uPointLightRadius",  _pointLightRadiusBuf);
+                shader.SetFloatArray("uPointLightFalloff", _pointLightFalloffBuf);
+            }
+
+            int pointShadowCount = ShadowsEnabled ? _shadowLightCount : 0;
+            shader.Set(L.PointShadowCount, pointShadowCount);
+            if (pointShadowCount > 0)
+            {
+                for (int i = 0; i < pointShadowCount; i++)
+                {
+                    _pointShadowPosBuf[i] = _litLights[i].WorldPosition;
+                    _pointShadowFarBuf[i] = _litLights[i].Radius;
+                }
+                shader.SetVec3Array("uPointShadowPos", _pointShadowPosBuf);
+                shader.SetFloatArray("uPointShadowFar", _pointShadowFarBuf);
+            }
+        }
 
         bool canBatch = enableInstancing && _instanceDrawer != null;
 
@@ -3669,6 +4744,10 @@ public class GlViewportControl : Panel
                         stats?.RecordFaceConsidered();
                         if (frustum.HasValue)
                         {
+                            // Flexi faces never reach this loop (excluded from batch
+                            // eligibility above), so no IsFlexi gate is needed here.
+                            if (visibleSceneKeys != null && !visibleSceneKeys.Contains(jFace.RootSceneKey))
+                            { stats?.RecordFaceCulled(); continue; }
                             jFace.GetWorldAabb(out var jMin, out var jMax);
                             if (!FrustumCuller.IntersectsAabb(frustum.Value, jMin, jMax))
                             { stats?.RecordFaceCulled(); continue; }
@@ -3697,6 +4776,12 @@ public class GlViewportControl : Panel
             // would always reject them. Skip the cull for flexi faces — they are small and rare.
             if (frustum.HasValue && !face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                {
+                    stats?.RecordFaceCulled();
+                    _i++;
+                    continue;
+                }
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
                 {
@@ -3743,6 +4828,7 @@ public class GlViewportControl : Panel
             shader.Set(L.Shiny,     face.Shiny);
             shader.Set(L.HasBump,   face.HasBump);
             shader.Set(L.AlphaMode, (int)face.AlphaMode);
+            shader.Set(L.IsTerrain, face.IsTerrain);
 
             bool hasTex = tex != null;
             shader.Set(L.HasTexture, hasTex);
@@ -3834,6 +4920,17 @@ public class GlViewportControl : Panel
                 shader.Set(L.SpecColor,      face.SpecularColor);
                 shader.Set(L.SpecExp,        face.SpecularExponent);
                 shader.Set(L.EnvIntensity,   face.EnvironmentIntensity);
+
+                // Terrain's remaining two detail-texture slots (uMetallicRoughnessMap =
+                // detail3, uEmissiveMap = layer-select map) aren't wired by either branch
+                // above — the PBR branch above binds them for actual PBR data, and this
+                // legacy-material branch has no use for them otherwise. Only terrain sets
+                // mrTex/emTex on a non-PBR face, so this is a no-op for every other face.
+                if (face.IsTerrain)
+                {
+                    if (mrTex != null) { mrTex.Bind(3); shader.Set(L.MetallicRoughnessMap, 3); }
+                    if (emTex != null) { emTex.Bind(4); shader.Set(L.EmissiveMap, 4); }
+                }
             }
 
             mesh.Draw();
@@ -3846,7 +4943,6 @@ public class GlViewportControl : Panel
     }
 
     // Writes one instance's data into buf starting at instanceIdx * GlInstanceDrawer.InstanceFloats.
-    // Matrices are transposed from System.Numerics row-major to GL column-major order.
     private static unsafe void WriteInstanceData(
         float[] buf, int instanceIdx, PrimRenderFace face, ref Matrix4x4 view, ref Matrix4x4 proj)
     {
@@ -3854,13 +4950,18 @@ public class GlViewportControl : Panel
         var mv    = face.Transform * view;
         var mvp   = mv * proj;
 
-        // Column-major upload: System.Numerics is row-major, so transpose before copying raw bytes.
-        var mvpT = Matrix4x4.Transpose(mvp);
-        var mvT  = Matrix4x4.Transpose(mv);
+        // Copy the System.Numerics matrices RAW — no transpose. SN stores row-major with
+        // row-vector convention; GL reads attribute mat4 columns from consecutive vec4s,
+        // so the raw bytes arrive as the transposed (column-vector) matrix, which is
+        // exactly what prim.vert's `aInstMvp * vec4(pos,1)` needs. This mirrors the
+        // uniform path (GlShader.Set uploads raw with transpose:false). Transposing here
+        // fed the shader the row-vector matrix — translation in the bottom row made w
+        // position-dependent and exploded instanced geometry into fans (2026-07-11
+        // instancing regression, root cause).
         var mvpSpan = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvpT), 16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvp), 16);
         var mvSpan  = System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(
-            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mvT),  16);
+            ref System.Runtime.CompilerServices.Unsafe.As<Matrix4x4, float>(ref mv),  16);
         mvpSpan.CopyTo(buf.AsSpan(@base,      16));
         mvSpan.CopyTo( buf.AsSpan(@base + 16, 16));
 
@@ -3910,7 +5011,8 @@ public class GlViewportControl : Panel
         GlShader shader,
         ref Matrix4x4 view,
         ref Matrix4x4 proj,
-        Frustum? frustum)
+        Frustum? frustum,
+        HashSet<ulong>? visibleSceneKeys = null)
     {
         shader.Use();
         // Per-frame view inverse (upper-3×3); combined with each face's cached model
@@ -3922,6 +5024,8 @@ public class GlViewportControl : Panel
             // Same flexi exemption as DrawFaces: their cached AABB is bind-pose.
             if (frustum.HasValue && !face.IsFlexi)
             {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                    continue;
                 face.GetWorldAabb(out var amin, out var amax);
                 if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
                     continue;
@@ -3935,6 +5039,44 @@ public class GlViewportControl : Panel
             mesh.Draw();
         }
         shader.Unuse();
+    }
+
+    /// <summary>
+    /// Depth-only pass for a shadow map: one light-space MVP per face, no fragment
+    /// work (see shadow_depth.frag). Modeled directly on <see cref="DrawFacesNormal"/>
+    /// — non-instanced, since this is vertex/depth-only cost and the instancing
+    /// machinery isn't worth the complexity here. Face culling is the caller's
+    /// responsibility (the shadow orchestration disables it entirely, so single-sided
+    /// planes — common in SL content — don't leak light through as missing shadows).
+    /// </summary>
+    /// <returns>Number of faces actually drawn (post-culling) — used for diagnostics.</returns>
+    private static int DrawFacesDepth(
+        List<(GlMesh mesh, GlTexture? tex, GlTexture? normalTex, GlTexture? specTex, GlTexture? mrTex, GlTexture? emTex, PrimRenderFace face)> list,
+        GlShader shader,
+        ref Matrix4x4 lightViewProj,
+        Frustum? frustum,
+        HashSet<ulong>? visibleSceneKeys = null)
+    {
+        shader.Use();
+        int mvpLoc = shader.GetLocation("uMvp");
+        int drawn = 0;
+        foreach (var (mesh, _, _, _, _, _, face) in list)
+        {
+            if (frustum.HasValue && !face.IsFlexi)
+            {
+                if (visibleSceneKeys != null && !visibleSceneKeys.Contains(face.RootSceneKey))
+                    continue;
+                face.GetWorldAabb(out var amin, out var amax);
+                if (!FrustumCuller.IntersectsAabb(frustum.Value, amin, amax))
+                    continue;
+            }
+            var mvp = face.Transform * lightViewProj;
+            shader.Set(mvpLoc, ref mvp);
+            mesh.Draw();
+            drawn++;
+        }
+        shader.Unuse();
+        return drawn;
     }
 
     private static readonly Vector4 s_navColorWalkable        = new(0.00f, 0.80f, 0.00f, 0.50f);

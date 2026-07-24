@@ -104,30 +104,21 @@
                     <StackPanel Spacing="12" Margin="8">
 
                         <StackPanel Spacing="2">
-                            <TextBlock Text="Avalonia UI" FontWeight="SemiBold" />
-                            <TextBlock Text="Version 11.3.12  ·  MIT License" Opacity="0.8" FontSize="12" />
-                            <TextBlock Text="Copyright © 2013–2024 AvaloniaUI OÜ and contributors"
-                                       Opacity="0.7" FontSize="11" TextWrapping="Wrap" />
-                        </StackPanel>
-
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="LibreMetaverse (OpenMetaverse fork)" FontWeight="SemiBold" />
+                            <TextBlock Text="LibreMetaverse" FontWeight="SemiBold" />
                             <TextBlock Text="BSD 3-Clause License" Opacity="0.8" FontSize="12" />
                             <TextBlock Text="Copyright © 2006–2016, OpenMetaverse Contributors" Opacity="0.7" FontSize="11" TextWrapping="Wrap" />
                             <TextBlock Text="Copyright © 2016–2026, Sjofn LLC" Opacity="0.7" FontSize="11" />
                         </StackPanel>
 
                         <StackPanel Spacing="2">
-                            <TextBlock Text="CommunityToolkit.Mvvm" FontWeight="SemiBold" />
-                            <TextBlock Text="Version 8.4.2  ·  MIT License" Opacity="0.8" FontSize="12" />
-                            <TextBlock Text="Copyright © .NET Foundation and contributors" Opacity="0.7" FontSize="11" />
+                            <TextBlock Text="FMOD Engine" FontWeight="SemiBold" />
+                            <TextBlock Text="Proprietary (Firelight Technologies EULA)" Opacity="0.8" FontSize="12" />
+                            <TextBlock TextWrapping="Wrap" Opacity="0.7" FontSize="11"
+                                       Text="This product uses FMOD Studio/Core by Firelight Technologies Pty Ltd. Copyright © Firelight Technologies Pty Ltd., 2004–2026. fmod.com" />
                         </StackPanel>
 
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="Microsoft.Extensions.Logging" FontWeight="SemiBold" />
-                            <TextBlock Text="MIT License" Opacity="0.8" FontSize="12" />
-                            <TextBlock Text="Copyright © Microsoft Corporation" Opacity="0.7" FontSize="11" />
-                        </StackPanel>
+                        <TextBlock Text="NuGet Packages" FontWeight="SemiBold" Margin="0,4,0,0" />
+                        <StackPanel x:Name="LibrariesPanel" Spacing="12" />
 
                     </StackPanel>
                 </ScrollViewer>

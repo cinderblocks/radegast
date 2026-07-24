@@ -190,7 +190,14 @@ internal sealed class SceneBuildScheduler : IDisposable
             _queue.RemoveAt(idx);
         }
 
-        _ = RunAsync(factory);
+        // Always run the factory on the thread pool — never inline on the Enqueue caller.
+        // TryDrain is reachable from arbitrary threads (LMV network events, timer callbacks,
+        // and UI-thread seeding via Dispatcher.Post), and an async factory executes
+        // synchronously up to its first await. Inline execution ran tessellation on those
+        // threads and, worse, let Progress<T> instances constructed inside a build capture
+        // the Avalonia UI SynchronizationContext — which routed texture-patch callbacks to
+        // the UI thread, where the patch gate's blocking Wait deadlocked the dispatcher.
+        _ = Task.Run(() => RunAsync(factory));
     }
 
     private async Task RunAsync(Func<CancellationToken, Task> factory)

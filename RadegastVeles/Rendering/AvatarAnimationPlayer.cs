@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using LibreMetaverse;
 using LibreMetaverse.Assets;
+using Radegast.Veles.Core;
 using Quaternion = System.Numerics.Quaternion;
 
 namespace Radegast.Veles.Rendering;
@@ -38,8 +39,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
 {
     // ── Static BVH cache (shared across all player instances) ─────────────────────
 
-    private static readonly Dictionary<UUID, BinBVHAnimationReader> s_cache    = new();
-    private static readonly object                                   s_cacheLock = new();
+    private static readonly LruCache<UUID, BinBVHAnimationReader> s_cache = new(1024);
 
     // ── Per-instance animation state ──────────────────────────────────────────────
 
@@ -160,8 +160,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
             {
                 if (_active.Exists(e => e.Id == id)) continue;
 
-                BinBVHAnimationReader? reader;
-                lock (s_cacheLock) s_cache.TryGetValue(id, out reader);
+                s_cache.TryGetValue(id, out BinBVHAnimationReader? reader);
 
                 if (reader != null)
                 {
@@ -441,7 +440,7 @@ internal sealed class AvatarAnimationPlayer : IDisposable
         try { reader = new BinBVHAnimationReader(asset.AssetData); }
         catch { return; }
 
-        lock (s_cacheLock) s_cache.TryAdd(id, reader);
+        s_cache.AddOrUpdate(id, reader);
 
         lock (_lock)
         {

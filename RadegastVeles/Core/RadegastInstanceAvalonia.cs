@@ -157,7 +157,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
             (long)(low ? LowMemoryModePreset.AssetCacheMaxSizeMb : assetCacheMaxSizeMb) * 1024 * 1024;
         GridTextureHelper.SkBitmapCacheCap =
             low ? LowMemoryModePreset.SkBitmapCacheCap : skBitmapCacheCap;
-        TextureDownloadQueue.Instance.CacheCapacity =
+        MapTileCache.CacheCapacity =
             low ? LowMemoryModePreset.TextureBitmapCacheCapacity : textureBitmapCacheCapacity;
         TextureDiskCache.MaxCachedFiles =
             low ? LowMemoryModePreset.TextureDiskCacheMaxFiles : textureDiskCacheMaxFiles;

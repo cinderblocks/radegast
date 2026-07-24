@@ -38,6 +38,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private Stream? _parcelStream;
     private readonly object _parcelMusicLock = new();
     private bool _playing;
+    private bool _userStopped;
     private string _currentURL = string.Empty;
     private string _lastArtistTag = string.Empty;
 
@@ -47,13 +48,28 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     // --- Parcel streaming ---
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StreamTooltip))]
     private string _streamUrl = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NowPlayingText))]
+    [NotifyPropertyChangedFor(nameof(StreamTooltip))]
     private string _stationName = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(NowPlayingText))]
+    [NotifyPropertyChangedFor(nameof(StreamTooltip))]
     private string _songTitle = string.Empty;
+
+    /// <summary>Station + song title combined for compact "now playing" display.</summary>
+    public string NowPlayingText =>
+        (StationName, SongTitle) switch
+        {
+            ("", "") => string.Empty,
+            (_, "")  => StationName,
+            ("", _)  => SongTitle,
+            _        => $"{StationName} - {SongTitle}"
+        };
 
     [ObservableProperty]
     private bool _autoPlay;
@@ -62,7 +78,24 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private bool _keepUrl;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PlayPauseIcon))]
+    [NotifyPropertyChangedFor(nameof(StreamTooltip))]
     private bool _isPlaying;
+
+    /// <summary>Icon for the compact global play/pause toggle.</summary>
+    public string PlayPauseIcon => IsPlaying ? "⏸" : "▶";
+
+    /// <summary>Tooltip for the compact global play/pause toggle: stream URL + now-playing title.</summary>
+    public string StreamTooltip
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(StreamUrl)) return "No parcel audio stream configured";
+            return IsPlaying
+                ? (string.IsNullOrEmpty(NowPlayingText) ? $"Playing: {StreamUrl}" : $"{NowPlayingText}\n{StreamUrl}")
+                : $"Stopped: {StreamUrl}";
+        }
+    }
 
     // --- Volumes (0–100 integer for slider binding) ---
 
@@ -76,6 +109,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private int _uiVolume = 50;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SpeakerTooltip))]
     private int _masterVolume = 100;
 
     // --- Toggles ---
@@ -84,7 +118,15 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     private bool _objectSoundsEnabled = true;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SpeakerIcon))]
+    [NotifyPropertyChangedFor(nameof(SpeakerTooltip))]
     private bool _isMuted;
+
+    /// <summary>Icon for the compact global speaker/mute toggle.</summary>
+    public string SpeakerIcon => IsMuted ? "🔇" : "🔊";
+
+    /// <summary>Tooltip for the compact global speaker/mute toggle: current master volume.</summary>
+    public string SpeakerTooltip => IsMuted ? $"Muted ({MasterVolume}%)" : $"Volume: {MasterVolume}%";
 
     [ObservableProperty]
     private bool _mediaMetadataNotificationsEnabled;
@@ -288,7 +330,15 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
             if (!_playing) return;
             _currentURL = string.Empty;
             Stop();
+            _userStopped = true;
         }
+    }
+
+    /// <summary>Single-button toggle for the compact global play/pause control.</summary>
+    [RelayCommand]
+    private void ToggleStream()
+    {
+        if (IsPlaying) StopStream(); else PlayStream();
     }
 
     [RelayCommand]
@@ -347,6 +397,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     {
         Stop();
         _playing = true;
+        _userStopped = false;
         IsPlaying = true;
         _parcelStream = new Stream { Volume = StreamVolume / 100f };
         _parcelStream.OnStreamInfo += OnStreamInfo;
@@ -408,7 +459,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
                         Play();
                     }
                 }
-                else if (AutoPlay)
+                else if (AutoPlay && !_userStopped)
                 {
                     _currentURL = StreamUrl;
                     Play();

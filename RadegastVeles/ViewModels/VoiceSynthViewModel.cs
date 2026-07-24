@@ -84,7 +84,9 @@ public sealed partial class VoiceSynthViewModel : ObservableObject, IDisposable
     /// <summary>True when voice synth is ready and enabled.</summary>
     public bool CanSpeak => VoiceSynthEnabled && ModelLoaded;
 
-    public string ModelStatusText => ModelLoading ? "Loading model…"
+    public string ModelStatusText => !VoiceSynthService.NativeRuntimeAvailable
+            ? "Not available on 32-bit (x86) builds - install the 64-bit or ARM64 version to use text-to-speech."
+        : ModelLoading ? "Loading model…"
         : ModelLoaded  ? "Model ready"
         : string.IsNullOrWhiteSpace(ModelDirectory) ? "No model configured"
         : "Model not loaded";

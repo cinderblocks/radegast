@@ -82,6 +82,12 @@
                           ToolTip.Tip="Show nearby chat messages over the scene"
                           AutomationProperties.Name="Toggle nearby chat overlay" />
 
+                <Button Content="💬" FontSize="12" Padding="4,2"
+                        Command="{Binding ToggleChatInputCommand}"
+                        Margin="0,0,6,0"
+                        ToolTip.Tip="Open chat input (or press Enter in the viewport)"
+                        AutomationProperties.Name="Toggle viewport chat input" />
+
                 <CheckBox Content="Perf Overlay"
                           IsChecked="{Binding ShowPerfOverlay}"
                           VerticalAlignment="Center"
@@ -112,7 +118,7 @@
                                          Wireframe="{Binding Wireframe}"
                                          HorizontalAlignment="Stretch"
                                          VerticalAlignment="Stretch"
-                                         ToolTip.Tip="Alt+drag: orbit  |  Alt+Ctrl+drag: pan  |  Alt+Ctrl+Shift+drag: dolly  |  Scroll: zoom  |  Click: select/interact"
+                                         ToolTip.Tip="Alt+drag: orbit | Alt+Ctrl+drag: pan | Alt+Ctrl+Shift+drag: dolly | Scroll: zoom | Click: select/interact | Double-click ground: walk there | M: mouselook | Enter: chat"
                                          AutomationProperties.Name="3D scene viewport">
                 <rendering:GlViewportControl.ContextMenu>
                     <ContextMenu>
@@ -170,6 +176,19 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+            </Border>
+
+            <!-- Viewport chat input (bottom-left, above the read-only overlay above) -->
+            <Border IsVisible="{Binding ChatInputVisible}"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Bottom"
+                    Margin="8,0,0,64"
+                    Width="360">
+                <TextBox x:Name="ChatInputBox"
+                         Text="{Binding ChatInput}"
+                         PlaceholderText="Say something... (Enter=Say, Shift+Enter=Whisper, Ctrl+Enter=Shout, Esc=close)"
+                         KeyDown="ChatInputBox_KeyDown"
+                         AutomationProperties.Name="Viewport chat input" />
             </Border>
 
             <!-- Name-tag overlay: items positioned by the VM at avatar screen coords -->

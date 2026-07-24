@@ -227,6 +227,16 @@ public sealed class GlShader : IDisposable
             gl.Uniform3(loc + i, values[i].X, values[i].Y, values[i].Z);
     }
 
+    /// <summary>Upload a uniform float array (e.g. local-light radius/falloff).</summary>
+    public void SetFloatArray(string name, float[] values)
+    {
+        int loc = Loc(name);
+        if (loc < 0) return;
+        var gl = GlApi.Gl;
+        for (int i = 0; i < values.Length; i++)
+            gl.Uniform1(loc + i, values[i]);
+    }
+
     // System.Numerics Matrix4x4/Matrix3x3 are contiguous row-major float blocks.
     // Reinterpret them as a float span for Silk.NET's glUniformMatrix*fv (count = 1).
     public void Set(string name, ref Matrix4x4 m, bool transpose = false)

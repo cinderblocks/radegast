@@ -43,7 +43,7 @@
     <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
     <PackageReference Include="BugSplatDotNetStandard" Version="4.3.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.10" />
     <PackageReference Include="NetSparkleUpdater.SparkleUpdater" Version="3.1.0" />
     <PackageReference Include="NetSparkleUpdater.UI.Avalonia" Version="3.1.0" />
     <!-- sherpa-onnx: managed API + platform-specific native runtimes -->
@@ -54,11 +54,20 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.3" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.3" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.3" />
-    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.2.86" />
+    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.3.91" />
     <PackageReference Include="NVorbis" Version="0.10.5" />
     <PackageReference Include="SharpCompress" Version="0.49.1" />
     <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
   </ItemGroup>
+  <!-- Bakes every PackageReference's id+version into the assembly's metadata attributes so the
+       About dialog's Libraries tab (AboutWindow.axaml.cs, PopulateLibraries) can list them at
+       runtime without ever going stale. Metadata-batching (%(...)) only expands inside a
+       Target, so this has to run as a Target rather than a bare ItemGroup. -->
+  <Target Name="EmbedPackageReferenceMetadata" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <AssemblyMetadata Include="PackageRef_%(PackageReference.Identity)" Value="%(PackageReference.Version)" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <ProjectReference Include="..\Radegast.Core\Radegast.Core.csproj" />
     <ProjectReference Include="..\Radegast.Veles.PluginApi\Radegast.Veles.PluginApi.csproj" />

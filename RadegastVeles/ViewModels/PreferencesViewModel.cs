@@ -116,12 +116,12 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private int _textureBitmapCacheCapacity = 2500;
 
     /// <summary>Live entry count read from the LRU cache; refreshed every second by <see cref="_cacheCountTimer"/>.</summary>
-    public int TextureBitmapCacheCount => TextureDownloadQueue.Instance.CacheCount;
+    public int TextureBitmapCacheCount => MapTileCache.CacheCount;
 
     /// <summary>Fill fraction (0.0–1.0) of the bitmap cache: count ÷ capacity.</summary>
     public double TextureBitmapCacheFill =>
         TextureBitmapCacheCapacity > 0
-            ? Math.Min(1.0, (double)TextureDownloadQueue.Instance.CacheCount / TextureBitmapCacheCapacity)
+            ? Math.Min(1.0, (double)MapTileCache.CacheCount / TextureBitmapCacheCapacity)
             : 0.0;
 
     private readonly DispatcherTimer _cacheCountTimer;
@@ -293,6 +293,19 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     /// <summary>Enable planar water reflections in scene viewers. Default false (costs a full scene pre-pass).</summary>
     [ObservableProperty]
     private bool _waterReflectionsEnabled = false;
+
+    /// <summary>Atmospheric distance haze (aerial perspective) on terrain and prims. Default true (cheap).</summary>
+    [ObservableProperty]
+    private bool _atmosphericsEnabled = true;
+
+    /// <summary>
+    /// Real-time shadows: a directional shadow map from the sun/moon plus cubemap
+    /// shadows from the nearest in-world "Light" prims. Default false — a full extra
+    /// scene depth pass plus up to two small cube-face passes every frame is
+    /// meaningful extra GPU cost.
+    /// </summary>
+    [ObservableProperty]
+    private bool _shadowsEnabled = false;
 
     /// <summary>Scene viewer draw distance in metres (16–512). Default 96.</summary>
     [ObservableProperty]
@@ -663,6 +676,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["frustum_culling_enabled"].AsBoolean() : true;
         WaterReflectionsEnabled = s["water_reflections_enabled"].Type != OSDType.Unknown
             ? s["water_reflections_enabled"].AsBoolean() : false;
+        AtmosphericsEnabled = s["atmospherics_enabled"].Type != OSDType.Unknown
+            ? s["atmospherics_enabled"].AsBoolean() : true;
+        ShadowsEnabled = s["shadows_enabled"].Type != OSDType.Unknown
+            ? s["shadows_enabled"].AsBoolean() : false;
         SceneViewerDrawDistance = s["scene_draw_distance"].Type != OSDType.Unknown
             ? (float)s["scene_draw_distance"].AsReal() : 96f;
         FlexiAnimationEnabled = s["flexi_animation_enabled"].Type != OSDType.Unknown
@@ -836,6 +853,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["ssao_enabled"] = OSD.FromBoolean(SsaoEnabled);
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
         s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
+        s["atmospherics_enabled"] = OSD.FromBoolean(AtmosphericsEnabled);
+        s["shadows_enabled"] = OSD.FromBoolean(ShadowsEnabled);
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
         s["flexi_animation_enabled"] = OSD.FromBoolean(FlexiAnimationEnabled);
         FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;

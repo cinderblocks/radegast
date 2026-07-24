@@ -23,6 +23,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using Silk.NET.OpenGL;
+using SkiaSharp;
 
 namespace Radegast.Veles.Rendering;
 
@@ -68,6 +69,11 @@ internal sealed class AvatarCloudDriver : IDisposable
 
     private readonly Puff[] _puffs = new Puff[16];
     private readonly Random _rng   = new();
+
+    // The soft puff sprite only needs to be uploaded once: GlViewportControl's particle
+    // drain keeps the previously-uploaded GlTexture for a submission whose Texture is
+    // null, so every SubmitFrame after the first just reuses it.
+    private bool _spriteSubmitted;
 
     public AvatarCloudDriver(uint localId, Vector3 worldPos, GlViewportControl viewport)
     {
@@ -205,15 +211,51 @@ internal sealed class AvatarCloudDriver : IDisposable
             };
         }
 
+        // Soft radial-gradient sprite only needs to be submitted once — GlViewportControl's
+        // particle drain keeps the previously-uploaded GlTexture when Texture is null, so
+        // reuploading every frame would be wasted GPU work.
+        SKBitmap? sprite = null;
+        if (!_spriteSubmitted)
+        {
+            sprite = CreatePuffSprite();
+            _spriteSubmitted = true;
+        }
+
         // World translation applied via EmitterTransform (particles are emitter-relative).
         vp.SubmitParticles(_key, new ParticleRenderSubmission
         {
             EmitterTransform = Matrix4x4.CreateTranslation(wp),
             Particles        = verts,
-            Texture          = null,
+            Texture          = sprite,
             // SL cloud uses SRC_ALPHA / ONE_MINUS_SRC_ALPHA blending
             BlendSrc = (int)BlendingFactor.SrcAlpha,
             BlendDst = (int)BlendingFactor.OneMinusSrcAlpha,
         });
+    }
+
+    /// <summary>
+    /// Procedurally generates a small soft circular sprite (opaque white centre fading
+    /// to transparent edge) so cloud puffs render as fluffy blobs instead of the shader's
+    /// flat-quad fallback for an untextured particle. Ownership transfers to the caller —
+    /// GlViewportControl's particle-submission drain disposes it after the GL upload.
+    /// </summary>
+    private static SKBitmap CreatePuffSprite()
+    {
+        const int size = 32;
+        var bmp = new SKBitmap(size, size, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+        using (var canvas = new SKCanvas(bmp))
+        using (var paint = new SKPaint
+        {
+            Shader = SKShader.CreateRadialGradient(
+                new SKPoint(size / 2f, size / 2f), size / 2f,
+                [new SKColor(255, 255, 255, 255), new SKColor(255, 255, 255, 0)],
+                null, SKShaderTileMode.Clamp),
+            IsAntialias = true,
+        })
+        {
+            canvas.Clear(SKColors.Transparent);
+            canvas.DrawRect(0, 0, size, size, paint);
+        }
+        return bmp;
     }
 }

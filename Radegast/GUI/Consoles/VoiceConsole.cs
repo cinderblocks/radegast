@@ -88,11 +88,11 @@ namespace Radegast
         private readonly RadegastInstanceForms Instance;
         private INetCom NetCom => Instance.NetCom;
         private GridClient Client => Instance.Client;
-        private TabsConsole tabConsole;
 
         internal VoiceManager voice;
         private readonly Dictionary<UUID, ListViewItem> participantItems = new Dictionary<UUID, ListViewItem>();
         private readonly System.Windows.Forms.Timer pttTimer;
+        private readonly ToolTip reconnectToolTip = new ToolTip();
         private bool pttKeyHeld;
         private bool isConnected;
         private string selectedInputDevice = string.Empty;
@@ -115,7 +115,6 @@ namespace Radegast
             Instance = instance;
 
             NetCom.ClientLoginStatus += NetComClientLoginStatus;
-            Instance.MainForm.Load += MainForm_Load;
 
             foreach (var choice in PttKeyOptions)
                 pttKeyCombo.Items.Add(choice);
@@ -140,6 +139,15 @@ namespace Radegast
                 var candidate = new VoiceManager(Instance.Client);
                 if (!candidate.AudioDevice.IsAvailable)
                 {
+                    // VoiceManager's constructor unconditionally subscribes to
+                    // Client.Network.SimChanged/Self.TeleportProgress and registers CAPS event
+                    // callbacks regardless of audio availability — the only thing that ever
+                    // unhooks them is Disconnect(). Every retry here (Reconnect button, toggling
+                    // chkVoiceEnable, a fresh login while hardware is still unavailable) used to
+                    // leave `candidate` simply dropped, permanently leaking those subscriptions
+                    // against the live GridClient for the rest of the session.
+                    candidate.Disconnect();
+
                     // Leave voice null so the next Start() (e.g. next login, or the
                     // user re-toggling chkVoiceEnable) retries from scratch instead of
                     // being stuck thinking voice is already (half-)initialized.
@@ -176,6 +184,17 @@ namespace Radegast
         private async Task ConnectAsync()
         {
             if (voice == null) return;
+            if (!VoiceManager.IsVoiceAllowedAt(Client))
+            {
+                // Don't even attempt it — the server rejects the provisioning offer outright
+                // (HTTP 472) for a parcel/estate with voice disabled, so trying just wastes a
+                // round trip for a failure that isn't really "disconnected," it's "not permitted
+                // here." UpdateVoiceAvailability() (driven by voice.OnVoicePermissionChanged)
+                // keeps btnReconnect disabled for this same reason, but this guards the
+                // auto-connect-on-login path too, which doesn't go through the button.
+                UpdateVoiceAvailability(false);
+                return;
+            }
             SetStatus(VoiceStatus.Connecting);
             try
             {
@@ -184,6 +203,9 @@ namespace Radegast
             }
             catch
             {
+                // The failure reason itself is now logged inside VoiceSession.PostCapsWithRetries
+                // (and other library-level failure points) via IVoiceLogger — this catch only
+                // needs to update the UI, not duplicate that logging here.
                 SetStatus(VoiceStatus.Disconnected);
             }
         }
@@ -203,6 +225,31 @@ namespace Radegast
             _ = ConnectAsync();
         }
 
+        /// <summary>
+        /// Reflects whether voice is permitted at the current parcel/estate in the UI: disables
+        /// the Reconnect button (so there's nothing to click into a guaranteed rejection) and
+        /// shows why via tooltip, rather than letting the user hit a generic connect failure for
+        /// what is really a permissions issue.
+        /// </summary>
+        private void UpdateVoiceAvailability(bool allowed)
+        {
+            if (allowed)
+            {
+                btnReconnect.Enabled = true;
+                reconnectToolTip.SetToolTip(btnReconnect, string.Empty);
+                reconnectToolTip.SetToolTip(progressBar1, string.Empty);
+                return;
+            }
+
+            isConnected = false;
+            btnReconnect.Enabled = false;
+            const string reason = "Voice is disabled on this parcel or estate";
+            reconnectToolTip.SetToolTip(btnReconnect, reason);
+            reconnectToolTip.SetToolTip(progressBar1, reason);
+            progressBar1.Value = 0;
+            progressBar1.ForeColor = Color.Gray;
+        }
+
         private void RegisterVoiceEvents()
         {
             Instance.Names.NameUpdated += Names_NameUpdated;
@@ -210,6 +257,7 @@ namespace Radegast
             voice.PeerConnectionClosed += Voice_PeerConnectionClosed;
             voice.OnRegionTransitionCompleted += Voice_OnRegionTransitionCompleted;
             voice.OnRegionTransitionFailed += Voice_OnRegionTransitionFailed;
+            voice.OnVoicePermissionChanged += Voice_OnVoicePermissionChanged;
             voice.OnReprovisionSucceeded += Voice_OnReprovisionSucceeded;
             voice.OnReprovisionFailed += Voice_OnReprovisionFailed;
             voice.PeerJoined += Voice_PeerJoined;
@@ -225,6 +273,7 @@ namespace Radegast
             voice.PeerConnectionClosed -= Voice_PeerConnectionClosed;
             voice.OnRegionTransitionCompleted -= Voice_OnRegionTransitionCompleted;
             voice.OnRegionTransitionFailed -= Voice_OnRegionTransitionFailed;
+            voice.OnVoicePermissionChanged -= Voice_OnVoicePermissionChanged;
             voice.OnReprovisionSucceeded -= Voice_OnReprovisionSucceeded;
             voice.OnReprovisionFailed -= Voice_OnReprovisionFailed;
             voice.PeerJoined -= Voice_PeerJoined;
@@ -475,6 +524,11 @@ namespace Radegast
             }));
         }
 
+        private void Voice_OnVoicePermissionChanged(bool allowed)
+        {
+            BeginInvoke(new MethodInvoker(() => UpdateVoiceAvailability(allowed)));
+        }
+
         // Fired by the dead-channel watchdog (stuck ICE, failed peer connection, etc.) when it
         // rebuilds the session in place — distinct from a region crossing. The rebuilt session's
         // PeerConnectionReady event (already wired) is what actually flips the status back to
@@ -671,11 +725,6 @@ namespace Radegast
                 }
             }
             catch { }
-        }
-
-        private void MainForm_Load(object sender, EventArgs e)
-        {
-            tabConsole = Instance.TabConsole;
         }
 
         private void NetComClientLoginStatus(object sender, LoginProgressEventArgs e)

@@ -242,12 +242,20 @@ public sealed class TextureDownloadQueue : IDisposable
     /// <param name="url">The URL to download from.</param>
     /// <param name="onComplete">Called with the decoded Bitmap (or null on failure).</param>
     /// <param name="priority">Download priority.</param>
-    public void Enqueue(string key, string url, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal)
+    /// <param name="cacheResult">
+    /// If <see langword="false"/>, the decoded bitmap is handed to <paramref name="onComplete"/>
+    /// but is NOT stored in this queue's internal <see cref="LruBitmapCache"/>. Use this when the
+    /// caller maintains its own cache for the same bitmap (e.g. <see cref="MapTileCache"/>) — two
+    /// independent LRU caches disposing the same shared Bitmap instance on their own eviction
+    /// schedules races and can leave one cache holding a disposed object (this crashed
+    /// GridMapControl.Render with an ObjectDisposedException).
+    /// </param>
+    public void Enqueue(string key, string url, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal, bool cacheResult = true)
     {
-        if (_cache.TryGet(key, out var cached)) { onComplete(cached); return; }
+        if (cacheResult && _cache.TryGet(key, out var cached)) { onComplete(cached); return; }
         if (!_pending.TryAdd(key, 0)) return;
 
-        var item = new WorkItem(key, url, null, onComplete);
+        var item = new WorkItem(key, url, null, onComplete, cacheResult);
         var queue = priority switch
         {
             TexturePriority.High => _highQueue,
@@ -260,12 +268,13 @@ public sealed class TextureDownloadQueue : IDisposable
     /// <summary>
     /// Enqueue a raw-bytes image decode (no download needed).
     /// </summary>
-    public void EnqueueDecode(string key, byte[] data, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal)
+    /// <param name="cacheResult">See <see cref="Enqueue"/>.</param>
+    public void EnqueueDecode(string key, byte[] data, Action<Bitmap?> onComplete, TexturePriority priority = TexturePriority.Normal, bool cacheResult = true)
     {
-        if (_cache.TryGet(key, out var cached)) { onComplete(cached); return; }
+        if (cacheResult && _cache.TryGet(key, out var cached)) { onComplete(cached); return; }
         if (!_pending.TryAdd(key, 0)) return;
 
-        var item = new WorkItem(key, null, data, onComplete);
+        var item = new WorkItem(key, null, data, onComplete, cacheResult);
         var queue = priority switch
         {
             TexturePriority.High => _highQueue,
@@ -351,7 +360,11 @@ public sealed class TextureDownloadQueue : IDisposable
 
                 if (item == null || token.IsCancellationRequested) continue;
 
-                ProcessItem(item, token).GetAwaiter().GetResult();
+                // Fire-and-forget: ProcessItem's own download/decode semaphores already
+                // bound true concurrency (4 downloads / 2 decodes). Blocking this dispatcher
+                // thread on the result would cap in-flight items at WorkerCount instead,
+                // defeating the point of having independently-tunable download/decode limits.
+                _ = ProcessItemSafe(item, token);
             }
             catch (OperationCanceledException)
             {
@@ -366,6 +379,19 @@ public sealed class TextureDownloadQueue : IDisposable
                     try { item.OnComplete(null); } catch { }
                 }
             }
+        }
+    }
+
+    private async Task ProcessItemSafe(WorkItem item, CancellationToken token)
+    {
+        try
+        {
+            await ProcessItem(item, token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Queue is shutting down; matches ProcessLoop's prior behavior of not
+            // invoking OnComplete for in-flight items on cancellation.
         }
     }
 
@@ -398,7 +424,7 @@ public sealed class TextureDownloadQueue : IDisposable
                 {
                     using var ms = new MemoryStream(data);
                     bitmap = new Bitmap(ms);
-                    if (bitmap != null)
+                    if (bitmap != null && item.CacheResult)
                         _cache.Add(item.Key, bitmap);
                 }
                 finally
@@ -448,5 +474,6 @@ public sealed class TextureDownloadQueue : IDisposable
         string Key,
         string? Url,
         byte[]? RawData,
-        Action<Bitmap?> OnComplete);
+        Action<Bitmap?> OnComplete,
+        bool CacheResult);
 }

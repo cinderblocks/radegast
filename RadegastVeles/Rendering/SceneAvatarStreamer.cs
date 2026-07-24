@@ -63,6 +63,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
     // Used to skip rebuilds when only position/rotation changed.
     private readonly ConcurrentDictionary<uint, int> _lastVisualParamHash = new();
 
+    // avatar LocalID → cached ground-anchor correction from the most recent successful
+    // mesh build (see AvatarMeshBuilder.ComputeGroundAdjustment). SL's network position
+    // is not feet height; ResolveAvatarWorldTransform subtracts this to place the avatar
+    // on the ground instead of floating. 0 until the first build completes.
+    private readonly ConcurrentDictionary<uint, float> _groundAdjustment = new();
+
     /// <summary>Number of avatar build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
 
@@ -350,6 +356,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _dirty.Clear();
         _rendered.Clear();
         _lastVisualParamHash.Clear();
+        _groundAdjustment.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         foreach (var (id, cts) in _inflight)
         {
@@ -422,6 +429,10 @@ internal sealed class SceneAvatarStreamer : IDisposable
     {
         var now = Environment.TickCount64;
         _dirty.AddOrUpdate(localId, now, (_, _) => now);
+        // Show the cloud placeholder immediately — not gated by the debounce or the
+        // scheduler back-pressure check in ProcessDirty, which only need to protect the
+        // expensive real mesh build below. Matches SL's near-instant cloud appearance.
+        EnsurePlaceholderVisible(localId);
         // Self-avatar gets an immediate fire; everyone else waits for debounce.
         int delay = localId == _client.Self.LocalID ? SelfDebounceMs : DebounceMs;
         _debounceTimer.Change(delay, Timeout.Infinite);
@@ -432,6 +443,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _dirty.TryRemove(localId, out _);
         _rendered.TryRemove(localId, out _);
         _lastVisualParamHash.TryRemove(localId, out _);
+        _groundAdjustment.TryRemove(localId, out _);
         if (_inflight.TryRemove(localId, out var cts))
         {
             cts.Cancel();
@@ -478,6 +490,49 @@ internal sealed class SceneAvatarStreamer : IDisposable
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
 
+    /// <summary>
+    /// Submits a T-pose placeholder mesh (invisible; pick/touch + world-footprint target
+    /// only — see <see cref="AvatarPlaceholderFactory"/>) and starts the SL-style particle
+    /// cloud (<see cref="AvatarCloudDriver"/>) for <paramref name="localId"/>'s first
+    /// appearance, so the avatar has a visible presence immediately while the real
+    /// appearance loads. Idempotent — safe to call repeatedly (from both
+    /// <see cref="EnqueueDirty"/> and <see cref="EnqueueBuild"/>); no-ops once the avatar
+    /// is rendered or a cloud driver already exists.
+    /// </summary>
+    private void EnsurePlaceholderVisible(uint localId)
+    {
+        if (_disposed || _rendered.ContainsKey(localId)) return;
+        var sim = _client.Network.CurrentSim;
+        if (sim == null) return;
+
+        Avatar? av = localId == _client.Self.LocalID
+            ? (sim.ObjectsAvatars.TryGetValue(localId, out var selfAv) ? selfAv : null)
+              ?? new Avatar { LocalID = localId, Position = _client.Self.SimPosition,
+                              Rotation = _client.Self.SimRotation }
+            : (sim.ObjectsAvatars.TryGetValue(localId, out var otherAv) ? otherAv : null);
+        if (av == null) return;
+
+        var (rawPos, rawRot) = ResolveAvatarWorldTransform(sim, av);
+        if (rawPos == OmVector3.Zero) return;
+
+        var worldPos = new Vector3(rawPos.X, rawPos.Y, rawPos.Z);
+        var worldRot = new Quaternion(rawRot.X, rawRot.Y, rawRot.Z, rawRot.W);
+        var placeholder = AvatarPlaceholderFactory.Build(
+            $"ph:av:{localId}", worldPos, worldRot, avatarLocalId: localId);
+        _viewport.SubmitSceneObject(SceneKey(localId), placeholder);
+
+        // Start a particle cloud at the avatar position to show the
+        // SL-style "cloud" effect while appearance data is loading.
+        if (!_cloudDrivers.ContainsKey(localId))
+        {
+            var cloud = new AvatarCloudDriver(localId, worldPos, _viewport);
+            if (_cloudDrivers.TryAdd(localId, cloud))
+                cloud.Start();
+            else
+                cloud.Dispose(); // race: another thread already added one
+        }
+    }
+
     private void EnqueueBuild(uint localId)
     {
         if (_disposed) return;
@@ -518,42 +573,10 @@ internal sealed class SceneAvatarStreamer : IDisposable
             ? SceneBuildScheduler.ScoreWithFrustum(distSq, SceneBuildScheduler.AvatarMultiplier, eyePos, camFwd, avObjPos)
             : SceneBuildScheduler.Score(distSq, SceneBuildScheduler.AvatarMultiplier);
 
-        // Progressive geometry: submit a T-pose placeholder immediately so the
-        // avatar occupies its correct world-space footprint while BuildAsync runs.
-        // Only for first appearance — updates to already-visible avatars keep the
-        // real geometry until the new build finishes.
-        if (!_rendered.ContainsKey(localId) && sim != null)
-        {
-            Avatar? av = localId == _client.Self.LocalID
-                ? (sim.ObjectsAvatars.TryGetValue(localId, out var selfAv) ? selfAv : null)
-                  ?? new Avatar { LocalID = localId, Position = _client.Self.SimPosition,
-                                  Rotation = _client.Self.SimRotation }
-                : (sim.ObjectsAvatars.TryGetValue(localId, out var otherAv) ? otherAv : null);
-
-            if (av != null)
-            {
-                var (rawPos, rawRot) = ResolveAvatarWorldTransform(sim, av);
-                if (rawPos != OmVector3.Zero)
-                {
-                    var worldPos = new Vector3(rawPos.X, rawPos.Y, rawPos.Z);
-                    var worldRot = new Quaternion(rawRot.X, rawRot.Y, rawRot.Z, rawRot.W);
-                    var placeholder = AvatarPlaceholderFactory.Build(
-                        $"ph:av:{localId}", worldPos, worldRot, avatarLocalId: localId);
-                    _viewport.SubmitSceneObject(SceneKey(localId), placeholder);
-
-                    // Start a particle cloud at the avatar position to show the
-                    // SL-style "cloud" effect while appearance data is loading.
-                    if (!_cloudDrivers.ContainsKey(localId))
-                    {
-                        var cloud = new AvatarCloudDriver(localId, worldPos, _viewport);
-                        if (_cloudDrivers.TryAdd(localId, cloud))
-                            cloud.Start();
-                        else
-                            cloud.Dispose(); // race: another thread already added one
-                    }
-                }
-            }
-        }
+        // Progressive geometry: normally already submitted immediately from EnqueueDirty
+        // (see EnsurePlaceholderVisible); this is a retry in case that first attempt had
+        // no avatar position data yet (e.g. the very first packet).
+        EnsurePlaceholderVisible(localId);
 
         var token = cts.Token;
         _scheduler.Enqueue(priority, _ => BuildAvatarAsync(localId, token));
@@ -606,13 +629,39 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
+                    {
                         patch.Bitmap?.Dispose();
-                    else
+                        return;
+                    }
+                    try
+                    {
+                        // The self-avatar's own bake textures get priority so they aren't
+                        // stuck waiting behind the rest of the scene's texture-patch backlog
+                        // (which can run into the tens of thousands of entries during a busy
+                        // scene load) — see SceneTexturePatch.HighPriority.
+                        if (localId == _client.Self.LocalID)
+                            patch = patch with { HighPriority = true };
                         _viewport.PatchSceneObjectTexture(patch, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Token was cancelled between the check above and PatchSceneObjectTexture's
+                        // internal gate.Wait(ct) — the bitmap was already disposed inside that call.
+                        // Progress<T> invokes this callback on a raw ThreadPool thread when
+                        // constructed off the UI thread, so an unhandled exception here would
+                        // crash the whole process rather than just failing this build.
+                    }
                 }))
                 .ConfigureAwait(false);
 
             if (token.IsCancellationRequested) return;
+
+            // Cache this avatar's ground-anchor correction from the freshly-built skeleton,
+            // then re-resolve worldPos/worldRot so this build places the mesh using the fresh
+            // value instead of whatever was cached (or 0) when the position was first read above.
+            _groundAdjustment[localId] = AvatarMeshBuilder.ComputeGroundAdjustment(result.BoneTransforms);
+            (rawWorldPos, worldRot) = ResolveAvatarWorldTransform(sim, avatarObj);
+            worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
             // Apply world-space position so the avatar stands at its sim-local coords.
             var submission = result.Submission;
@@ -726,18 +775,25 @@ internal sealed class SceneAvatarStreamer : IDisposable
         Simulator sim, Avatar avatar)
     {
         float hoverZ = avatar.HoverHeight.Z;
+        // SL's network position is not feet height — see AvatarMeshBuilder.ComputeGroundAdjustment.
+        // Subtracted uniformly (self, other, seated) so the avatar stands on the ground instead
+        // of floating by roughly its own pelvis-to-head-top distance. 0 (no correction) until this
+        // avatar's first mesh build completes and caches its real value.
+        float groundAdj = _groundAdjustment.TryGetValue(avatar.LocalID, out var adj) ? adj : 0f;
 
         if (avatar.LocalID == _client.Self.LocalID)
         {
-            var pos = _client.Self.SimPosition;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
-            return (pos, _client.Self.SimRotation);
+            // SimPosition already folds in self.HoverHeight.Z for the not-sitting case
+            // (see AgentManager.SimPosition) — adding hoverZ again here would double it.
+            var selfPos = _client.Self.SimPosition;
+            selfPos = new OmVector3(selfPos.X, selfPos.Y, selfPos.Z - groundAdj);
+            return (selfPos, _client.Self.SimRotation);
         }
 
         if (avatar.ParentID == 0)
         {
             var pos = avatar.Position;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ - groundAdj);
             return (pos, avatar.Rotation);
         }
 
@@ -746,7 +802,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (!sim.ObjectsPrimitives.TryGetValue(avatar.ParentID, out var seatPrim))
         {
             var pos = avatar.Position;
-            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ);
+            pos = new OmVector3(pos.X, pos.Y, pos.Z + hoverZ - groundAdj);
             return (pos, avatar.Rotation);
         }
 
@@ -769,6 +825,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             }
         }
 
+        worldPos = new OmVector3(worldPos.X, worldPos.Y, worldPos.Z - groundAdj);
         return (worldPos, worldRot);
     }
 

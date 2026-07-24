@@ -15,8 +15,50 @@
         AutomationProperties.Name="Radegast Veles main window">
 
     <DockPanel>
-        <!-- Menu bar -->
-        <Menu DockPanel.Dock="Top" AutomationProperties.Name="Main menu">
+        <!-- Menu bar, with compact global audio controls docked to the right -->
+        <DockPanel DockPanel.Dock="Top">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="2"
+                        Margin="6,0" VerticalAlignment="Center"
+                        AutomationProperties.Name="Global audio controls">
+                <!-- Parcel audio play/pause -->
+                <Button Content="{Binding Media.PlayPauseIcon}"
+                        Command="{Binding Media.ToggleStreamCommand}"
+                        IsEnabled="{Binding Media.SoundSystemAvailable}"
+                        Background="Transparent" BorderThickness="0"
+                        MinWidth="28" MinHeight="28" Padding="0" FontSize="13"
+                        ToolTip.Tip="{Binding Media.StreamTooltip}"
+                        AutomationProperties.Name="Toggle parcel audio playback" />
+                <!-- Master volume / mute -->
+                <Button Content="{Binding Media.SpeakerIcon}"
+                        Background="Transparent" BorderThickness="0"
+                        MinWidth="28" MinHeight="28" Padding="0" FontSize="13"
+                        ToolTip.Tip="{Binding Media.SpeakerTooltip}"
+                        AutomationProperties.Name="Audio volume and mute">
+                    <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedRight">
+                            <StackPanel Width="180" Spacing="8" Margin="4">
+                                <Grid ColumnDefinitions="*,40">
+                                    <Slider Grid.Column="0" Minimum="0" Maximum="100"
+                                            Value="{Binding Media.MasterVolume}"
+                                            AutomationProperties.Name="Master volume slider" />
+                                    <TextBlock Grid.Column="1" Text="{Binding Media.MasterVolume, StringFormat='{}{0}%'}"
+                                               VerticalAlignment="Center" HorizontalAlignment="Right" />
+                                </Grid>
+                                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                        Command="{Binding Media.ToggleMuteCommand}"
+                                        AutomationProperties.Name="Toggle mute all audio">
+                                    <Panel>
+                                        <TextBlock Text="Unmute" IsVisible="{Binding Media.IsMuted}" />
+                                        <TextBlock Text="Mute" IsVisible="{Binding !Media.IsMuted}" />
+                                    </Panel>
+                                </Button>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+            <!-- Menu bar -->
+            <Menu AutomationProperties.Name="Main menu">
             <MenuItem Header="_File" AutomationProperties.Name="File menu">
                 <MenuItem Header="_Preferences..." AutomationProperties.Name="Preferences"
                           Click="OnPreferencesClick" />
@@ -74,7 +116,7 @@
                           Click="OnShowMarketplaceClick" />
                 <Separator />
                 <MenuItem Header="_Scene Viewer" AutomationProperties.Name="Open 3D scene viewer"
-                          IsEnabled="{Binding !IsLowMemoryModeEnabled}"
+                          IsEnabled="{Binding CanOpenSceneViewer}"
                           Click="OnShowSceneViewerClick" />
                 <Separator />
                 <MenuItem Header="Teleport _Home" AutomationProperties.Name="Teleport home"
@@ -130,7 +172,8 @@
                 <MenuItem Header="_About Radegast Veles..." AutomationProperties.Name="About Radegast Veles"
                           Click="OnAboutClick" />
             </MenuItem>
-        </Menu>
+            </Menu>
+        </DockPanel>
 
         <!-- Status bar -->
         <Grid DockPanel.Dock="Bottom" ColumnDefinitions="*,Auto,Auto" Margin="4,2" AutomationProperties.Name="Status bar">
@@ -231,10 +274,17 @@
                 <!-- Separator dot when connected -->
                 <TextBlock Text="·" VerticalAlignment="Center" Opacity="0.4"
                            IsVisible="{Binding Voice.IsConnected}" />
+                <!-- Connection status indicator: green = connected, amber = connecting/reconnecting, red = last attempt failed, gray = idle -->
+                <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                         Fill="{Binding Voice.StatusIndicatorColor}"
+                         ToolTip.Tip="{Binding Voice.StatusText}"
+                         AutomationProperties.Name="{Binding Voice.StatusText, StringFormat='Voice status: {0}'}" />
                 <!-- Connect / disconnect -->
                 <Button Content="{Binding Voice.ConnectLabel}"
                         Command="{Binding Voice.ToggleConnectCommand}"
+                        IsEnabled="{Binding Voice.CanToggleConnect}"
                         MinHeight="20" Padding="6,1" FontSize="11"
+                        ToolTip.Tip="{Binding Voice.ConnectButtonTooltip}"
                         AutomationProperties.Name="{Binding Voice.ConnectLabel}" />
             </StackPanel>
 
@@ -447,6 +497,10 @@
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal" Spacing="4">
                         <TextBlock Text="Scene Viewer" VerticalAlignment="Center" />
+                        <Button Content="⏏" FontSize="10" Padding="2"
+                                Click="OnUndockSceneViewerClick"
+                                ToolTip.Tip="Detach to its own window (closes and reopens fresh there)"
+                                AutomationProperties.Name="Detach scene viewer panel" />
                         <Button Content="✕" FontSize="10" Padding="2"
                                 Click="OnCloseSceneViewerClick"
                                 ToolTip.Tip="Close scene viewer (releases GPU resources)"

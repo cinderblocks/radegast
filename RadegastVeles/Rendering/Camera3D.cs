@@ -53,11 +53,23 @@ public sealed class Camera3D
     public float Near       { get; set; } = 0.01f;
     public float Far        { get; set; } = 500f;
 
+    /// <summary>
+    /// True when the camera is in first-person mouselook: the eye is pinned to
+    /// <see cref="MouselookEye"/> (the avatar's head) and looks outward in the
+    /// <see cref="Yaw"/>/<see cref="Pitch"/> direction, instead of orbiting around
+    /// <see cref="Target"/> at <see cref="Distance"/>.
+    /// </summary>
+    public bool MouselookMode { get; set; }
+
+    /// <summary>Avatar eye-height world position used as the camera eye while <see cref="MouselookMode"/> is active.</summary>
+    public Vector3 MouselookEye { get; set; }
+
     /// <summary>Computed eye position in world space (Z-up convention).</summary>
     public Vector3 EyePosition
     {
         get
         {
+            if (MouselookMode) return MouselookEye;
             float y = Yaw   * (MathF.PI / 180f);
             float p = Pitch * (MathF.PI / 180f);
             return Target + new Vector3(
@@ -67,15 +79,31 @@ public sealed class Camera3D
         }
     }
 
+    // Point the view matrix looks toward. In orbit mode this is Target (the eye orbits
+    // around it); in mouselook it is a point one unit out from the eye in the Yaw/Pitch
+    // facing direction (the eye is fixed, so here Yaw/Pitch describe where we're looking
+    // rather than where the eye sits relative to a fixed target).
+    private Vector3 LookTarget
+    {
+        get
+        {
+            if (!MouselookMode) return Target;
+            float y = Yaw   * (MathF.PI / 180f);
+            float p = Pitch * (MathF.PI / 180f);
+            var dir = new Vector3(MathF.Cos(p) * MathF.Cos(y), MathF.Cos(p) * MathF.Sin(y), MathF.Sin(p));
+            return MouselookEye + dir;
+        }
+    }
+
     /// <summary>
-    /// Unit vector pointing from the eye position toward <see cref="Target"/>.
+    /// Unit vector pointing from the eye position toward the look target.
     /// Used by the interest-list scheduler to boost priority for objects in front of the camera.
     /// </summary>
     public Vector3 ForwardDirection
     {
         get
         {
-            var dir = Target - EyePosition;
+            var dir = LookTarget - EyePosition;
             float len = dir.Length();
             return len > 1e-5f ? dir / len : -Vector3.UnitX;
         }
@@ -83,7 +111,7 @@ public sealed class Camera3D
 
     // Z-up view matrix; matches Second Life's coordinate system.
     public Matrix4x4 GetViewMatrix() =>
-        Matrix4x4.CreateLookAt(EyePosition, Target, Vector3.UnitZ);
+        Matrix4x4.CreateLookAt(EyePosition, LookTarget, Vector3.UnitZ);
 
     public Matrix4x4 GetProjectionMatrix(float aspect) =>
         Matrix4x4.CreatePerspectiveFieldOfView(

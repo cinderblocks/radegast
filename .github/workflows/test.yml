@@ -28,14 +28,6 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Setup MSBuild
-        shell: pwsh
-        run: |
-          $msbuildPath = & "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
-          $msbuildDir = Split-Path $msbuildPath -Parent
-          echo "$msbuildDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Host "Added MSBuild to PATH: $msbuildDir"
-
       - name: Install WiX Toolset
         shell: pwsh
         run: |
@@ -56,14 +48,11 @@ jobs:
           Write-Host "Setting TAG_VERSION to $tagVersion"
           echo "TAG_VERSION=$tagVersion" | Out-File -FilePath $Env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Restore NuGet packages
-        run: nuget restore radegast.sln
-
       - name: Restore for platform-specific build
-        run: msbuild radegast.sln /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+        run: dotnet restore radegast.sln -p:Configuration=${{ matrix.configuration }} -p:Platform=${{ matrix.platform }}
 
       - name: Build solution
-        run: msbuild radegast.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
+        run: dotnet build radegast.sln -c ${{ matrix.configuration }} -p:Platform=${{ matrix.platform }} --no-restore
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

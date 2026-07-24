@@ -53,7 +53,29 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [NotifyPropertyChangedFor(nameof(ConnectLabel))]
     [NotifyPropertyChangedFor(nameof(PushToTalkButtonVisible))]
     [NotifyPropertyChangedFor(nameof(MicMuteButtonVisible))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
     private bool _isConnected;
+
+    /// <summary>
+    /// True while a connect/reconnect attempt is actively in flight — covers both an explicit
+    /// Join Voice click and an automatic post-region-crossing reprovision (set from
+    /// <see cref="OnRegionTransitionCompleted"/> when it lands on "still not connected yet").
+    /// Drives the "Connecting…" indicator and disables Join Voice so an impatient repeat click
+    /// can't fire a second overlapping connect attempt while one is already running.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ConnectLabel))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
+    private bool _isConnecting;
+
+    /// <summary>True when the most recent connect/reconnect attempt ended in a genuine failure (not just "someone else already has the lock").</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StatusIndicatorColor))]
+    private bool _hasConnectionError;
 
     /// <summary>True when the local microphone is muted.</summary>
     [ObservableProperty]
@@ -68,6 +90,18 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsVisibleInUI))]
     private bool _voiceEnabled = true;
+
+    /// <summary>
+    /// True when the current parcel/estate actually permits voice. Mirrors
+    /// <see cref="VoiceManager.VoiceAllowedHere"/>; kept in sync via <c>OnVoicePermissionChanged</c>
+    /// so the Join Voice control can be disabled instead of letting the user press it and get a
+    /// confusing generic connect failure for what is really a permissions issue.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ConnectLabel))]
+    [NotifyPropertyChangedFor(nameof(CanToggleConnect))]
+    [NotifyPropertyChangedFor(nameof(ConnectButtonTooltip))]
+    private bool _isVoiceAllowedHere = true;
 
     /// <summary>When true, the mic is always muted and the PTT button must be held to speak.</summary>
     [ObservableProperty]
@@ -91,8 +125,33 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [ObservableProperty]
     private bool _isMicTestActive;
 
-    public string ConnectLabel => IsConnected ? "Leave Voice" : "Join Voice";
+    public string ConnectLabel => IsConnecting ? "Cancel" : IsConnected ? "Leave Voice" : IsVoiceAllowedHere ? "Join Voice" : "Voice Unavailable";
     public string MicIcon      => IsMicMuted  ? "Muted"        : "Talk";
+
+    /// <summary>
+    /// Disables the control only when voice isn't permitted here and nothing is connected or in
+    /// flight — leaving/cancelling is always allowed once connected or while connecting (e.g. a
+    /// still-active session from before crossing into a no-voice parcel, or bailing out of a
+    /// stuck connect attempt).
+    /// </summary>
+    public bool CanToggleConnect => IsConnected || IsConnecting || IsVoiceAllowedHere;
+
+    /// <summary>Tooltip for the Join/Leave/Cancel Voice button, explaining why it's disabled if it is.</summary>
+    public string ConnectButtonTooltip => IsConnecting
+        ? "Cancel connecting to voice"
+        : CanToggleConnect
+            ? (IsConnected ? "Leave voice" : "Join voice")
+            : "Voice is disabled on this parcel or estate";
+
+    /// <summary>
+    /// Simple traffic-light color for a compact connection-status dot: green = connected,
+    /// amber = connecting/reconnecting, red = the last attempt genuinely failed, gray = idle.
+    /// </summary>
+    public string StatusIndicatorColor =>
+        IsConnected        ? "#33AA33"
+        : IsConnecting     ? "#DDAA22"
+        : HasConnectionError ? "#CC3333"
+        : "#888888";
 
     /// <summary>Label displayed on the PTT button (mic emoji + state).</summary>
     public string PttButtonLabel => IsPushToTalking ? "🎙 Live" : "🎙 Talk";
@@ -316,8 +375,27 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     [RelayCommand]
     private async Task ToggleConnect()
     {
-        if (IsConnected) Disconnect();
-        else await Connect();
+        if (IsConnected)
+        {
+            Disconnect();
+        }
+        else if (IsConnecting)
+        {
+            // The in-flight VoiceManager connect/reprovision attempt holds its region-transition
+            // lock and is actively mutating session state for its whole retry loop — calling
+            // VoiceManager.Disconnect() concurrently with it would race that same state
+            // unsynchronized (Disconnect() doesn't take the lock at all). So "Cancel" only gives
+            // up on watching this attempt from the UI; it can't safely abort the attempt itself.
+            // If it succeeds a few seconds later anyway, OnConnectionReady will still fire and
+            // correctly flip the UI back to Connected.
+            IsConnecting = false;
+            HasConnectionError = false;
+            StatusText = "Cancelled";
+        }
+        else
+        {
+            await Connect();
+        }
     }
 
     [RelayCommand]
@@ -418,31 +496,75 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     private async Task Connect()
     {
         if (_voice == null || !IsAvailable) return;
+        if (IsConnecting) return; // already trying — ignore a repeat click instead of racing it
+        if (!_voice.VoiceAllowedHere)
+        {
+            // Mirrors the button already being disabled via CanToggleConnect — reached only if
+            // something invokes Connect() directly (e.g. TryAutoConnectAsync) rather than via
+            // the button click.
+            StatusText = "Voice unavailable in this area";
+            return;
+        }
+        IsConnecting = true;
+        HasConnectionError = false;
         StatusText = "Connecting...";
         try
         {
             bool ok = await _voice.ConnectPrimaryRegionAsync();
+            // If the user hit "Cancel" while this was in flight, IsConnecting is already false
+            // and Disconnect()/the cancel handler already set the status — don't stomp it with a
+            // stale result from the attempt that was just abandoned.
+            if (!IsConnecting) return;
             if (!ok)
             {
-                StatusText = "Failed to connect";
-                IsConnected = false;
+                if (_voice.IsTransitioning)
+                {
+                    // Not a real failure — a region-crossing reprovision (or another connect
+                    // attempt) already holds the connect lock, so this call was just dropped.
+                    // Leave the "Connecting..." status up rather than reporting a false failure
+                    // that would invite the user to click Join Voice again and repeat this.
+                    StatusText = "Connecting...";
+                }
+                else
+                {
+                    StatusText = _voice.VoiceAllowedHere ? "Failed to connect" : "Voice unavailable in this area";
+                    HasConnectionError = _voice.VoiceAllowedHere;
+                    IsConnected = false;
+                    IsConnecting = false;
+                }
+                return;
             }
+            // ConnectPrimaryRegionAsync() returning true only means the SDP offer/answer was
+            // provisioned — the ICE handshake for the new session is still in flight at this
+            // point and can take several more seconds (see OnConnectionReady). Deliberately leave
+            // IsConnecting = true here (same as the region-crossing "Reconnecting…" path) so the
+            // button stays on "Cancel" instead of flipping back to a clickable "Join Voice" that
+            // would tear down this still-forming session and restart the whole attempt.
+            StatusText = "Connecting...";
         }
         catch (Exception ex)
         {
+            if (!IsConnecting) return;
+            // The failure reason itself is now logged inside VoiceSession.PostCapsWithRetries
+            // (and other library-level failure points) via IVoiceLogger — this catch only needs
+            // to update the UI, not duplicate that logging here.
             StatusText  = $"Error: {ex.Message}";
+            HasConnectionError = true;
             IsConnected = false;
+            IsConnecting = false;
         }
     }
 
     private void Disconnect()
     {
         _voice?.Disconnect();
-        IsConnected    = false;
-        IsMicMuted     = false;
-        IsPushToTalking = false;
+        // VoiceManager.Disconnect() tears down every session kind, so RecomputeIsConnected()
+        // will correctly land on "not connected" here and reset mic/PTT state accordingly.
+        RecomputeIsConnected();
         Participants.Clear();
         StatusText = "Disconnected";
+        IsConnecting = false;
+        HasConnectionError = false;
     }
 
     private void WireEvents()
@@ -452,10 +574,16 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.PeerConnectionClosed         += OnConnectionClosed;
         _voice.OnRegionTransitionCompleted  += OnRegionTransitionCompleted;
         _voice.OnRegionTransitionFailed     += OnRegionTransitionFailed;
+        _voice.OnVoicePermissionChanged     += OnVoicePermissionChanged;
         _voice.PeerJoined                   += OnPeerJoined;
         _voice.PeerLeft                     += OnPeerLeft;
         _voice.PeerAudioUpdated             += OnPeerAudioUpdated;
         _voice.OnP2PCallIncoming            += OnP2PCallIncoming;
+        _voice.OnP2PCallStarted             += OnP2PCallStarted;
+        _voice.OnP2PCallAccepted            += OnP2PCallAccepted;
+        _voice.OnP2PCallEnded               += OnP2PCallEnded;
+        _voice.OnP2PCallFailed              += OnP2PCallFailed;
+        _voice.OnP2PCallDeclined            += OnP2PCallDeclined;
         _voice.OnGroupVoiceJoined           += OnGroupVoiceJoined;
         _voice.OnGroupVoiceLeft             += OnGroupVoiceLeft;
         _voice.OnGroupVoiceJoinFailed       += OnGroupVoiceJoinFailed;
@@ -472,10 +600,16 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.PeerConnectionClosed         -= OnConnectionClosed;
         _voice.OnRegionTransitionCompleted  -= OnRegionTransitionCompleted;
         _voice.OnRegionTransitionFailed     -= OnRegionTransitionFailed;
+        _voice.OnVoicePermissionChanged     -= OnVoicePermissionChanged;
         _voice.PeerJoined                   -= OnPeerJoined;
         _voice.PeerLeft                     -= OnPeerLeft;
         _voice.PeerAudioUpdated             -= OnPeerAudioUpdated;
         _voice.OnP2PCallIncoming            -= OnP2PCallIncoming;
+        _voice.OnP2PCallStarted             -= OnP2PCallStarted;
+        _voice.OnP2PCallAccepted            -= OnP2PCallAccepted;
+        _voice.OnP2PCallEnded               -= OnP2PCallEnded;
+        _voice.OnP2PCallFailed              -= OnP2PCallFailed;
+        _voice.OnP2PCallDeclined            -= OnP2PCallDeclined;
         _voice.OnGroupVoiceJoined           -= OnGroupVoiceJoined;
         _voice.OnGroupVoiceLeft             -= OnGroupVoiceLeft;
         _voice.OnGroupVoiceJoinFailed       -= OnGroupVoiceJoinFailed;
@@ -487,58 +621,125 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
 
     // ── Event handlers ────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Recomputes <see cref="IsConnected"/> from VoiceManager's live state across every session
+    /// kind (primary spatial, group, P2P) instead of letting each event handler independently
+    /// assign a single flat bool while assuming it's the only channel that could exist.
+    /// Previously <c>OnGroupVoiceJoined</c> set <c>IsConnected = true</c> but nothing ever set it
+    /// back to <c>false</c> when the group call ended (it stuck forever), and P2P call events
+    /// didn't touch <c>IsConnected</c> at all — hiding the mic/PTT buttons (both gated on
+    /// <see cref="IsConnected"/>) for the entire duration of a live P2P call. On an actual
+    /// false→true or true→false transition this also applies/reverts the same mic-state
+    /// initialization <c>OnConnectionReady</c> used to hardcode for the primary session only —
+    /// guarded so joining a *second* concurrent channel (e.g. group voice while primary is
+    /// already connected) doesn't re-initialize mic state and fight whatever the user already set.
+    /// </summary>
+    private void RecomputeIsConnected()
+    {
+        bool wasConnected = IsConnected;
+        bool nowConnected = (_voice?.Connected ?? false)
+                            || (_voice?.GetActiveGroupVoiceSessions().Count > 0)
+                            || (_voice?.GetActiveP2PCalls().Count > 0);
+        IsConnected = nowConnected;
+        if (nowConnected)
+        {
+            // Reaching a genuinely connected state always supersedes any in-flight "connecting"
+            // indicator or stale failure flag, regardless of which path (manual Join Voice or an
+            // automatic region-crossing reprovision) got it there.
+            IsConnecting = false;
+            HasConnectionError = false;
+        }
+
+        if (!wasConnected && nowConnected && _voice != null)
+        {
+            if (PushToTalkEnabled)
+            {
+                // PTT mode: keep mic muted until the Talk button is held
+                IsMicMuted = true;
+                _voice.AudioDevice.MicMute = true; // ensures StopRecording()
+            }
+            else
+            {
+                // Open-mic mode: start recording immediately on connect
+                IsMicMuted = false;
+                _voice.AudioDevice.MicMute = false; // calls StartRecording()
+            }
+        }
+        else if (wasConnected && !nowConnected)
+        {
+            IsMicMuted = false;
+            IsPushToTalking = false;
+        }
+    }
+
     private void OnConnectionReady()
         => Dispatcher.UIThread.Post(() =>
         {
-            IsConnected = true;
-            StatusText  = "Connected";
+            StatusText = "Connected";
             VoiceSynth.OnVoiceConnected();
-            if (_voice != null)
-            {
-                if (PushToTalkEnabled)
-                {
-                    // PTT mode: keep mic muted until the Talk button is held
-                    IsMicMuted = true;
-                    _voice.AudioDevice.MicMute = true; // ensures StopRecording()
-                }
-                else
-                {
-                    // Open-mic mode: start recording immediately on connect
-                    IsMicMuted = false;
-                    _voice.AudioDevice.MicMute = false; // calls StartRecording()
-                }
-            }
+            RecomputeIsConnected();
         });
 
     private void OnConnectionClosed()
         => Dispatcher.UIThread.Post(() =>
         {
-            IsConnected    = false;
-            IsMicMuted     = false;
-            IsPushToTalking = false;
-            Participants.Clear();
             StatusText = "Disconnected";
             VoiceSynth.OnVoiceDisconnected();
+            RecomputeIsConnected();
+            // Participants aggregates peers from every session kind (VoiceManager forwards
+            // group/P2P peer events through the same PeerJoined/PeerLeft it uses for primary) —
+            // only clear it once nothing at all is connected, so a still-active group/P2P call's
+            // roster isn't wiped just because primary spatial voice closed.
+            if (!IsConnected) Participants.Clear();
         });
 
     private void OnRegionTransitionCompleted()
         => Dispatcher.UIThread.Post(() =>
         {
-            // Participants from the old region are stale
+            // Participants from the old region are stale (primary/spatial peers specifically;
+            // see OnConnectionClosed for why a still-active group/P2P roster isn't touched here).
             Participants.Clear();
-            IsConnected = false;
-            StatusText  = "Reconnecting...";
+
+            // PeerConnectionReady and this event are both posted to the UI thread from
+            // VoiceManager's background reprovision task, so their relative order here isn't
+            // guaranteed. RecomputeIsConnected reads live state rather than assuming this event
+            // fires after (or before) PeerConnectionReady.
+            RecomputeIsConnected();
+            if (IsConnected)
+            {
+                StatusText = "Connected";
+            }
+            else if (!(_voice?.VoiceAllowedHere ?? true))
+            {
+                StatusText = "Voice unavailable in this area";
+                IsConnecting = false;
+            }
+            else
+            {
+                // The new session's ICE handshake is still in flight — OnConnectionReady (via
+                // PeerConnectionReady) or OnRegionTransitionFailed will resolve this shortly.
+                StatusText = "Reconnecting...";
+                IsConnecting = true;
+            }
             // VoiceManager.ReprovisionForNewRegion() already created and provisioned the new
             // session before firing this event. Do NOT call ConnectPrimaryRegion() here —
             // that would race a second session against the one the manager already started.
-            // PeerConnectionReady will set IsConnected = true when the new session connects.
         });
 
     private void OnRegionTransitionFailed(Exception ex)
         => Dispatcher.UIThread.Post(() =>
         {
-            IsConnected = false;
-            StatusText  = $"Voice failed: {ex.Message}";
+            StatusText = $"Voice failed: {ex.Message}";
+            HasConnectionError = true;
+            IsConnecting = false;
+            RecomputeIsConnected();
+        });
+
+    private void OnVoicePermissionChanged(bool allowed)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            IsVoiceAllowedHere = allowed;
+            if (!allowed && !IsConnected) StatusText = "Voice unavailable in this area";
         });
 
     private void OnPeerJoined(UUID peerId)
@@ -596,30 +797,69 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
             name,
             onAccept: async () =>
             {
-                if (_voice == null) return;
-                var ok = await _voice.AcceptIncomingP2PCallAsync(callerId);
-                if (!ok)
-                    Dispatcher.UIThread.Post(() => StatusText = $"Could not connect voice call from {name}");
+                try
+                {
+                    if (_voice == null) return;
+                    var ok = await _voice.AcceptIncomingP2PCallAsync(callerId);
+                    if (!ok)
+                        Dispatcher.UIThread.Post(() => StatusText = $"Could not connect voice call from {name}");
+                }
+                catch (Exception ex)
+                {
+                    // This lambda is invoked fire-and-forget (async void-equivalent) from the
+                    // notification's accept button — an unobserved exception here would
+                    // otherwise vanish silently instead of surfacing to the user.
+                    Dispatcher.UIThread.Post(() => StatusText = $"Could not connect voice call from {name}: {ex.Message}");
+                }
             },
             onDecline: () => _voice?.DeclineIncomingP2PCall(callerId));
         Dispatcher.UIThread.Post(() =>
             _instance.RaiseNotification(vm));
     }
 
+    private void OnP2PCallStarted(UUID agentId)
+        => Dispatcher.UIThread.Post(() => RecomputeIsConnected());
+
+    private void OnP2PCallAccepted(UUID agentId)
+        => Dispatcher.UIThread.Post(() => RecomputeIsConnected());
+
+    private void OnP2PCallEnded(UUID agentId)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            RecomputeIsConnected();
+            if (!IsConnected) Participants.Clear();
+        });
+
+    private void OnP2PCallFailed(UUID agentId, Exception ex)
+        => Dispatcher.UIThread.Post(() =>
+        {
+            StatusText = $"Voice call failed: {ex.Message}";
+            RecomputeIsConnected();
+        });
+
+    private void OnP2PCallDeclined(UUID agentId)
+        => Dispatcher.UIThread.Post(() => RecomputeIsConnected());
+
     private void OnGroupVoiceJoined(UUID groupId)
         => Dispatcher.UIThread.Post(() =>
         {
-            IsConnected = true;
+            RecomputeIsConnected();
             GroupVoiceJoined?.Invoke(groupId);
         });
 
     private void OnGroupVoiceLeft(UUID groupId)
-        => Dispatcher.UIThread.Post(() => GroupVoiceLeft?.Invoke(groupId));
+        => Dispatcher.UIThread.Post(() =>
+        {
+            RecomputeIsConnected();
+            if (!IsConnected) Participants.Clear();
+            GroupVoiceLeft?.Invoke(groupId);
+        });
 
     private void OnGroupVoiceJoinFailed(UUID groupId, Exception ex)
         => Dispatcher.UIThread.Post(() =>
         {
             StatusText = $"Group voice failed: {ex.Message}";
+            RecomputeIsConnected();
             GroupVoiceLeft?.Invoke(groupId);
         });
 
@@ -627,16 +867,17 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         => Dispatcher.UIThread.Post(() =>
         {
             StatusText = "Reconnected";
+            IsConnecting = false;
         });
 
     private void OnReprovisionFailed(Exception ex)
         => Dispatcher.UIThread.Post(() =>
         {
-            IsConnected    = false;
-            IsMicMuted     = false;
-            IsPushToTalking = false;
-            Participants.Clear();
             StatusText = $"Voice reconnect failed: {ex.Message}";
+            HasConnectionError = true;
+            IsConnecting = false;
+            RecomputeIsConnected();
+            if (!IsConnected) Participants.Clear();
         });
 
     private void OnEncodedSampleReceived(uint durationRtpUnits, byte[] sample)

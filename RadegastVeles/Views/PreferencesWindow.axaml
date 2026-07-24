@@ -480,7 +480,17 @@
                                   IsChecked="{Binding WaterReflectionsEnabled}"
                                   AutomationProperties.Name="Enable water reflections" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
-                                   Text="Renders the scene a second time into a reflection texture sampled by the water surface. Disabled by default due to GPU cost. Takes effect the next time a viewer window is opened." />
+                                   Text="Renders the scene a second time into a reflection texture sampled by the water surface. Disabled by default due to GPU cost. Takes effect the next time a viewer window is opened. Without it, water still reflects a procedural sky." />
+                        <CheckBox Content="Atmospheric haze (distance fog)"
+                                  IsChecked="{Binding AtmosphericsEnabled}"
+                                  AutomationProperties.Name="Enable atmospheric haze" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Fades distant terrain and objects toward the sky's horizon colour (aerial perspective). Very cheap; disable only to see distant geometry at full contrast. Takes effect the next time a viewer window is opened." />
+                        <CheckBox Content="Shadows"
+                                  IsChecked="{Binding ShadowsEnabled}"
+                                  AutomationProperties.Name="Enable shadows" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Casts real-time shadows from the sun/moon and nearby in-world lights. Disabled by default due to GPU cost (an extra scene depth pass every frame). Takes effect the next time a viewer window is opened." />
                         <CheckBox Content="Animate flexiprims"
                                   IsChecked="{Binding FlexiAnimationEnabled}"
                                   AutomationProperties.Name="Animate flexiprims" />
