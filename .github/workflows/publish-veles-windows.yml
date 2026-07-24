@@ -673,7 +673,6 @@ jobs:
           Choose the installer or archive for your platform:
 
           ### Windows Installers (Recommended)
-          - **RadegastVelesSetup_x86_${version}.msi** - For 32-bit Windows
           - **RadegastVelesSetup_x64_${version}.msi** - For 64-bit Windows
           - **RadegastVelesSetup_ARM64_${version}.msi** - For Windows on ARM64
 

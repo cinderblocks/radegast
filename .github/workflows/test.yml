@@ -60,24 +60,10 @@ jobs:
         run: nuget restore radegast.sln
 
       - name: Restore for platform-specific build
-        shell: pwsh
-        run: |
-          if ("${{ matrix.configuration }}" -eq "RadegastWindows") {
-            msbuild Install\VelesSetup\VelesSetup.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }}
-            msbuild Install\VelesBundle\VelesBundle.wixproj /restore /p:Configuration=Release /p:Platform=${{ matrix.platform }}
-          } else {
-            msbuild radegast.sln /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
-          }
+        run: msbuild radegast.sln /t:Restore /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
       - name: Build solution
-        shell: pwsh
-        run: |
-          if ("${{ matrix.configuration }}" -eq "RadegastWindows") {
-            msbuild Install\VelesSetup\VelesSetup.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }}
-            msbuild Install\VelesBundle\VelesBundle.wixproj /p:Configuration=Release /p:Platform=${{ matrix.platform }}
-          } else {
-            msbuild radegast.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
-          }
+        run: msbuild radegast.sln /m /p:Configuration=${{ matrix.configuration }} /p:Platform=${{ matrix.platform }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
