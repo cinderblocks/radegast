@@ -19,6 +19,7 @@
 
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading;
@@ -62,8 +63,13 @@ internal sealed class FlexiPrimAnimator : IDisposable
     private const float SimTickRate = 1f / 30f;  // ~30 Hz
 
     /// <summary>
-    /// When false the physics loop still runs but skips all simulation and GPU upload work,
-    /// leaving flexi prims frozen in their last-computed (or bind) pose.
+    /// When false, spring/gravity/wind spine physics are skipped — flexi prims stay rigid in
+    /// their rest pose (or wherever simulation last left them, if this was just turned off
+    /// mid-motion) rather than swaying. This does <em>not</em> stop the prim from being placed
+    /// in world space: <see cref="TickAndUpload"/> still runs the placement step whenever the
+    /// avatar/bone/world transform actually changes (and once unconditionally, the first time),
+    /// just skipping the redundant re-upload otherwise. A flexi attachment on a stationary
+    /// avatar with this off costs effectively nothing after its first tick.
     /// </summary>
     public static volatile bool AnimationEnabled = false;
 
@@ -77,12 +83,35 @@ internal sealed class FlexiPrimAnimator : IDisposable
         // X/Y deflection is in metres; segment spacing along Z is Scale.Z/n.
         public readonly Vector3[] Positions;
         public readonly Vector3[] Velocities;
+        // The attachTx last used to deform+upload this state's vertices, or null if it has
+        // never been placed yet. Lets TickAndUpload skip the (comparatively expensive)
+        // per-vertex deform/upload when physics simulation is disabled and nothing has moved,
+        // while still catching every case where it actually needs to run: first placement,
+        // and any avatar/bone/world-transform change even while frozen. See AnimationEnabled.
+        public Matrix4x4? LastAttachTx;
 
-        public FlexiState(FlexiPrimInfo info)
+        /// <param name="carryOver">
+        /// Spine state cloned from the same underlying prim's previous <see cref="FlexiState"/>
+        /// (matched by <see cref="LibreMetaverse.Primitive.LocalID"/> — see
+        /// <c>FlexiPrimAnimator.CaptureCarryOverState</c>), reused verbatim instead of resetting
+        /// to the rest pose when a rebuild (LOD change, draw-distance change, appearance rebake,
+        /// tab-switch/GL reset, ...) replaces the animator for a still-present flexi prim. Null
+        /// — or a length mismatch, e.g. the prim's Softness was edited and the segment count
+        /// changed — falls back to the straight rest pose.
+        /// </param>
+        public FlexiState(FlexiPrimInfo info, (Vector3[] Positions, Vector3[] Velocities)? carryOver = null)
         {
             Info = info;
             int n    = info.PathSegments + 1;
             float sz = info.Scale.Z;
+
+            if (carryOver is { } prior && prior.Positions.Length == n && prior.Velocities.Length == n)
+            {
+                Positions  = prior.Positions;
+                Velocities = prior.Velocities;
+                return;
+            }
+
             Positions  = new Vector3[n];
             Velocities = new Vector3[n];
             // Rest pose: straight along +Z, anchor at −sz/2.
@@ -122,15 +151,47 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// is set (registered after GL upload), spine positions are enqueued for compute-shader
     /// deformation instead of being processed on the CPU.
     /// </param>
+    /// <param name="priorAnimator">
+    /// The animator this one is replacing, if any (e.g. <c>SceneFlexiStreamer.StartAnimator</c>
+    /// rebuilding a linkset/avatar after a LOD change, draw-distance change, appearance rebake,
+    /// or tab-switch/GL reset). Spine state is carried over per-prim (matched by LocalID) instead
+    /// of always starting at the straight rest pose, so a rebuild unrelated to the flexi prim's
+    /// own motion doesn't visibly snap it back and make it re-settle. Safe to pass an already
+    /// disposed animator — disposal doesn't clear its state arrays.
+    /// </param>
     public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[], int, bool> scheduleUpdate,
-        Action<FlexiComputeJob>? scheduleCompute = null)
+        Action<FlexiComputeJob>? scheduleCompute = null, FlexiPrimAnimator? priorAnimator = null)
     {
         _flexiPrims      = submission.FlexiPrims;
         _scheduleUpdate  = scheduleUpdate;
         _scheduleCompute = scheduleCompute;
+
+        var carryOver = priorAnimator?.CaptureCarryOverState();
         _states = new FlexiState[_flexiPrims.Length];
         for (int i = 0; i < _flexiPrims.Length; i++)
-            _states[i] = new FlexiState(_flexiPrims[i]);
+        {
+            var fi = _flexiPrims[i];
+            (Vector3[], Vector3[])? prior = carryOver != null &&
+                carryOver.TryGetValue(fi.Prim.LocalID, out var p) ? p : null;
+            _states[i] = new FlexiState(fi, prior);
+        }
+    }
+
+    /// <summary>
+    /// Snapshots this animator's current spine state, keyed by the owning prim's LocalID, for
+    /// a replacement animator to carry over (see the <c>priorAnimator</c> constructor parameter).
+    /// Arrays are cloned rather than handed over by reference so the outgoing animator's own
+    /// physics thread — which may still have an in-flight <see cref="Tick"/> racing this capture,
+    /// since disposal doesn't cancel a tick already in progress — can't mutate state the new
+    /// animator has started reading. At worst that race yields one tick's stale/torn read; the
+    /// damped spring physics self-corrects within a tick or two, so it isn't worth a lock.
+    /// </summary>
+    private Dictionary<uint, (Vector3[] Positions, Vector3[] Velocities)> CaptureCarryOverState()
+    {
+        var map = new Dictionary<uint, (Vector3[], Vector3[])>(_states.Length);
+        foreach (var state in _states)
+            map[state.Info.Prim.LocalID] = ((Vector3[])state.Positions.Clone(), (Vector3[])state.Velocities.Clone());
+        return map;
     }
 
     /// <summary>
@@ -248,18 +309,28 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// loop (<see cref="Start"/>) or externally by <see cref="FlexiSceneScheduler"/>, which
     /// may pass a larger <paramref name="dt"/> when it has throttled this animator to less
     /// than every tick (see the scheduler's distance-based tick divisor).
+    /// <para>
+    /// <see cref="AnimationEnabled"/> gates the spine <em>physics</em> (spring/gravity/wind
+    /// integration) — not whether the prim gets placed in world space at all. World placement
+    /// (avatar/bone/world transform → vertex buffer) always runs via <see cref="TickAndUpload"/>;
+    /// with animation disabled it just skips re-uploading when nothing has actually moved, so a
+    /// flexi prim still tracks its avatar/linkset correctly while frozen instead of sitting
+    /// wherever the mesh builder's raw local-space coordinates happened to leave it. See
+    /// <see cref="FlexiState.LastAttachTx"/>.
+    /// </para>
     /// </summary>
     public void Tick(float dt)
     {
-        if (_disposed || !AnimationEnabled) return;
+        if (_disposed) return;
         foreach (var state in _states)
-            TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute);
+            TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute, simulate: AnimationEnabled);
     }
 
     // ── Simulation tick + vertex upload ──────────────────────────────────────────
 
     private static void TickAndUpload(FlexiState state, float dt,
-        Action<int, float[], int, bool> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute)
+        Action<int, float[], int, bool> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute,
+        bool simulate)
     {
         var info   = state.Info;
         var flex   = info.Prim.Flexible!;
@@ -314,79 +385,98 @@ internal sealed class FlexiPrimAnimator : IDisposable
         float sy = info.Scale.Y;
         float sz = info.Scale.Z;
 
-        // Prim world-orientation axes (normalised rows of attachTx rotation block).
-        var primRight = Vector3.Normalize(new Vector3(attachTx.M11, attachTx.M12, attachTx.M13));
-        var primFwd   = Vector3.Normalize(new Vector3(attachTx.M21, attachTx.M22, attachTx.M23));
-        var primUp    = Vector3.Normalize(new Vector3(attachTx.M31, attachTx.M32, attachTx.M33));
-
-        // World gravity (0,0,-1) rotated into prim-local space.
-        var wg = new Vector3(0f, 0f, -1f);
-        var localGrav = new Vector3(
-            Vector3.Dot(wg, primRight),
-            Vector3.Dot(wg, primFwd),
-            Vector3.Dot(wg, primUp));
-
-        float segLen     = sz / n;                  // metres per spine segment
-        float forceFactor = segLen * dt;             // SL: section_length * secondsThisFrame
-
-        // Tension: SL uses  t_factor = tension*0.1 * (1 - 0.85^(dt*30)), capped at 0.1
-        const float MaxTension = 0.1f;
-        float tFactor = flex.Tension * 0.1f * (1f - MathF.Pow(0.85f, dt * 30f));
-        if (tFactor > MaxTension) tFactor = MaxTension;
-
-        // Air-friction momentum: momentum = 1 / 10^((drag*2+1)*dt)
-        float frictionCoeff = MathF.Pow(10f, (flex.Drag * 2f + 1f) * dt);
-        if (frictionCoeff < 1f) frictionCoeff = 1f;
-        float momentum = 1f / frictionCoeff;
-
-        // Wind (sinusoidal stand-in, in metres, prim-local XY).
-        float windPhase  = (float)(Environment.TickCount64 * 0.001);
-        float windFactor = flex.Wind * 0.1f * segLen * dt;
-        float windX = MathF.Sin(windPhase * 0.7f) * windFactor;
-        float windY = MathF.Cos(windPhase * 0.5f) * windFactor;
-
-        // Per-tick position impulses (metres).
-        var gravImpulse = localGrav  * (flex.Gravity * forceFactor);
-        var userImpulse = new Vector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
-
-        // ── Anchor (segment 0): fixed at bottom of prim ──────────────────────────
-        state.Positions[0]  = new Vector3(0f, 0f, -sz * 0.5f);
-        state.Velocities[0] = Vector3.Zero;
-        var dir0 = Vector3.UnitZ;  // prim rest-axis direction
-
-        for (int i = 1; i <= n; i++)
+        // Physics integration only runs when animation is enabled — see AnimationEnabled and
+        // the Tick() doc comment. World placement below (WorldBounds + deform/upload) always
+        // runs regardless, using whatever state.Positions currently holds (the rest pose if
+        // simulation has never run, or the last-simulated pose if it was just turned off).
+        if (simulate)
         {
-            ref Vector3 pos = ref state.Positions[i];
-            ref Vector3 vel = ref state.Velocities[i];
-            var lastPos = pos;
+            // Prim world-orientation axes (normalised rows of attachTx rotation block).
+            var primRight = Vector3.Normalize(new Vector3(attachTx.M11, attachTx.M12, attachTx.M13));
+            var primFwd   = Vector3.Normalize(new Vector3(attachTx.M21, attachTx.M22, attachTx.M23));
+            var primUp    = Vector3.Normalize(new Vector3(attachTx.M31, attachTx.M32, attachTx.M33));
 
-            // Apply position impulses (SL style — forces directly displace position).
-            pos += gravImpulse;
-            pos += new Vector3(windX, windY, 0f);
-            pos += userImpulse;
+            // World gravity (0,0,-1) rotated into prim-local space.
+            var wg = new Vector3(0f, 0f, -1f);
+            var localGrav = new Vector3(
+                Vector3.Dot(wg, primRight),
+                Vector3.Dot(wg, primFwd),
+                Vector3.Dot(wg, primUp));
 
-            // Tension toward parent segment direction.
-            var parentPos = state.Positions[i - 1];
-            var parentDir = (i == 1)
-                ? dir0
-                : Vector3.Normalize(state.Positions[i - 1] - state.Positions[i - 2]);
-            var currentVec = pos - parentPos;
-            var diff       = parentDir * segLen - currentVec;
-            pos += diff * tFactor;
+            float segLen     = sz / n;                  // metres per spine segment
+            float forceFactor = segLen * dt;             // SL: section_length * secondsThisFrame
 
-            // Inertia (carry-over velocity).
-            pos += vel * momentum;
+            // Tension: SL uses  t_factor = tension*0.1 * (1 - 0.85^(dt*30)), capped at 0.1
+            const float MaxTension = 0.1f;
+            float tFactor = flex.Tension * 0.1f * (1f - MathF.Pow(0.85f, dt * 30f));
+            if (tFactor > MaxTension) tFactor = MaxTension;
 
-            // Clamp to segment length.
-            var d = pos - parentPos;
-            float dLen = d.Length();
-            if (dLen > 1e-6f)
-                pos = parentPos + d * (segLen / dLen);
+            // Air-friction momentum: momentum = 1 / 10^((drag*2+1)*dt)
+            float frictionCoeff = MathF.Pow(10f, (flex.Drag * 2f + 1f) * dt);
+            if (frictionCoeff < 1f) frictionCoeff = 1f;
+            float momentum = 1f / frictionCoeff;
 
-            // Velocity = positional displacement this tick.
-            vel = pos - lastPos;
-            if (vel.LengthSquared() > 1f) vel = Vector3.Normalize(vel);
+            // Wind (sinusoidal stand-in, in metres, prim-local XY).
+            float windPhase  = (float)(Environment.TickCount64 * 0.001);
+            float windFactor = flex.Wind * 0.1f * segLen * dt;
+            float windX = MathF.Sin(windPhase * 0.7f) * windFactor;
+            float windY = MathF.Cos(windPhase * 0.5f) * windFactor;
+
+            // Per-tick position impulses (metres).
+            var gravImpulse = localGrav  * (flex.Gravity * forceFactor);
+            var userImpulse = new Vector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
+
+            // ── Anchor (segment 0): fixed at bottom of prim ──────────────────────────
+            state.Positions[0]  = new Vector3(0f, 0f, -sz * 0.5f);
+            state.Velocities[0] = Vector3.Zero;
+            var dir0 = Vector3.UnitZ;  // prim rest-axis direction
+
+            for (int i = 1; i <= n; i++)
+            {
+                ref Vector3 pos = ref state.Positions[i];
+                ref Vector3 vel = ref state.Velocities[i];
+                var lastPos = pos;
+
+                // Apply position impulses (SL style — forces directly displace position).
+                pos += gravImpulse;
+                pos += new Vector3(windX, windY, 0f);
+                pos += userImpulse;
+
+                // Tension toward parent segment direction.
+                var parentPos = state.Positions[i - 1];
+                var parentDir = (i == 1)
+                    ? dir0
+                    : Vector3.Normalize(state.Positions[i - 1] - state.Positions[i - 2]);
+                var currentVec = pos - parentPos;
+                var diff       = parentDir * segLen - currentVec;
+                pos += diff * tFactor;
+
+                // Inertia (carry-over velocity).
+                pos += vel * momentum;
+
+                // Clamp to segment length.
+                var d = pos - parentPos;
+                float dLen = d.Length();
+                if (dLen > 1e-6f)
+                    pos = parentPos + d * (segLen / dLen);
+
+                // Velocity = positional displacement this tick.
+                vel = pos - lastPos;
+                if (vel.LengthSquared() > 1f) vel = Vector3.Normalize(vel);
+            }
         }
+
+        // Nothing left to do once simulation is disabled and attachTx hasn't changed since
+        // the last time we placed this prim: WorldBounds and the vertex buffer are already
+        // correct (the last-published WorldBounds stays valid — it was computed from this
+        // same, unchanged, attachTx/state.Positions pair). Still runs on the first tick ever
+        // (LastAttachTx is null) and on every tick where attachTx did change (avatar moved,
+        // bone moved, seat/build correction, ...) even with physics simulation off, so a
+        // frozen flexi prim still tracks its owner correctly instead of sitting wherever the
+        // mesh builder's raw local-space coordinates happened to leave it. See AnimationEnabled.
+        if (!simulate && state.LastAttachTx == attachTx)
+            return;
+        state.LastAttachTx = attachTx;
 
         // ── Publish a live world-space AABB for the frustum-culler ───────────────
         //

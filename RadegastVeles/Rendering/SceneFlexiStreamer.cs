@@ -145,6 +145,12 @@ internal sealed class SceneFlexiStreamer : IDisposable
             return;
         }
 
+        // Grab whatever animator is currently serving this key (if any) BEFORE removing it,
+        // so its spine physics state can carry over into the replacement instead of every
+        // rebuild (LOD change, draw-distance change, appearance rebake, tab-switch/GL reset)
+        // snapping the flexi prim back to its straight rest pose and making it visibly
+        // re-settle even though nothing about its own motion actually changed.
+        _animators.TryGetValue(key, out var priorAnimator);
         RemoveAnimator(key);
 
         // Capture viewport reference once; the lambda keeps it alive for the animator's lifetime.
@@ -155,7 +161,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
             ? (faceIndex, verts, len, pooled) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
             : FlexiPrimAnimator.CreateSingleObjectScheduler(vp);
 
-        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute);
+        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute, priorAnimator);
         // Registered with the shared scheduler, not animator.Start() — see FlexiSceneScheduler.
         _scheduler.Register(animator);
         _animators[key] = animator;
