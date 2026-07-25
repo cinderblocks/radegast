@@ -121,6 +121,29 @@ internal sealed class PrimMeshBuilder(GridClient client)
         return false;
     }
 
+    /// <summary>
+    /// Non-mutating peek at the decoded-mesh cache's known vertex count for
+    /// <paramref name="assetId"/> — used by <see cref="AvatarComplexityEstimator"/> to
+    /// opportunistically refine a mesh-prim's cost estimate when its asset happens to
+    /// already be decoded (e.g. a common mesh worn by several nearby avatars). Unlike
+    /// <see cref="TryGetCachedMesh"/> this deliberately does not touch LRU order or the
+    /// hit/miss counters — it's a passive read for cost estimation, not a real mesh
+    /// fetch, and must never influence eviction ordering or telemetry.
+    /// </summary>
+    public static bool TryPeekCachedMeshVertexCount(UUID assetId, out int vertexCount)
+    {
+        lock (MeshCacheLock)
+        {
+            if (MeshCache.TryGetValue(assetId, out var node))
+            {
+                vertexCount = node.Value.VertexCount;
+                return true;
+            }
+        }
+        vertexCount = 0;
+        return false;
+    }
+
     private static void AddToMeshCache(UUID assetId, FacetedMesh mesh)
     {
         int vertexCount = 0;
@@ -316,7 +339,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             int end = Math.Min(fp.FaceStart + fp.FaceCount, faces.Count);
             for (int fi = fp.FaceStart; fi < end; fi++)
-                faces[fi].IsFlexi = true;
+            {
+                faces[fi].IsFlexi    = true;
+                // Lets the frustum-cull path read this prim's live world bounds
+                // (see PrimRenderFace.FlexiOwner) instead of the stale bind-pose AABB.
+                faces[fi].FlexiOwner = fp;
+            }
         }
 
         var submission = new PrimRenderSubmission

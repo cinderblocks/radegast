@@ -181,6 +181,17 @@ public static class AvatarMenuBuilder
                     Command = new RelayCommand(() => instance.Client.Friends.TerminateFriendship(agentId))
                 });
             }
+
+            // Independent of friend status — friends are already exempt from the
+            // avatar-complexity impostor system without needing this; this covers
+            // everyone else the user has explicitly chosen to trust.
+            bool alwaysRender = instance.AvatarRenderOverrides.IsAlwaysRender(agentId);
+            menu.Items.Add(new MenuItem
+            {
+                Header = alwaysRender ? "Always Render Fully ✓" : "Always Render Fully",
+                Command = new RelayCommand(() =>
+                    instance.AvatarRenderOverrides.SetAlwaysRender(agentId, !alwaysRender))
+            });
         }
 
         menu.Items.Add(new Separator());

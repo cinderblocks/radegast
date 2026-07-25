@@ -125,6 +125,9 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <summary>Persistent group-notice archive for this session.</summary>
     public GroupNoticeArchiveService NoticeArchive { get; }
 
+    /// <summary>Per-avatar "Always Render Fully" overrides for the avatar-complexity impostor system.</summary>
+    public Rendering.AvatarRenderOverrideStore AvatarRenderOverrides { get; }
+
     /// <summary>
     /// When enabled, disables the 3D Scene Viewer, the Nearby/Objects minimaps, and tightens
     /// texture/asset cache sizes to a conservative preset. Intended for running many bot
@@ -170,6 +173,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         : base(appName, client, new NetComAvalonia(client))
     {
         NoticeArchive = new GroupNoticeArchiveService(this);
+        AvatarRenderOverrides = new Rendering.AvatarRenderOverrideStore(GlobalSettings);
 
         // Honour a user-configured texture-cache path stored by Preferences.
         var customCacheDir = GlobalSettings["texture_cache_dir"]?.AsString();

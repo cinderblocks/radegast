@@ -311,6 +311,23 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private float _sceneViewerDrawDistance = 96f;
 
+    /// <summary>
+    /// Avatar rendering-complexity threshold in Veles complexity points (0–500, where
+    /// 500 means unlimited/always full). Avatars estimated over this render as a
+    /// silhouette, or as a particle cloud well over it. Default 120.
+    /// </summary>
+    [ObservableProperty]
+    private float _avatarComplexityThreshold = 120f;
+
+    /// <summary>
+    /// Reports every avatar this viewer renders (its Veles-estimated weight and whether
+    /// it's been locally tiered down) to the region's AvatarRenderInfo capability, and
+    /// fetches the region's aggregate back to warn you if nearby viewers are having
+    /// trouble rendering you. Matches stock SL viewer behavior. Default true.
+    /// </summary>
+    [ObservableProperty]
+    private bool _avatarRenderInfoReportingEnabled = true;
+
     /// <summary>Animate flexible prims (physics simulation at ~30 Hz). Default false to save CPU.</summary>
     [ObservableProperty]
     private bool _flexiAnimationEnabled = false;
@@ -682,6 +699,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["shadows_enabled"].AsBoolean() : false;
         SceneViewerDrawDistance = s["scene_draw_distance"].Type != OSDType.Unknown
             ? (float)s["scene_draw_distance"].AsReal() : 96f;
+        AvatarComplexityThreshold = s["avatar_complexity_threshold"].Type != OSDType.Unknown
+            ? (float)s["avatar_complexity_threshold"].AsReal() : 120f;
+        AvatarRenderInfoReportingEnabled = s["avatar_render_info_reporting_enabled"].Type != OSDType.Unknown
+            ? s["avatar_render_info_reporting_enabled"].AsBoolean() : true;
         FlexiAnimationEnabled = s["flexi_animation_enabled"].Type != OSDType.Unknown
             ? s["flexi_animation_enabled"].AsBoolean() : false;
         FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
@@ -856,6 +877,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["atmospherics_enabled"] = OSD.FromBoolean(AtmosphericsEnabled);
         s["shadows_enabled"] = OSD.FromBoolean(ShadowsEnabled);
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
+        s["avatar_complexity_threshold"] = OSD.FromReal(AvatarComplexityThreshold);
+        s["avatar_render_info_reporting_enabled"] = OSD.FromBoolean(AvatarRenderInfoReportingEnabled);
         s["flexi_animation_enabled"] = OSD.FromBoolean(FlexiAnimationEnabled);
         FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
 

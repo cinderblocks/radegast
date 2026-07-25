@@ -125,7 +125,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         CancellationToken               ct,
         int                             lodLevel        = 0,
         Action<PrimRenderSubmission>?   onGeometryReady = null,
-        IProgress<SceneTexturePatch>?   texturePatch    = null)
+        IProgress<SceneTexturePatch>?   texturePatch    = null,
+        AvatarRenderTier                renderTier      = AvatarRenderTier.Full,
+        Vector4?                        overrideColor   = null)
     {
         // 1. Load avatar definition and build VP-morphed bone world matrices.
         LindenAvatarDefinition?            avatarDef         = null;
@@ -237,7 +239,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 onGeometryReady(greySub);
             } : null,
             avatarLocalId: avatarLocalId,
-            texturePatch:  null)   // body bakes use the blocking path; patches would be lost when UploadSubmission frees the grey shell
+            texturePatch:  null,   // body bakes use the blocking path; patches would be lost when UploadSubmission frees the grey shell
+            overrideColor: overrideColor)
             .ConfigureAwait(false);
 
         // VP-deformed bone world matrices: used only for attachment placement so that
@@ -255,7 +258,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // the LLM bind-pose space so attachments land on the correct mesh surface.
         var flexiInfos = new List<FlexiPrimInfo>();
 
-        if (sim != null && boneWorldMatrices != null)
+        // Silhouette tier skips attachments entirely — that's where the real cost
+        // (attachment mesh/texture fetch, GPU upload) lives; the body-only mesh built
+        // above already carries real skin data and animates on its own.
+        if (renderTier != AvatarRenderTier.Silhouette && sim != null && boneWorldMatrices != null)
         {
             try
             {
@@ -281,6 +287,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                         : (origFace.Vertices?.Length ?? 0);
                     int nv            = vFloats / 12;
                     var rigged        = attRiggedSkins[i];
+                    // nv > 0 implies VerticesLength/Vertices.Length was > 0, so Vertices is populated.
+                    var srcVerts      = origFace.Vertices!;
 
                     // Attachment vertices are stored in prim-local space by PrimMeshBuilder;
                     // the shader always applies face.Transform as the model matrix.
@@ -296,20 +304,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     {
                         int o  = vi * 12;
                         var wp = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o],     origFace.Vertices[o + 1],
-                                        origFace.Vertices[o + 2], 1f), faceTransform);
+                            new Vector4(srcVerts[o],     srcVerts[o + 1],
+                                        srcVerts[o + 2], 1f), faceTransform);
                         var wn = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o + 3], origFace.Vertices[o + 4],
-                                        origFace.Vertices[o + 5], 0f), faceTransform);
+                            new Vector4(srcVerts[o + 3], srcVerts[o + 4],
+                                        srcVerts[o + 5], 0f), faceTransform);
                         var wt = Vector4.Transform(
-                            new Vector4(origFace.Vertices[o + 8], origFace.Vertices[o + 9],
-                                        origFace.Vertices[o + 10], 0f), faceTransform);
+                            new Vector4(srcVerts[o + 8], srcVerts[o + 9],
+                                        srcVerts[o + 10], 0f), faceTransform);
                         worldVerts[o]      = wp.X; worldVerts[o + 1]  = wp.Y; worldVerts[o + 2]  = wp.Z;
                         worldVerts[o + 3]  = wn.X; worldVerts[o + 4]  = wn.Y; worldVerts[o + 5]  = wn.Z;
-                        worldVerts[o + 6]  = origFace.Vertices[o + 6];
-                        worldVerts[o + 7]  = origFace.Vertices[o + 7];
+                        worldVerts[o + 6]  = srcVerts[o + 6];
+                        worldVerts[o + 7]  = srcVerts[o + 7];
                         worldVerts[o + 8]  = wt.X; worldVerts[o + 9]  = wt.Y; worldVerts[o + 10] = wt.Z;
-                        worldVerts[o + 11] = origFace.Vertices[o + 11]; // handedness invariant
+                        worldVerts[o + 11] = srcVerts[o + 11]; // handedness invariant
                     }
 
                     attFaces[i] = new PrimRenderFace
@@ -421,7 +429,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                          ai.JointOffset, ai.JointRotation, new List<(int, float[])>());
                                 pendingFlexi[srcPrim.LocalID] = entry;
                             }
-                            entry.faceList.Add((bodyFaceCount + i, origFace.Vertices));
+                            entry.faceList.Add((bodyFaceCount + i, srcVerts));
                         }
                         else
                         {
@@ -468,7 +476,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     // animator can re-apply it after each deformation tick.
                     var baseVerts = faceList.Select(f => (float[])f.verts.Clone()).ToArray();
                     int segments  = FlexiPrimAnimator.ComputeSegmentCount(flexPrim.Flexible!.Softness);
-                    flexiInfos.Add(new FlexiPrimInfo
+                    var flexiInfo = new FlexiPrimInfo
                     {
                         Prim               = flexPrim,
                         FaceStart          = faceStart,
@@ -482,7 +490,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         AttachJointName    = jointName.Length > 0 ? jointName : null,
                         AttachJointOffset  = jointOffset,
                         AttachJointRotation = jointRot,
-                    });
+                    };
+                    flexiInfos.Add(flexiInfo);
+                    // Lets the frustum-cull path read this prim's live world bounds
+                    // (see PrimRenderFace.FlexiOwner) instead of the stale bind-pose AABB.
+                    foreach (var (faceIdx, _) in faceList)
+                        faces[faceIdx].FlexiOwner = flexiInfo;
                 }
                 if (aBMin.X < float.MaxValue)
                 {
@@ -1134,7 +1147,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             int                             lodLevel        = 0,
             Action<PrimRenderFace[], Vector3, Vector3>? onGeometryReady = null,
             uint                            avatarLocalId   = 0,
-            IProgress<SceneTexturePatch>?   texturePatch    = null)
+            IProgress<SceneTexturePatch>?   texturePatch    = null,
+            Vector4?                        overrideColor   = null)
     {
         var faceData = new List<BodyFaceData>();
         var bMin     = new Vector3(float.MaxValue);
@@ -1289,6 +1303,47 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 FaceIndex   = fi,
             }).ToArray();
             onGeometryReady(greyFaces, bMin, bMax);
+        }
+
+        // Silhouette tier: skip Phase 2 (bake download) and Phase 3's texture-driven
+        // assembly entirely — assemble final faces/skin-data directly from Phase 1's
+        // faceData with a flat identity color on every face. Skin data (Bone1/Weight1/
+        // Bone2/Weight2) comes entirely from faceData and does not depend on textures,
+        // so silhouettes carry real bind-weight data and animate through the same LBS
+        // path as a full build; only texture/attachment cost is actually skipped.
+        if (overrideColor is { } oc)
+        {
+            var silFaces = new List<PrimRenderFace>();
+            var silSkin  = new List<AvatarFaceSkinData>();
+            for (int fi = 0; fi < faceData.Count; fi++)
+            {
+                var fd = faceData[fi];
+                silFaces.Add(new PrimRenderFace
+                {
+                    Vertices    = fd.Verts,
+                    Indices     = fd.Indices,
+                    Color       = oc,
+                    Transform   = Matrix4x4.Identity,
+                    Centroid    = fd.Centroid,
+                    IsTwoSided  = fd.IsTwoSided,
+                    AlphaCutoff = fd.AlphaCutoff,
+                    AlphaMode   = FaceAlphaMode.None,
+                    HasAlpha    = false,
+                    Texture     = null,
+                    PrimLocalId = avatarLocalId,
+                    FaceIndex   = fi,
+                });
+                silSkin.Add(new AvatarFaceSkinData
+                {
+                    FaceIndex = fi,
+                    BindVerts = fd.Verts,
+                    Bone1     = fd.Bone1,
+                    Weight1   = fd.Weight1,
+                    Bone2     = fd.Bone2,
+                    Weight2   = fd.Weight2,
+                });
+            }
+            return (silFaces, silSkin, faceMorphList.ToImmutableArray(), bMin, bMax);
         }
 
         // Phase 2: download baked textures.

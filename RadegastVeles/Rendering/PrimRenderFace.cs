@@ -197,6 +197,13 @@ public sealed class PrimRenderFace
     public          bool      IsFlexi    { get; set; }
 
     /// <summary>
+    /// The <see cref="FlexiPrimInfo"/> that drives this face's per-tick deformation.
+    /// Only set when <see cref="IsFlexi"/> is true. Lets the frustum-cull path read the
+    /// animator's live world-space bounds instead of this face's stale bind-pose AABB.
+    /// </summary>
+    internal        FlexiPrimInfo? FlexiOwner { get; set; }
+
+    /// <summary>
     /// World-space centroid of this face, used for alpha depth sorting.
     /// For skinned faces this is the average of the post-skinning vertex positions;
     /// for rigid faces it is the average of the world-transformed vertex positions.
@@ -466,6 +473,7 @@ public sealed class PrimRenderFace
             Texture                    = Texture,
             Transform                  = worldTransform,
             IsFlexi                    = IsFlexi,
+            FlexiOwner                 = FlexiOwner,
             IsTerrain                  = IsTerrain,
             Centroid                   = worldCentroid,
             IsTwoSided                 = IsTwoSided,
@@ -628,6 +636,27 @@ public sealed class FlexiPrimInfo
     /// so visibility is guaranteed by the happens-before on the periodic timer.
     /// </summary>
     internal volatile FlexiGpuData? GpuData;
+
+    /// <summary>
+    /// Live world-space bounding box, recomputed every physics tick in
+    /// <c>FlexiPrimAnimator.TickAndUpload</c> from the deformed spine, padded by the
+    /// prim's cross-section radius. Consumed by the frustum-cull path in
+    /// <c>GlViewportControl</c> in place of each face's stale bind-pose AABB (flexi
+    /// faces don't update <see cref="PrimRenderFace.Transform"/>, so the normal
+    /// cached-AABB cull would always reject them). Null until the first tick has run.
+    /// Written on the physics background thread, read on the GL thread — reference
+    /// assignment is atomic and <c>volatile</c> gives the necessary visibility.
+    /// </summary>
+    internal volatile FlexiWorldBounds? WorldBounds;
+}
+
+/// <summary>
+/// Immutable world-space AABB snapshot for a flexi prim; see <see cref="FlexiPrimInfo.WorldBounds"/>.
+/// </summary>
+internal sealed class FlexiWorldBounds
+{
+    public required Vector3 Min { get; init; }
+    public required Vector3 Max { get; init; }
 }
 
 /// <summary>

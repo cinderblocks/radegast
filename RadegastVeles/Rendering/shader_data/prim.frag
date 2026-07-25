@@ -287,7 +287,7 @@ vec3 pointLightsPBR(vec3 albedo, float metallic, float roughness, vec3 F0,
 // ── PBR lighting path ────────────────────────────────────────────────────────
 
 void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
-                 vec3 emissive, vec3 n, vec3 v, float alpha, out vec4 result)
+                 vec3 emissive, vec3 n, vec3 nGeo, vec3 v, float alpha, out vec4 result)
 {
     vec3 F0 = mix(vec3(0.04), albedo, metallic);
     roughness = max(roughness, 0.04); // avoid div-by-zero
@@ -316,7 +316,16 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
         // `ambient`) dims indirect light partially — see the matching comment on
         // ambientShadow in the legacy Blinn-Phong path for why pure sun-only
         // attenuation isn't enough to read as a visible shadow in every environment.
-        sunShadow = sampleDirShadow(vWorldPos, n, NdotL);
+        //
+        // Tested against nGeo (the smooth, un-normal-mapped normal), not the shading
+        // `n` above: the shadow depth map was rendered from gl_Position alone, with no
+        // normal map applied, so nGeo is what actually matches its geometry. Using the
+        // normal-mapped `n` here would feed a texture-driven per-texel wobble into both
+        // the offset direction/magnitude and NdotL's implicit gating — the same class of
+        // bug already found and fixed once for terrain's bump map (see shadow.glsl's
+        // normal-offset-bias comment); normal maps reintroduce it for any other surface.
+        float geoNdotL = max(dot(nGeo, L), 0.0);
+        sunShadow = sampleDirShadow(vWorldPos, nGeo, geoNdotL);
 
         Lo += (kD * albedo / PI + specular) * uSunColor * kKey * NdotL * sunShadow;
     }
@@ -443,6 +452,12 @@ void main()
         vec3 albedo = pow(base.rgb, vec3(2.2));
 
         vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
+        // Smooth per-vertex normal, saved before any normal-map perturbation below —
+        // this is what the shadow depth pass actually rendered with (gl_Position only,
+        // no normal map involved). Used only for the shadow test (see nGeo comment on
+        // the legacy Blinn-Phong path further down for the full rationale); shading
+        // keeps using the perturbed `n`.
+        vec3 nGeo = n;
         vec3 v = normalize(-vViewPos);
 
         // Per-vertex tangent basis. Fall back to screen-space derivatives only when no
@@ -502,7 +517,7 @@ void main()
         emissive += albedo * glow;
 
         vec4 result;
-        pbrLighting(albedo, metallic, roughness, occlusion, emissive, n, v,
+        pbrLighting(albedo, metallic, roughness, occlusion, emissive, n, nGeo, v,
                     (alphaMode == 1) ? base.a : 1.0, result);
         fragColor = vec4(applyFog(result.rgb), result.a);
         return;
@@ -538,6 +553,10 @@ void main()
     vec3 albedo = pow(base.rgb, vec3(2.2));
 
     vec3 n = normalize(gl_FrontFacing ? vNormal : -vNormal);
+    // Smooth per-vertex normal, saved before normal-map/bump perturbation below.
+    // Used only for the shadow test further down (see the sampleDirShadow call site
+    // for why) — everything else keeps using the perturbed `n`.
+    vec3 nGeo = n;
     vec3 v = normalize(-vViewPos);
 
     // Per-vertex tangent basis. Fall back to screen-space derivatives for meshes
@@ -620,7 +639,20 @@ void main()
     float keySpec = pow(max(dot(n, keyH), 0.0), shininess);
 
     // Shadow only attenuates the direct/key term — fill, rim and ambient stay lit.
-    float sunShadow = sampleDirShadow(vWorldPos, n, keyDiff);
+    //
+    // Tested against nGeo, NOT the shading normal `n`: the shadow depth map was
+    // rendered from gl_Position alone (no normal map, no bump), so nGeo — the
+    // un-perturbed per-vertex normal — is what actually matches its geometry.
+    // This matters most for terrain, which carries the strongest bump amount in
+    // this shader (0.7, below) derived from a screen-space luminance derivative
+    // over a triplanar/anti-tiled detail texture — an inherently noisy, per-texel
+    // signal. Feeding that into sampleDirShadow's offset direction/magnitude and
+    // NdotL gating (via `n`/`keyDiff`) reintroduces exactly the kind of per-texel
+    // wobble the normal-offset-bias fix (see shadow.glsl) was meant to eliminate,
+    // just one step removed — it shows up as shadow flicker across the terrain
+    // even though the terrain's *shading* normal is allowed to be bumpy.
+    float geoNdotL = max(dot(nGeo, uSunDir), 0.0);
+    float sunShadow = sampleDirShadow(vWorldPos, nGeo, geoNdotL);
 
     // Fill light: clamped lambert, no specular
     float fillDiff = max(dot(n, kFillDir), 0.0);

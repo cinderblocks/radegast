@@ -45,6 +45,11 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private readonly ConcurrentDictionary<ulong, FlexiPrimAnimator> _animators  = new();
     private readonly ConcurrentDictionary<uint, ulong>              _localToKey = new();
 
+    // Ticks every animator in _animators from one shared timer/task instead of each one
+    // owning its own — a scene can have dozens of flexi objects (grass, trees, attachments)
+    // and also applies distance-based tick throttling (see FlexiSceneScheduler).
+    private readonly FlexiSceneScheduler _scheduler;
+
     private bool _disposed;
 
     public SceneFlexiStreamer(GridClient client, GlViewportControl viewport,
@@ -53,6 +58,8 @@ internal sealed class SceneFlexiStreamer : IDisposable
         _client        = client;
         _viewport      = viewport;
         _objectStreamer = objectStreamer;
+        _scheduler     = new FlexiSceneScheduler(client);
+        _scheduler.Start();
 
         _objectStreamer.ObjectBuilt += OnObjectBuilt;
     }
@@ -90,7 +97,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     public void Clear()
     {
         foreach (var kv in _animators)
+        {
+            _scheduler.Unregister(kv.Value);
             kv.Value.Dispose();
+        }
         _animators.Clear();
         _localToKey.Clear();
     }
@@ -103,6 +113,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         if (_avatarStreamer != null)
             _avatarStreamer.AvatarBuilt -= OnAvatarBuilt;
         Clear();
+        _scheduler.Dispose();
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────────
@@ -116,16 +127,13 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
     {
         if (_disposed) return;
+        // The initial world position is already seeded directly onto each FlexiPrimInfo's
+        // ExternalTransform by SceneAvatarStreamer.BuildAsync before this event fires
+        // (SceneAvatarStreamer.cs, AvatarWorldMatrix seeding block) — no separate seed
+        // needed here. (A prior attempt to seed via OnFlexiWorldUpdate at this point was
+        // always a no-op: this handler runs before SceneAvatarAnimationStreamer's, so the
+        // target SceneAvatarAnimator does not exist yet.)
         StartAnimator(sceneKey, result.Submission, sceneKey: sceneKey, avatarLocalId: localId);
-
-        // Seed the initial world matrix so the flexi attachment appears at the correct
-        // world position from the very first tick, rather than snapping from origin
-        // until the next terse avatar update arrives.
-        if (_avatarStreamer != null && _animationStreamer != null)
-        {
-            var worldMatrix = _avatarStreamer.GetCurrentWorldMatrix(localId);
-            _animationStreamer.OnFlexiWorldUpdate(localId, worldMatrix);
-        }
     }
 
     private void StartAnimator(ulong key, PrimRenderSubmission submission, ulong sceneKey,
@@ -137,18 +145,25 @@ internal sealed class SceneFlexiStreamer : IDisposable
             return;
         }
 
+        // Grab whatever animator is currently serving this key (if any) BEFORE removing it,
+        // so its spine physics state can carry over into the replacement instead of every
+        // rebuild (LOD change, draw-distance change, appearance rebake, tab-switch/GL reset)
+        // snapping the flexi prim back to its straight rest pose and making it visibly
+        // re-settle even though nothing about its own motion actually changed.
+        _animators.TryGetValue(key, out var priorAnimator);
         RemoveAnimator(key);
 
         // Capture viewport reference once; the lambda keeps it alive for the animator's lifetime.
         var vp = _viewport;
         // ScheduleSceneVertexUpdate takes uint; safe cast because object keys are current-sim localIds
         // (uint range) and avatar keys (AvatarKeyOffset + localId) also fit in uint.
-        Action<int, float[]> schedule = sceneKey != 0
-            ? (faceIndex, verts) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, verts.Length, isPoolRented: false)
-            : vp.ScheduleVertexUpdate;
+        Action<int, float[], int, bool> schedule = sceneKey != 0
+            ? (faceIndex, verts, len, pooled) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
+            : FlexiPrimAnimator.CreateSingleObjectScheduler(vp);
 
-        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute);
-        animator.Start();
+        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute, priorAnimator);
+        // Registered with the shared scheduler, not animator.Start() — see FlexiSceneScheduler.
+        _scheduler.Register(animator);
         _animators[key] = animator;
 
         // For avatar attachments: register the reverse mapping and push the flexi
@@ -164,7 +179,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     private void RemoveAnimator(ulong rootId)
     {
         if (_animators.TryRemove(rootId, out var anim))
+        {
+            _scheduler.Unregister(anim);
             anim.Dispose();
+        }
         // If this was an avatar key, remove the reverse mapping.
         foreach (var kv in _localToKey)
         {

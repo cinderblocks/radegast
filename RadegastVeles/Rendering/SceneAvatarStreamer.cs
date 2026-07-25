@@ -28,6 +28,7 @@ using LibreMetaverse;
 using OmVector3  = LibreMetaverse.Vector3;
 using Quaternion = System.Numerics.Quaternion;
 using Vector3    = System.Numerics.Vector3;
+using Vector4    = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
 
@@ -68,6 +69,45 @@ internal sealed class SceneAvatarStreamer : IDisposable
     // is not feet height; ResolveAvatarWorldTransform subtracts this to place the avatar
     // on the ground instead of floating. 0 until the first build completes.
     private readonly ConcurrentDictionary<uint, float> _groundAdjustment = new();
+
+    // ── Avatar rendering complexity (Veles-local "jellydoll") ───────────────────────
+
+    // Superset of _rendered's keys that also includes Cloud-tier avatars — used so a
+    // threshold change (RecomputeAllTiers) can re-evaluate avatars currently hidden as
+    // a cloud, which _rendered alone would miss.
+    private readonly ConcurrentDictionary<uint, byte> _trackedLocalIds = new();
+    // Tier decided by EnqueueBuild, read once by BuildAvatarAsync and removed. Avoids
+    // recomputing (and risking a different answer from) DetermineRenderTier on the
+    // scheduler thread using a possibly-stale sim snapshot.
+    private readonly ConcurrentDictionary<uint, AvatarRenderTier> _pendingTier = new();
+    // Attachment prim LocalID → owning avatar LocalID, so a kill/update on an
+    // attachment can find its avatar and re-trigger a cost re-evaluation.
+    private readonly ConcurrentDictionary<uint, uint> _attachmentOwner = new();
+    // avatar LocalID → last-estimated complexity cost, invalidated only by
+    // OnAttachmentObjectUpdate/OnAttachmentKilled. DetermineRenderTier runs on every
+    // EnqueueBuild call (i.e. every dirty-settle, including position-only ones, not
+    // just real appearance changes) — without this cache each of those would rescan
+    // this avatar's attachments via AvatarComplexityEstimator for no reason, since a
+    // position update can't change what an avatar is wearing.
+    private readonly ConcurrentDictionary<uint, float> _cachedCost = new();
+    // avatar LocalID → last-determined render tier, written by DetermineRenderTier
+    // alongside _cachedCost. Read by SnapshotReportableAvatars for network reporting.
+    private readonly ConcurrentDictionary<uint, AvatarRenderTier> _cachedTier = new();
+
+    private readonly AvatarRenderOverrideStore _overrides;
+
+    /// <summary>
+    /// Avatars whose estimated Veles-local render cost (see
+    /// <see cref="AvatarComplexityEstimator"/>) exceeds this are shown as a silhouette;
+    /// well over it (<see cref="CloudTierMultiplier"/>×), as a particle cloud. Self,
+    /// friends, and per-avatar "Always Render Fully" overrides are always exempt.
+    /// </summary>
+    public float ComplexityThreshold { get; set; } = 120f;
+
+    /// <summary>Threshold value (and slider maximum) that means "unlimited" — always Full.</summary>
+    public const float ComplexityThresholdMax = 500f;
+
+    private const float CloudTierMultiplier = 2.0f;
 
     /// <summary>Number of avatar build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
@@ -118,42 +158,21 @@ internal sealed class SceneAvatarStreamer : IDisposable
     public void SetAnimationStreamer(SceneAvatarAnimationStreamer animationStreamer)
         => _animationStreamer = animationStreamer;
 
-    /// <summary>
-    /// Computes the current world matrix for the avatar with the given local ID.
-    /// Returns <see cref="Matrix4x4"/> identity if the avatar is not found.
-    /// Used by <see cref="SceneFlexiStreamer"/> to seed <c>ExternalTransform</c>
-    /// on a freshly-built flexi animator so attachments appear at the correct
-    /// world position from the very first tick rather than snapping from origin.
-    /// </summary>
-    public Matrix4x4 GetCurrentWorldMatrix(uint localId)
-    {
-        var sim = _client.Network.CurrentSim;
-        if (sim == null) return Matrix4x4.Identity;
-
-        if (localId == _client.Self.LocalID)
-        {
-            var p = _client.Self.SimPosition;
-            var r = _client.Self.SimRotation;
-            return AvatarWorldMatrix(new Vector3(p.X, p.Y, p.Z), r);
-        }
-
-        if (!sim.ObjectsAvatars.TryGetValue(localId, out var av))
-            return Matrix4x4.Identity;
-
-        var (wp, wr) = ResolveAvatarWorldTransform(sim, av);
-        return AvatarWorldMatrix(new Vector3(wp.X, wp.Y, wp.Z), wr);
-    }
-
     public SceneAvatarStreamer(GridClient client, GlViewportControl viewport,
-        SceneBuildScheduler scheduler)
+        SceneBuildScheduler scheduler, AvatarRenderOverrideStore overrides)
     {
         _client    = client;
         _viewport  = viewport;
         _builder   = new AvatarMeshBuilder(client);
         _scheduler = scheduler;
+        _overrides = overrides;
 
         _debounceTimer = new Timer(_ => ProcessDirty(), null,
             Timeout.Infinite, Timeout.Infinite);
+
+        _overrides.OverrideChanged            += OnOverrideChanged;
+        _client.Friends.FriendshipResponse    += OnFriendshipResponse;
+        _client.Friends.FriendshipTerminated  += OnFriendshipTerminated;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────────
@@ -189,7 +208,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // Re-resolve and push the updated world transform.
             var (resolvedPos, resolvedRot) = ResolveAvatarWorldTransform(sim, av);
             var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
-            _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(wp, resolvedRot));
+            var worldMatrix = AvatarWorldMatrix(wp, resolvedRot);
+            _viewport.SetSceneObjectTransform(SceneKey(localId), worldMatrix);
+            // Keep flexi attachments (hair, skirts, tails, ...) in sync with the seat's
+            // motion — without this they stay frozen at the last terse-update position
+            // while the body rides along with the moving prim (vehicle / animated seat).
+            _animationStreamer?.OnFlexiWorldUpdate(localId, worldMatrix);
         }
 
         // Also update self-avatar if seated on this linkset.
@@ -208,7 +232,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var resolvedPos = _client.Self.SimPosition;
                 var resolvedRot = _client.Self.SimRotation;
                 var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
-                _viewport.SetSceneObjectTransform(SceneKey(selfId), AvatarWorldMatrix(wp, resolvedRot));
+                var selfWorldMatrix = AvatarWorldMatrix(wp, resolvedRot);
+                _viewport.SetSceneObjectTransform(SceneKey(selfId), selfWorldMatrix);
+                _animationStreamer?.OnFlexiWorldUpdate(selfId, selfWorldMatrix);
             }
         }
     }
@@ -327,6 +353,53 @@ internal sealed class SceneAvatarStreamer : IDisposable
     }
 
     /// <summary>
+    /// Re-evaluates render tier for every tracked avatar — including ones currently
+    /// hidden as a Cloud (which <see cref="DirtyAllRendered"/>'s <c>_rendered</c>-only
+    /// iteration would miss) — so a raised <see cref="ComplexityThreshold"/> can pull an
+    /// avatar back from Cloud to Silhouette/Full, or a lowered one can push it down,
+    /// without waiting for an unrelated appearance change. Called when the threshold
+    /// slider changes.
+    /// </summary>
+    public void RecomputeAllTiers()
+    {
+        if (_disposed) return;
+        var now = Environment.TickCount64;
+        foreach (var localId in _trackedLocalIds.Keys)
+            _dirty.AddOrUpdate(localId, now, (_, _) => now);
+        if (!_dirty.IsEmpty)
+            _debounceTimer.Change(DebounceMs, Timeout.Infinite);
+    }
+
+    /// <summary>
+    /// Called when an attachment prim belonging to a tracked avatar is added or its
+    /// metadata updated, so a new attachment's cost is picked up by a re-evaluation
+    /// without waiting for an unrelated position/appearance update.
+    /// </summary>
+    public void OnAttachmentObjectUpdate(Simulator sim, Primitive prim, bool isNew)
+    {
+        if (_disposed || prim.ParentID == 0) return;
+        if (!sim.ObjectsAvatars.ContainsKey(prim.ParentID)) return;
+        if (!_trackedLocalIds.ContainsKey(prim.ParentID)) return;
+        _attachmentOwner[prim.LocalID] = prim.ParentID;
+        if (isNew)
+        {
+            _cachedCost.TryRemove(prim.ParentID, out _);
+            EnqueueDirty(prim.ParentID);
+        }
+    }
+
+    /// <summary>Called when a prim is killed, in case it was a tracked avatar's attachment.</summary>
+    public void OnAttachmentKilled(uint killedLocalId)
+    {
+        if (_disposed) return;
+        if (_attachmentOwner.TryRemove(killedLocalId, out var owner) && _trackedLocalIds.ContainsKey(owner))
+        {
+            _cachedCost.TryRemove(owner, out _);
+            EnqueueDirty(owner);
+        }
+    }
+
+    /// <summary>
     /// Immediately removes any rendered avatars that now lie outside the current
     /// <see cref="DrawDistance"/>. Called automatically when the draw distance is
     /// reduced.
@@ -357,6 +430,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _rendered.Clear();
         _lastVisualParamHash.Clear();
         _groundAdjustment.Clear();
+        _trackedLocalIds.Clear();
+        _pendingTier.Clear();
+        _attachmentOwner.Clear();
+        _cachedCost.Clear();
+        _cachedTier.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         foreach (var (id, cts) in _inflight)
         {
@@ -383,6 +461,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _overrides.OverrideChanged           -= OnOverrideChanged;
+        _client.Friends.FriendshipResponse   -= OnFriendshipResponse;
+        _client.Friends.FriendshipTerminated -= OnFriendshipTerminated;
         _debounceTimer.Dispose();
         foreach (var cts in _inflight.Values) { cts.Cancel(); cts.Dispose(); }
         _inflight.Clear();
@@ -444,6 +525,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _rendered.TryRemove(localId, out _);
         _lastVisualParamHash.TryRemove(localId, out _);
         _groundAdjustment.TryRemove(localId, out _);
+        _trackedLocalIds.TryRemove(localId, out _);
+        _pendingTier.TryRemove(localId, out _);
+        _cachedCost.TryRemove(localId, out _);
+        _cachedTier.TryRemove(localId, out _);
+        foreach (var (attId, owner) in _attachmentOwner)
+            if (owner == localId) _attachmentOwner.TryRemove(attId, out _);
         if (_inflight.TryRemove(localId, out var cts))
         {
             cts.Cancel();
@@ -502,6 +589,18 @@ internal sealed class SceneAvatarStreamer : IDisposable
     private void EnsurePlaceholderVisible(uint localId)
     {
         if (_disposed || _rendered.ContainsKey(localId)) return;
+        // Once a cloud driver already exists, both the (invisible) placeholder mesh and
+        // the particle cloud are already showing — skip resubmitting the placeholder.
+        // This matters beyond tidiness: EnqueueDirty calls this un-debounced on every
+        // terse update via OnAvatarUpdate, and an avatar permanently in the Cloud
+        // complexity tier (not just transiently loading, which is normally brief) would
+        // otherwise resubmit a full scene-object every single terse update for as long
+        // as it stays in view and keeps moving. The cloud driver's own position (and so
+        // the visible particle effect) is kept current separately via UpdateWorldPos
+        // from OnTerseAvatarUpdate; only the invisible pick-footprint mesh goes stale
+        // here, same as it already could during the ordinary loading window.
+        if (_cloudDrivers.ContainsKey(localId)) return;
+
         var sim = _client.Network.CurrentSim;
         if (sim == null) return;
 
@@ -523,9 +622,111 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         // Start a particle cloud at the avatar position to show the
         // SL-style "cloud" effect while appearance data is loading.
-        if (!_cloudDrivers.ContainsKey(localId))
+        var cloud = new AvatarCloudDriver(localId, worldPos, _viewport);
+        if (_cloudDrivers.TryAdd(localId, cloud))
+            cloud.Start();
+        else
+            cloud.Dispose(); // race: another thread already added one
+    }
+
+    /// <summary>
+    /// Decides how <paramref name="avatarObj"/> should render given its estimated
+    /// Veles-local complexity (<see cref="AvatarComplexityEstimator"/>) relative to
+    /// <see cref="ComplexityThreshold"/>. Self, friends, and per-avatar overrides are
+    /// always Full — but their cost is still computed and cached (see below), it just
+    /// doesn't affect the tier decision.
+    /// </summary>
+    private AvatarRenderTier DetermineRenderTier(Simulator sim, Avatar avatarObj)
+    {
+        // Cost is always computed/cached, even for exempt avatars — mirrors SL's own
+        // isTooComplex()/getVisualComplexity() split: complexity is computed for every
+        // character regardless of exemption, only the muting decision short-circuits for
+        // self/friend/always-render. Needed so AvatarRenderInfoReporter can report an
+        // honest weight for exempt avatars too, not just the ones Veles actually tiers
+        // down. Cheap due to the cache — see _cachedCost's declaration comment.
+        float cost = _cachedCost.GetOrAdd(avatarObj.LocalID,
+            id => AvatarComplexityEstimator.EstimateCost(sim, id));
+
+        var tier = DetermineRenderTierCore(avatarObj, cost);
+        _cachedTier[avatarObj.LocalID] = tier;
+        return tier;
+    }
+
+    private AvatarRenderTier DetermineRenderTierCore(Avatar avatarObj, float cost)
+    {
+        if (avatarObj.LocalID == _client.Self.LocalID) return AvatarRenderTier.Full;
+        if (avatarObj.ID != UUID.Zero)
         {
-            var cloud = new AvatarCloudDriver(localId, worldPos, _viewport);
+            if (_client.Friends.FriendList.ContainsKey(avatarObj.ID)) return AvatarRenderTier.Full;
+            if (_overrides.IsAlwaysRender(avatarObj.ID)) return AvatarRenderTier.Full;
+        }
+        if (ComplexityThreshold >= ComplexityThresholdMax) return AvatarRenderTier.Full;
+
+        if (cost <= ComplexityThreshold) return AvatarRenderTier.Full;
+        if (cost <= ComplexityThreshold * CloudTierMultiplier) return AvatarRenderTier.Silhouette;
+        return AvatarRenderTier.Cloud;
+    }
+
+    /// <summary>
+    /// Snapshot of every currently-tracked avatar's last-known tier, for
+    /// <see cref="AvatarRenderInfoReporter"/>'s network reporting pass. Weight is always
+    /// reported as 0: Veles's complexity-points estimate runs 0-~500 while SL's real ARC
+    /// weights run in the tens to hundreds of thousands, and this is a crowd-sourced
+    /// capability — the region combines every present viewer's report for the same avatar,
+    /// so sending our number as-is risks corrupting other viewers' "how others see you"
+    /// readout for a target avatar in an unknown direction, depending on how the region
+    /// aggregates (average/sum/max). 0 is a deliberately inert placeholder until the real
+    /// aggregation behaviour is confirmed in-world. TooComplex mirrors what SL's own
+    /// isTooComplex() means: whether *this* viewer has judged the avatar too complex to
+    /// render fully — always false for exempt avatars, same as SL — and is scale-independent,
+    /// so it's reported honestly. Avatars not yet evaluated at least once (no cache entry
+    /// yet) are skipped.
+    /// </summary>
+    public IReadOnlyList<(UUID AgentId, int Weight, bool TooComplex)> SnapshotReportableAvatars()
+    {
+        var sim = _client.Network.CurrentSim;
+        if (sim == null) return Array.Empty<(UUID, int, bool)>();
+
+        var list = new List<(UUID, int, bool)>();
+        foreach (var localId in _trackedLocalIds.Keys)
+        {
+            if (!sim.ObjectsAvatars.TryGetValue(localId, out var av) || av.ID == UUID.Zero) continue;
+            if (!_cachedCost.TryGetValue(localId, out _)) continue;
+            var tier = _cachedTier.TryGetValue(localId, out var t) ? t : AvatarRenderTier.Full;
+            list.Add((av.ID, 0, tier != AvatarRenderTier.Full));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// Puts <paramref name="localId"/> into the Cloud render tier: removes any real
+    /// scene-object mesh in favour of the invisible pick/footprint placeholder (if one
+    /// wasn't already showing from the loading-time cloud), and starts or recolors its
+    /// particle cloud with a per-avatar identity tint. Never touches the build
+    /// scheduler — that's the actual point of this tier.
+    /// </summary>
+    private void EnterCloudTier(Simulator sim, uint localId, Avatar av)
+    {
+        if (_rendered.TryRemove(localId, out _))
+        {
+            var (rawPos, rawRot) = ResolveAvatarWorldTransform(sim, av);
+            var worldPos = new Vector3(rawPos.X, rawPos.Y, rawPos.Z);
+            var worldRot = new Quaternion(rawRot.X, rawRot.Y, rawRot.Z, rawRot.W);
+            var placeholder = AvatarPlaceholderFactory.Build(
+                $"ph:av:{localId}", worldPos, worldRot, avatarLocalId: localId);
+            _viewport.SubmitSceneObject(SceneKey(localId), placeholder);
+        }
+
+        var tint = AvatarIdentityColor.FromUuid(av.ID);
+        if (_cloudDrivers.TryGetValue(localId, out var existing))
+        {
+            existing.SetTint(tint);
+        }
+        else
+        {
+            var (rawPos2, _) = ResolveAvatarWorldTransform(sim, av);
+            var worldPos2 = new Vector3(rawPos2.X, rawPos2.Y, rawPos2.Z);
+            var cloud = new AvatarCloudDriver(localId, worldPos2, _viewport, tint);
             if (_cloudDrivers.TryAdd(localId, cloud))
                 cloud.Start();
             else
@@ -533,9 +734,56 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
     }
 
+    private void OnOverrideChanged(UUID agentId) => HandleTrustChange(agentId);
+    private void OnFriendshipResponse(object? sender, FriendshipResponseEventArgs e) => HandleTrustChange(e.AgentID);
+    private void OnFriendshipTerminated(object? sender, FriendshipTerminatedEventArgs e) => HandleTrustChange(e.AgentID);
+
+    /// <summary>
+    /// Re-evaluates one avatar's tier after something that only affects exemption status
+    /// (friend added/removed, "Always Render Fully" toggled) changes for them — O(1),
+    /// only touches an avatar already being tracked. An avatar not yet tracked gets
+    /// correct exemption treatment for free the next time it comes into range.
+    /// </summary>
+    private void HandleTrustChange(UUID agentId)
+    {
+        if (_disposed) return;
+        var sim = _client.Network.CurrentSim;
+        if (sim == null) return;
+        foreach (var av in sim.ObjectsAvatars.Values)
+        {
+            if (av != null && av.ID == agentId && _trackedLocalIds.ContainsKey(av.LocalID))
+            {
+                EnqueueDirty(av.LocalID);
+                return;
+            }
+        }
+    }
+
     private void EnqueueBuild(uint localId)
     {
         if (_disposed) return;
+        _trackedLocalIds[localId] = 0;
+
+        // Decide render tier before paying any build cost — Cloud tier must never reach
+        // the build scheduler (no asset fetch, no GPU upload for it), which is the whole
+        // point of tiering. Full/Silhouette fall through to the normal build pipeline
+        // below, with the pre-computed tier stashed for BuildAvatarAsync to pick up.
+        var sim = _client.Network.CurrentSim;
+        if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var avForTier))
+        {
+            var tier = DetermineRenderTier(sim, avForTier);
+            if (tier == AvatarRenderTier.Cloud)
+            {
+                if (_inflight.TryRemove(localId, out var staleCts))
+                {
+                    staleCts.Cancel();
+                    staleCts.Dispose();
+                }
+                EnterCloudTier(sim, localId, avForTier);
+                return;
+            }
+            _pendingTier[localId] = tier;
+        }
 
         if (_inflight.TryRemove(localId, out var oldCts))
         {
@@ -548,7 +796,6 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         // Avatars use AvatarMultiplier so they outrank same-distance prims.
         // Additionally boost priority for avatars that are currently visible (in front of the camera).
-        var sim       = _client.Network.CurrentSim;
         var avatarPos = _client.Self.SimPosition;
         float distSq  = AvatarDistanceSq(sim, localId, avatarPos);
 
@@ -618,6 +865,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
             var (rawWorldPos, worldRot) = ResolveAvatarWorldTransform(sim, avatarObj);
             var worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
+            // Picked by EnqueueBuild before this build was ever scheduled — Cloud tier
+            // never reaches this method at all. Default Full covers the (defensive-only)
+            // case where no entry was stashed.
+            var renderTier = _pendingTier.TryRemove(localId, out var pt) ? pt : AvatarRenderTier.Full;
+            Vector4? overrideColor = renderTier == AvatarRenderTier.Silhouette
+                ? AvatarIdentityColor.FromUuid(avatarObj.ID)
+                : null;
+
             var result = await _builder.BuildAsync(
                 localId,
                 visualParams,
@@ -626,6 +881,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 ct:           token,
                 lodLevel:     AvatarLodForDistance(
                     OmVector3.Distance(rawWorldPos, _client.Self.SimPosition)),
+                renderTier:    renderTier,
+                overrideColor: overrideColor,
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
@@ -722,7 +979,18 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var (freshPos, freshRot) = ResolveAvatarWorldTransform(sim, postBuildAv);
                 var freshWorldPos = new Vector3(freshPos.X, freshPos.Y, freshPos.Z);
                 if (Vector3.DistanceSquared(freshWorldPos, worldPos) > 0.01f)
-                    _viewport.SetSceneObjectTransform(SceneKey(localId), AvatarWorldMatrix(freshWorldPos, freshRot));
+                {
+                    var freshWorldMatrix = AvatarWorldMatrix(freshWorldPos, freshRot);
+                    _viewport.SetSceneObjectTransform(SceneKey(localId), freshWorldMatrix);
+                    // AvatarBuilt hasn't fired yet at this point in the build, so the
+                    // SceneAvatarAnimator this avatar's flexi prims will be driven by
+                    // doesn't exist yet — OnFlexiWorldUpdate would silently no-op (same
+                    // event-ordering trap as the seed call removed from SceneFlexiStreamer.
+                    // OnAvatarBuilt). Write ExternalTransform directly onto the FlexiPrims
+                    // the animator will read once it's created, mirroring the seed above.
+                    foreach (var fp in submission.FlexiPrims)
+                        fp.ExternalTransform = freshWorldMatrix;
+                }
             }
 
             // Record the visual-param hash so OnAvatarUpdate can skip redundant rebuilds
