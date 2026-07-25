@@ -125,7 +125,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         CancellationToken               ct,
         int                             lodLevel        = 0,
         Action<PrimRenderSubmission>?   onGeometryReady = null,
-        IProgress<SceneTexturePatch>?   texturePatch    = null)
+        IProgress<SceneTexturePatch>?   texturePatch    = null,
+        AvatarRenderTier                renderTier      = AvatarRenderTier.Full,
+        Vector4?                        overrideColor   = null)
     {
         // 1. Load avatar definition and build VP-morphed bone world matrices.
         LindenAvatarDefinition?            avatarDef         = null;
@@ -237,7 +239,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 onGeometryReady(greySub);
             } : null,
             avatarLocalId: avatarLocalId,
-            texturePatch:  null)   // body bakes use the blocking path; patches would be lost when UploadSubmission frees the grey shell
+            texturePatch:  null,   // body bakes use the blocking path; patches would be lost when UploadSubmission frees the grey shell
+            overrideColor: overrideColor)
             .ConfigureAwait(false);
 
         // VP-deformed bone world matrices: used only for attachment placement so that
@@ -255,7 +258,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // the LLM bind-pose space so attachments land on the correct mesh surface.
         var flexiInfos = new List<FlexiPrimInfo>();
 
-        if (sim != null && boneWorldMatrices != null)
+        // Silhouette tier skips attachments entirely — that's where the real cost
+        // (attachment mesh/texture fetch, GPU upload) lives; the body-only mesh built
+        // above already carries real skin data and animates on its own.
+        if (renderTier != AvatarRenderTier.Silhouette && sim != null && boneWorldMatrices != null)
         {
             try
             {
@@ -1141,7 +1147,8 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             int                             lodLevel        = 0,
             Action<PrimRenderFace[], Vector3, Vector3>? onGeometryReady = null,
             uint                            avatarLocalId   = 0,
-            IProgress<SceneTexturePatch>?   texturePatch    = null)
+            IProgress<SceneTexturePatch>?   texturePatch    = null,
+            Vector4?                        overrideColor   = null)
     {
         var faceData = new List<BodyFaceData>();
         var bMin     = new Vector3(float.MaxValue);
@@ -1296,6 +1303,47 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 FaceIndex   = fi,
             }).ToArray();
             onGeometryReady(greyFaces, bMin, bMax);
+        }
+
+        // Silhouette tier: skip Phase 2 (bake download) and Phase 3's texture-driven
+        // assembly entirely — assemble final faces/skin-data directly from Phase 1's
+        // faceData with a flat identity color on every face. Skin data (Bone1/Weight1/
+        // Bone2/Weight2) comes entirely from faceData and does not depend on textures,
+        // so silhouettes carry real bind-weight data and animate through the same LBS
+        // path as a full build; only texture/attachment cost is actually skipped.
+        if (overrideColor is { } oc)
+        {
+            var silFaces = new List<PrimRenderFace>();
+            var silSkin  = new List<AvatarFaceSkinData>();
+            for (int fi = 0; fi < faceData.Count; fi++)
+            {
+                var fd = faceData[fi];
+                silFaces.Add(new PrimRenderFace
+                {
+                    Vertices    = fd.Verts,
+                    Indices     = fd.Indices,
+                    Color       = oc,
+                    Transform   = Matrix4x4.Identity,
+                    Centroid    = fd.Centroid,
+                    IsTwoSided  = fd.IsTwoSided,
+                    AlphaCutoff = fd.AlphaCutoff,
+                    AlphaMode   = FaceAlphaMode.None,
+                    HasAlpha    = false,
+                    Texture     = null,
+                    PrimLocalId = avatarLocalId,
+                    FaceIndex   = fi,
+                });
+                silSkin.Add(new AvatarFaceSkinData
+                {
+                    FaceIndex = fi,
+                    BindVerts = fd.Verts,
+                    Bone1     = fd.Bone1,
+                    Weight1   = fd.Weight1,
+                    Bone2     = fd.Bone2,
+                    Weight2   = fd.Weight2,
+                });
+            }
+            return (silFaces, silSkin, faceMorphList.ToImmutableArray(), bMin, bMax);
         }
 
         // Phase 2: download baked textures.

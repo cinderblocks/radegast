@@ -54,6 +54,9 @@ internal sealed class AvatarCloudDriver : IDisposable
 
     // World-space position (updated from the avatar streamer as the avatar moves).
     private Vector3       _worldPos;
+    // Puff tint — white for the loading-time cloud (SL parity), or a per-avatar identity
+    // color when this driver is (re)used for the complexity-based Cloud render tier.
+    private Vector4       _tint = new(1f, 1f, 1f, 1f);
     private readonly object _lock = new();
 
     // Simple cloud particle state: an array of live cloud puffs.
@@ -75,12 +78,13 @@ internal sealed class AvatarCloudDriver : IDisposable
     // null, so every SubmitFrame after the first just reuses it.
     private bool _spriteSubmitted;
 
-    public AvatarCloudDriver(uint localId, Vector3 worldPos, GlViewportControl viewport)
+    public AvatarCloudDriver(uint localId, Vector3 worldPos, GlViewportControl viewport, Vector4? tint = null)
     {
         // Encode the avatar LocalID in the lower 32 bits with the cloud flag.
         _key      = AvatarCloudKeyFlag | localId;
         _worldPos = worldPos;
         _viewport = viewport;
+        if (tint.HasValue) _tint = tint.Value;
 
         for (int i = 0; i < _puffs.Length; i++)
             _puffs[i] = new Puff { Age = float.MaxValue }; // all dead initially
@@ -89,6 +93,16 @@ internal sealed class AvatarCloudDriver : IDisposable
     public void UpdateWorldPos(Vector3 worldPos)
     {
         lock (_lock) _worldPos = worldPos;
+    }
+
+    /// <summary>
+    /// Recolors an already-running driver in place — e.g. a loading-time cloud (started
+    /// white) that turns out to also be over the complexity Cloud threshold once the
+    /// avatar's tier is known, without tearing down and restarting the particle burst.
+    /// </summary>
+    public void SetTint(Vector4 tint)
+    {
+        lock (_lock) _tint = tint;
     }
 
     public void Start()
@@ -188,7 +202,8 @@ internal sealed class AvatarCloudDriver : IDisposable
         if (count == 0) return;
 
         Vector3 wp;
-        lock (_lock) wp = _worldPos;
+        Vector4 tint;
+        lock (_lock) { wp = _worldPos; tint = _tint; }
 
         var verts = new ParticleVertex[count];
         int vi = 0;
@@ -197,14 +212,16 @@ internal sealed class AvatarCloudDriver : IDisposable
             if (puff.Age >= puff.Lifetime) continue;
 
             float t     = puff.Age / puff.Lifetime;
-            // SL cloud: colour interpolates white→transparent (INTERP_COLOR_MASK)
+            // SL cloud: colour interpolates tint→transparent (INTERP_COLOR_MASK) — tint is
+            // white for the loading-time cloud, or a per-avatar identity color for the
+            // complexity-based Cloud tier.
             float alpha = 1f - t;
             // Scale interpolates start→end (INTERP_SCALE_MASK)
             float scale = puff.StartScale + (puff.EndScale - puff.StartScale) * t;
             verts[vi++] = new ParticleVertex
             {
                 Position = puff.Pos,
-                Color    = new Vector4(1f, 1f, 1f, alpha),
+                Color    = new Vector4(tint.X, tint.Y, tint.Z, tint.W * alpha),
                 HalfW    = scale * 0.5f,
                 HalfH    = scale * 0.5f,
                 Glow     = 0f,

@@ -632,6 +632,24 @@ public class GlViewportControl : Panel
     /// <summary>Number of scene object submissions waiting to be uploaded to the GPU this frame. Zero-cost snapshot.</summary>
     public int PendingUploadCount => _pendingSceneObjects.Count;
 
+    /// <summary>Texture patches queued for GPU upload but not yet applied. Zero-cost snapshot.</summary>
+    public int QueuedTexturePatchCount => _pendingTexturePatches.Count;
+
+    /// <summary>Texture patches that failed and are waiting on a retry. Zero-cost snapshot.</summary>
+    public int DeferredTexturePatchCount => _deferredPatches.Count;
+
+    /// <summary>Total opaque + alpha scene faces currently uploaded. Zero-cost snapshot.</summary>
+    public int SceneFaceCount => _sceneOpaque.Count + _sceneAlpha.Count;
+
+    /// <summary>
+    /// Mirrors <see cref="SceneViewerViewModel.ShowPerfOverlay"/> (set by the VM whenever
+    /// that toggle changes, including on viewport attach). Gates the periodic
+    /// <c>[SceneLoad]</c> pipeline log below the same way — the overlay is the intended
+    /// audience for this telemetry, so there's no reason to also spam Veles.log for
+    /// users who never turned it on.
+    /// </summary>
+    public bool ShowPerfOverlay { get; set; }
+
     // True when any cross-thread queue holds work that only the GL thread can drain.
     // Read from the UI-thread heartbeat; all members are safe to probe cross-thread.
     private bool HasPendingGpuWork =>
@@ -1205,7 +1223,10 @@ public class GlViewportControl : Panel
             // pending, so "loading feels slow" is diagnosable from Veles.log: it shows
             // which stage is deep — GPU upload queue vs texture patches vs deferrals —
             // and whether the decoded-mesh cache is earning its keep.
-            if (++_loadTelemetryFrame >= 150)
+            // Gated on ShowPerfOverlay: this is debug telemetry for people actively
+            // diagnosing load behaviour (the overlay's own audience), not something to
+            // spam into every user's Veles.log by default.
+            if (ShowPerfOverlay && ++_loadTelemetryFrame >= 150)
             {
                 _loadTelemetryFrame = 0;
                 int up = _pendingSceneObjects.Count;

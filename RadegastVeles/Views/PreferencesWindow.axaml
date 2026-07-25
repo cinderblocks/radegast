@@ -6,6 +6,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Radegast.Veles.ViewModels"
+        xmlns:conv="using:Radegast.Veles.Converters"
         x:Class="Radegast.Veles.Views.PreferencesWindow"
         x:DataType="vm:PreferencesViewModel"
         Title="Preferences"
@@ -517,6 +518,27 @@
                                        TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                        Text="How far (in metres) the scene viewer streams and renders objects. Takes effect the next time a viewer window is opened." />
                         </Grid>
+                        <Grid ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0"
+                                       Text="Avatar Rendering Complexity"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" />
+                            <Slider Grid.Row="0" Grid.Column="1"
+                                    Minimum="0" Maximum="500"
+                                    TickFrequency="10" IsSnapToTickEnabled="True"
+                                    Value="{Binding AvatarComplexityThreshold}"
+                                    AutomationProperties.Name="Avatar rendering complexity threshold" />
+                            <TextBlock Grid.Row="0" Grid.Column="2"
+                                       VerticalAlignment="Center" Margin="8,0,0,0"
+                                       Text="{Binding AvatarComplexityThreshold, Converter={x:Static conv:ComplexityThresholdConverter.Instance}}" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                       Text="Avatars whose estimated local rendering cost exceeds this are shown as a flat-coloured silhouette; well over the limit, as a particle cloud with no body mesh. You, your friends, and anyone marked 'Always Render Fully' are always exempt. At maximum, every avatar always renders fully." />
+                        </Grid>
+                        <CheckBox Content="Report avatar complexity to region"
+                                  IsChecked="{Binding AvatarRenderInfoReportingEnabled}"
+                                  AutomationProperties.Name="Report avatar complexity to region" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Sends every avatar you render's estimated weight and whether you've tiered it down to the region, and fetches back how many nearby people are having trouble rendering you — matches stock Second Life viewer behaviour. Takes effect immediately." />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

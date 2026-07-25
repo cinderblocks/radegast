@@ -72,6 +72,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private SceneFlexiStreamer?              _flexiStreamer;
     private SceneAvatarAnimationStreamer?    _avatarAnimStreamer;
     private SceneAnimeshStreamer?            _animeshStreamer;
+    private AvatarRenderInfoReporter?        _avatarRenderInfoReporter;
     private SceneNameTagService?             _nameTagService;
     private SceneBuildScheduler?             _buildScheduler;
     private SceneEnvironmentService?         _envService;
@@ -96,6 +97,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _waterReflectionsEnabled = false;
     [ObservableProperty] private bool   _atmosphericsEnabled = true;
     [ObservableProperty] private bool   _shadowsEnabled = false;
+    [ObservableProperty] private bool   _avatarRenderInfoReportingEnabled = true;
     [ObservableProperty] private string _perfOverlayText = string.Empty;
 
     private const int ChatOverlayMaxLines = 10;
@@ -111,6 +113,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _isRunning;
     /// <summary>Draw / stream distance in metres (16–512). Default matches SceneObjectStreamer.</summary>
     [ObservableProperty] private float  _drawDistance = 96f;
+    /// <summary>
+    /// Avatar rendering-complexity threshold (0–<see cref="SceneAvatarStreamer.ComplexityThresholdMax"/>,
+    /// which means "unlimited"). Avatars estimated over this render as a silhouette/cloud impostor.
+    /// </summary>
+    [ObservableProperty] private float  _avatarComplexityThreshold = 120f;
     /// <summary>LocalID of the prim or avatar the user last clicked, 0 when nothing selected.</summary>
     [ObservableProperty] private uint   _selectedLocalId;
     /// <summary>Face index of the last prim click, used to refresh <see cref="SelectedInfo"/> on property arrival.</summary>
@@ -157,6 +164,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? instance.GlobalSettings["shadows_enabled"].AsBoolean() : false;
         _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? (float)instance.GlobalSettings["scene_draw_distance"].AsReal() : 96f;
+        _avatarComplexityThreshold = instance.GlobalSettings["avatar_complexity_threshold"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? (float)instance.GlobalSettings["avatar_complexity_threshold"].AsReal() : 120f;
+        _avatarRenderInfoReportingEnabled = instance.GlobalSettings["avatar_render_info_reporting_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["avatar_render_info_reporting_enabled"].AsBoolean() : true;
     }
 
     partial void OnWireframeChanged(bool value)
@@ -189,8 +200,14 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_viewport != null) _viewport.ShadowsEnabled = value;
     }
 
+    partial void OnAvatarRenderInfoReportingEnabledChanged(bool value)
+    {
+        if (_avatarRenderInfoReporter != null) _avatarRenderInfoReporter.Enabled = value;
+    }
+
     partial void OnShowPerfOverlayChanged(bool value)
     {
+        if (_viewport != null) _viewport.ShowPerfOverlay = value;
         if (!value) PerfOverlayText = string.Empty;
     }
 
@@ -206,6 +223,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _avatarStreamer?.DirtyAllRendered();
     }
 
+    partial void OnAvatarComplexityThresholdChanged(float value)
+    {
+        if (_avatarStreamer == null) return;
+        _avatarStreamer.ComplexityThreshold = value;
+        _avatarStreamer.RecomputeAllTiers();
+    }
+
     /// <summary>
     /// Attach the GL viewport so the VM can configure it and submit
     /// geometry to it. Called from the view's code-behind after the visual tree is ready.
@@ -219,6 +243,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.WaterReflectionsEnabled    = WaterReflectionsEnabled;
         _viewport.AtmosphericsEnabled        = AtmosphericsEnabled;
         _viewport.ShadowsEnabled              = ShadowsEnabled;
+        _viewport.ShowPerfOverlay              = ShowPerfOverlay;
         _viewport.WaterHeight            = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
 
         LibreMetaverse.Logger.Info(
@@ -259,7 +284,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // avatars overlap without starving the render thread.
         _buildScheduler      = new SceneBuildScheduler(maxConcurrent: 4);
         _objectStreamer       = new SceneObjectStreamer(_instance.Client, viewport, _buildScheduler);
-        _avatarStreamer       = new SceneAvatarStreamer(_instance.Client, viewport, _buildScheduler);
+        _avatarStreamer       = new SceneAvatarStreamer(_instance.Client, viewport, _buildScheduler, _instance.AvatarRenderOverrides);
+        _avatarRenderInfoReporter = new AvatarRenderInfoReporter(_instance.Client, _avatarStreamer, _instance)
+        {
+            Enabled = AvatarRenderInfoReportingEnabled
+        };
+        _avatarRenderInfoReporter.Start();
         _particleStreamer    = new SceneParticleStreamer(_instance.Client, viewport);
         _lightStreamer       = new SceneLightStreamer(_instance.Client);
         _viewport.LightStreamer = _lightStreamer;
@@ -273,6 +303,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // Apply current draw distance to freshly created streamers.
         _objectStreamer.DrawDistance = DrawDistance;
         _avatarStreamer.DrawDistance = DrawDistance;
+        _avatarStreamer.ComplexityThreshold = AvatarComplexityThreshold;
 
         // Name-tag overlay service.
         _nameTagService = new SceneNameTagService(_instance.Client, viewport);
@@ -383,6 +414,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _objectStreamer.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _particleStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _lightStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
+        // Other-avatar attachments were previously never forwarded here at all, so an
+        // avatar attaching new mesh after being rendered never re-triggered a rebuild —
+        // now load-bearing for the complexity system's recompute-on-attachment-change.
+        if (e.IsAttachment)
+            _avatarStreamer?.OnAttachmentObjectUpdate(e.Simulator, e.Prim, e.IsNew);
 
         // A full ObjectUpdate may carry a prim that is already (or will become) a
         // seat for one or more avatars.  When avatar ObjectUpdates arrive before
@@ -495,6 +531,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _objectStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _avatarStreamer?.OnKillAvatar(e.Simulator, e.ObjectLocalID);
+        // Harmless no-op unless this LocalID was a tracked avatar's attachment.
+        _avatarStreamer?.OnAttachmentKilled(e.ObjectLocalID);
         _particleStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _lightStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
         _flexiStreamer?.OnKillObject(e.Simulator, e.ObjectLocalID);
@@ -535,6 +573,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _flexiStreamer?.Clear();
             _avatarAnimStreamer?.Clear();
             _animeshStreamer?.Clear();
+            _avatarRenderInfoReporter?.OnSimChanged();
             NameTags.Clear();
             SelectedLocalId = 0;
             SelectedInfo    = string.Empty;
@@ -1369,6 +1408,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         _avatarStreamer?.Dispose();
         _avatarStreamer = null;
+        _avatarRenderInfoReporter?.Dispose();
+        _avatarRenderInfoReporter = null;
 
         _buildScheduler?.Dispose();
         _buildScheduler = null;
@@ -1442,13 +1483,18 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         int avBuilds     = _avatarStreamer?.InflightCount        ?? 0;
         int pendingUpl   = _viewport?.PendingUploadCount        ?? 0;
         int texDecodes   = GridTextureHelper.InflightDecodeCount;
+        int patchQueue   = _viewport?.QueuedTexturePatchCount   ?? 0;
+        int patchDeferred = _viewport?.DeferredTexturePatchCount ?? 0;
+        int sceneFaces   = _viewport?.SceneFaceCount            ?? 0;
 
         var text = $"CPU {stats.CpuTimeMs:F1} ms" +
                    (stats.GpuTimeMs > 0 ? $"  GPU {stats.GpuTimeMs:F1} ms" : string.Empty) +
                    $"\nDraws {stats.DrawCalls}  Tris {stats.Triangles:#,0}" +
                    $"\nFaces {stats.FacesSubmitted}  Culled {stats.FacesCulled}" +
                    $"\nBuild Q:{buildQueue}  Obj:{objBuilds}  Av:{avBuilds}" +
-                   $"\nUpload Q:{pendingUpl}  TexDec:{texDecodes}";
+                   $"\nUpload Q:{pendingUpl}  TexDec:{texDecodes}" +
+                   $"\nPatches Q:{patchQueue}  Deferred:{patchDeferred}  SceneFaces:{sceneFaces:#,0}" +
+                   $"\nMeshCache {PrimMeshBuilder.MeshCacheHits}h/{PrimMeshBuilder.MeshCacheMisses}m";
         Dispatcher.UIThread.Post(() =>
         {
             if (!_disposed) PerfOverlayText = text;
