@@ -73,23 +73,6 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// </summary>
     public static volatile bool AnimationEnabled = false;
 
-    // TEMPORARY diagnostic: reported bug where flexi attachments stay frozen at their
-    // build-time position instead of tracking the bone they're attached to. First pass
-    // (a flat first-8-ticks-globally counter) turned out to be too eager — FlexiPrimAnimator.
-    // Start() begins ticking on its own independent PeriodicTimer immediately, while the
-    // live bone provider is only wired later by AnimTick once LoadAsync's Dispatcher.Post
-    // completion callback runs on the UI thread, so a narrow budget could exhaust itself
-    // entirely inside that startup race and falsely look like "never wired" instead of
-    // "wired a few dozen ms late". This version instead tracks the null->non-null
-    // *transition* over a multi-second window (throttled, not a hard tick cap), so a
-    // startup race (transition logged quickly) is distinguishable from a genuine
-    // permanent failure (no transition ever logged) in one retest.
-    // Remove once the root cause is confirmed and fixed.
-    private static readonly Stopwatch s_diagStopwatch = Stopwatch.StartNew();
-    private static volatile bool s_diagTransitionLogged;
-    private static int s_diagNullLogCount;
-    private const int MaxDiagNullLogs = 30; // throttled below to ~1 per 10 ticks — spans ~10s
-
     // ── Per-flexi-prim state ──────────────────────────────────────────────────────
 
     private sealed class FlexiState
@@ -398,34 +381,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
                          * Matrix4x4.CreateFromQuaternion(info.AttachJointRotation)
                          * Matrix4x4.CreateTranslation(info.AttachJointOffset)
                          * stripped;
-
-                if (!s_diagTransitionLogged)
-                {
-                    s_diagTransitionLogged = true;
-                    LibreMetaverse.Logger.Debug(
-                        $"[FlexiDiag] joint={info.AttachJointName} provider became non-null at " +
-                        $"{s_diagStopwatch.ElapsedMilliseconds}ms; boneMatrixTranslation=" +
-                        $"({boneMatrix.M41:F3},{boneMatrix.M42:F3},{boneMatrix.M43:F3}) " +
-                        $"attachTxTranslation=({attachTx.M41:F3},{attachTx.M42:F3},{attachTx.M43:F3})");
-                }
             }
-            else if (s_diagNullLogCount < MaxDiagNullLogs)
-            {
-                s_diagNullLogCount++;
-                if (s_diagNullLogCount % 10 == 1)
-                    LibreMetaverse.Logger.Debug(
-                        $"[FlexiDiag] joint={info.AttachJointName} AttachBoneProvider still NULL at " +
-                        $"{s_diagStopwatch.ElapsedMilliseconds}ms (tick #{s_diagNullLogCount}) — " +
-                        "using static build-time AttachTransform.");
-            }
-        }
-        else if (s_diagNullLogCount < MaxDiagNullLogs)
-        {
-            s_diagNullLogCount++;
-            if (s_diagNullLogCount % 10 == 1)
-                LibreMetaverse.Logger.Debug(
-                    $"[FlexiDiag] AttachJointName is NULL for this flexi prim at " +
-                    $"{s_diagStopwatch.ElapsedMilliseconds}ms — never tracks any bone.");
         }
 
         // Apply the external (world-placement) transform AFTER attachment recomputation

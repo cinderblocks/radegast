@@ -429,7 +429,18 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                          ai.JointOffset, ai.JointRotation, new List<(int, float[])>());
                                 pendingFlexi[srcPrim.LocalID] = entry;
                             }
-                            entry.faceList.Add((bodyFaceCount + i, srcVerts));
+                            // srcVerts (origFace.Vertices) may be an ArrayPool-rented, oversized
+                            // buffer (see the vFloats/VerticesLength comment above) — trim to the
+                            // real logical length before handing it to FlexiPrimAnimator, which has
+                            // no VerticesLength of its own and infers vertex count from the array's
+                            // raw .Length. Left untrimmed, every downstream computation (vertex
+                            // count, profile/segment geometry, and the length published to
+                            // scheduleUpdate) was inflated, corrupting the flexi mesh's own vertex
+                            // data despite the attachment transform being computed correctly.
+                            var flexiVerts = vFloats == srcVerts.Length
+                                ? srcVerts
+                                : srcVerts.AsSpan(0, vFloats).ToArray();
+                            entry.faceList.Add((bodyFaceCount + i, flexiVerts));
                         }
                         else
                         {

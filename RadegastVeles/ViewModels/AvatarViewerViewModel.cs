@@ -112,7 +112,20 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     // Attachment-flavour bones (no VP scale propagation through the hierarchy) —
     // used to keep flexi attachment prims aligned with the static AttachTransform
     // built at mesh-build time.
-    private Dictionary<string, Matrix4x4> _attachBonesBuffer = new(StringComparer.Ordinal);
+    //
+    // Ping-pong buffers, not a single reused Dictionary: FlexiPrimAnimator.RunAsync runs
+    // its own independent ~30 Hz timer loop on a separate thread from AnimationLoopAsync
+    // (no synchronization between them), and its SetBoneProvider closure calls TryGetValue
+    // on whatever this field pointed to at Set time. A single Dictionary mutated in place
+    // via Clear()+refill each AnimTick is not thread-safe against a concurrent reader —
+    // this produced exactly the observed symptom (flexi prims plausibly placed once, then
+    // frozen forever regardless of the animation-physics toggle, since the race silently
+    // returns stale/empty lookups instead of throwing). Mirrors the identical fix already
+    // used by the Scene Viewer's own separate implementation, SceneAvatarAnimator.
+    private readonly Dictionary<string, Matrix4x4> _attachBonesPing = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Matrix4x4> _attachBonesPong = new(StringComparer.Ordinal);
+    private bool _attachUsePing = true;
+    private volatile Dictionary<string, Matrix4x4>? _attachBonesPublished;
 
     private ParticleViewerDriver? _particles;
     private FlexiPrimAnimator?    _flexi;
@@ -881,10 +894,16 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 // static AttachTransform built by AvatarMeshBuilder.
                 if (_flexi != null)
                 {
+                    // Write into the currently-inactive ping-pong buffer, then publish the
+                    // fully-written snapshot — see the field doc comment for why a single
+                    // reused Dictionary is not safe here.
+                    _attachUsePing = !_attachUsePing;
+                    var writeTarget = _attachUsePing ? _attachBonesPing : _attachBonesPong;
                     AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
-                        avatarDef, vpBt, rotDeltas, _attachBonesBuffer);
-                    var attachBones = _attachBonesBuffer;
-                    _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
+                        avatarDef, vpBt, rotDeltas, writeTarget);
+                    _attachBonesPublished = writeTarget;
+                    var published = _attachBonesPublished;
+                    _flexi.SetBoneProvider(name => published!.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
                 }
 
                 // Optimisation: once the static VP pose has been applied and no animation is
@@ -903,10 +922,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         // attachment-flavour bones.
         if (_flexi != null && mode == AvatarPoseMode.APose)
         {
+            _attachUsePing = !_attachUsePing;
+            var writeTarget = _attachUsePing ? _attachBonesPing : _attachBonesPong;
             AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
-                avatarDef, vpBt, rotDeltas, _attachBonesBuffer);
-            var attachBones = _attachBonesBuffer;
-            _flexi.SetBoneProvider(name => attachBones.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
+                avatarDef, vpBt, rotDeltas, writeTarget);
+            _attachBonesPublished = writeTarget;
+            var published = _attachBonesPublished;
+            _flexi.SetBoneProvider(name => published!.TryGetValue(name, out var m) ? m : Matrix4x4.Identity);
         }
 
         // Rigged/fitted mesh attachments deform with real VP-driven bone transforms

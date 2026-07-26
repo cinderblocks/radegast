@@ -192,6 +192,9 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         // Preferences this session (important for unattended bots).
         LowMemoryModeEnabled = GlobalSettings["low_memory_mode_enabled"].AsBoolean();
 
+        Rendering.FlexiPrimAnimator.AnimationEnabled =
+            GlobalSettings["flexi_animation_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown && GlobalSettings["flexi_animation_enabled"].AsBoolean();
+
         var assetCacheMaxSizeMb = GlobalSettings["asset_cache_max_size_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? GlobalSettings["asset_cache_max_size_mb"].AsInteger() : 1024;
         var skBitmapCacheCap = GlobalSettings["sk_bitmap_cache_cap"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
