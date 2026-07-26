@@ -40,6 +40,13 @@ public sealed class NameTagItem
     public double Y     { get; init; }
     /// <summary>True when this tag belongs to the local agent.</summary>
     public bool   IsSelf { get; init; }
+    /// <summary>
+    /// Veles complexity-cost text (e.g. "182"), or empty if the cost display is
+    /// disabled or the avatar hasn't been through a cost estimate yet.
+    /// </summary>
+    public string CostText  { get; init; } = string.Empty;
+    /// <summary>ARGB color for <see cref="CostText"/>, tier-coded (green/yellow/red).</summary>
+    public uint   CostColor { get; init; } = 0xFFFFFFFF;
 }
 
 /// <summary>
@@ -64,8 +71,9 @@ public sealed class HoverTextItem
 /// </summary>
 internal sealed class SceneNameTagService : IDisposable
 {
-    private readonly GridClient        _client;
-    private readonly GlViewportControl _viewport;
+    private readonly GridClient          _client;
+    private readonly GlViewportControl   _viewport;
+    private readonly SceneAvatarStreamer _avatarStreamer;
 
     // Height above avatar root position where the name tag is anchored (metres).
     private const float TagHeightOffset = 2.2f;
@@ -74,6 +82,12 @@ internal sealed class SceneNameTagService : IDisposable
 
     private readonly CancellationTokenSource _cts = new();
     private bool _disposed;
+
+    /// <summary>
+    /// When true, append each avatar's Veles complexity cost to its name tag.
+    /// Checked per-tick — safe to flip live from Preferences, no relog needed.
+    /// </summary>
+    public bool ShowComplexityCost { get; set; }
 
     /// <summary>
     /// Raised on the thread-pool whenever the avatar name-tag list should be refreshed.
@@ -86,10 +100,11 @@ internal sealed class SceneNameTagService : IDisposable
     /// </summary>
     public event Action<IReadOnlyList<HoverTextItem>>?  HoverTagsUpdated;
 
-    public SceneNameTagService(GridClient client, GlViewportControl viewport)
+    public SceneNameTagService(GridClient client, GlViewportControl viewport, SceneAvatarStreamer avatarStreamer)
     {
-        _client   = client;
-        _viewport = viewport;
+        _client         = client;
+        _viewport       = viewport;
+        _avatarStreamer = avatarStreamer;
     }
 
     public void Start() => _ = RunAsync(_cts.Token);
@@ -167,12 +182,22 @@ internal sealed class SceneNameTagService : IDisposable
             if (string.IsNullOrWhiteSpace(name))
                 name = localId.ToString();
 
+            string costText = string.Empty;
+            uint costColor = 0xFFFFFFFF;
+            if (ShowComplexityCost && _avatarStreamer.TryGetCachedComplexity(localId, out var cost, out var tier))
+            {
+                costText = ((int)MathF.Round(cost)).ToString();
+                costColor = AvatarTierColor.ToArgb(tier);
+            }
+
             tags.Add(new NameTagItem
             {
-                Name   = name,
-                X      = sx,
-                Y      = sy,
-                IsSelf = av.ID == selfId,
+                Name      = name,
+                X         = sx,
+                Y         = sy,
+                IsSelf    = av.ID == selfId,
+                CostText  = costText,
+                CostColor = costColor,
             });
         }
 

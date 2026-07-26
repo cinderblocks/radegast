@@ -8,6 +8,7 @@
              xmlns:vm="using:Radegast.Veles.ViewModels"
              xmlns:rendering="using:Radegast.Veles.Rendering"
              xmlns:conv="using:Radegast.Veles.Converters"
+             xmlns:sconv="using:Avalonia.Data.Converters"
              x:Class="Radegast.Veles.Views.SceneViewerPanel"
              x:DataType="vm:SceneViewerViewModel"
              AutomationProperties.Name="3D scene viewer">
@@ -209,9 +210,17 @@
                                     Background="#99000000"
                                     CornerRadius="3"
                                     Padding="4,1">
-                                <TextBlock Text="{Binding Name}"
-                                           FontSize="11"
-                                           Foreground="White" />
+                                <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}"
+                                               FontSize="11"
+                                               HorizontalAlignment="Center"
+                                               Foreground="White" />
+                                    <TextBlock Text="{Binding CostText}"
+                                               IsVisible="{Binding CostText, Converter={x:Static sconv:StringConverters.IsNotNullOrEmpty}}"
+                                               FontSize="9"
+                                               HorizontalAlignment="Center"
+                                               Foreground="{Binding CostColor, Converter={x:Static conv:ArgbToColorConverter.Instance}}" />
+                                </StackPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

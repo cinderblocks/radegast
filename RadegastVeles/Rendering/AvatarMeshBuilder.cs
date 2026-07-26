@@ -1720,16 +1720,35 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 try
                 {
                     Func<UUID, UUID> bakedResolver = id => ResolveBakedTexId(avatarObj, id);
+                    // Bounded per-attachment: mesh/sculpt-texture downloads inside
+                    // BuildAttachmentFacesAsync are not all individually timeout-guarded
+                    // (e.g. a non-mesh sculpt texture fetch awaits the outer build token
+                    // only), so one stalled asset request can otherwise hang this task
+                    // forever. Since Task.WhenAll below waits for every attachment, an
+                    // unbounded hang here freezes the whole avatar (stuck "loading",
+                    // frozen T-pose) instead of just losing one attachment. Timing out
+                    // and skipping this attachment also keeps geometry submission on a
+                    // predictable schedule, which matters for GlViewportControl's
+                    // deferred-texture-patch retry window (~30 s) — a slow attachment
+                    // delaying final submission past that window silently drops other,
+                    // already-downloaded attachments' textures (e.g. flexi hair).
                     var (attFaces, attRigged, aBMin, aBMax) = await _primMesher
                         .BuildAttachmentFacesAsync(linkset, attachJointMatrix, progress, ct,
                             bakedResolver,
                             rootLocalId:  root.LocalID,
                             texturePatch: texturePatch)
+                        .WaitAsync(TimeSpan.FromSeconds(45), ct)
                         .ConfigureAwait(false);
                     return (apoint.JointName, apoint.Position, apoint.Rotation, root.LocalID,
                             attFaces, attRigged, aBMin, aBMax, ok: true);
                 }
                 catch (OperationCanceledException) { throw; }
+                catch (TimeoutException)
+                {
+                    Logger.Debug($"AvatarMeshBuilder: attachment on point {apId} timed out " +
+                                 "building (mesh/texture fetch stalled); skipping this attachment.", client);
+                    return default;
+                }
                 catch { return default; }
             }, ct)).ToList();
 

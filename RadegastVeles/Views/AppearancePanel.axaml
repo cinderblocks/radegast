@@ -6,6 +6,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Radegast.Veles.ViewModels"
+             xmlns:sconv="using:Avalonia.Data.Converters"
              x:Class="Radegast.Veles.Views.AppearancePanel"
              x:DataType="vm:AppearanceViewModel"
              AutomationProperties.Name="Appearance panel">
@@ -38,13 +39,24 @@
                             MinWidth="52"
                             AutomationProperties.Name="Apply hover height" />
                 </Grid>
-                <Grid ColumnDefinitions="Auto,Auto,*">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,*">
                     <Button Grid.Column="0" Content="⟳ Refresh" Command="{Binding RefreshCommand}"
                             Margin="0,0,4,0" AutomationProperties.Name="Refresh appearance" />
                     <Button Grid.Column="1" Content="Rebake" Command="{Binding RebakeTexturesCommand}"
                             ToolTip.Tip="Rebake avatar textures"
                             AutomationProperties.Name="Rebake textures" />
-                    <TextBlock Grid.Column="2" Text="{Binding StatusText}"
+                    <Border Grid.Column="2"
+                            IsVisible="{Binding ReportedComplexityText, Converter={x:Static sconv:StringConverters.IsNotNullOrEmpty}}"
+                            Background="#12FFFFFF" CornerRadius="4" Padding="6,3" Margin="8,0,0,0"
+                            ToolTip.Tip="Your rendering complexity as reported back by nearby viewers via the region's AvatarRenderInfo capability — matches Second Life's Appearance floater. Blank if no one nearby has reported you yet.">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="Reported Complexity:" FontSize="11"
+                                       Foreground="{DynamicResource VelesMutedForeground}" />
+                            <TextBlock Text="{Binding ReportedComplexityText}" FontSize="11" FontFamily="Monospace"
+                                       AutomationProperties.Name="Avatar reported complexity" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Grid.Column="3" Text="{Binding StatusText}"
                                VerticalAlignment="Center" Margin="8,0,0,0"
                                FontSize="11" Foreground="{DynamicResource VelesMutedForeground}"
                                TextTrimming="CharacterEllipsis"

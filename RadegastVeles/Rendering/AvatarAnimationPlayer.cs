@@ -434,11 +434,24 @@ internal sealed class AvatarAnimationPlayer : IDisposable
     private void OnAnimationReceived(UUID id, Asset? asset)
     {
         if (_disposed) return;
-        if (asset?.AssetData == null) return;
+        if (asset?.AssetData == null)
+        {
+            // Download failed (timeout, dropped request, missing asset, etc.). _requested
+            // guards against re-issuing a request while one is already in flight, but
+            // without this, a single failed fetch would permanently block this animation
+            // from ever being retried for this player's lifetime — no other code path
+            // clears the entry (Dispose() clears all of them, but that means closing and
+            // reopening the whole avatar view, not just re-selecting Live Animation).
+            // Removing it here lets the next SetActiveAnimations call (routine — fires on
+            // every AvatarAnimation event) retry instead of leaving the avatar permanently
+            // undeformed for that joint set.
+            lock (_lock) { _requested.Remove(id); }
+            return;
+        }
 
         BinBVHAnimationReader reader;
         try { reader = new BinBVHAnimationReader(asset.AssetData); }
-        catch { return; }
+        catch { lock (_lock) { _requested.Remove(id); } return; }
 
         s_cache.AddOrUpdate(id, reader);
 

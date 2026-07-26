@@ -328,6 +328,14 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _avatarRenderInfoReportingEnabled = true;
 
+    /// <summary>
+    /// Show each nearby avatar's Veles complexity cost under its name tag in the 3D
+    /// scene viewer, color-coded by render tier (green/yellow/red). Default false to
+    /// avoid clutter for users who don't care about the number.
+    /// </summary>
+    [ObservableProperty]
+    private bool _showAvatarComplexityInNameTags = false;
+
     /// <summary>Animate flexible prims (physics simulation at ~30 Hz). Default false to save CPU.</summary>
     [ObservableProperty]
     private bool _flexiAnimationEnabled = false;
@@ -703,6 +711,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? (float)s["avatar_complexity_threshold"].AsReal() : 120f;
         AvatarRenderInfoReportingEnabled = s["avatar_render_info_reporting_enabled"].Type != OSDType.Unknown
             ? s["avatar_render_info_reporting_enabled"].AsBoolean() : true;
+        ShowAvatarComplexityInNameTags = s["show_avatar_complexity_in_nametags"].Type != OSDType.Unknown
+            ? s["show_avatar_complexity_in_nametags"].AsBoolean() : false;
         FlexiAnimationEnabled = s["flexi_animation_enabled"].Type != OSDType.Unknown
             ? s["flexi_animation_enabled"].AsBoolean() : false;
         FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
@@ -879,6 +889,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
         s["avatar_complexity_threshold"] = OSD.FromReal(AvatarComplexityThreshold);
         s["avatar_render_info_reporting_enabled"] = OSD.FromBoolean(AvatarRenderInfoReportingEnabled);
+        s["show_avatar_complexity_in_nametags"] = OSD.FromBoolean(ShowAvatarComplexityInNameTags);
         s["flexi_animation_enabled"] = OSD.FromBoolean(FlexiAnimationEnabled);
         FlexiPrimAnimator.AnimationEnabled = FlexiAnimationEnabled;
 

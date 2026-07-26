@@ -539,6 +539,11 @@
                                   AutomationProperties.Name="Report avatar complexity to region" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Sends every avatar you render's estimated weight and whether you've tiered it down to the region, and fetches back how many nearby people are having trouble rendering you — matches stock Second Life viewer behaviour. Takes effect immediately." />
+                        <CheckBox Content="Show rendering cost under avatar name tags"
+                                  IsChecked="{Binding ShowAvatarComplexityInNameTags}"
+                                  AutomationProperties.Name="Show rendering cost under avatar name tags" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Displays each nearby avatar's Veles complexity cost under its name tag in the 3D scene viewer, colour-coded green/yellow/red by render tier. Applies the next time the Scene Viewer is opened." />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

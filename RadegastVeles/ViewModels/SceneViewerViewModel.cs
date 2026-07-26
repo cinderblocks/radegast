@@ -98,6 +98,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _atmosphericsEnabled = true;
     [ObservableProperty] private bool   _shadowsEnabled = false;
     [ObservableProperty] private bool   _avatarRenderInfoReportingEnabled = true;
+    [ObservableProperty] private bool   _showAvatarComplexityInNameTags = false;
     [ObservableProperty] private string _perfOverlayText = string.Empty;
 
     private const int ChatOverlayMaxLines = 10;
@@ -168,6 +169,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? (float)instance.GlobalSettings["avatar_complexity_threshold"].AsReal() : 120f;
         _avatarRenderInfoReportingEnabled = instance.GlobalSettings["avatar_render_info_reporting_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["avatar_render_info_reporting_enabled"].AsBoolean() : true;
+        _showAvatarComplexityInNameTags = instance.GlobalSettings["show_avatar_complexity_in_nametags"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["show_avatar_complexity_in_nametags"].AsBoolean() : false;
     }
 
     partial void OnWireframeChanged(bool value)
@@ -203,6 +206,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     partial void OnAvatarRenderInfoReportingEnabledChanged(bool value)
     {
         if (_avatarRenderInfoReporter != null) _avatarRenderInfoReporter.Enabled = value;
+    }
+
+    partial void OnShowAvatarComplexityInNameTagsChanged(bool value)
+    {
+        if (_nameTagService != null) _nameTagService.ShowComplexityCost = value;
     }
 
     partial void OnShowPerfOverlayChanged(bool value)
@@ -306,7 +314,10 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _avatarStreamer.ComplexityThreshold = AvatarComplexityThreshold;
 
         // Name-tag overlay service.
-        _nameTagService = new SceneNameTagService(_instance.Client, viewport);
+        _nameTagService = new SceneNameTagService(_instance.Client, viewport, _avatarStreamer)
+        {
+            ShowComplexityCost = ShowAvatarComplexityInNameTags
+        };
         _nameTagService.TagsUpdated      += OnNameTagsUpdated;
         _nameTagService.HoverTagsUpdated += OnHoverTagsUpdated;
         _nameTagService.Start();

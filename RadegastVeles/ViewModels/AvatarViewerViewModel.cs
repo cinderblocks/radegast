@@ -137,6 +137,22 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _errorText   = string.Empty;
     [ObservableProperty] private bool   _wireframe;
     [ObservableProperty] private bool   _ssaoEnabled;
+
+    /// <summary>
+    /// This avatar's local Veles complexity cost (see <see cref="AvatarComplexityEstimator"/>),
+    /// recomputed whenever a build completes. Same source/semantics as the Scene Viewer's
+    /// nameplate display — tier-coded green/yellow/red against the current threshold.
+    /// </summary>
+    [ObservableProperty] private string _localComplexityText  = string.Empty;
+    [ObservableProperty] private uint   _localComplexityColor = 0xFFFFFFFFu;
+
+    /// <summary>
+    /// Self-only: our own agent's "reported" complexity weight fetched back from the
+    /// region's AvatarRenderInfo capability — same source/semantics as the Appearance
+    /// panel's reading. Not shown when previewing another avatar; the capability doesn't
+    /// give a reliable way to single out a specific other avatar's reported weight here.
+    /// </summary>
+    [ObservableProperty] private string _reportedComplexityText = string.Empty;
     [ObservableProperty] private AvatarPoseMode _poseMode = AvatarPoseMode.LiveAnimation;
 
     /// <summary>
@@ -193,7 +209,11 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             Timeout.Infinite, Timeout.Infinite);
 
         if (_isSelf)
-            Client.Appearance.AppearanceSet += OnSelfAppearanceSet;
+        {
+            Client.Appearance.AppearanceSet     += OnSelfAppearanceSet;
+            Client.Self.AvatarRenderInfoUpdated += OnAvatarRenderInfoUpdated;
+            RefreshReportedComplexity();
+        }
         Client.Avatars.AvatarAppearance += OnAvatarAppearance;
         Client.Objects.ObjectUpdate     += OnObjectUpdate;
         Client.Objects.KillObject       += OnKillObject;
@@ -425,17 +445,22 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 _particles = null;
             }
 
-            // (Re)start flexi-prim animation for any flexi attachments.
+            // Stop the old flexi animator's ticking immediately. Starting the replacement
+            // is deferred below (after Submit) — see the comment there for why.
             _flexi?.Dispose();
-            if (result.Submission.FlexiPrims.Length > 0 && _viewport != null)
+            _flexi = null;
+
+            // Local Veles complexity cost is stable now that attachments are known.
+            RefreshLocalComplexity();
+
+            // Self-only: actively refresh "reported by others" complexity — don't rely
+            // solely on some other panel's independent fetch loop, since this window can
+            // be open on its own. Skipped quietly if the region doesn't expose the
+            // capability, matching AvatarRenderInfoReporter's own guard.
+            if (_isSelf && Client.Network.CurrentSim?.Caps?.CapabilityURI("AvatarRenderInfo") != null)
             {
-                var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(result.Submission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
-                _flexi.Start();
-            }
-            else
-            {
-                _flexi = null;
+                await Client.Self.GetAvatarRenderInfoAsync().ConfigureAwait(false);
+                RefreshReportedComplexity();
             }
 
             Dispatcher.UIThread.Post(() =>
@@ -451,6 +476,19 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                         _viewport.SubmitAvatarFront(submission);
                     else
                         _viewport.Submit(submission);
+
+                    // (Re)start flexi-prim animation now that _faceMeshes matches this
+                    // submission. Starting this any earlier (e.g. right after BuildAsync,
+                    // before Submit ran) let the animator's ~30 Hz loop begin writing face
+                    // indices computed against the new submission while the viewport's
+                    // _faceMeshes still reflected the previous (or grey-preview) one —
+                    // every update in that window silently dropped via ScheduleVertexUpdate's
+                    // bounds check, leaving flexi attachments frozen at their build-time pose.
+                    if (submission.FlexiPrims.Length > 0)
+                    {
+                        _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport));
+                        _flexi.Start();
+                    }
                 }
                 _firstLoad       = false;
                 _buildInProgress = false;
@@ -611,6 +649,42 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         ScheduleReload();
     }
 
+    private void OnAvatarRenderInfoUpdated(object? sender, AvatarRenderInfoEventArgs e)
+        => RefreshReportedComplexity();
+
+    /// <summary>Self-only: mirrors AppearanceViewModel's identically-named method.</summary>
+    private void RefreshReportedComplexity()
+    {
+        var info = Client.Self.AvatarRenderInfo;
+        string text = info != null && info.Agents.TryGetValue(Client.Self.AgentID, out var self)
+            ? self.Weight.ToString()
+            : string.Empty;
+        Dispatcher.UIThread.Post(() => ReportedComplexityText = text);
+    }
+
+    /// <summary>
+    /// Recomputes this avatar's local Veles complexity cost/tier. Called after a build
+    /// completes, when the avatar's own attachments (and thus its cost) are up to date.
+    /// </summary>
+    private void RefreshLocalComplexity()
+    {
+        var sim = Client.Network.CurrentSim;
+        if (sim == null || _avatarLocalId == 0)
+        {
+            Dispatcher.UIThread.Post(() => LocalComplexityText = string.Empty);
+            return;
+        }
+        float cost = AvatarComplexityEstimator.EstimateCost(sim, _avatarLocalId);
+        float threshold = _instance.GlobalSettings["avatar_complexity_threshold"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? (float)_instance.GlobalSettings["avatar_complexity_threshold"].AsReal() : 120f;
+        var tier = AvatarComplexityEstimator.TierForCost(cost, threshold);
+        Dispatcher.UIThread.Post(() =>
+        {
+            LocalComplexityText  = ((int)MathF.Round(cost)).ToString();
+            LocalComplexityColor = AvatarTierColor.ToArgb(tier);
+        });
+    }
+
     private void OnObjectUpdate(object? sender, PrimEventArgs e)
     {
         if (_avatarLocalId == 0) return;
@@ -655,6 +729,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1.0 / 30.0));
         var sw    = System.Diagnostics.Stopwatch.StartNew();
         float prev = 0f;
+        bool loggedError = false;
         try
         {
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
@@ -662,7 +737,33 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
-                AnimTick(dt);
+                try
+                {
+                    AnimTick(dt);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // AnimTick previously had no per-tick guard. This loop is started via
+                    // "_ = AnimationLoopAsync(...)" (fire-and-forget, no observer), so an
+                    // unhandled exception here would silently kill the ENTIRE loop forever:
+                    // the avatar freezes at whatever pose was last applied and stays frozen
+                    // no matter what pose mode is selected afterward (T-pose, A-pose, Live
+                    // Animation all look identical once this loop is dead) — indistinguishable
+                    // from a genuine hang without this being surfaced. Catch, report once
+                    // (avoid spamming ErrorText/log at 30 Hz if it throws every tick), and
+                    // keep ticking so a transient bad frame doesn't kill animation permanently.
+                    if (!loggedError)
+                    {
+                        loggedError = true;
+                        Logger.Error("AvatarViewerViewModel: AnimTick threw; this avatar's pose " +
+                                     "will be frozen until fixed.", ex, Client);
+                        Dispatcher.UIThread.Post(() =>
+                        {
+                            HasError  = true;
+                            ErrorText = $"Animation error: {ex.Message}";
+                        });
+                    }
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -724,7 +825,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     foreach (var mv in entry.Vertices)
                     {
                         int vi = (int)mv.VertexIndex;
-                        int o  = vi * 8;
+                        int o  = vi * 12;
                         if ((uint)(o + 5) >= (uint)workV.Length) continue;
                         workV[o + 0] += mv.CoordDelta.X  * w;
                         workV[o + 1] += mv.CoordDelta.Y  * w;
@@ -860,7 +961,8 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 var bonesMap = (skin.UseVpBoneTransforms && vpAnimBones != null)
                     ? vpAnimBones : animBones;
 
-                int nvR = skin.BindVerts.Length / 8;
+                // Stride is 12 floats (pos3+normal3+uv2+tangent4) — see AvatarFaceSkinData.BindVerts.
+                int nvR = skin.BindVerts.Length / 12;
                 float[] nvBufR = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
                 var joints = skin.JointNames;
                 var ibms   = skin.InvBindMatrices;
@@ -868,7 +970,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
                 for (int vi = 0; vi < nvR; vi++)
                 {
-                    int o = vi * 8;
+                    int o = vi * 12;
                     var bp = new Vector4(skin.BindVerts[o],     skin.BindVerts[o + 1],
                                          skin.BindVerts[o + 2], 1f);
                     var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
@@ -908,6 +1010,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     nvBufR[o + 3] = an.X; nvBufR[o + 4] = an.Y; nvBufR[o + 5] = an.Z;
                     nvBufR[o + 6] = skin.BindVerts[o + 6];
                     nvBufR[o + 7] = skin.BindVerts[o + 7];
+                    // Tangent (4 floats) is not LBS-transformed, only carried through —
+                    // matches how UV above is handled, and how the non-animated build
+                    // path leaves tangents untouched by skinning.
+                    nvBufR[o + 8]  = skin.BindVerts[o + 8];
+                    nvBufR[o + 9]  = skin.BindVerts[o + 9];
+                    nvBufR[o + 10] = skin.BindVerts[o + 10];
+                    nvBufR[o + 11] = skin.BindVerts[o + 11];
                 }
 
                 viewport.ScheduleVertexUpdate(skin.FaceIndex, nvBufR.AsSpan(0, skin.BindVerts.Length));
@@ -917,12 +1026,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
             if (skin.Bone1.Length == 0) continue;
 
-            int     nv    = skin.BindVerts.Length / 8;
+            // Stride is 12 floats (pos3+normal3+uv2+tangent4) — see AvatarFaceSkinData.BindVerts.
+            int     nv    = skin.BindVerts.Length / 12;
             float[] nvBuf = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
 
             for (int vi = 0; vi < nv; vi++)
             {
-                int o  = vi * 8;
+                int o  = vi * 12;
                 var bp = new Vector4(
                     skin.BindVerts[o],     skin.BindVerts[o + 1],
                     skin.BindVerts[o + 2], 1f);
@@ -967,6 +1077,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 nvBuf[o + 3] = an.X; nvBuf[o + 4] = an.Y; nvBuf[o + 5] = an.Z;
                 nvBuf[o + 6] = skin.BindVerts[o + 6];
                 nvBuf[o + 7] = skin.BindVerts[o + 7];
+                // Tangent (4 floats) is not LBS-transformed, only carried through —
+                // matches how UV above is handled, and how the non-animated build
+                // path leaves tangents untouched by skinning.
+                nvBuf[o + 8]  = skin.BindVerts[o + 8];
+                nvBuf[o + 9]  = skin.BindVerts[o + 9];
+                nvBuf[o + 10] = skin.BindVerts[o + 10];
+                nvBuf[o + 11] = skin.BindVerts[o + 11];
             }
 
             viewport.ScheduleVertexUpdate(skin.FaceIndex, nvBuf.AsSpan(0, skin.BindVerts.Length));
@@ -982,7 +1099,10 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         _disposed = true;
 
         if (_isSelf)
-            Client.Appearance.AppearanceSet -= OnSelfAppearanceSet;
+        {
+            Client.Appearance.AppearanceSet     -= OnSelfAppearanceSet;
+            Client.Self.AvatarRenderInfoUpdated -= OnAvatarRenderInfoUpdated;
+        }
         Client.Avatars.AvatarAppearance -= OnAvatarAppearance;
         Client.Objects.ObjectUpdate     -= OnObjectUpdate;
         Client.Objects.KillObject       -= OnKillObject;

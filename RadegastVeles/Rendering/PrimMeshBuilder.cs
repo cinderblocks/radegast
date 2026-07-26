@@ -1126,8 +1126,22 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             if (prim.Sculpt.Type != SculptType.Mesh)
             {
-                var sculptBmp = await GridTextureHelper.DownloadSkBitmapAsync(
-                    client, prim.Sculpt.SculptTexture, ct: ct).ConfigureAwait(false);
+                // Independent timeout, matching the mesh-type branch's RequestMeshAsync
+                // call below — otherwise this awaits only the outer build token, which
+                // has no self-cancelling deadline, and a stalled sculpt-texture fetch
+                // can hang this prim's tessellation (and everything awaiting it) forever.
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                using var linked  = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+                SKBitmap? sculptBmp;
+                try
+                {
+                    sculptBmp = await GridTextureHelper.DownloadSkBitmapAsync(
+                        client, prim.Sculpt.SculptTexture, ct: linked.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    sculptBmp = null; // timed out, not a real cancellation — fall through to parametric fallback
+                }
                 if (sculptBmp != null)
                 {
                     using (sculptBmp)

@@ -7,6 +7,8 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Radegast.Veles.ViewModels"
              xmlns:rendering="using:Radegast.Veles.Rendering"
+             xmlns:conv="using:Radegast.Veles.Converters"
+             xmlns:sconv="using:Avalonia.Data.Converters"
              x:Class="Radegast.Veles.Views.AvatarViewerPanel"
              x:DataType="vm:AvatarViewerViewModel"
              AutomationProperties.Name="3D avatar viewer">
@@ -109,18 +111,37 @@
 
         <!-- Status bar -->
         <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" Padding="6,2">
-            <Grid ColumnDefinitions="*,Auto,Auto">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
                 <TextBlock Grid.Column="0"
                            Text="{Binding StatusText}"
                            VerticalAlignment="Center"
                            AutomationProperties.Name="Status" />
-                <TextBlock Grid.Column="1"
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4"
+                            Margin="8,0,0,0" VerticalAlignment="Center"
+                            IsVisible="{Binding LocalComplexityText, Converter={x:Static sconv:StringConverters.IsNotNullOrEmpty}}"
+                            ToolTip.Tip="This avatar's local Veles rendering cost — matches the Scene Viewer's name tag display">
+                    <TextBlock Text="Cost:" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding LocalComplexityText}" FontSize="11" FontFamily="Monospace"
+                               VerticalAlignment="Center"
+                               Foreground="{Binding LocalComplexityColor, Converter={x:Static conv:ArgbToColorConverter.Instance}}"
+                               AutomationProperties.Name="Local rendering cost" />
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4"
+                            Margin="8,0,0,0" VerticalAlignment="Center"
+                            IsVisible="{Binding ReportedComplexityText, Converter={x:Static sconv:StringConverters.IsNotNullOrEmpty}}"
+                            ToolTip.Tip="Your complexity as reported back by nearby viewers — matches the Appearance panel's reading">
+                    <TextBlock Text="Reported:" FontSize="11" Opacity="0.5" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding ReportedComplexityText}" FontSize="11" FontFamily="Monospace"
+                               VerticalAlignment="Center"
+                               AutomationProperties.Name="Reported complexity" />
+                </StackPanel>
+                <TextBlock Grid.Column="3"
                            Text="{Binding PoseHintText}"
                            Opacity="0.5" FontSize="11"
                            VerticalAlignment="Center"
                            Margin="12,0,8,0"
                            AutomationProperties.Name="Pose mode note" />
-                <ProgressBar Grid.Column="2"
+                <ProgressBar Grid.Column="4"
                              IsVisible="{Binding IsLoading}"
                              IsIndeterminate="True"
                              Width="80" Height="10"

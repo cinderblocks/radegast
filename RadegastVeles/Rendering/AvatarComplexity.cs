@@ -66,6 +66,24 @@ internal static class AvatarComplexityEstimator
     public const float LightCost       = 10.0f; // Veles-specific: contends for the 2 shadow-cubemap slots
     public const float ParticleCost    = 4.0f;  // particle emitter GPU buffer cost
 
+    /// <summary>Cost above <c>threshold</c> at which an avatar tiers down to Cloud instead of Silhouette.</summary>
+    public const float CloudTierMultiplier = 2.0f;
+
+    /// <summary>
+    /// Pure cost→tier mapping, shared by <see cref="SceneAvatarStreamer.DetermineRenderTierCore"/>
+    /// (which layers exemption logic on top) and any UI surface that wants to show what
+    /// tier a raw cost number falls into (e.g. the Appearance panel's self cost display,
+    /// which has no notion of friend/override exemption since you can't exempt yourself
+    /// from your own reflection).
+    /// </summary>
+    public static AvatarRenderTier TierForCost(float cost, float threshold)
+    {
+        if (threshold >= SceneAvatarStreamer.ComplexityThresholdMax) return AvatarRenderTier.Full;
+        if (cost <= threshold) return AvatarRenderTier.Full;
+        if (cost <= threshold * CloudTierMultiplier) return AvatarRenderTier.Silhouette;
+        return AvatarRenderTier.Cloud;
+    }
+
     /// <summary>
     /// Estimates the render cost of the avatar at <paramref name="avatarLocalId"/> from
     /// its currently-known attachments. Cheap: one pass over already-resident
@@ -160,6 +178,21 @@ internal static class AvatarComplexityEstimator
 
         return c;
     }
+}
+
+/// <summary>
+/// Tier-coded ARGB color for displaying a cost number in UI (nameplate, Appearance
+/// panel) — green/yellow/red, same semantics as SL's own ARC-over-head color coding.
+/// </summary>
+internal static class AvatarTierColor
+{
+    public static uint ToArgb(AvatarRenderTier tier) => tier switch
+    {
+        AvatarRenderTier.Full       => 0xFF80FF80u, // green
+        AvatarRenderTier.Silhouette => 0xFFFFD060u, // yellow/amber
+        AvatarRenderTier.Cloud      => 0xFFFF6060u, // red
+        _ => 0xFFFFFFFFu,
+    };
 }
 
 /// <summary>

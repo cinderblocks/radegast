@@ -60,6 +60,18 @@ public partial class AppearanceViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _hasAttachments;
     [ObservableProperty] private string _statusText = string.Empty;
 
+    /// <summary>
+    /// Your own avatar's "reported" complexity weight — the region-aggregated number
+    /// other viewers' AvatarRenderInfo POSTs have contributed for you, fetched back via
+    /// GET (mirrors SL's Appearance floater's "as seen by others" reading; NOT Veles's own
+    /// local <see cref="AvatarComplexityEstimator"/> estimate, which is a different number
+    /// shown separately in the 3D scene viewer's name tags). Empty until the region has
+    /// returned a value for our own agent ID — which requires the capability to exist on
+    /// this region and at least one viewer (possibly none, if we're alone) to have reported
+    /// us, so an empty reading here is expected and not necessarily a bug.
+    /// </summary>
+    [ObservableProperty] private string _reportedComplexityText = string.Empty;
+
     public const double MinHoverHeight = -2.0;
     public const double MaxHoverHeight =  2.0;
     [ObservableProperty] private double _hoverHeight;
@@ -93,10 +105,30 @@ public partial class AppearanceViewModel : ObservableObject, IDisposable
         Client.Appearance.AppearanceSet         += OnAppearanceSet;
         Client.Inventory.ItemReceived           += OnInventoryItemReceived;
         Client.Self.AgentPreferencesUpdated     += OnAgentPreferencesUpdated;
+        Client.Self.AvatarRenderInfoUpdated     += OnAvatarRenderInfoUpdated;
+        RefreshReportedComplexity();
         _ = LoadAsync();
     }
 
     partial void OnHoverHeightChanged(double value) => HoverHeightText = value.ToString("F2");
+
+    private void OnAvatarRenderInfoUpdated(object? sender, AvatarRenderInfoEventArgs e)
+        => RefreshReportedComplexity();
+
+    /// <summary>
+    /// Reads our own agent's weight out of the last AvatarRenderInfo GET response, if any
+    /// (see <see cref="ReportedComplexityText"/>). Called passively whenever a GET
+    /// completes anywhere in the client (e.g. the Scene Viewer's periodic fetch loop, if
+    /// running) and actively from <see cref="LoadAsync"/>.
+    /// </summary>
+    private void RefreshReportedComplexity()
+    {
+        var info = Client.Self.AvatarRenderInfo;
+        string text = info != null && info.Agents.TryGetValue(Client.Self.AgentID, out var self)
+            ? self.Weight.ToString()
+            : string.Empty;
+        Dispatcher.UIThread.Post(() => ReportedComplexityText = text);
+    }
 
     private void OnWearablesReply(object? sender, AgentWearablesReplyEventArgs e)
         => Dispatcher.UIThread.Post(() => _ = LoadAsync());
@@ -197,6 +229,17 @@ public partial class AppearanceViewModel : ObservableObject, IDisposable
                 });
             }
             attachList.Sort((a, b) => string.Compare(a.SlotLabel, b.SlotLabel, StringComparison.Ordinal));
+
+            // Actively refresh our "reported by others" complexity — don't rely solely on
+            // the Scene Viewer's periodic fetch loop, since this panel can be open (or this
+            // very method can run, e.g. after wearing something new) without the Scene
+            // Viewer ever having been opened this session. Skipped quietly if the region
+            // doesn't expose the capability, matching AvatarRenderInfoReporter's own guard.
+            if (Client.Network.CurrentSim?.Caps?.CapabilityURI("AvatarRenderInfo") != null)
+            {
+                await Client.Self.GetAvatarRenderInfoAsync().ConfigureAwait(false);
+                RefreshReportedComplexity();
+            }
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -355,5 +398,6 @@ public partial class AppearanceViewModel : ObservableObject, IDisposable
         Client.Appearance.AppearanceSet         -= OnAppearanceSet;
         Client.Inventory.ItemReceived           -= OnInventoryItemReceived;
         Client.Self.AgentPreferencesUpdated     -= OnAgentPreferencesUpdated;
+        Client.Self.AvatarRenderInfoUpdated     -= OnAvatarRenderInfoUpdated;
     }
 }

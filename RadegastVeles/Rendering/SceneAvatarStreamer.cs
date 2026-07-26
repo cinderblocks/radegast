@@ -99,15 +99,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// <summary>
     /// Avatars whose estimated Veles-local render cost (see
     /// <see cref="AvatarComplexityEstimator"/>) exceeds this are shown as a silhouette;
-    /// well over it (<see cref="CloudTierMultiplier"/>×), as a particle cloud. Self,
-    /// friends, and per-avatar "Always Render Fully" overrides are always exempt.
+    /// well over it (<see cref="AvatarComplexityEstimator.CloudTierMultiplier"/>×), as a
+    /// particle cloud. Self, friends, and per-avatar "Always Render Fully" overrides are
+    /// always exempt.
     /// </summary>
     public float ComplexityThreshold { get; set; } = 120f;
 
     /// <summary>Threshold value (and slider maximum) that means "unlimited" — always Full.</summary>
     public const float ComplexityThresholdMax = 500f;
-
-    private const float CloudTierMultiplier = 2.0f;
 
     /// <summary>Number of avatar build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
@@ -660,11 +659,24 @@ internal sealed class SceneAvatarStreamer : IDisposable
             if (_client.Friends.FriendList.ContainsKey(avatarObj.ID)) return AvatarRenderTier.Full;
             if (_overrides.IsAlwaysRender(avatarObj.ID)) return AvatarRenderTier.Full;
         }
-        if (ComplexityThreshold >= ComplexityThresholdMax) return AvatarRenderTier.Full;
+        return AvatarComplexityEstimator.TierForCost(cost, ComplexityThreshold);
+    }
 
-        if (cost <= ComplexityThreshold) return AvatarRenderTier.Full;
-        if (cost <= ComplexityThreshold * CloudTierMultiplier) return AvatarRenderTier.Silhouette;
-        return AvatarRenderTier.Cloud;
+    /// <summary>
+    /// Looks up the last-computed Veles complexity cost/tier for a single avatar, for UI
+    /// display (nameplate cost label). Returns false if the avatar hasn't been through
+    /// <see cref="DetermineRenderTier"/> yet (no cache entry). Read-only — never triggers
+    /// a compute, matching this cache's existing "avoid recompute-every-tick" intent.
+    /// </summary>
+    public bool TryGetCachedComplexity(uint localId, out float cost, out AvatarRenderTier tier)
+    {
+        if (!_cachedCost.TryGetValue(localId, out cost))
+        {
+            tier = AvatarRenderTier.Full;
+            return false;
+        }
+        tier = _cachedTier.TryGetValue(localId, out var t) ? t : AvatarRenderTier.Full;
+        return true;
     }
 
     /// <summary>
