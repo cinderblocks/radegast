@@ -24,6 +24,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using Quaternion = System.Numerics.Quaternion;
 using Vector4    = System.Numerics.Vector4;
 
@@ -147,7 +148,18 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
-                AnimTick(dt);
+                try
+                {
+                    AnimTick(dt);
+                }
+                catch (Exception ex)
+                {
+                    // A fire-and-forget RunAsync task previously swallowed any exception
+                    // here other than OperationCanceledException, silently killing the
+                    // whole per-tick loop (and every downstream diagnostic) with zero log
+                    // output — indistinguishable from AnimTick never being entered at all.
+                    Logger.DebugLog($"[AnimTickFail] AnimTick threw: {ex}");
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -178,7 +190,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
             // Write into the currently-inactive ping-pong buffer.
             _attachUsePing = !_attachUsePing;
             var writeTarget = _attachUsePing ? _attachBonesPing : _attachBonesPong;
-            AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
+            AvatarBoneMath.ComputeAttachmentBoneWorldMatrices(
                 avatarDef, vpBt, liveDeltas, writeTarget);
             // Publish the fully-written snapshot; FlexiPrimAnimator reads via the captured reference.
             _attachBonesPublished = writeTarget;
@@ -194,7 +206,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
         if (liveDeltas == null)
             liveDeltas = _player.Advance(dt, out morphWeights);
 
-        AvatarMeshBuilder.ComputeAnimatedBoneWorldMatrices(avatarDef, vpBt, liveDeltas, _animBonesBuffer);
+        AvatarBoneMath.ComputeAnimatedBoneWorldMatrices(avatarDef, vpBt, liveDeltas, _animBonesBuffer);
         var animBones = _animBonesBuffer;
 
         // Use pre-allocated _vpAnimBonesBuffer; pass live liveDeltas so attachments animate.
@@ -207,7 +219,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 if (skin.UseVpBoneTransforms)
                 {
                     _vpAnimBonesBuffer.Clear();
-                    AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
+                    AvatarBoneMath.ComputeAttachmentBoneWorldMatrices(
                         avatarDef, fittedBt, liveDeltas, _vpAnimBonesBuffer);
                     vpAnimBones = _vpAnimBonesBuffer;
                     break;
@@ -244,7 +256,19 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 {
                     if (bonesMap.TryGetValue(joints[ji], out var bm))
                     { skinMats[ji] = ibms[ji] * bm; hasSkin[ji] = true; }
-                    else hasSkin[ji] = false;
+                    else
+                    {
+                        // GPU fast-path below packs skinMats unconditionally (no per-vertex
+                        // hasSkin branch like the CPU path has) — a joint absent from bonesMap
+                        // must resolve to Identity here so it packs as an honest bind-pose
+                        // passthrough, matching the CPU fallback (ap += w * bp) below. Leaving
+                        // this as the zero-initialized default produced a zero skin matrix on
+                        // the GPU path, which collapses any vertex weighted to that joint
+                        // toward the mesh's local origin — a plausible source of fanned-spike
+                        // artifacts distinct from (and worse than) the CPU path's behavior.
+                        skinMats[ji] = Matrix4x4.Identity;
+                        hasSkin[ji] = false;
+                    }
                 }
 
                 // GPU fast-path: pack skin matrices and enqueue a compute job instead of
@@ -255,7 +279,9 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     var mats = new float[jointCount * 16];
                     for (int ji = 0; ji < jointCount; ji++)
                     {
-                        if (!hasSkin[ji]) continue;
+                        // Always pack — skinMats[ji] is Identity (not the zero-initialized
+                        // default) for joints absent from bonesMap, so this is a correct
+                        // bind-pose passthrough rather than a collapse-to-origin.
                         int b = ji * 16;
                         ref readonly var m = ref skinMats[ji];
                         mats[b +  0] = m.M11; mats[b +  1] = m.M12; mats[b +  2] = m.M13; mats[b +  3] = m.M14;

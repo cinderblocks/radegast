@@ -368,7 +368,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
             if (provider != null)
             {
                 var boneMatrix = provider(info.AttachJointName);
-                // Strip scale from the bone world matrix (same as AvatarMeshBuilder.StripScale).
+                // Strip scale from the bone world matrix (same as AvatarBoneMath.StripScale).
                 var r0 = Vector3.Normalize(new Vector3(boneMatrix.M11, boneMatrix.M12, boneMatrix.M13));
                 var r1 = Vector3.Normalize(new Vector3(boneMatrix.M21, boneMatrix.M22, boneMatrix.M23));
                 var r2 = Vector3.Normalize(new Vector3(boneMatrix.M31, boneMatrix.M32, boneMatrix.M33));

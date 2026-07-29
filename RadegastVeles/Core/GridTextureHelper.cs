@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
@@ -881,11 +882,31 @@ public static class GridTextureHelper
         if (textureId == UUID.Zero)
             return Task.FromResult<SKBitmap?>(null);
 
-        // SSB textures must NOT be cached in TextureDiskCache — their UUIDs are reused
-        // across appearance changes with different pixel content.  The LibreMetaverse
-        // asset cache (Client.Assets.Cache) handles SSB caching in RequestServerBakedImage.
-        // Evict any stale entry a prior (buggy) session may have written.
+        // SSB textures must NOT be cached anywhere keyed only by UUID — their UUIDs are
+        // reused across appearance changes with different pixel content (e.g. re-baking
+        // after wearing/removing an alpha layer keeps the same textureId for that bake
+        // slot). Evict any stale entry a prior session may have written.
+        //
+        // This used to evict only TextureDiskCache (Veles's own disk cache) on the
+        // reasoning that Client.Assets.Cache — LibreMetaverse's general-purpose asset
+        // cache, which RequestServerBakedImageAsync also checks before hitting the
+        // network (AssetManager.cs, RequestServerBakedImageAsync) — "handles SSB caching"
+        // correctly. It doesn't: it's a plain persistent disk cache keyed by UUID with no
+        // versioning, so it's just as vulnerable to the reused-UUID problem. Confirmed via
+        // a diagnostic that showed this avatar's downloaded "upper"/"lower" bakes (the
+        // slots whose alpha-layer content had just changed) came back with a completely
+        // flat, unmasked alpha channel while "head"/"hair" (unchanged since an earlier,
+        // correctly-cached fetch) decoded with a real mask — the signature of a stale
+        // Client.Assets.Cache hit serving pre-alpha-layer bytes for a reused UUID, not a
+        // grid-side SSB compositing failure (confirmed this avatar is on the official SL
+        // grid, where SSB alpha compositing is known to work).
         TextureDiskCache.Evict(textureId);
+        var cachedPath = client.Assets.Cache.AssetFileName(textureId);
+        if (cachedPath != null)
+        {
+            try { File.Delete(cachedPath); }
+            catch (Exception ex) { Logger.Debug($"GridTextureHelper: failed evicting stale SSB entry from asset cache for {textureId}.", ex, client); }
+        }
 
         var tcs = new TaskCompletionSource<SKBitmap?>(TaskCreationOptions.RunContinuationsAsynchronously);
         var reg = ct.Register(() => tcs.TrySetResult(null));

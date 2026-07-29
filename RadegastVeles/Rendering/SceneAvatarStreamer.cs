@@ -25,6 +25,7 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
+using LibreMetaverse.Rendering;
 using OmVector3  = LibreMetaverse.Vector3;
 using Quaternion = System.Numerics.Quaternion;
 using Vector3    = System.Numerics.Vector3;
@@ -65,7 +66,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     private readonly ConcurrentDictionary<uint, int> _lastVisualParamHash = new();
 
     // avatar LocalID → cached ground-anchor correction from the most recent successful
-    // mesh build (see AvatarMeshBuilder.ComputeGroundAdjustment). SL's network position
+    // mesh build (see AvatarBoneMath.ComputeGroundAdjustment). SL's network position
     // is not feet height; ResolveAvatarWorldTransform subtracts this to place the avatar
     // on the ground instead of floating. 0 until the first build completes.
     private readonly ConcurrentDictionary<uint, float> _groundAdjustment = new();
@@ -928,7 +929,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // Cache this avatar's ground-anchor correction from the freshly-built skeleton,
             // then re-resolve worldPos/worldRot so this build places the mesh using the fresh
             // value instead of whatever was cached (or 0) when the position was first read above.
-            _groundAdjustment[localId] = AvatarMeshBuilder.ComputeGroundAdjustment(result.BoneTransforms);
+            _groundAdjustment[localId] = AvatarBoneMath.ComputeGroundAdjustment(result.BoneTransforms);
             (rawWorldPos, worldRot) = ResolveAvatarWorldTransform(sim, avatarObj);
             worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
@@ -1019,9 +1020,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
             AvatarBuilt?.Invoke(SceneKey(localId), localId, result);
         }
         catch (OperationCanceledException) { }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Swallow per-avatar failures — the scene viewer continues working.
+            // Previously fully silent — swallowing here means AvatarBuilt (line ~1019)
+            // never fires, so OnAvatarBuilt never constructs/starts a SceneAvatarAnimator
+            // for this avatar, and AnimTick is never entered at all. That is
+            // indistinguishable from a healthy avatar sitting frozen at whatever
+            // pose BuildAsync last submitted. Log so a failure here is visible.
+            Logger.DebugLog($"[AvatarBuildFail] avatar build failed after submission for localId={localId}: {ex}");
         }
         finally
         {
@@ -1055,7 +1061,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         Simulator sim, Avatar avatar)
     {
         float hoverZ = avatar.HoverHeight.Z;
-        // SL's network position is not feet height — see AvatarMeshBuilder.ComputeGroundAdjustment.
+        // SL's network position is not feet height — see AvatarBoneMath.ComputeGroundAdjustment.
         // Subtracted uniformly (self, other, seated) so the avatar stands on the ground instead
         // of floating by roughly its own pelvis-to-head-top distance. 0 (no correction) until this
         // avatar's first mesh build completes and caches its real value.

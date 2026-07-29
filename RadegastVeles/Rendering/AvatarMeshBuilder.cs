@@ -130,14 +130,40 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         Vector4?                        overrideColor   = null)
     {
         // 1. Load avatar definition and build VP-morphed bone world matrices.
-        LindenAvatarDefinition?            avatarDef         = null;
-        Dictionary<string, BoneTransform>? boneTransforms    = null;
-        Dictionary<string, Matrix4x4>?     boneWorldMatrices = null;
+        LindenAvatarDefinition?            avatarDef             = null;
+        Dictionary<string, BoneTransform>? boneTransforms        = null;
+        Dictionary<string, Matrix4x4>?     boneWorldMatrices     = null;
+        Dictionary<string, Vector3>?       defaultJointPositions = null;
         try
         {
             progress?.Report("Loading avatar definition…");
             avatarDef         = s_cachedAvatarDef ??= LindenAvatarDefinition.Load();
             boneTransforms    = avatarDef.ComputeBoneTransforms(visualParams);
+
+            // Skeleton-default local joint positions, used to threshold-filter attachment
+            // joint-position overrides (LLJoint::aboveJointPosThreshold in the SL viewer) —
+            // built once here since every rigged attachment processed below needs it.
+            // Includes collision volumes too (fitted-mesh CV names like BELLY/CHEST/LEFT_PEC
+            // appear in override data alongside regular m*-prefixed joints — confirmed via
+            // this session's diagnostic logging), matching ComputeBoneTransforms's own
+            // seeding, which treats joints and their child collision volumes uniformly.
+            defaultJointPositions = new Dictionary<string, Vector3>(StringComparer.Ordinal);
+            foreach (var joint in avatarDef.Skeleton.GetAllJoints())
+            {
+                if (!string.IsNullOrEmpty(joint.name))
+                {
+                    defaultJointPositions[joint.name] = joint.pos != null && joint.pos.Length >= 3
+                        ? new Vector3(joint.pos[0], joint.pos[1], joint.pos[2])
+                        : Vector3.Zero;
+                }
+                foreach (var cv in joint.collision_volume ?? [])
+                {
+                    if (cv == null || string.IsNullOrEmpty(cv.name)) continue;
+                    defaultJointPositions[cv.name] = cv.pos != null && cv.pos.Length >= 3
+                        ? new Vector3(cv.pos[0], cv.pos[1], cv.pos[2])
+                        : Vector3.Zero;
+                }
+            }
             // Build the DEFAULT (bind-pose) bone world matrices using the skeleton's
             // undeformed T-pose joint positions and scales — no VP bone deformations.
             // These are used as the invBind matrices for LBS and for eye pre-transforms.
@@ -150,7 +176,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             // formula reduces to a pure rotation:
             //   v_anim = v_bind × Invert(default_bone) × (default_bone + rotation_delta)
             //          ≈ v_bind × rotation_delta
-            boneWorldMatrices = BuildBoneWorldMatrices(avatarDef.Skeleton,
+            boneWorldMatrices = AvatarBoneMath.BuildBoneWorldMatrices(avatarDef.Skeleton,
                 new Dictionary<string, BoneTransform>());
         }
         catch (Exception ex)
@@ -248,7 +274,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // used for body-mesh LBS (that uses the default boneWorldMatrices above).
         Dictionary<string, Matrix4x4>? vpBoneWorldMatrices = null;
         if (boneTransforms != null)
-            vpBoneWorldMatrices = BuildBoneWorldMatrices(avatarDef.Skeleton, boneTransforms);
+            vpBoneWorldMatrices = AvatarBoneMath.BuildBoneWorldMatrices(avatarDef.Skeleton, boneTransforms);
 
         // 4. Build attachment faces (non-HUD, rigid only).
         // Use the default (non-VP) bone world matrices for attachment joint positions.
@@ -257,6 +283,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // StripScale() inside BuildAttachmentsAsync removes VP scale; default positions match
         // the LLM bind-pose space so attachments land on the correct mesh surface.
         var flexiInfos = new List<FlexiPrimInfo>();
+
+        // Joint-position-override candidates contributed by every rigged attachment
+        // processed below, keyed by joint name — mirrors LLJoint's per-joint
+        // LLVector3OverrideMap (one map per joint, one entry per contributing mesh).
+        // Resolved (conflict-resolved and merged into boneTransforms/FittedBoneTransforms)
+        // once, after all attachments have been processed, below.
+        var jointOverrideContributors = new Dictionary<string, List<(UUID MeshId, Vector3 Position)>>(StringComparer.Ordinal);
 
         // Silhouette tier skips attachments entirely — that's where the real cost
         // (attachment mesh/texture fetch, GPU upload) lives; the body-only mesh built
@@ -273,8 +306,6 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 // Flexi rigid attachment faces are driven by FlexiPrimAnimator, not skinData.
                 // Key: prim LocalID  Value: (source Primitive, prim-to-avatar-local transform, attach-point metadata, ordered face-slot list)
                 var pendingFlexi = new Dictionary<uint, (Primitive prim, Matrix4x4 attachTx, Matrix4x4 primLocalMatrix, string jointName, Vector3 jointOffset, Quaternion jointRot, List<(int faceIdx, float[] verts)> faceList)>();
-                var emptyDeltas = System.Collections.Immutable.ImmutableDictionary<string, Quaternion>.Empty;
-                var tposeAttachmentBones = ComputeAttachmentBoneWorldMatrices(avatarDef, boneTransforms!, emptyDeltas);
 
                 for (int i = 0; i < attFaces.Count; i++)
                 {
@@ -365,7 +396,47 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         // Keep the per-attachment inverse bind matrices from this mesh asset's
                         // own skin block. Replacing them with body/skeleton-derived matrices
                         // puts fitted collision-volume weights in the wrong bind space.
-                        RejectOutlierRiggedInfluences(rigged, worldVerts, nv, tposeAttachmentBones);
+                        //
+                        // No sanity/outlier check on the mesh's own weights here — real SL C++
+                        // has none either; the authored joint/weight data is trusted as-is. An
+                        // earlier version of this code rejected any influence whose invBind,
+                        // composed with the avatar's current bone, moved the vertex >0.25m from
+                        // its bind position, falling back to a rigid nearest-joint bind. That
+                        // heuristic user-confirmed broke legitimately-authored, heavily
+                        // multi-joint-weighted mesh (a jacket rigged to this dragon avatar) by
+                        // treating real fitted-mesh conformance as corruption — removed rather
+                        // than re-tuned, since SL itself needs no equivalent.
+                        //
+                        // A same-day attempt to substitute freshly-derived IBMs whenever this
+                        // asset's own IBMs were "close enough" to Veles's skeleton (gated on a
+                        // 0.15m threshold, derived from one fantasy avatar's rig-proportion
+                        // mismatch) was reverted: on ordinary, near-default-rigged content (the
+                        // common case) it would always pass that gate and silently overwrite the
+                        // asset's own authored bind data with Veles's skeleton — discarding
+                        // exactly the per-asset bind space fitted mesh needs. Confirmed wrong
+                        // once a cleaner repro (standard human test agent, single fitted-mesh
+                        // attachment) showed body shape not being applied to the attachment at
+                        // all, which this substitution is a plausible cause of. Do not
+                        // reintroduce without re-deriving the threshold against content where
+                        // it's known NOT to be needed, not just content where it is.
+
+                        // Collect this attachment's joint-position-override candidates
+                        // (already extracted raw in PrimMeshBuilder; threshold-filter here
+                        // against the avatar's default skeleton, mirroring
+                        // LLJoint::aboveJointPosThreshold — 0.1mm squared-distance).
+                        if (defaultJointPositions != null && rigged.JointPositionOverrides.Length > 0)
+                        {
+                            const float thresholdSq = 0.0001f * 0.0001f;
+                            foreach (var (jointName, pos) in rigged.JointPositionOverrides)
+                            {
+                                if (!defaultJointPositions.TryGetValue(jointName, out var defaultPos)) continue;
+                                if (Vector3.DistanceSquared(pos, defaultPos) <= thresholdSq) continue;
+
+                                if (!jointOverrideContributors.TryGetValue(jointName, out var contributors))
+                                    jointOverrideContributors[jointName] = contributors = [];
+                                contributors.Add((rigged.MeshId, pos));
+                            }
+                        }
 
                         skinData.Add(new AvatarFaceSkinData
                         {
@@ -518,6 +589,71 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             catch { /* attachment build failure is non-fatal */ }
         }
 
+        // Resolve joint-position-override conflicts and merge the winners.
+        //
+        // Conflict resolution mirrors LLVector3OverrideMap::findActiveOverride in the SL
+        // viewer exactly (verified against source, not guessed): the contributor with the
+        // numerically LARGEST mesh-asset UUID wins per joint — not attach order.
+        //
+        // Two different merge targets, because AvatarBuildResult.BoneTransforms and
+        // FittedBoneTransforms are consumed differently downstream:
+        //  - overrideOnlyTransforms feeds the classic body + non-fitted attachments
+        //    (AnimTick's animBones, via ComputeAnimatedBoneWorldMatrices). That path was
+        //    deliberately given an EMPTY dict before this feature existed, so LBS reduces to
+        //    pure rotation and body shape comes entirely from vertex morphs, not bone
+        //    transforms. A sparse dict containing ONLY overridden joints preserves that for
+        //    every other joint (BuildLocalMatrix falls through to the skeleton default for
+        //    any joint absent from the dict) while correctly repositioning exactly the
+        //    joints an attachment overrides — the same selective effect LLJoint::setPosition
+        //    has in SL, where only joints with an active override move.
+        //  - fittedTransforms feeds rigged/fitted attachment LBS (vpAnimBones), which already
+        //    needs the full VP-deformed dict for CV/shape distortion; overrides simply
+        //    replace the position for whichever joints they touch, on top of that.
+        //
+        // Scale: overrideOnlyTransforms only ever needs Position for regular m*-prefixed
+        // joints (Vector3.One below is correct — every regular joint's default scale in
+        // avatar_skeleton.xml is exactly (1,1,1); only collision volumes differ, and the
+        // classic body/non-fitted attachments this dict feeds never skin against CVs by
+        // name — confirmed: no attachment point in avatar_lad.xml references a CV).
+        // A handful of override winners ARE collision volumes (e.g. PELVIS, L_CLAVICLE,
+        // R_UPPER_ARM), so this dict does end up with Scale=1.0 entries for those CV names
+        // too — but since nothing ever looks up a CV by name in the tree this dict feeds,
+        // it's a latent inconsistency with no live consumer, not a bug in practice.
+        // fittedTransforms starts as a full copy of boneTransforms, which ComputeBoneTransforms
+        // already seeds for every joint AND collision volume — so the `with { Position = … }`
+        // branch below (preserving the existing, correct default/VP-distorted Scale) is the
+        // one that always runs in practice; its `else` is a defensive fallback only. This is
+        // also why fittedTransforms's CV scale stays correct even now that
+        // ComputeAttachmentBoneWorldMatrices applies VP scale to regular joints too (see its
+        // doc comment) — the override merge never touches Scale for existing entries.
+        // SL's only scale behavior (LockScaleIfJointPosition) is "lock to default scale,"
+        // which this merge doesn't implement — out of scope here, unrelated to the VP-scale
+        // fix above.
+        var fittedTransforms = boneTransforms != null
+            ? new Dictionary<string, BoneTransform>(boneTransforms, StringComparer.Ordinal)
+            : new Dictionary<string, BoneTransform>(StringComparer.Ordinal);
+        foreach (var (jointName, contributors) in jointOverrideContributors)
+        {
+            if (contributors.Count == 0) continue;
+            var winnerPos = contributors[0].Position;
+            var winnerMeshId = contributors[0].MeshId;
+            for (int c = 1; c < contributors.Count; c++)
+            {
+                if (contributors[c].MeshId.CompareTo(winnerMeshId) > 0)
+                {
+                    winnerMeshId = contributors[c].MeshId;
+                    winnerPos    = contributors[c].Position;
+                }
+            }
+
+            var winnerPosLm = new LibreMetaverse.Vector3(winnerPos.X, winnerPos.Y, winnerPos.Z);
+
+            if (fittedTransforms.TryGetValue(jointName, out var fbt))
+                fittedTransforms[jointName] = fbt with { Position = winnerPosLm };
+            else
+                fittedTransforms[jointName] = new BoneTransform { Position = winnerPosLm, Scale = LibreMetaverse.Vector3.One };
+        }
+
         if (faces.Count == 0 || bMin.X >= float.MaxValue)
         {
             bMin = new Vector3(-0.5f);
@@ -534,378 +670,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             FlexiPrims = flexiInfos.ToArray(),
             SkinData   = skinArray,
         };
-        // Pass empty BoneTransforms so AnimTick uses the default skeleton + rotation-only LBS.
-        // VP bone scale/position changes come from mesh morphs (BindVerts), not bone matrices.
-        // FittedBoneTransforms carries the real VP-deformed values for rigged / fitted mesh
-        // faces (see AvatarFaceSkinData.UseVpBoneTransforms).
+        // BoneTransforms carries the full VP-shaped dict (same data as FittedBoneTransforms),
+        // not a sparse override-only dict. Real SL has exactly one skeleton: rigged
+        // attachments and the classic body (LLPolyMesh, 2-bone LBS) both skin against the
+        // same shape-distorted joints. A previous split here (classic body: scale=1 except
+        // at override winners) silently dropped every <param_skeleton>-only shape slider
+        // (leg length, torso length, shoulder width, Height, etc.) from the classic body,
+        // since those params have no body-mesh vertex-morph counterpart in avatar_lad.xml
+        // for ApplyBodyMeshMorphs to apply instead. Params that DO have both a skeleton
+        // delta and a mesh vertex morph (breast/belly sliders) are unaffected by this join:
+        // that's exactly how real SL applies them too (independent effects, not duplicates).
         return new AvatarBuildResult(submission, skinArray, avatarDef,
-            new Dictionary<string, BoneTransform>(), boneWorldMatrices,
-            boneTransforms ?? new Dictionary<string, BoneTransform>(),
+            fittedTransforms, boneWorldMatrices,
+            fittedTransforms,
             faceMorphData);
-    }
-
-    // ── Bone world matrices ───────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns a copy of <paramref name="m"/> with the scale removed from the upper-left 3×3,
-    /// leaving only rotation and translation. Used for attachment placement so VP bone scale
-    /// (which adjusts skeleton proportions) does not stretch rigid attachment geometry.
-    /// </summary>
-    private static Matrix4x4 StripScale(Matrix4x4 m)
-    {
-        var r0 = new Vector3(m.M11, m.M12, m.M13);
-        if (r0.LengthSquared() > 1e-10f) r0 = Vector3.Normalize(r0);
-        var r1 = new Vector3(m.M21, m.M22, m.M23);
-        if (r1.LengthSquared() > 1e-10f) r1 = Vector3.Normalize(r1);
-        var r2 = new Vector3(m.M31, m.M32, m.M33);
-        if (r2.LengthSquared() > 1e-10f) r2 = Vector3.Normalize(r2);
-        return new Matrix4x4(
-            r0.X, r0.Y, r0.Z, 0f,
-            r1.X, r1.Y, r1.Z, 0f,
-            r2.X, r2.Y, r2.Z, 0f,
-            m.M41, m.M42, m.M43, m.M44);
-    }
-
-    /// <summary>
-    /// Computes how far above the avatar's true ground/feet position the SL network
-    /// position (<c>Avatar.Position.Z</c> / <c>AgentManager.SimPosition.Z</c>) sits.
-    /// <para>
-    /// SL's avatar position is <b>not</b> feet height — it's offset upward by roughly the
-    /// pelvis-to-head-top distance. The skeleton's own leg chain (mHip → mKnee → mAnkle →
-    /// mFoot) already returns to ~0 when the root (mPelvis) is placed at the network
-    /// position, so without this correction the whole avatar renders floating by that
-    /// same amount. Matches classic Radegast's <c>RenderAvatar.UpdateSize</c> /
-    /// <c>AdjustedPosition</c> (Radegast/GUI/Rendering/RenderAvatar.cs), which computes
-    /// this per-avatar from the same VP-morphed bone positions and subtracts it before
-    /// placing the OpenGL avatar transform.
-    /// </para>
-    /// Returns the classic-viewer fallback of 1.0m (its default Height=2.0/PelvisToFoot=1.0)
-    /// when any required bone is missing.
-    /// </summary>
-    public static float ComputeGroundAdjustment(Dictionary<string, BoneTransform>? boneTransforms)
-    {
-        const float FallbackAdjustment = 1.0f;
-        const float Sqrt2 = 1.4142135623730950488016887242097f;
-
-        if (boneTransforms == null ||
-            !boneTransforms.TryGetValue("mPelvis",   out var pelvis) ||
-            !boneTransforms.TryGetValue("mSkull",    out var skull) ||
-            !boneTransforms.TryGetValue("mNeck",     out var neck) ||
-            !boneTransforms.TryGetValue("mChest",    out var chest) ||
-            !boneTransforms.TryGetValue("mHead",     out var head) ||
-            !boneTransforms.TryGetValue("mTorso",    out var torso) ||
-            !boneTransforms.TryGetValue("mHipLeft",  out var hip) ||
-            !boneTransforms.TryGetValue("mKneeLeft", out var knee) ||
-            !boneTransforms.TryGetValue("mAnkleLeft",out var ankle) ||
-            !boneTransforms.TryGetValue("mFootLeft", out var foot))
-            return FallbackAdjustment;
-
-        float pelvisToFoot = hip.Position.Z   * pelvis.Scale.Z
-                            - knee.Position.Z  * hip.Scale.Z
-                            - ankle.Position.Z * knee.Scale.Z
-                            - foot.Position.Z  * ankle.Scale.Z;
-
-        float height = pelvisToFoot
-                     + Sqrt2 * (skull.Position.Z * head.Scale.Z)
-                     + head.Position.Z  * neck.Scale.Z
-                     + neck.Position.Z  * chest.Scale.Z
-                     + chest.Position.Z * torso.Scale.Z
-                     + torso.Position.Z * pelvis.Scale.Z;
-
-        float adjustment = height - pelvisToFoot;
-        return float.IsFinite(adjustment) && adjustment > 0f ? adjustment : FallbackAdjustment;
-    }
-
-    private static Dictionary<string, Matrix4x4> BuildBoneWorldMatrices(
-        LindenSkeleton                    skeleton,
-        Dictionary<string, BoneTransform> boneTransforms)
-    {
-        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(skeleton.bone, Matrix4x4.Identity, boneTransforms, result);
-        return result;
-    }
-
-    // Caches the split alias arrays for each Joint instance so aliases.Split is never
-    // called more than once per distinct Joint object across the lifetime of the process.
-    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Joint, string[]>
-        s_aliasCache = new();
-
-    private static void BuildBoneMatricesRecursive(
-        Joint                             joint,
-        Matrix4x4                         parentWorld,
-        Dictionary<string, BoneTransform> boneTransforms,
-        Dictionary<string, Matrix4x4>     result,
-        IReadOnlyDictionary<string, Quaternion>? rotDeltas = null,
-        bool                              applyVpScale = true)
-    {
-        var world = BuildLocalMatrix(joint, boneTransforms, rotDeltas, applyVpScale) * parentWorld;
-
-        if (!string.IsNullOrEmpty(joint.name))
-            result[joint.name] = world;
-
-        // Use cached split — Joint objects are loaded once at startup so this
-        // eliminates the per-frame string[] allocation that was the #1 hotspot.
-        if (!string.IsNullOrEmpty(joint.aliases))
-        {
-            var aliases = s_aliasCache.GetValue(joint,
-                j => j.aliases.Split(' ', StringSplitOptions.RemoveEmptyEntries));
-            foreach (var alias in aliases)
-                if (!string.IsNullOrEmpty(alias))
-                    result.TryAdd(alias, world);
-        }
-
-        foreach (var cv in joint.collision_volume ?? [])
-        {
-            if (cv == null) continue;
-            // Collision volumes are fitted-mesh bones. Build them through the same
-            // transform path as regular joints so visual-parameter position/scale
-            // deformations drive attachments exactly as they drive the live avatar skeleton.
-            var cvLocal = BuildCollisionVolumeLocalMatrix(cv, boneTransforms);
-            var cvWorld = cvLocal * world;
-            if (!string.IsNullOrEmpty(cv.name))
-                result.TryAdd(cv.name, cvWorld);
-        }
-
-        foreach (var child in joint.bone ?? [])
-        {
-            if (child == null) continue;
-            BuildBoneMatricesRecursive(child, world, boneTransforms, result, rotDeltas, applyVpScale);
-        }
-    }
-
-    private static Matrix4x4 BuildLocalMatrix(
-        JointBase                         joint,
-        Dictionary<string, BoneTransform> boneTransforms,
-        IReadOnlyDictionary<string, Quaternion>? rotDeltas = null,
-        bool                              applyVpScale = true)
-    {
-        if (string.IsNullOrEmpty(joint.name))
-            return Matrix4x4.Identity;
-
-        Vector3 pos, scale;
-        if (boneTransforms.TryGetValue(joint.name, out var bt))
-        {
-            pos   = new Vector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
-            // When applyVpScale is false (attachment LBS), use the XML default scale so that
-            // VP scale deformations do not compound multiplicatively through the hierarchy.
-            // VP position deltas are still applied to preserve proportional bone spacing.
-            scale = applyVpScale
-                ? new Vector3(bt.Scale.X, bt.Scale.Y, bt.Scale.Z)
-                : (joint.scale?.Length >= 3
-                    ? new Vector3(joint.scale[0], joint.scale[1], joint.scale[2])
-                    : Vector3.One);
-        }
-        else
-        {
-            pos   = joint.pos?.Length   >= 3
-                ? new Vector3(joint.pos[0],   joint.pos[1],   joint.pos[2])
-                : Vector3.Zero;
-            scale = joint.scale?.Length >= 3
-                ? new Vector3(joint.scale[0], joint.scale[1], joint.scale[2])
-                : Vector3.One;
-        }
-
-        float rx = joint.rot?.Length > 0 ? joint.rot[0] * (MathF.PI / 180f) : 0f;
-        float ry = joint.rot?.Length > 1 ? joint.rot[1] * (MathF.PI / 180f) : 0f;
-        float rz = joint.rot?.Length > 2 ? joint.rot[2] * (MathF.PI / 180f) : 0f;
-        var rot = Quaternion.CreateFromYawPitchRoll(ry, rx, rz);
-
-        // Apply animation delta on top of the T-pose rotation (mirrors deformbone in RenderAvatar).
-        if (rotDeltas != null && rotDeltas.TryGetValue(joint.name, out var delta))
-            rot = rot * delta;
-
-        return Matrix4x4.CreateScale(scale)
-             * Matrix4x4.CreateFromQuaternion(rot)
-             * Matrix4x4.CreateTranslation(pos);
-    }
-
-    private static Matrix4x4 BuildCollisionVolumeLocalMatrix(
-        CollisionVolume                   volume,
-        Dictionary<string, BoneTransform> boneTransforms)
-    {
-        Vector3 pos, scale;
-        if (!string.IsNullOrEmpty(volume.name) && boneTransforms.TryGetValue(volume.name, out var bt))
-        {
-            pos   = new Vector3(bt.Position.X, bt.Position.Y, bt.Position.Z);
-            scale = new Vector3(bt.Scale.X,    bt.Scale.Y,    bt.Scale.Z);
-        }
-        else
-        {
-            pos = volume.pos?.Length >= 3
-                ? new Vector3(volume.pos[0], volume.pos[1], volume.pos[2])
-                : Vector3.Zero;
-            scale = volume.scale?.Length >= 3
-                ? new Vector3(volume.scale[0], volume.scale[1], volume.scale[2])
-                : Vector3.One;
-        }
-
-        float rx = volume.rot?.Length > 0 ? volume.rot[0] * (MathF.PI / 180f) : 0f;
-        float ry = volume.rot?.Length > 1 ? volume.rot[1] * (MathF.PI / 180f) : 0f;
-        float rz = volume.rot?.Length > 2 ? volume.rot[2] * (MathF.PI / 180f) : 0f;
-        var rot = Quaternion.CreateFromYawPitchRoll(ry, rx, rz);
-
-        return Matrix4x4.CreateScale(scale)
-             * Matrix4x4.CreateFromQuaternion(rot)
-             * Matrix4x4.CreateTranslation(pos);
-    }
-
-    /// <summary>
-    /// Compute animated bone world matrices by rebuilding the skeleton with the
-    /// given per-joint rotation deltas applied on top of the T-pose rotations.
-    /// Equivalent to calling <see cref="BuildBoneWorldMatrices"/> but with live
-    /// animation values threaded through <see cref="BuildLocalMatrix"/>.
-    /// </summary>
-    internal static Dictionary<string, Matrix4x4> ComputeAnimatedBoneWorldMatrices(
-        LindenAvatarDefinition                   avatarDef,
-        Dictionary<string, BoneTransform>        boneTransforms,
-        IReadOnlyDictionary<string, Quaternion>  rotDeltas)
-    {
-        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
-            boneTransforms, result, rotDeltas);
-        return result;
-    }
-
-    /// <summary>
-    /// Reuse-overload: clears and refills <paramref name="result"/> in-place so the
-    /// caller can keep a pre-allocated dictionary alive across frames.
-    /// </summary>
-    internal static void ComputeAnimatedBoneWorldMatrices(
-        LindenAvatarDefinition                   avatarDef,
-        Dictionary<string, BoneTransform>        boneTransforms,
-        IReadOnlyDictionary<string, Quaternion>  rotDeltas,
-        Dictionary<string, Matrix4x4>            result)
-    {
-        result.Clear();
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
-            boneTransforms, result, rotDeltas);
-    }
-
-    /// <summary>
-    /// Compute bone world matrices for rigged attachment LBS, applying VP position
-    /// deltas but <em>not</em> VP scale deformations.
-    /// compounding multiplicatively through the hierarchy (e.g. mChest accumulating
-    /// ~4.8× Z scale), which would catastrophically inflate vertex positions.
-    /// Matches the SL viewer: scale deformations affect only the avatar body mesh
-    /// via vertex morphs, not the animBone matrices used for attachment skinning.
-    /// </summary>
-    internal static Dictionary<string, Matrix4x4> ComputeAttachmentBoneWorldMatrices(
-        LindenAvatarDefinition                   avatarDef,
-        Dictionary<string, BoneTransform>        boneTransforms,
-        IReadOnlyDictionary<string, Quaternion>  rotDeltas)
-    {
-        var result = new Dictionary<string, Matrix4x4>(StringComparer.Ordinal);
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
-            boneTransforms, result, rotDeltas, applyVpScale: false);
-        return result;
-    }
-
-    /// <summary>
-    /// Reuse-overload: clears and refills <paramref name="result"/> in-place.
-    /// </summary>
-    internal static void ComputeAttachmentBoneWorldMatrices(
-        LindenAvatarDefinition                   avatarDef,
-        Dictionary<string, BoneTransform>        boneTransforms,
-        IReadOnlyDictionary<string, Quaternion>  rotDeltas,
-        Dictionary<string, Matrix4x4>            result)
-    {
-        result.Clear();
-        BuildBoneMatricesRecursive(avatarDef.Skeleton.bone, Matrix4x4.Identity,
-            boneTransforms, result, rotDeltas, applyVpScale: false);
-    }
-
-    private static void RejectOutlierRiggedInfluences(
-        PrimMeshBuilder.AttachmentRiggedSkin skin,
-        float[]                              bindVerts,
-        int                                  vertexCount,
-        Dictionary<string, Matrix4x4>        tposeBones)
-    {
-        if (skin.InvBindMatrices.Length == 0 || skin.JointNames.Length == 0) return;
-
-        const float maxDelta = 0.25f;
-        float maxDeltaSq = maxDelta * maxDelta;
-
-        for (int vi = 0; vi < vertexCount; vi++)
-        {
-            int o  = vi * 12;
-            int si = vi * 4;
-            var bp = new Vector4(bindVerts[o], bindVerts[o + 1], bindVerts[o + 2], 1f);
-
-            RejectOutlierInfluence(skin.JointNames, skin.InvBindMatrices, tposeBones, bp, maxDeltaSq,
-                skin.Joints[si],     ref skin.Weights[si]);
-            RejectOutlierInfluence(skin.JointNames, skin.InvBindMatrices, tposeBones, bp, maxDeltaSq,
-                skin.Joints[si + 1], ref skin.Weights[si + 1]);
-            RejectOutlierInfluence(skin.JointNames, skin.InvBindMatrices, tposeBones, bp, maxDeltaSq,
-                skin.Joints[si + 2], ref skin.Weights[si + 2]);
-            RejectOutlierInfluence(skin.JointNames, skin.InvBindMatrices, tposeBones, bp, maxDeltaSq,
-                skin.Joints[si + 3], ref skin.Weights[si + 3]);
-
-            float sum = skin.Weights[si] + skin.Weights[si + 1] + skin.Weights[si + 2] + skin.Weights[si + 3];
-            if (sum > 1e-6f)
-            {
-                float inv = 1f / sum;
-                skin.Weights[si]     *= inv;
-                skin.Weights[si + 1] *= inv;
-                skin.Weights[si + 2] *= inv;
-                skin.Weights[si + 3] *= inv;
-            }
-            else
-            {
-                skin.Joints[si] = FindNearestJoint(skin.JointNames, new Vector3(bp.X, bp.Y, bp.Z), tposeBones);
-                skin.Joints[si + 1] = skin.Joints[si + 2] = skin.Joints[si + 3] = skin.Joints[si];
-                skin.Weights[si]     = 1f;
-                skin.Weights[si + 1] = skin.Weights[si + 2] = skin.Weights[si + 3] = 0f;
-            }
-        }
-    }
-
-    private static void RejectOutlierInfluence(
-        string[]                      jointNames,
-        Matrix4x4[]                   invBindMatrices,
-        Dictionary<string, Matrix4x4> tposeBones,
-        Vector4                       bindPos,
-        float                         maxDeltaSq,
-        int                           jointIndex,
-        ref float                     weight)
-    {
-        if (weight <= 1e-4f) return;
-        if ((uint)jointIndex >= (uint)jointNames.Length || (uint)jointIndex >= (uint)invBindMatrices.Length)
-        {
-            weight = 0f;
-            return;
-        }
-
-        if (!tposeBones.TryGetValue(jointNames[jointIndex], out var tposeBone))
-        {
-            weight = 0f;
-            return;
-        }
-
-        var bindCheck = Vector4.Transform(Vector4.Transform(bindPos, invBindMatrices[jointIndex]), tposeBone);
-        var deltaXyz  = new Vector3(bindCheck.X - bindPos.X, bindCheck.Y - bindPos.Y, bindCheck.Z - bindPos.Z);
-        if (deltaXyz.LengthSquared() > maxDeltaSq)
-            weight = 0f;
-    }
-
-    private static int FindNearestJoint(
-        string[]                      jointNames,
-        Vector3                       pos,
-        Dictionary<string, Matrix4x4> tposeBones)
-    {
-        int best = 0;
-        float bestD2 = float.MaxValue;
-        for (int i = 0; i < jointNames.Length; i++)
-        {
-            if (!tposeBones.TryGetValue(jointNames[i], out var m)) continue;
-            var bonePos = new Vector3(m.M41, m.M42, m.M43);
-            float d2 = (bonePos - pos).LengthSquared();
-            if (d2 < bestD2)
-            {
-                bestD2 = d2;
-                best = i;
-            }
-        }
-        return best;
     }
 
     /// <summary>
@@ -1504,12 +1282,19 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             }
 
             // Hair uses alpha-mask (hard discard at 0.2) to cut out the texture shape.
-            // All other body mesh faces are fully opaque — baked skin textures encode
-            // compositing layer data in alpha, not GL transparency.  Rendering them with
-            // AlphaMode.Blend causes the alpha channel to be written into the scene FBO
-            // and composited away when blitted to Avalonia's framebuffer.
-            bool isHair     = fd.BakeName == "hair";
-            var  alphaMode  = isHair ? FaceAlphaMode.Mask : FaceAlphaMode.None;
+            // All other body mesh faces also need Mask, not None: an alpha wearable
+            // (invisiprim layer) composites into the SAME baked texture's alpha channel,
+            // and SL C++ discards those texels so mesh clothing doesn't show skin
+            // poking through underneath. Forcing None here (as before) skipped that
+            // discard test entirely, so the alpha-wearable mask never applied and the
+            // base body rendered fully opaque under rigged mesh attachments.
+            // AlphaMode.Blend (which was tried and rejected — see below) is not needed
+            // here: Mask always outputs alpha=1.0 (prim.frag), so it doesn't have
+            // Blend's problem of writing the alpha channel into the scene FBO and
+            // getting composited away when blitted to Avalonia's framebuffer. Ordinary
+            // skin (alpha ~1.0 everywhere) is unaffected since nothing there falls
+            // below the 0.004 cutoff already set by BodyFaceData.AlphaCutoff.
+            var  alphaMode  = FaceAlphaMode.Mask;
             bool hasAlpha   = false; // body faces always go into the opaque pass
 
             faces.Add(new PrimRenderFace
@@ -1666,7 +1451,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         uint       PrimLocalId);
 
     private async Task<(List<PrimRenderFace> faces, List<string> faceBonesNames,
-                         List<PrimMeshBuilder.AttachmentRiggedSkin?> riggedSkins,
+                         List<AttachmentRiggedSkin?> riggedSkins,
                          List<AttachmentBuildInfo> attachInfos,
                          Vector3 bMin, Vector3 bMax)>
         BuildAttachmentsAsync(
@@ -1680,7 +1465,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
     {
         var allFaces       = new List<PrimRenderFace>();
         var allFaceBones   = new List<string>();
-        var allRigged      = new List<PrimMeshBuilder.AttachmentRiggedSkin?>();
+        var allRigged      = new List<AttachmentRiggedSkin?>();
         var allAttachInfos = new List<AttachmentBuildInfo>();
         var bMin           = new Vector3(float.MaxValue);
         var bMax           = new Vector3(float.MinValue);
@@ -1722,7 +1507,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
 
                 var attachJointMatrix = Matrix4x4.CreateFromQuaternion(apoint.Rotation)
                                       * Matrix4x4.CreateTranslation(apoint.Position)
-                                      * StripScale(boneMatrix);
+                                      * AvatarBoneMath.StripScale(boneMatrix);
 
                 var linkset = new List<Primitive> { root };
                 if (primsByParent.TryGetValue(root.LocalID, out var children))
@@ -1760,13 +1545,19 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                                  "building (mesh/texture fetch stalled); skipping this attachment.", client);
                     return default;
                 }
-                catch { return default; }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
+                        $"linksetCount={linkset.Count} — attachment dropped from render: {ex}",
+                        Microsoft.Extensions.Logging.LogLevel.Warning, client);
+                    return default;
+                }
             }, ct)).ToList();
 
         progress?.Report($"Building {attachTasks.Count} attachment(s)…");
 
         (string JointName, Vector3 JointPos, Quaternion JointRot, uint RootLocalId,
-         List<PrimRenderFace> attFaces, List<PrimMeshBuilder.AttachmentRiggedSkin?> attRigged,
+         List<PrimRenderFace> attFaces, List<AttachmentRiggedSkin?> attRigged,
          Vector3 aBMin, Vector3 aBMax, bool ok)[] attachResults;
         try
         {

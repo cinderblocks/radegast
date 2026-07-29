@@ -464,7 +464,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             // SceneAnimeshStreamer can drive LBS animation each tick.
             if (mesh.SkinData?.JointNames?.Length > 0 && flexiBaseVerts == null)
             {
-                var bindShape = FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
+                var bindShape = RiggedSkinMath.FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
                 for (int gi = faceStart; gi < faces.Count; gi++)
                 {
                     int fi = faces[gi].FaceIndex;
@@ -497,7 +497,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                         skinJoints[si + 2] = vw.Joint2; skinWts[si + 2] = vw.Weight2;
                         skinJoints[si + 3] = vw.Joint3; skinWts[si + 3] = vw.Weight3;
 
-                        NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
+                        RiggedSkinMath.NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
                             ref skinJoints[si],     ref skinWts[si],
                             ref skinJoints[si + 1], ref skinWts[si + 1],
                             ref skinJoints[si + 2], ref skinWts[si + 2],
@@ -1325,27 +1325,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
     }
 
     // ── Attachment tessellation ───────────────────────────────────────────────────
-
-    /// <summary>
-    /// Rigged / fitted mesh skinning data for a single attachment face.
-    /// When non-null, the caller must render the face in avatar-local space
-    /// (its <see cref="PrimRenderFace.Transform"/> is already Identity and its
-    /// vertices are in mesh bind-space) and drive animation through the supplied
-    /// joint names + inverse bind matrices + per-vertex weights.
-    /// </summary>
-    internal sealed class AttachmentRiggedSkin
-    {
-        public string[]    JointNames      = [];
-        public Matrix4x4[] InvBindMatrices = [];
-        /// <summary>
-        /// Interleaved per-vertex joint indices: <c>Joints[vi * 4 + k]</c> is influence k of vertex vi.
-        /// </summary>
-        public int[]       Joints  = [];
-        /// <summary>
-        /// Interleaved per-vertex weights: <c>Weights[vi * 4 + k]</c> is weight k of vertex vi.
-        /// </summary>
-        public float[]     Weights = [];
-    }
+    // AttachmentRiggedSkin (the per-face rigged-skin DTO) now lives in
+    // LibreMetaverse.Rendering — pure data, no OpenGL/UI dependency, reusable by any backend.
 
     /// <summary>
     /// Tessellates an attachment linkset and downloads its textures.
@@ -1501,7 +1482,15 @@ internal sealed class PrimMeshBuilder(GridClient client)
         //   v_anim = v_bind × invBind × animBone
         // where v_bind = BindShapeMatrix × raw_vertex (so BindShapeMatrix is baked into
         // the vertex, not into invBind).
-        var jointInvBind = BuildInvBindMatrices(mesh.SkinData);
+        var jointInvBind = RiggedSkinMath.BuildInvBindMatrices(mesh.SkinData);
+        var meshId       = prim.Sculpt?.SculptTexture ?? UUID.Zero;
+
+        // Raw joint-position-override candidates carried by this mesh's own skin block
+        // (AltInverseBindMatrices), if any. Threshold-filtering against the avatar's
+        // default skeleton and mesh_id-based conflict resolution happen later in
+        // AvatarMeshBuilder.BuildAsync, which has the skeleton and sees every attachment —
+        // this only extracts what one mesh, in isolation, is offering.
+        var jointOverrides = RiggedSkinMath.ExtractJointPositionOverrides(mesh.SkinData);
 
         // Use the stored BindShapeMatrix from the mesh asset.  The IBM was baked by the
         // exporter as Invert(bone_world × Scale(s)), so IBM.Row0.Length = 1/s = 39.37.
@@ -1511,7 +1500,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
         // that v_bind × IBM × bone_world places vertices at the correct avatar-space Z.
         // Using a uniform Scale(0.0254) instead would discard the translation and give
         // v_anim ≈ v_raw (dress rendered at origin, not on the avatar).
-        var bindShape = FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
+        var bindShape = RiggedSkinMath.FloatsToMatrix(mesh.SkinData.BindShapeMatrix);
 
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
@@ -1570,12 +1559,13 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 joints[si + 2] = vw.Joint2;  weights[si + 2] = vw.Weight2;
                 joints[si + 3] = vw.Joint3;  weights[si + 3] = vw.Weight3;
 
-                NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
+                RiggedSkinMath.NormalizeSkinWeights(mesh.SkinData.JointNames.Length,
                     ref joints[si],     ref weights[si],
                     ref joints[si + 1], ref weights[si + 1],
                     ref joints[si + 2], ref weights[si + 2],
                     ref joints[si + 3], ref weights[si + 3]);
             }
+
             var centroid = centSum * (1f / nv);
             ushort[] indices = face.Indices.ToArray();
             ComputeTangents(verts, nv, indices);
@@ -1611,7 +1601,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 hasBump   = texFace.Bump != Bumpiness.None;
                 alphaMode = hasAlpha ? FaceAlphaMode.Blend : FaceAlphaMode.None;
             }
-            if (a <= 0.01f) continue;
+            // Fully-invisible rigged faces are still kept when they carry joint-position
+            // overrides: some creators attach a fully-transparent rigged mesh purely to
+            // inject skeleton corrections (no visible geometry at all). riggedSkins[i] must
+            // stay index-aligned with faces[i] (see AvatarMeshBuilder.BuildAsync's merge
+            // loop), so the override can only survive by keeping this (invisible) face.
+            if (a <= 0.01f && jointOverrides.Length == 0) continue;
 
             faces.Add(new RawFace(verts, nv8, indices,
                 new Vector4(r, g, b, a), fullbright, glow, hasAlpha, texId,
@@ -1621,10 +1616,13 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 MaterialId: materialId, RenderMaterialId: renderMaterialId));
             riggedSkins.Add(new AttachmentRiggedSkin
             {
-                JointNames      = mesh.SkinData.JointNames,
-                InvBindMatrices = jointInvBind,
-                Joints          = joints,
-                Weights         = weights,
+                JointNames             = mesh.SkinData.JointNames,
+                InvBindMatrices        = jointInvBind,
+                Joints                 = joints,
+                Weights                = weights,
+                MeshId                 = meshId,
+                JointPositionOverrides = jointOverrides,
+                LockScaleIfJointPosition = mesh.SkinData.LockScaleIfJointPosition,
             });
         }
     }
@@ -1658,88 +1656,6 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             faces[i] = faces[i] with { FaceIndex = faceIndex };
         }
-    }
-
-    /// <summary>Converts a 16-element row-major float array to a Matrix4x4.</summary>
-    private static Matrix4x4 FloatsToMatrix(float[] f)
-    {
-        if (f == null || f.Length < 16) return Matrix4x4.Identity;
-        return new Matrix4x4(
-            f[ 0], f[ 1], f[ 2], f[ 3],
-            f[ 4], f[ 5], f[ 6], f[ 7],
-            f[ 8], f[ 9], f[10], f[11],
-            f[12], f[13], f[14], f[15]);
-    }
-
-    /// <summary>
-    /// Builds the per-joint inverse bind matrix array used for rigged skinning.
-    /// The SL mesh format supplies one 4×4 (16 floats, row-major, row-vector) per joint.
-    /// When the asset contains <see cref="MeshSkinData.AltInverseBindMatrices"/> (i.e. the
-    /// mesh was uploaded with joint position overrides), those are preferred over the regular
-    /// <see cref="MeshSkinData.InverseBindMatrices"/>.  This matches the SL viewer branch:
-    /// <c>use_alt_ibm = skin.mJointOverrides.size() &gt; 0</c>.
-    /// </summary>
-    private static Matrix4x4[] BuildInvBindMatrices(MeshSkinData skin)
-    {
-        int n = skin.JointNames.Length;
-        var result = new Matrix4x4[n];
-
-        // Prefer alt IBMs when present — they account for custom joint positions baked
-        // into the mesh by the uploader (e.g. a dress whose skeleton was exported at a
-        // non-standard joint position).  Using the regular IBMs for such a mesh will
-        // produce explosive distortion because the IBM is in the wrong bind-pose space.
-        bool useAlt = skin.AltInverseBindMatrices.Length >= n * 16;
-        var  raw    = useAlt ? skin.AltInverseBindMatrices : skin.InverseBindMatrices;
-        int  have   = raw.Length / 16;
-
-        for (int i = 0; i < n; i++)
-        {
-            if (i < have)
-            {
-                int b = i * 16;
-                result[i] = new Matrix4x4(
-                    raw[b    ], raw[b + 1], raw[b + 2], raw[b + 3],
-                    raw[b + 4], raw[b + 5], raw[b + 6], raw[b + 7],
-                    raw[b + 8], raw[b + 9], raw[b +10], raw[b +11],
-                    raw[b +12], raw[b +13], raw[b +14], raw[b +15]);
-            }
-            else
-            {
-                result[i] = Matrix4x4.Identity;
-            }
-        }
-
-        return result;
-    }
-
-    private static void NormalizeSkinWeights(
-        int jointCount,
-        ref int j0, ref float w0,
-        ref int j1, ref float w1,
-        ref int j2, ref float w2,
-        ref int j3, ref float w3)
-    {
-        if ((uint)j0 >= (uint)jointCount) w0 = 0f;
-        if ((uint)j1 >= (uint)jointCount) w1 = 0f;
-        if ((uint)j2 >= (uint)jointCount) w2 = 0f;
-        if ((uint)j3 >= (uint)jointCount) w3 = 0f;
-
-        w0 = Math.Clamp(w0, 0f, 1f);
-        w1 = Math.Clamp(w1, 0f, 1f);
-        w2 = Math.Clamp(w2, 0f, 1f);
-        w3 = Math.Clamp(w3, 0f, 1f);
-
-        float sum = w0 + w1 + w2 + w3;
-        if (sum > 1e-6f)
-        {
-            float inv = 1f / sum;
-            w0 *= inv; w1 *= inv; w2 *= inv; w3 *= inv;
-            return;
-        }
-
-        j0 = 0; j1 = 0; j2 = 0; j3 = 0;
-        w0 = jointCount > 0 ? 1f : 0f;
-        w1 = 0f; w2 = 0f; w3 = 0f;
     }
 
 }

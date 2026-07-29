@@ -30,7 +30,7 @@ namespace Radegast.Veles.Rendering;
 /// <summary>
 /// Downloads BVH animation assets and advances their playback time each frame,
 /// producing a per-joint delta-rotation dictionary for use with
-/// <see cref="AvatarMeshBuilder.ComputeAnimatedBoneWorldMatrices"/>.
+/// <see cref="LibreMetaverse.Rendering.AvatarBoneMath"/>'s ComputeAnimatedBoneWorldMatrices.
 ///
 /// Mirrors the approach in the legacy Radegast RenderAvatar.addanimation / animate methods,
 /// cross-referenced with the SL viewer llagent.cpp / llvoavatar.cpp animation pipeline.

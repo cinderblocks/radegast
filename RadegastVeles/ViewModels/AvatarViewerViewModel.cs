@@ -134,6 +134,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     // Arm bones extend along ±Y (lateral axis); rotating around local +X by -θ swings
     // the +Y arm direction toward -Z (floor), producing the SL reference A-pose.
     // Right-arm bones need the opposite sign to also drop toward -Z.
+
     private static readonly IReadOnlyDictionary<string, Quaternion> s_aPoseDeltas =
         new Dictionary<string, Quaternion>(StringComparer.Ordinal)
         {
@@ -899,7 +900,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     // reused Dictionary is not safe here.
                     _attachUsePing = !_attachUsePing;
                     var writeTarget = _attachUsePing ? _attachBonesPing : _attachBonesPong;
-                    AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
+                    AvatarBoneMath.ComputeAttachmentBoneWorldMatrices(
                         avatarDef, vpBt, rotDeltas, writeTarget);
                     _attachBonesPublished = writeTarget;
                     var published = _attachBonesPublished;
@@ -914,7 +915,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 _prevLiveDeltaCount = count;
             }
 
-        AvatarMeshBuilder.ComputeAnimatedBoneWorldMatrices(avatarDef, vpBt, rotDeltas, _animBonesBuffer);
+        AvatarBoneMath.ComputeAnimatedBoneWorldMatrices(avatarDef, vpBt, rotDeltas, _animBonesBuffer);
         var animBones = _animBonesBuffer;
 
         // Flexi attachment provider was already refreshed above for the LiveAnimation
@@ -924,7 +925,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         {
             _attachUsePing = !_attachUsePing;
             var writeTarget = _attachUsePing ? _attachBonesPing : _attachBonesPong;
-            AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
+            AvatarBoneMath.ComputeAttachmentBoneWorldMatrices(
                 avatarDef, vpBt, rotDeltas, writeTarget);
             _attachBonesPublished = writeTarget;
             var published = _attachBonesPublished;
@@ -968,7 +969,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     }
                 }
             }
-            AvatarMeshBuilder.ComputeAttachmentBoneWorldMatrices(
+            AvatarBoneMath.ComputeAttachmentBoneWorldMatrices(
                 avatarDef, physicsPatched ?? _fittedBoneTransforms, rotDeltas, _vpAnimBonesBuffer);
             vpAnimBones = _vpAnimBonesBuffer;
         }
@@ -997,9 +998,12 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                                          skin.BindVerts[o + 2], 1f);
                     var bn = new Vector4(skin.BindVerts[o + 3], skin.BindVerts[o + 4],
                                          skin.BindVerts[o + 5], 0f);
+                    var bt = new Vector4(skin.BindVerts[o + 8], skin.BindVerts[o + 9],
+                                         skin.BindVerts[o + 10], 0f);
 
                     var ap = Vector4.Zero;
                     var an = Vector4.Zero;
+                    var at = Vector4.Zero;
                     float totalW = 0f;
 
                     for (int infl = 0; infl < 4; infl++)
@@ -1014,6 +1018,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                         {
                             ap += w * bp;
                             an += w * bn;
+                            at += w * bt;
                             totalW += w;
                             continue;
                         }
@@ -1021,23 +1026,26 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                         var ib = ibms[ji];
                         var sp = Vector4.Transform(Vector4.Transform(bp, ib), m);
                         var sn = Vector4.Transform(Vector4.Transform(bn, ib), m);
+                        var st = Vector4.Transform(Vector4.Transform(bt, ib), m);
                         ap += w * sp;
                         an += w * sn;
+                        at += w * st;
                         totalW += w;
                     }
 
-                    if (totalW <= 1e-4f) { ap = bp; an = bn; }
+                    if (totalW <= 1e-4f) { ap = bp; an = bn; at = bt; }
 
                     nvBufR[o]     = ap.X; nvBufR[o + 1] = ap.Y; nvBufR[o + 2] = ap.Z;
                     nvBufR[o + 3] = an.X; nvBufR[o + 4] = an.Y; nvBufR[o + 5] = an.Z;
                     nvBufR[o + 6] = skin.BindVerts[o + 6];
                     nvBufR[o + 7] = skin.BindVerts[o + 7];
-                    // Tangent (4 floats) is not LBS-transformed, only carried through —
-                    // matches how UV above is handled, and how the non-animated build
-                    // path leaves tangents untouched by skinning.
-                    nvBufR[o + 8]  = skin.BindVerts[o + 8];
-                    nvBufR[o + 9]  = skin.BindVerts[o + 9];
-                    nvBufR[o + 10] = skin.BindVerts[o + 10];
+                    // Tangent XYZ (indices 8-10) is LBS-transformed the same as the normal —
+                    // matches SL's own skinning vertex shader (pbrmetallicroughnessV.glsl),
+                    // which applies the identical skinned transform to tangent and normal so
+                    // the TBN basis stays consistent with the posed geometry. Index 11 (the
+                    // tangent's handedness sign, +-1) is invariant under rotation and is
+                    // carried through unchanged, same as SceneAvatarAnimator's equivalent loop.
+                    nvBufR[o + 8]  = at.X; nvBufR[o + 9] = at.Y; nvBufR[o + 10] = at.Z;
                     nvBufR[o + 11] = skin.BindVerts[o + 11];
                 }
 
@@ -1061,9 +1069,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 var bn = new Vector4(
                     skin.BindVerts[o + 3], skin.BindVerts[o + 4],
                     skin.BindVerts[o + 5], 0f);
+                var bt = new Vector4(
+                    skin.BindVerts[o + 8], skin.BindVerts[o + 9],
+                    skin.BindVerts[o + 10], 0f);
 
                 var ap = Vector4.Zero;
                 var an = Vector4.Zero;
+                var at = Vector4.Zero;
 
                 var   b1 = skin.Bone1[vi];
                 float w1 = skin.Weight1[vi];
@@ -1072,11 +1084,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 {
                     ap += w1 * Vector4.Transform(Vector4.Transform(bp, ib1), m1);
                     an += w1 * Vector4.Transform(Vector4.Transform(bn, ib1), m1);
+                    at += w1 * Vector4.Transform(Vector4.Transform(bt, ib1), m1);
                 }
                 else
                 {
                     ap += w1 * bp;
                     an += w1 * bn;
+                    at += w1 * bt;
                 }
 
                 float w2 = skin.Weight2[vi];
@@ -1087,11 +1101,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     {
                         ap += w2 * Vector4.Transform(Vector4.Transform(bp, ib2), m2);
                         an += w2 * Vector4.Transform(Vector4.Transform(bn, ib2), m2);
+                        at += w2 * Vector4.Transform(Vector4.Transform(bt, ib2), m2);
                     }
                     else
                     {
                         ap += w2 * bp;
                         an += w2 * bn;
+                        at += w2 * bt;
                     }
                 }
 
@@ -1099,12 +1115,9 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 nvBuf[o + 3] = an.X; nvBuf[o + 4] = an.Y; nvBuf[o + 5] = an.Z;
                 nvBuf[o + 6] = skin.BindVerts[o + 6];
                 nvBuf[o + 7] = skin.BindVerts[o + 7];
-                // Tangent (4 floats) is not LBS-transformed, only carried through —
-                // matches how UV above is handled, and how the non-animated build
-                // path leaves tangents untouched by skinning.
-                nvBuf[o + 8]  = skin.BindVerts[o + 8];
-                nvBuf[o + 9]  = skin.BindVerts[o + 9];
-                nvBuf[o + 10] = skin.BindVerts[o + 10];
+                // Tangent XYZ (indices 8-10) is LBS-transformed the same as the normal — see
+                // the matching comment on the rigged-mesh loop above.
+                nvBuf[o + 8]  = at.X; nvBuf[o + 9] = at.Y; nvBuf[o + 10] = at.Z;
                 nvBuf[o + 11] = skin.BindVerts[o + 11];
             }
 
