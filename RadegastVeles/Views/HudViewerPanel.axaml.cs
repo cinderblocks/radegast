@@ -18,15 +18,29 @@
  */
 
 using Avalonia.Controls;
+using Avalonia.Layout;
+using Radegast.Veles.Rendering;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Views;
 
 public partial class HudViewerPanel : UserControl
 {
+    /// <summary>The Vulkan viewport hosted by this panel, exposed through the backend-agnostic
+    /// interface <see cref="HudViewerViewModel.SetViewport"/> consumes.</summary>
+    public readonly ISingleObjectViewport Viewport;
+
     public HudViewerPanel()
     {
         InitializeComponent();
+
+        var vk = new VkViewportControl();
+        Viewport = vk;
+        Control control = vk;
+        control.HorizontalAlignment = HorizontalAlignment.Stretch;
+        control.VerticalAlignment = VerticalAlignment.Stretch;
+        Avalonia.Automation.AutomationProperties.SetName(control, "HUD viewport");
+        ViewportHost.Content = control;
     }
 
     protected override void OnDataContextChanged(System.EventArgs e)
@@ -37,8 +51,11 @@ public partial class HudViewerPanel : UserControl
             vm.SetViewport(Viewport);
             Viewport.InitFailed += msg =>
             {
+                // Logged, not just reflected in UI state, so a panel-fatal init failure is
+                // visible to log analysis (see SceneViewerViewModel's identical InitFailed handler).
+                LibreMetaverse.Logger.Error($"[HudViewer] Viewport init failed: {msg}");
                 vm.HasError   = true;
-                vm.ErrorText  = $"GL init failed: {msg}";
+                vm.ErrorText  = $"Vulkan init failed: {msg}";
                 vm.StatusText = vm.ErrorText;
                 vm.IsLoading  = false;
             };

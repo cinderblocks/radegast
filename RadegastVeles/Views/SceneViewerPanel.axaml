@@ -115,13 +115,24 @@
         </Border>
 
         <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
-            <rendering:GlViewportControl x:Name="Viewport"
-                                         Wireframe="{Binding Wireframe}"
-                                         HorizontalAlignment="Stretch"
-                                         VerticalAlignment="Stretch"
-                                         ToolTip.Tip="Alt+drag: orbit | Alt+Ctrl+drag: pan | Alt+Ctrl+Shift+drag: dolly | Scroll: zoom | Click: select/interact | Double-click ground: walk there | M: mouselook | Enter: chat"
-                                         AutomationProperties.Name="3D scene viewport">
-                <rendering:GlViewportControl.ContextMenu>
+            <!-- 3-D viewport: constructed in code-behind, GL or Vulkan, since XAML can't
+                 conditionally declare one of two control types, see SceneViewerPanel.axaml.cs's
+                 UseVulkanViewport build-time flag (plan Section 2's dual-backend design,
+                 mirroring PrimViewerPanel's own Milestone 12 pattern exactly). The Wireframe
+                 binding that used to live here is redundant with SceneViewerViewModel.SetViewport/
+                 OnWireframeChanged, which already push Wireframe to whichever viewport is
+                 attached, so it was dropped rather than replicated in code-behind. The ContextMenu
+                 and ToolTip, which used to be property-elements on the viewport control itself,
+                 are relocated onto this host instead, since they can't survive the swap to a
+                 dynamically-constructed child control; ViewportHost fills the identical
+                 screen area and stays in the normal XAML-declared logical tree, so bindings and
+                 right-click/hover behavior are unaffected. -->
+            <ContentControl x:Name="ViewportHost"
+                            Background="Transparent"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
+                            ToolTip.Tip="Alt+drag: orbit | Alt+Ctrl+drag: pan | Alt+Ctrl+Shift+drag: dolly | Scroll: zoom | Click: select/interact | Double-click ground: walk there | M: mouselook | Enter: chat">
+                <ContentControl.ContextMenu>
                     <ContextMenu>
                         <MenuItem Header="{Binding ContextLabel}" IsEnabled="False" FontWeight="SemiBold" />
                         <Separator />
@@ -133,8 +144,8 @@
                         <Separator />
                         <MenuItem Header="Stand Up" Command="{Binding StandUpCommand}" IsVisible="{Binding ContextIsSitting}" />
                     </ContextMenu>
-                </rendering:GlViewportControl.ContextMenu>
-            </rendering:GlViewportControl>
+                </ContentControl.ContextMenu>
+            </ContentControl>
 
             <!-- Performance stats overlay (top-left, shown when ShowPerfOverlay is true) -->
             <Border IsHitTestVisible="False"

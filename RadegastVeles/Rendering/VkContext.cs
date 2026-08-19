@@ -1,0 +1,358 @@
+/*
+ * Radegast Metaverse Client
+ * Copyright (c) 2026, Sjofn LLC
+ * All rights reserved.
+ *
+ * Radegast is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published
+ * by the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
+// Adapted from Avalonia's own samples/GpuInterop/VulkanDemo (MIT licensed,
+// https://github.com/AvaloniaUI/Avalonia)'s VulkanContext.cs, validated working against
+// this project's pinned Avalonia version in experiments/VulkanEmbeddingSpike before being
+// ported here. Trimmed from the original: no GRContext/SkiaSharp interop (that was the
+// sample's own texture-dump debug feature, not part of the render/present pipeline itself).
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Runtime.InteropServices;
+using Avalonia.Platform;
+using Avalonia.Rendering.Composition;
+using Silk.NET.Core;
+using Silk.NET.Core.Native;
+using Silk.NET.Direct3D11;
+using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.KHR;
+
+namespace Radegast.Veles.Rendering;
+
+/// <summary>
+/// Holds the single, shared Vulkan instance/device/queue used by every Veles Vulkan-backed
+/// viewer panel. Unlike <see cref="GlApi"/>'s pattern (one GL context per panel, each
+/// initialised independently by Avalonia's <c>OpenGlControlBase</c>), there is exactly one
+/// <see cref="VkContext"/> for the whole process -- see plan Section 5's "Shared device
+/// design": device/instance creation happens once, at first-panel-construction, and every
+/// subsequent panel reuses it. Construct via <see cref="TryCreate"/>, never directly.
+/// </summary>
+internal sealed unsafe class VkContext : IDisposable
+{
+    public required Vk Api { get; init; }
+    public required Instance Instance { get; init; }
+    public required PhysicalDevice PhysicalDevice { get; init; }
+    public required Device Device { get; init; }
+    public required Queue Queue { get; init; }
+    public required uint QueueFamilyIndex { get; init; }
+    public required VkCommandBufferPool Pool { get; init; }
+    public required DescriptorPool DescriptorPool { get; init; }
+
+    /// <summary>
+    /// Whether this device can sample a BC3 (S3TC DXT5) compressed image, checked once here
+    /// rather than per-texture -- <see cref="VkTexture"/>'s compressed-upload constructor
+    /// requires this. <c>textureCompressionBC</c> is a widely-supported desktop feature but not
+    /// universal (mobile/ARM GPUs typically lack it), so callers must gate on this before
+    /// looking up a <c>TextureDiskCache</c> compressed-tier entry, falling back to the
+    /// uncompressed RGBA8 upload path when false.
+    /// </summary>
+    public required bool SupportsBc3 { get; init; }
+
+    /// <summary>Assigned right after construction in <see cref="TryCreate"/>, not via object
+    /// initializer -- its constructor needs a fully-built <see cref="VkContext"/> to pass to
+    /// <see cref="VkBufferHelper"/>, so it can't be a <c>required init</c> property set inline
+    /// alongside the others above. Never null on any <see cref="VkContext"/> a caller can
+    /// observe. See <see cref="VkMaterialUboPool"/>'s own header comment for why it exists.</summary>
+    public VkMaterialUboPool MaterialUboPool { get; private set; } = null!;
+
+    /// <summary>Non-null only on the Mode B (D3D11 cross-import) path -- see plan Section 3 --
+    /// when Avalonia's compositor backend doesn't advertise native Vulkan handle sharing and
+    /// render-target images must be exported as DXGI shared handles instead.</summary>
+    public required ComPtr<ID3D11Device> D3DDevice { get; init; }
+
+    /// <summary>
+    /// Creates the shared Vulkan instance + device, negotiating whichever external
+    /// memory/semaphore handle type <paramref name="gpuInterop"/> (Avalonia's compositor GPU
+    /// interop feature for whatever backend it's actually running under) advertises support
+    /// for. Works under both integration modes validated in the Phase 0 spike: Mode A
+    /// (Avalonia's own compositor on Vulkan, native <c>VulkanOpaqueNtHandle</c> sharing) and
+    /// Mode B (Avalonia on its default ANGLE/D3D11 backend, cross-import via
+    /// <c>D3D11TextureNtHandle</c>) -- the branch on <c>SupportedImageHandleTypes</c> below is
+    /// what picks between them at runtime; nothing here hardcodes one mode.
+    /// </summary>
+    public static (VkContext? result, string info) TryCreate(ICompositionGpuInterop gpuInterop)
+    {
+        using var appName = new VkByteString("RadegastVeles");
+        var applicationInfo = new ApplicationInfo
+        {
+            SType = StructureType.ApplicationInfo,
+            PApplicationName = appName,
+            ApiVersion = new Version32(1, 1, 0),
+            PEngineName = appName,
+            EngineVersion = new Version32(1, 0, 0),
+            ApplicationVersion = new Version32(1, 0, 0)
+        };
+
+        var enabledExtensions = new List<string> { "VK_KHR_get_physical_device_properties2" };
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            enabledExtensions.Add("VK_KHR_portability_enumeration");
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            enabledExtensions.AddRange(["VK_KHR_external_memory_capabilities", "VK_KHR_external_semaphore_capabilities"]);
+
+        var api = Vk.GetApi();
+
+        Device device = default;
+        DescriptorPool descriptorPool = default;
+        VkCommandBufferPool? pool = null;
+        var success = false;
+        try
+        {
+            using var pRequiredExtensions = new VkByteStringList(enabledExtensions);
+            using var pEnabledLayers = new VkByteStringList(Array.Empty<string>());
+
+            var instanceCreateInfo = new InstanceCreateInfo
+            {
+                SType = StructureType.InstanceCreateInfo,
+                PApplicationInfo = &applicationInfo,
+                PpEnabledExtensionNames = pRequiredExtensions,
+                EnabledExtensionCount = pRequiredExtensions.UCount,
+                PpEnabledLayerNames = pEnabledLayers,
+                EnabledLayerCount = pEnabledLayers.UCount,
+                Flags = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? InstanceCreateFlags.EnumeratePortabilityBitKhr : default
+            };
+
+            api.CreateInstance(in instanceCreateInfo, null, out var vkInstance).ThrowOnError();
+
+            var requireDeviceExtensions = new List<string>();
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                requireDeviceExtensions.AddRange(["VK_KHR_external_memory", "VK_KHR_external_semaphore"]);
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                if (!(gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle)
+                      || gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaqueNtHandle)))
+                    return (null, "Image sharing is not supported by the current Avalonia rendering backend");
+                requireDeviceExtensions.Add(KhrExternalMemoryWin32.ExtensionName);
+                requireDeviceExtensions.Add(KhrExternalSemaphoreWin32.ExtensionName);
+                requireDeviceExtensions.Add("VK_KHR_dedicated_allocation");
+                requireDeviceExtensions.Add("VK_KHR_get_memory_requirements2");
+            }
+            else
+            {
+                if (!gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaquePosixFileDescriptor)
+                    || !gpuInterop.SupportedSemaphoreTypes.Contains(KnownPlatformGraphicsExternalSemaphoreHandleTypes.VulkanOpaquePosixFileDescriptor))
+                    return (null, "Image sharing is not supported by the current Avalonia rendering backend");
+                requireDeviceExtensions.Add(KhrExternalMemoryFd.ExtensionName);
+                requireDeviceExtensions.Add(KhrExternalSemaphoreFd.ExtensionName);
+            }
+
+            uint count = 0;
+            api.EnumeratePhysicalDevices(vkInstance, ref count, null).ThrowOnError();
+            var physicalDevices = stackalloc PhysicalDevice[(int)count];
+            api.EnumeratePhysicalDevices(vkInstance, ref count, physicalDevices).ThrowOnError();
+
+            for (uint c = 0; c < count; c++)
+            {
+                if (requireDeviceExtensions.Any(ext => !api.IsDeviceExtensionPresent(physicalDevices[c], ext)))
+                    continue;
+
+                var physicalDeviceIdProperties = new PhysicalDeviceIDProperties { SType = StructureType.PhysicalDeviceIDProperties };
+                var physicalDeviceProperties2 = new PhysicalDeviceProperties2
+                {
+                    SType = StructureType.PhysicalDeviceProperties2,
+                    PNext = &physicalDeviceIdProperties
+                };
+                api.GetPhysicalDeviceProperties2(physicalDevices[c], &physicalDeviceProperties2);
+
+                if (gpuInterop.DeviceLuid != null && physicalDeviceIdProperties.DeviceLuidvalid)
+                {
+                    if (!new Span<byte>(physicalDeviceIdProperties.DeviceLuid, 8).SequenceEqual(gpuInterop.DeviceLuid))
+                        continue;
+                }
+                else if (gpuInterop.DeviceUuid != null)
+                {
+                    if (!new Span<byte>(physicalDeviceIdProperties.DeviceUuid, 16).SequenceEqual(gpuInterop.DeviceUuid))
+                        continue;
+                }
+
+                var physicalDevice = physicalDevices[c];
+
+                uint queueFamilyCount = 0;
+                api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, ref queueFamilyCount, null);
+                var familyProperties = stackalloc QueueFamilyProperties[(int)queueFamilyCount];
+                api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, ref queueFamilyCount, familyProperties);
+
+                for (uint queueFamilyIndex = 0; queueFamilyIndex < queueFamilyCount; queueFamilyIndex++)
+                {
+                    var family = familyProperties[queueFamilyIndex];
+                    if (!family.QueueFlags.HasFlag(QueueFlags.GraphicsBit))
+                        continue;
+
+                    var queuePriorities = stackalloc float[(int)family.QueueCount];
+                    for (var i = 0; i < family.QueueCount; i++) queuePriorities[i] = 1f;
+
+                    var features = new PhysicalDeviceFeatures();
+                    var queueCreateInfo = new DeviceQueueCreateInfo
+                    {
+                        SType = StructureType.DeviceQueueCreateInfo,
+                        QueueFamilyIndex = queueFamilyIndex,
+                        QueueCount = family.QueueCount,
+                        PQueuePriorities = queuePriorities
+                    };
+
+                    using var pEnabledDeviceExtensions = new VkByteStringList(requireDeviceExtensions);
+                    var deviceCreateInfo = new DeviceCreateInfo
+                    {
+                        SType = StructureType.DeviceCreateInfo,
+                        QueueCreateInfoCount = 1,
+                        PQueueCreateInfos = &queueCreateInfo,
+                        PpEnabledExtensionNames = pEnabledDeviceExtensions,
+                        EnabledExtensionCount = pEnabledDeviceExtensions.UCount,
+                        PEnabledFeatures = &features
+                    };
+
+                    api.CreateDevice(physicalDevice, in deviceCreateInfo, null, out device).ThrowOnError();
+                    api.GetDeviceQueue(device, queueFamilyIndex, 0, out var queue);
+
+                    // MaxMemoryAllocationCount is a separate ceiling from the DescriptorPool
+                    // sizing below: VkMesh does 2-3 AllocateMemory calls per face (vbo/ebo/
+                    // +lebo) and VkMaterialDescriptorSet does 1 more (its UBO) -- neither
+                    // suballocates, so a real scene's face count is directly bounded by this
+                    // limit too.
+                    api.GetPhysicalDeviceProperties(physicalDevice, out var deviceProps);
+                    LibreMetaverse.Logger.Info(
+                        $"[VkContext] Device limits: maxMemoryAllocationCount={deviceProps.Limits.MaxMemoryAllocationCount}, "
+                        + $"maxDescriptorSetSamplers={deviceProps.Limits.MaxDescriptorSetSamplers}, "
+                        + $"maxDescriptorSetUniformBuffers={deviceProps.Limits.MaxDescriptorSetUniformBuffers}");
+
+                    // Descriptor scheme: set 0 per-frame UBO, set 1 per-pass samplers, set 2
+                    // per-material, across ~13-15 pipeline variants.
+                    //
+                    // StorageBuffer covers skin-compute descriptor sets (VkAvatarSkinGpuData --
+                    // 5 SSBO bindings per skinned avatar face) and flexi-compute descriptor sets
+                    // (VkFlexiGpuData -- 3 SSBO bindings per face); each allocates one descriptor
+                    // set per face at face-upload time and never rebinds it -- only the
+                    // SkinMatsSSBO's contents change per animation tick, via a host-visible
+                    // memory write, not a descriptor rebind. These are additional sets stacked
+                    // on top of the scene-face budget below, not drawn from within it.
+                    //
+                    // UniformBuffer/CombinedImageSampler/MaxSets are sized for SceneViewer's
+                    // per-face streaming: unlike PrimViewer/AvatarViewer's single bounded
+                    // submission, SceneViewer streams a whole scene's worth of prims, each face
+                    // allocating its own VkMaterialDescriptorSet (1 UBO + 5 samplers, see
+                    // VkMaterialDescriptorSet.cs -- deliberately NOT deduplicated by material
+                    // content). Sets are freed via vkFreeDescriptorSets on object removal
+                    // (FreeDescriptorSetBit below), so this bounds *concurrently live*
+                    // descriptor sets across the whole process (one shared VkContext/pool for
+                    // all 4 panels), not a cumulative total. Current sizing targets ~6000
+                    // concurrently-live scene faces, budgeted by CombinedImageSampler at 5/face
+                    // (the binding count observed to bind first, over UniformBuffer's larger
+                    // per-face allowance).
+                    //
+                    // These numbers are a documented budget, not a load-bearing hard limit:
+                    // VK_ERROR_OUT_OF_POOL_MEMORY detection at the declared per-type counts is
+                    // spec-permitted but not guaranteed in practice. If exhausted again, the
+                    // real fix is per-material descriptor-set dedup (most faces in a real build
+                    // share texture sets) or generation-based vkResetDescriptorPool -- this
+                    // pool's FreeDescriptorSetBit means alloc/free churn from scene streaming can
+                    // still hit VK_ERROR_OUT_OF_POOL_MEMORY via fragmentation even with nominal
+                    // capacity left, regardless of how large these numbers get.
+                    var poolSizes = stackalloc DescriptorPoolSize[3]
+                    {
+                        new DescriptorPoolSize { Type = DescriptorType.UniformBuffer, DescriptorCount = 6144 },
+                        new DescriptorPoolSize { Type = DescriptorType.CombinedImageSampler, DescriptorCount = 32768 },
+                        new DescriptorPoolSize { Type = DescriptorType.StorageBuffer, DescriptorCount = 4096 },
+                    };
+                    var descriptorPoolInfo = new DescriptorPoolCreateInfo
+                    {
+                        SType = StructureType.DescriptorPoolCreateInfo,
+                        PoolSizeCount = 3,
+                        PPoolSizes = poolSizes,
+                        MaxSets = 8192,
+                        Flags = DescriptorPoolCreateFlags.FreeDescriptorSetBit
+                    };
+                    api.CreateDescriptorPool(device, &descriptorPoolInfo, null, out descriptorPool).ThrowOnError();
+
+                    pool = new VkCommandBufferPool(api, device, queue, queueFamilyIndex);
+
+                    ComPtr<ID3D11Device> d3dDevice = null;
+                    if (physicalDeviceIdProperties.DeviceLuidvalid
+                        && RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                        && !gpuInterop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaqueNtHandle))
+                    {
+                        // Mode B: this backend can't share native Vulkan handles, so mint a
+                        // D3D11 device on the same physical adapter (matched by LUID) purely
+                        // to create DXGI-shared render-target textures instead.
+                        d3dDevice = VkD3DMemoryHelper.CreateDeviceByLuid(
+                            MemoryMarshal.Read<Luid>(new Span<byte>(physicalDeviceIdProperties.DeviceLuid, 8)));
+                    }
+
+                    var name = Marshal.PtrToStringAnsi(new IntPtr(physicalDeviceProperties2.Properties.DeviceName))!;
+
+                    // BC3 needs SAMPLED_IMAGE support under optimal tiling -- the feature bit
+                    // alone (PhysicalDeviceFeatures.TextureCompressionBc) doesn't guarantee any
+                    // particular usage is actually supported, so query the format directly.
+                    api.GetPhysicalDeviceFormatProperties(physicalDevice, Format.BC3UnormBlock, out var bc3Props);
+                    bool supportsBc3 = bc3Props.OptimalTilingFeatures.HasFlag(FormatFeatureFlags.SampledImageBit);
+
+                    var vkContext = new VkContext
+                    {
+                        Api = api,
+                        Device = device,
+                        Instance = vkInstance,
+                        PhysicalDevice = physicalDevice,
+                        Queue = queue,
+                        QueueFamilyIndex = queueFamilyIndex,
+                        Pool = pool,
+                        DescriptorPool = descriptorPool,
+                        SupportsBc3 = supportsBc3,
+                        D3DDevice = d3dDevice
+                    };
+                    // Capacity matches DescriptorPool's own MaxSets above -- a material
+                    // descriptor set can never exceed that ceiling regardless of this pool's
+                    // size (other descriptor-set kinds share the same MaxSets budget too), so
+                    // sizing this any larger couldn't matter and any smaller could become the
+                    // new binding constraint instead of MaxSets.
+                    vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 8192);
+                    // success is set only after MaterialUboPool's own allocation succeeds, so
+                    // the finally block below still tears down pool/descriptorPool/device if
+                    // that construction throws instead of leaking them.
+                    success = true;
+                    return (vkContext, name);
+                }
+            }
+
+            return (null, "No suitable Vulkan device/queue found");
+        }
+        catch (Exception e)
+        {
+            return (null, e.ToString());
+        }
+        finally
+        {
+            if (!success)
+            {
+                pool?.Dispose();
+                if (descriptorPool.Handle != default) api.DestroyDescriptorPool(device, descriptorPool, null);
+                if (device.Handle != default) api.DestroyDevice(device, null);
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        D3DDevice.Dispose();
+        Pool.Dispose();
+        MaterialUboPool.Dispose();
+        Api.DestroyDescriptorPool(Device, DescriptorPool, null);
+        Api.DestroyDevice(Device, null);
+    }
+}

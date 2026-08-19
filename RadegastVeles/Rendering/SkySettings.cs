@@ -29,7 +29,7 @@ namespace Radegast.Veles.Rendering;
 /// <remarks>
 /// EEP integration: parse <c>EnvironmentData.DayCycle</c> LLSD and populate
 /// this object from the sky track keys (blue_horizon, blue_density, etc.),
-/// then assign to <see cref="GlViewportControl.Sky"/> on the UI thread.
+/// then assign to <see cref="VkViewportControl.Sky"/> on the UI thread.
 /// </remarks>
 public sealed class SkySettings
 {
@@ -38,7 +38,7 @@ public sealed class SkySettings
 
     /// <summary>
     /// Rayleigh scattering density per colour channel (WL <c>blue_density</c>, RGB).
-    /// <see cref="GlViewportControl"/>'s sky shader computes
+    /// The sky shader computes
     /// <c>BlueHorizon * exp(-BlueDensity / sinElevation)</c> — HIGHER density means
     /// MORE attenuation (less of that channel gets through), so for a blue-dominant
     /// sky the blue channel needs the LOWEST density here, not the highest.
@@ -79,7 +79,7 @@ public sealed class SkySettings
     public float SunGlowSize { get; set; } = 1.75f;
 
     // ── Cloud layer (EEP cloud_* fields) ────────────────────────────────────────
-    // These describe SL's single flat cloud layer; GlViewportControl synthesizes
+    // These describe SL's single flat cloud layer; the renderer synthesizes
     // several visual layers from them (altitude/scale/scroll offsets applied in
     // the sky shader) rather than the protocol describing multiple layers itself.
 

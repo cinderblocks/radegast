@@ -50,7 +50,7 @@ public readonly struct UvTransform
 /// <summary>
 /// CPU-side data for one rendered face of a prim, ready to be uploaded to the GPU.
 /// Transferred from the VM thread to the GL thread via
-/// <see cref="GlViewportControl.Submit"/>.
+/// <see cref="VkViewportControl.Submit"/>.
 /// </summary>
 public sealed class PrimRenderFace
 {
@@ -113,9 +113,9 @@ public sealed class PrimRenderFace
 
     /// <summary>
     /// Scene key (simIndex in upper 32 bits, root localId in lower 32 bits) of the root
-    /// object this face belongs to in <c>GlViewportControl._sceneObjects</c>. Zero for
+    /// object this face belongs to in <c>VkViewportControl._sceneObjects</c>. Zero for
     /// faces outside the scene-object layer (the standalone single-object preview path).
-    /// Set by <see cref="Rendering.GlViewportControl"/> when a face is added to the scene,
+    /// Set by <see cref="Rendering.VkViewportControl"/> when a face is added to the scene,
     /// so the per-frame spatial-grid pre-filter can map a face back to its owning object
     /// without a reverse lookup.
     /// </summary>
@@ -294,8 +294,8 @@ public sealed class PrimRenderFace
     /// <summary>
     /// True for the single terrain face built by <see cref="SceneTerrainBuilder"/>. The
     /// five texture slots below carry the region's four raw detail textures plus a
-    /// baked layer-select map (not PBR material data) — see
-    /// <see cref="GlViewportControl"/>'s terrain triplanar-blend path in prim.frag.
+    /// baked layer-select map (not PBR material data) — see the terrain
+    /// triplanar-blend path in prim.frag.
     /// </summary>
     public          bool        IsTerrain                  { get; init; }
 
@@ -340,15 +340,6 @@ public sealed class PrimRenderFace
     private int     _localAabbReady; // 0 = not computed, 1 = computed.
 
     /// <summary>
-    /// Computes the world-space AABB by transforming the eight corners of the cached
-    /// local-space AABB through <see cref="Transform"/>. The local AABB is computed
-    /// on first call from <see cref="Vertices"/> and cached for the lifetime of this
-    /// face. Animated faces (whose Vertices buffer is replaced via
-    /// <c>GlMesh.UpdateVertices</c>) keep the original rest-pose AABB; this is the
-    /// same approximation used by the SL viewer's renderable bounding volume so
-    /// occasional near-pose deformation never causes false culling.
-    /// </summary>
-    /// <summary>
     /// World-space center of the cached local AABB under the <em>current</em>
     /// <see cref="Transform"/>. Used as the alpha-sort reference point instead of the
     /// build-time <see cref="Centroid"/> so faces whose transform is updated after build
@@ -364,6 +355,15 @@ public sealed class PrimRenderFace
         return Vector3.Transform((_localMin + _localMax) * 0.5f, _transform);
     }
 
+    /// <summary>
+    /// Computes the world-space AABB by transforming the eight corners of the cached
+    /// local-space AABB through <see cref="Transform"/>. The local AABB is computed
+    /// on first call from <see cref="Vertices"/> and cached for the lifetime of this
+    /// face. Animated faces (whose Vertices buffer is replaced via
+    /// <c>GlMesh.UpdateVertices</c>) keep the original rest-pose AABB; this is the
+    /// same approximation used by the SL viewer's renderable bounding volume so
+    /// occasional near-pose deformation never causes false culling.
+    /// </summary>
     public void GetWorldAabb(out Vector3 min, out Vector3 max)
     {
         EnsureLocalAabb();
@@ -391,7 +391,7 @@ public sealed class PrimRenderFace
         if (System.Threading.Interlocked.CompareExchange(ref _localAabbReady, 1, 0) == 1)
             return;
         // Prefer PickerVertices (stride 3) if the viewport has already slimmed this face;
-        // fall back to the original interleaved Vertices (stride 8) otherwise.
+        // fall back to the original interleaved Vertices (stride 12) otherwise.
         var pv = PickerVertices;
         if (pv != null && pv.Length >= 3)
         {
@@ -456,9 +456,9 @@ public sealed class PrimRenderFace
         {
             Vertices                   = Vertices,
             // VerticesLength MUST travel with Vertices: builder faces carry ArrayPool-rented
-            // buffers whose logical length is VerticesLength. Dropping it here made the GPU
+            // buffers whose logical length is VerticesLength. Dropping it here makes the GPU
             // upload consume the oversized rented array (garbage tail → poisoned picker/AABB
-            // data) and skipped the ArrayPool return after upload.
+            // data) and skips the ArrayPool return after upload.
             VerticesLength             = VerticesLength,
             PickerVertices             = PickerVertices,
             NormalUvVertices           = NormalUvVertices,
@@ -629,25 +629,24 @@ public sealed class FlexiPrimInfo
     public Func<string, Matrix4x4>? AttachBoneProvider { get; set; }
 
     /// <summary>
-    /// GPU-side buffers for compute-shader vertex deformation.
-    /// Set by GlViewportControl on the GL thread after the face meshes are uploaded;
-    /// null until then (and permanently null when compute shaders are not supported).
-    /// Read by FlexiPrimAnimator on the physics background thread — write is done once
-    /// so visibility is guaranteed by the happens-before on the periodic timer.
-    /// </summary>
-    internal volatile FlexiGpuData? GpuData;
-
-    /// <summary>
     /// Live world-space bounding box, recomputed every physics tick in
     /// <c>FlexiPrimAnimator.TickAndUpload</c> from the deformed spine, padded by the
-    /// prim's cross-section radius. Consumed by the frustum-cull path in
-    /// <c>GlViewportControl</c> in place of each face's stale bind-pose AABB (flexi
-    /// faces don't update <see cref="PrimRenderFace.Transform"/>, so the normal
-    /// cached-AABB cull would always reject them). Null until the first tick has run.
-    /// Written on the physics background thread, read on the GL thread — reference
-    /// assignment is atomic and <c>volatile</c> gives the necessary visibility.
+    /// prim's cross-section radius. Consumed by the viewport's frustum-cull path in place of
+    /// each face's stale bind-pose AABB (flexi faces don't update
+    /// <see cref="PrimRenderFace.Transform"/>, so the normal cached-AABB cull would always
+    /// reject them). Null until the first tick has run. Written on the physics background
+    /// thread, read on the render thread — reference assignment is atomic and
+    /// <c>volatile</c> gives the necessary visibility.
     /// </summary>
     internal volatile FlexiWorldBounds? WorldBounds;
+
+    /// <summary>
+    /// GPU compute resources for this flexi prim, assigned on the render thread after upload.
+    /// Null until registered; <c>FlexiPrimAnimator.TickAndUpload</c> falls back to the CPU path
+    /// for any tick where GpuData is null or disposed. Same write-once/<c>volatile</c> contract
+    /// as <see cref="WorldBounds"/> above.
+    /// </summary>
+    internal volatile VkFlexiGpuData? GpuData;
 }
 
 /// <summary>
@@ -718,10 +717,10 @@ public enum TextureSlot : byte
 /// Carries a single decoded bitmap that should be uploaded and stitched into an
 /// already-live scene-object face.  Produced by <see cref="PrimMeshBuilder"/> as
 /// each texture download completes and consumed by
-/// <see cref="GlViewportControl.PatchSceneObjectTexture"/>.
+/// <see cref="VkViewportControl.PatchSceneObjectTexture"/>.
 /// </summary>
 /// <param name="RootLocalId">
-///   The root prim LocalID passed to <see cref="GlViewportControl.SubmitSceneObject"/>.
+///   The root prim LocalID passed to <see cref="VkViewportControl.SubmitSceneObject"/>.
 /// </param>
 /// <param name="FaceIndex">
 ///   Zero-based index into <see cref="PrimRenderSubmission.Faces"/> for the target face.
@@ -763,7 +762,7 @@ public sealed record SceneTexturePatch(
     public int ResolutionLevel { get; init; } = -1;
 
     /// <summary>
-    /// When true, <see cref="GlViewportControl.PatchSceneObjectTexture"/> routes this patch
+    /// When true, <see cref="VkViewportControl.PatchSceneObjectTexture"/> routes this patch
     /// through a small dedicated queue that is fully drained every frame instead of the
     /// normal budgeted queue. Set by <see cref="Rendering.SceneAvatarStreamer"/> for the
     /// self-avatar's own bake-texture patches, so they aren't stuck waiting behind a
@@ -771,4 +770,15 @@ public sealed record SceneTexturePatch(
     /// entries) — the rest of the scene's patches are unaffected.
     /// </summary>
     public bool HighPriority { get; init; }
+
+    /// <summary>
+    /// Asset UUID of the texture <see cref="Bitmap"/> was decoded from.
+    /// <see cref="LibreMetaverse.UUID.Zero"/> (default) means "unknown" -- e.g. patches built
+    /// before this field existed, or synthetic bitmaps with no backing asset. Used by
+    /// <c>VkViewportControl.ApplySubmissionPatchIfReady</c> to key a
+    /// <c>TextureDiskCache.TryGetCompressedPixels</c> lookup for the BC3 compressed upload
+    /// path; a zero UUID simply skips that lookup and falls back to the uncompressed
+    /// <see cref="Bitmap"/> already carried here, so leaving this unset is always safe.
+    /// </summary>
+    public LibreMetaverse.UUID TextureId { get; init; }
 }

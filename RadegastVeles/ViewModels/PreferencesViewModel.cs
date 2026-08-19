@@ -129,13 +129,18 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     partial void OnTextureBitmapCacheCapacityChanged(int value) =>
         OnPropertyChanged(nameof(TextureBitmapCacheFill));
 
-    /// <summary>Human-readable summary of current disk cache size and file count (.j2k files).</summary>
+    /// <summary>
+    /// Human-readable summary of current disk cache size and file count, combining both the
+    /// raw J2K tier (.j2k) and the decoded-pixel tier (.ktx2) -- see TextureDiskCache's class
+    /// doc comment. Both tiers are cleared together by <see cref="ClearTextureDiskCacheAsync"/>,
+    /// so the combined total is what "cache size" means to the user here.
+    /// </summary>
     public string TextureDiskCacheSizeText
     {
         get
         {
-            long bytes = TextureDiskCache.GetCacheSizeBytes();
-            int  count = TextureDiskCache.GetCacheFileCount();
+            long bytes = TextureDiskCache.GetCacheSizeBytes() + TextureDiskCache.GetPixelCacheSizeBytes();
+            int  count = TextureDiskCache.GetCacheFileCount() + TextureDiskCache.GetPixelCacheFileCount();
             return $"{count:N0} file(s) · {FormatBytes(bytes)}";
         }
     }

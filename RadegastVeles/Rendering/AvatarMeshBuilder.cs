@@ -144,9 +144,9 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             // joint-position overrides (LLJoint::aboveJointPosThreshold in the SL viewer) —
             // built once here since every rigged attachment processed below needs it.
             // Includes collision volumes too (fitted-mesh CV names like BELLY/CHEST/LEFT_PEC
-            // appear in override data alongside regular m*-prefixed joints — confirmed via
-            // this session's diagnostic logging), matching ComputeBoneTransforms's own
-            // seeding, which treats joints and their child collision volumes uniformly.
+            // appear in override data alongside regular m*-prefixed joints), matching
+            // ComputeBoneTransforms's own seeding, which treats joints and their child
+            // collision volumes uniformly.
             defaultJointPositions = new Dictionary<string, Vector3>(StringComparer.Ordinal);
             foreach (var joint in avatarDef.Skeleton.GetAllJoints())
             {
@@ -398,27 +398,13 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         // puts fitted collision-volume weights in the wrong bind space.
                         //
                         // No sanity/outlier check on the mesh's own weights here — real SL C++
-                        // has none either; the authored joint/weight data is trusted as-is. An
-                        // earlier version of this code rejected any influence whose invBind,
-                        // composed with the avatar's current bone, moved the vertex >0.25m from
-                        // its bind position, falling back to a rigid nearest-joint bind. That
-                        // heuristic user-confirmed broke legitimately-authored, heavily
-                        // multi-joint-weighted mesh (a jacket rigged to this dragon avatar) by
-                        // treating real fitted-mesh conformance as corruption — removed rather
-                        // than re-tuned, since SL itself needs no equivalent.
-                        //
-                        // A same-day attempt to substitute freshly-derived IBMs whenever this
-                        // asset's own IBMs were "close enough" to Veles's skeleton (gated on a
-                        // 0.15m threshold, derived from one fantasy avatar's rig-proportion
-                        // mismatch) was reverted: on ordinary, near-default-rigged content (the
-                        // common case) it would always pass that gate and silently overwrite the
-                        // asset's own authored bind data with Veles's skeleton — discarding
-                        // exactly the per-asset bind space fitted mesh needs. Confirmed wrong
-                        // once a cleaner repro (standard human test agent, single fitted-mesh
-                        // attachment) showed body shape not being applied to the attachment at
-                        // all, which this substitution is a plausible cause of. Do not
-                        // reintroduce without re-deriving the threshold against content where
-                        // it's known NOT to be needed, not just content where it is.
+                        // has none either; the authored joint/weight data is trusted as-is.
+                        // Substituting freshly-derived inverse bind matrices for the asset's own
+                        // -- even ones that look "close enough" to Veles's skeleton -- silently
+                        // overwrites the asset's authored bind data and discards exactly the
+                        // per-asset bind space that fitted mesh and heavily multi-joint-weighted
+                        // rigs depend on. Do not reintroduce without verifying against content
+                        // where it's known NOT to be needed, not just content where it is.
 
                         // Collect this attachment's joint-position-override candidates
                         // (already extracted raw in PrimMeshBuilder; threshold-filter here
@@ -504,10 +490,10 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                             // buffer (see the vFloats/VerticesLength comment above) — trim to the
                             // real logical length before handing it to FlexiPrimAnimator, which has
                             // no VerticesLength of its own and infers vertex count from the array's
-                            // raw .Length. Left untrimmed, every downstream computation (vertex
-                            // count, profile/segment geometry, and the length published to
-                            // scheduleUpdate) was inflated, corrupting the flexi mesh's own vertex
-                            // data despite the attachment transform being computed correctly.
+                            // raw .Length. Left untrimmed, downstream computation (vertex count,
+                            // profile/segment geometry, and the length published to scheduleUpdate)
+                            // is inflated, corrupting the flexi mesh's vertex data even though the
+                            // attachment transform itself is computed correctly.
                             var flexiVerts = vFloats == srcVerts.Length
                                 ? srcVerts
                                 : srcVerts.AsSpan(0, vFloats).ToArray();
@@ -518,14 +504,29 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                             // Rigid attachment: bind every vertex to the attachment joint with weight 1.
                             var bone1   = new string[nv]; Array.Fill(bone1,   attFaceBones[i]);
                             var weight1 = new float[nv];  Array.Fill(weight1, 1.0f);
+                            // Bone2 must be filled with string.Empty, not left at the default
+                            // `new string[nv]` null -- both AvatarSkinGpuData.Create (GL) and
+                            // VkAvatarSkinGpuData.Create read every element unconditionally via
+                            // `skin.Bone2[vi].Length` with no null check (by design: every other
+                            // producer of AvatarFaceSkinData, e.g. the base body's own
+                            // ExtractBodyMeshFaceData, already guarantees non-null entries), so a
+                            // null here throws NullReferenceException as soon as a rigid
+                            // attachment's skin data reaches either backend's GPU-registration
+                            // step.
+                            var bone2 = new string[nv]; Array.Fill(bone2, string.Empty);
                             skinData.Add(new AvatarFaceSkinData
                             {
-                                FaceIndex = bodyFaceCount + i,
-                                BindVerts = worldVerts,
-                                Bone1     = bone1,
-                                Weight1   = weight1,
-                                Bone2     = new string[nv],
-                                Weight2   = new float[nv],
+                                FaceIndex        = bodyFaceCount + i,
+                                BindVerts        = worldVerts,
+                                Bone1            = bone1,
+                                Weight1          = weight1,
+                                Bone2            = bone2,
+                                Weight2          = new float[nv],
+                                // See AvatarFaceSkinData.IsRigidSingleBone's own doc comment --
+                                // this is exactly the shape it describes (single bone, weight
+                                // 1.0, no second influence), known true here at the source
+                                // rather than re-derived downstream.
+                                IsRigidSingleBone = true,
                             });
                         }
                     }
@@ -592,14 +593,14 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // Resolve joint-position-override conflicts and merge the winners.
         //
         // Conflict resolution mirrors LLVector3OverrideMap::findActiveOverride in the SL
-        // viewer exactly (verified against source, not guessed): the contributor with the
-        // numerically LARGEST mesh-asset UUID wins per joint — not attach order.
+        // viewer exactly (verified against source): the contributor with the numerically
+        // LARGEST mesh-asset UUID wins per joint — not attach order.
         //
         // Two different merge targets, because AvatarBuildResult.BoneTransforms and
         // FittedBoneTransforms are consumed differently downstream:
         //  - overrideOnlyTransforms feeds the classic body + non-fitted attachments
-        //    (AnimTick's animBones, via ComputeAnimatedBoneWorldMatrices). That path was
-        //    deliberately given an EMPTY dict before this feature existed, so LBS reduces to
+        //    (AnimTick's animBones, via ComputeAnimatedBoneWorldMatrices). That path carries
+        //    no bone transform for any joint without an active override, so LBS reduces to
         //    pure rotation and body shape comes entirely from vertex morphs, not bone
         //    transforms. A sparse dict containing ONLY overridden joints preserves that for
         //    every other joint (BuildLocalMatrix falls through to the skeleton default for
@@ -614,7 +615,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // joints (Vector3.One below is correct — every regular joint's default scale in
         // avatar_skeleton.xml is exactly (1,1,1); only collision volumes differ, and the
         // classic body/non-fitted attachments this dict feeds never skin against CVs by
-        // name — confirmed: no attachment point in avatar_lad.xml references a CV).
+        // name — no attachment point in avatar_lad.xml references a CV).
         // A handful of override winners ARE collision volumes (e.g. PELVIS, L_CLAVICLE,
         // R_UPPER_ARM), so this dict does end up with Scale=1.0 entries for those CV names
         // too — but since nothing ever looks up a CV by name in the tree this dict feeds,
@@ -622,13 +623,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // fittedTransforms starts as a full copy of boneTransforms, which ComputeBoneTransforms
         // already seeds for every joint AND collision volume — so the `with { Position = … }`
         // branch below (preserving the existing, correct default/VP-distorted Scale) is the
-        // one that always runs in practice; its `else` is a defensive fallback only. This is
-        // also why fittedTransforms's CV scale stays correct even now that
-        // ComputeAttachmentBoneWorldMatrices applies VP scale to regular joints too (see its
-        // doc comment) — the override merge never touches Scale for existing entries.
+        // one that always runs in practice; its `else` is a defensive fallback only.
+        // fittedTransforms's CV scale stays correct independent of ComputeAttachmentBoneWorldMatrices
+        // applying VP scale to regular joints too (see its doc comment) — the override merge
+        // never touches Scale for existing entries.
         // SL's only scale behavior (LockScaleIfJointPosition) is "lock to default scale,"
-        // which this merge doesn't implement — out of scope here, unrelated to the VP-scale
-        // fix above.
+        // which this merge doesn't implement — out of scope here.
         var fittedTransforms = boneTransforms != null
             ? new Dictionary<string, BoneTransform>(boneTransforms, StringComparer.Ordinal)
             : new Dictionary<string, BoneTransform>(StringComparer.Ordinal);
@@ -673,12 +673,12 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         // BoneTransforms carries the full VP-shaped dict (same data as FittedBoneTransforms),
         // not a sparse override-only dict. Real SL has exactly one skeleton: rigged
         // attachments and the classic body (LLPolyMesh, 2-bone LBS) both skin against the
-        // same shape-distorted joints. A previous split here (classic body: scale=1 except
-        // at override winners) silently dropped every <param_skeleton>-only shape slider
-        // (leg length, torso length, shoulder width, Height, etc.) from the classic body,
-        // since those params have no body-mesh vertex-morph counterpart in avatar_lad.xml
-        // for ApplyBodyMeshMorphs to apply instead. Params that DO have both a skeleton
-        // delta and a mesh vertex morph (breast/belly sliders) are unaffected by this join:
+        // same shape-distorted joints. A sparse dict (scale=1 except at override winners)
+        // would silently drop every <param_skeleton>-only shape slider (leg length, torso
+        // length, shoulder width, Height, etc.) from the classic body, since those params
+        // have no body-mesh vertex-morph counterpart in avatar_lad.xml for
+        // ApplyBodyMeshMorphs to apply instead. Params that DO have both a skeleton delta
+        // and a mesh vertex morph (breast/belly sliders) are unaffected by this join:
         // that's exactly how real SL applies them too (independent effects, not duplicates).
         return new AvatarBuildResult(submission, skinArray, avatarDef,
             fittedTransforms, boneWorldMatrices,
@@ -1230,23 +1230,33 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 // Use an independent per-texture timeout — do NOT link to ct (the build
                 // token). Same rationale as the streaming path above: an avatar
                 // terse-update or appearance event debounces a reload and cancels ct
-                // while a bake download is still in flight, which used to abort the
-                // whole Task.WhenAll and throw OperationCanceledException out of
-                // BuildAsync. LoadAsync's catch treats that as a normal cancel and
-                // discards the build silently, leaving only the untextured (white)
-                // faces assembled below with no downloaded bakes and no error surfaced.
+                // while a bake download is still in flight. Without this independent
+                // timeout, that would abort the whole Task.WhenAll and throw
+                // OperationCanceledException out of BuildAsync; LoadAsync's catch treats
+                // that as a normal cancel and discards the build silently, leaving only
+                // the untextured (white) faces assembled below with no downloaded bakes
+                // and no error surfaced.
                 var tasks = unique.Select(t => Task.Run(async () =>
                 {
                     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                     var bmp = await GridTextureHelper.DownloadServerBakedSkBitmapAsync(
                         client, avatarUuid, t.TexId, t.BakeName, timeout.Token)
                         .ConfigureAwait(false);
-                    // Preprocess here on the background thread (RGBA8888 convert + vertical
-                    // flip) so the GL thread only issues the OpenGL upload call.
-                    var processed = bmp != null ? GlTexture.Preprocess(bmp) : null;
-                    if (processed == null)
+                    // Deliberately NOT preprocessed here (RGBA8888 convert + vertical flip):
+                    // this builder is shared/backend-agnostic (matches PrimMeshBuilder's own
+                    // "never preprocess in the builder" convention). Preprocessing here would
+                    // double-flip: VkViewportControl.ApplyPendingSubmission's TryUpload always
+                    // calls VkTexture.Preprocess on an embedded PrimRenderFace.Texture (correct
+                    // for every PrimMeshBuilder-sourced texture, which really does arrive raw),
+                    // so a pre-flipped bake reaching Vulkan this way would be flipped twice
+                    // (once here, once in TryUpload), netting no flip and scrambling every
+                    // avatar body face's UV sampling. Storing the raw bitmap here and letting
+                    // each backend's own TryUpload preprocess it keeps the same "preprocess
+                    // exactly once, at upload time" invariant every other texture path in this
+                    // codebase follows.
+                    if (bmp == null)
                         Logger.Debug($"AvatarMeshBuilder: bake download failed for {t.BakeName} ({t.TexId}), face will render untextured.", client);
-                    lock (textures) textures[t.TexId] = processed;
+                    lock (textures) textures[t.TexId] = bmp;
                 })).ToList();
 
                 await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -1285,15 +1295,14 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             // All other body mesh faces also need Mask, not None: an alpha wearable
             // (invisiprim layer) composites into the SAME baked texture's alpha channel,
             // and SL C++ discards those texels so mesh clothing doesn't show skin
-            // poking through underneath. Forcing None here (as before) skipped that
-            // discard test entirely, so the alpha-wearable mask never applied and the
-            // base body rendered fully opaque under rigged mesh attachments.
-            // AlphaMode.Blend (which was tried and rejected — see below) is not needed
-            // here: Mask always outputs alpha=1.0 (prim.frag), so it doesn't have
-            // Blend's problem of writing the alpha channel into the scene FBO and
-            // getting composited away when blitted to Avalonia's framebuffer. Ordinary
-            // skin (alpha ~1.0 everywhere) is unaffected since nothing there falls
-            // below the 0.004 cutoff already set by BodyFaceData.AlphaCutoff.
+            // poking through underneath -- None would skip that discard test entirely,
+            // leaving the base body opaque under rigged mesh attachments.
+            // Mask is used instead of AlphaMode.Blend: Mask always outputs alpha=1.0
+            // (prim.frag), so it doesn't have Blend's problem of writing the alpha
+            // channel into the scene FBO and getting composited away when blitted to
+            // Avalonia's framebuffer. Ordinary skin (alpha ~1.0 everywhere) is
+            // unaffected since nothing there falls below the 0.004 cutoff already set
+            // by BodyFaceData.AlphaCutoff.
             var  alphaMode  = FaceAlphaMode.Mask;
             bool hasAlpha   = false; // body faces always go into the opaque pass
 
@@ -1502,8 +1511,26 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             .Select(root => Task.Run(async () =>
             {
                 var apId = (int)root.PrimData.AttachmentPoint;
-                if (!attachPoints.TryGetValue(apId, out var apoint)) return default;
-                if (!boneWorldMatrices.TryGetValue(apoint.JointName, out var boneMatrix)) return default;
+                if (!attachPoints.TryGetValue(apId, out var apoint))
+                {
+                    // Diagnostic (2026-08-19, chasing "sculptie attachment renders in AvatarViewer
+                    // but not SceneViewer, self-avatar, nothing else on the avatar affected"):
+                    // this and the boneWorldMatrices check below were silent early returns --
+                    // attachResults' own !r.ok branch only logs for the catch block below, not
+                    // these two. An attach point missing from avatar_lad.xml's table would drop
+                    // this attachment with zero trace anywhere in the log.
+                    Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
+                        "unknown attach point (not in avatar_lad.xml table) — attachment dropped from render.",
+                        Microsoft.Extensions.Logging.LogLevel.Warning, client);
+                    return default;
+                }
+                if (!boneWorldMatrices.TryGetValue(apoint.JointName, out var boneMatrix))
+                {
+                    Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
+                        $"joint={apoint.JointName} not found in boneWorldMatrices — attachment dropped from render.",
+                        Microsoft.Extensions.Logging.LogLevel.Warning, client);
+                    return default;
+                }
 
                 var attachJointMatrix = Matrix4x4.CreateFromQuaternion(apoint.Rotation)
                                       * Matrix4x4.CreateTranslation(apoint.Position)
@@ -1524,7 +1551,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                     // unbounded hang here freezes the whole avatar (stuck "loading",
                     // frozen T-pose) instead of just losing one attachment. Timing out
                     // and skipping this attachment also keeps geometry submission on a
-                    // predictable schedule, which matters for GlViewportControl's
+                    // predictable schedule, which matters for the viewer's
                     // deferred-texture-patch retry window (~30 s) — a slow attachment
                     // delaying final submission past that window silently drops other,
                     // already-downloaded attachments' textures (e.g. flexi hair).
@@ -1535,6 +1562,19 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                             texturePatch: texturePatch)
                         .WaitAsync(TimeSpan.FromSeconds(45), ct)
                         .ConfigureAwait(false);
+                    if (attFaces.Count == 0)
+                    {
+                        // Diagnostic (2026-08-19, same investigation as the two checks above):
+                        // a successful-but-empty result is otherwise indistinguishable from an
+                        // attachment that was never worn at all -- neither the catch block below
+                        // nor the results loop's `if (!r.ok) continue` fires for this case, since
+                        // ok is true and faces is just empty.
+                        Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
+                            $"linksetCount={linkset.Count} sculptType={root.Sculpt?.Type} " +
+                            "BuildAttachmentFacesAsync returned 0 faces (no exception, no timeout) — " +
+                            "attachment will not render.",
+                            Microsoft.Extensions.Logging.LogLevel.Warning, client);
+                    }
                     return (apoint.JointName, apoint.Position, apoint.Rotation, root.LocalID,
                             attFaces, attRigged, aBMin, aBMax, ok: true);
                 }

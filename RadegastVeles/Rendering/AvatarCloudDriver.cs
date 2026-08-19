@@ -22,7 +22,6 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using Silk.NET.OpenGL;
 using SkiaSharp;
 
 namespace Radegast.Veles.Rendering;
@@ -41,14 +40,14 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class AvatarCloudDriver : IDisposable
 {
-    // The key passed to GlViewportControl.SubmitParticles / RemoveParticles.
+    // The key passed to ISceneViewport.SubmitParticles / RemoveParticles.
     // We use a high bit flag so avatar cloud keys never collide with prim LocalIDs
     // (which are uint, fitting in 32 bits). 0xC100_0000_0000_0000 is in the upper
     // 64-bit range well above any uint value.
     private const ulong AvatarCloudKeyFlag = 0xC100_0000_0000_0000UL;
 
-    private readonly ulong              _key;
-    private          GlViewportControl? _viewport;
+    private readonly ulong           _key;
+    private          ISceneViewport? _viewport;
     private          CancellationTokenSource? _cts;
     private          bool               _disposed;
 
@@ -73,12 +72,13 @@ internal sealed class AvatarCloudDriver : IDisposable
     private readonly Puff[] _puffs = new Puff[16];
     private readonly Random _rng   = new();
 
-    // The soft puff sprite only needs to be uploaded once: GlViewportControl's particle
-    // drain keeps the previously-uploaded GlTexture for a submission whose Texture is
-    // null, so every SubmitFrame after the first just reuses it.
+    // The soft puff sprite only needs to be uploaded once: both backends' particle drain
+    // keeps the previously-uploaded texture for a submission whose Texture is null (GL and
+    // Vulkan both preserve this exact per-emitter texture-inheritance behavior), so every
+    // SubmitFrame after the first just reuses it.
     private bool _spriteSubmitted;
 
-    public AvatarCloudDriver(uint localId, Vector3 worldPos, GlViewportControl viewport, Vector4? tint = null)
+    public AvatarCloudDriver(uint localId, Vector3 worldPos, ISceneViewport viewport, Vector4? tint = null)
     {
         // Encode the avatar LocalID in the lower 32 bits with the cloud flag.
         _key      = AvatarCloudKeyFlag | localId;
@@ -228,8 +228,8 @@ internal sealed class AvatarCloudDriver : IDisposable
             };
         }
 
-        // Soft radial-gradient sprite only needs to be submitted once — GlViewportControl's
-        // particle drain keeps the previously-uploaded GlTexture when Texture is null, so
+        // Soft radial-gradient sprite only needs to be submitted once — the viewport's
+        // particle drain keeps the previously-uploaded texture when Texture is null, so
         // reuploading every frame would be wasted GPU work.
         SKBitmap? sprite = null;
         if (!_spriteSubmitted)
@@ -245,8 +245,8 @@ internal sealed class AvatarCloudDriver : IDisposable
             Particles        = verts,
             Texture          = sprite,
             // SL cloud uses SRC_ALPHA / ONE_MINUS_SRC_ALPHA blending
-            BlendSrc = (int)BlendingFactor.SrcAlpha,
-            BlendDst = (int)BlendingFactor.OneMinusSrcAlpha,
+            BlendSrc = Silk.NET.Vulkan.BlendFactor.SrcAlpha,
+            BlendDst = Silk.NET.Vulkan.BlendFactor.OneMinusSrcAlpha,
         });
     }
 
@@ -254,7 +254,7 @@ internal sealed class AvatarCloudDriver : IDisposable
     /// Procedurally generates a small soft circular sprite (opaque white centre fading
     /// to transparent edge) so cloud puffs render as fluffy blobs instead of the shader's
     /// flat-quad fallback for an untextured particle. Ownership transfers to the caller —
-    /// GlViewportControl's particle-submission drain disposes it after the GL upload.
+    /// the viewport's particle-submission drain disposes it after upload.
     /// </summary>
     private static SKBitmap CreatePuffSprite()
     {

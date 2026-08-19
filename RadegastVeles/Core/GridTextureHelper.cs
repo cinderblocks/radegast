@@ -53,15 +53,25 @@ public static class GridTextureHelper
     // A cache hit avoids re-running J2kImage.FromBytes (43 ms / texture) and instead
     // pays only an SKBitmap.Copy (1.6 ms) — a 27× reduction per repeated texture.
     // RAM is bounded by SkBitmapCacheCap: each 1024×1024 RGBA bitmap ≈ 4 MB, so the
-    // default cap of 64 entries ≈ 256 MB worst case. (Previous defaults of 128 and
-    // 512 reached 512 MB and 2 GB respectively with full-resolution textures.) Users
-    // with plenty of RAM can raise this via SkBitmapCacheCap or the preferences UI.
+    // default cap of 64 entries ≈ 256 MB worst case. Users with plenty of RAM can raise
+    // this via SkBitmapCacheCap or the preferences UI.
     //
     // Eviction policy: least-recently used. Evicted SKBitmaps are disposed on the
-    // ThreadPool after a 500 ms grace period — long enough for any concurrent
-    // TryGetValue + Copy() call that obtained a reference just before eviction to
-    // finish its synchronous Copy(), but short enough to promptly reclaim native
+    // ThreadPool after a grace period (EvictedBitmapGraceMs) — long enough for any
+    // concurrent TryGetValue + Copy() call that obtained a reference just before eviction
+    // to finish its synchronous Copy(), but short enough to promptly reclaim native
     // (unmanaged) SkiaSharp pixel memory that the CLR GC cannot otherwise observe.
+    // NOTE: a 2026-08-18 region-crossing crash (0xC0000005 in SKBitmap.get_ColorType) was
+    // traced to DecodeWithDeduplication publishing `owned` (cache insert + TrySetResult)
+    // BEFORE its own final ColorType read -- fixed there by reordering, not by widening this
+    // window. A late-joiner's ContinueWith continuation reading a since-evicted bitmap under
+    // ThreadPool contention is a real, separate residual risk this grace period doesn't fully
+    // close either way (it's a scheduled callback, not a bounded synchronous call), but
+    // widening it only makes that failure mode rarer/harder to reproduce without fixing it,
+    // and this cache's own history (0607cf80) is an OOM from holding allocations alive too
+    // long -- left at 500ms deliberately; don't raise this as a fix for a future report of
+    // the same crash shape without addressing the late-joiner ownership issue directly.
+    private const int EvictedBitmapGraceMs = 500;
     private static readonly LruCache<UUID, SKBitmap> SkBitmapCache = new(64,
         onEvicted: static (_, bmp) =>
         {
@@ -69,7 +79,7 @@ public static class GridTextureHelper
             var b = bmp;
             ThreadPool.QueueUserWorkItem(static s =>
             {
-                Thread.Sleep(500);
+                Thread.Sleep(EvictedBitmapGraceMs);
                 try { ((SKBitmap)s!).Dispose(); } catch { }
             }, b);
         });
@@ -82,7 +92,25 @@ public static class GridTextureHelper
     private static readonly ConcurrentDictionary<UUID, Task<SKBitmap?>> _inflightDecodes = new();
 
     // Deduplicates concurrent LOD (non-full-resolution) decodes for the same (UUID, level) pair.
-    // These results are NOT cached in SkBitmapCache so full-res callers always get full quality.
+    // These results are NOT cached in SkBitmapCache so full-res callers always get full quality --
+    // but ARE cached here, separately, keyed by the (UUID, level) pair itself, since
+    // _inflightLodDecodes only dedupes CONCURRENT requests, not sequential ones once the
+    // in-flight entry is removed on completion. Same eviction/disposal pattern as SkBitmapCache
+    // (LRU, EvictedBitmapGraceMs grace before disposing an evicted bitmap). Smaller entries than
+    // full-res (lower resolution per level), so a larger cap is affordable; not exposed as a
+    // user-facing preference like SkBitmapCacheCap since this is an internal efficiency measure,
+    // not a memory/quality tradeoff the way the full-res cache size is.
+    private static readonly LruCache<(UUID, int), SKBitmap> LodBitmapCache = new(256,
+        onEvicted: static (_, bmp) =>
+        {
+            var b = bmp;
+            ThreadPool.QueueUserWorkItem(static s =>
+            {
+                Thread.Sleep(EvictedBitmapGraceMs);
+                try { ((SKBitmap)s!).Dispose(); } catch { }
+            }, b);
+        });
+
     private static readonly ConcurrentDictionary<(UUID, int), Task<SKBitmap?>> _inflightLodDecodes = new();
 
     // Shared HttpClient for HTTP byte-range texture requests.  A single instance is correct for
@@ -103,6 +131,10 @@ public static class GridTextureHelper
         4 => 60_000, // ~512×512
         _ => int.MaxValue,
     };
+
+    private static long _lodDecodeCalls;
+    private static readonly ConcurrentDictionary<(UUID, int), byte> _lodDecodeSeenKeys = new();
+    private static long _lastLodDecodeLogTicks;
 
     // Atomic counters — incremented with Interlocked so they are safe to read from
     // any thread at any time.  Zero overhead on the hot path (single interlocked add).
@@ -256,12 +288,28 @@ public static class GridTextureHelper
     public const double DefaultDecodePerDecodeMb = 21.5;
 
     /// <summary>
+    /// CPU cores left un-clamped for the render thread, animation ticks, and everything else
+    /// competing for CPU time. Default 2.
+    /// <para>
+    /// On a high-core-count machine with plenty of RAM, <c>TuneDecodeGateForAvailableRam</c>'s
+    /// RAM-based budget can exceed <c>ProcessorCount</c>, so without this reservation a burst of
+    /// J2K decodes could legitimately run one per core on every core, starving the render thread
+    /// of scheduling time. Leaving cores reserved trades a bit of peak decode throughput for the
+    /// render thread actually getting to run during that burst.
+    /// </para>
+    /// </summary>
+    public const int DefaultDecodeReservedCores = 2;
+
+    /// <summary>
     /// Sets <see cref="MaxConcurrentDecodes"/> based on the amount of available managed
     /// memory reported by the GC.  Each cold J2K decode requires ≈21.5 MB of working
     /// memory (CoreJ2K DWT coefficient buffers).  The method reserves
     /// <paramref name="reservedMb"/> MB for the rest of the application and divides the
     /// remainder by the per-decode budget, then clamps the result to
-    /// [1, <c>ProcessorCount</c>] so the CPU is never the bottleneck.
+    /// [1, <c>ProcessorCount - reservedCores</c>] so a decode burst can't consume every core
+    /// the render thread and animation ticks need to keep the app responsive while it runs
+    /// (see <see cref="DefaultDecodeReservedCores"/> for why this isn't just
+    /// <c>ProcessorCount</c>).
     /// </summary>
     /// <param name="reservedMb">
     /// Megabytes to reserve for the rest of the application.  Default is <see cref="DefaultDecodeReservedMb"/>.
@@ -270,9 +318,14 @@ public static class GridTextureHelper
     /// Expected peak managed-heap cost per concurrent decode in megabytes.
     /// Default is <see cref="DefaultDecodePerDecodeMb"/>, measured by memory profiling CoreJ2K.
     /// </param>
+    /// <param name="reservedCores">
+    /// CPU cores to leave un-clamped for the rest of the app. Default is
+    /// <see cref="DefaultDecodeReservedCores"/>.
+    /// </param>
     public static void TuneDecodeGateForAvailableRam(
         double reservedMb = DefaultDecodeReservedMb,
-        double perDecodeMb = DefaultDecodePerDecodeMb)
+        double perDecodeMb = DefaultDecodePerDecodeMb,
+        int reservedCores = DefaultDecodeReservedCores)
     {
         var info = GC.GetGCMemoryInfo();
         // TotalAvailableMemoryBytes is the GC-visible memory limit (respects container
@@ -280,8 +333,8 @@ public static class GridTextureHelper
         var availableMb = info.TotalAvailableMemoryBytes / (1024.0 * 1024.0);
         var budget      = Math.Max(0.0, availableMb - reservedMb);
         var fromRam     = (int)Math.Floor(budget / perDecodeMb);
-        // Never starve the CPU: cap at ProcessorCount so no CPU core sits idle.
-        var tuned = Math.Clamp(fromRam, 1, Environment.ProcessorCount);
+        var maxCores    = Math.Max(1, Environment.ProcessorCount - reservedCores);
+        var tuned = Math.Clamp(fromRam, 1, maxCores);
         MaxConcurrentDecodes = tuned;
     }
 
@@ -345,12 +398,32 @@ public static class GridTextureHelper
             return;
         }
 
-        // TextureDiskCache.TryGet does synchronous file I/O (File.Exists + ReadAllBytes).
+        // TextureDiskCache.TryGet/TryGetPixels do synchronous file I/O.
         // Download is frequently called directly from UI-thread ViewModel code (profile,
         // group, parcel, and landmark panels reacting to server replies), so dispatch the
         // disk-cache check itself to the thread pool instead of blocking the caller.
         Task.Run(() =>
         {
+            // Pixel-cache tier: a KTX2 hit skips the CoreJ2K decode entirely.
+            var diskPixels = TextureDiskCache.TryGetPixels(textureId);
+            if (diskPixels != null)
+            {
+                try
+                {
+                    var pixelBitmap = SkBitmapToAvaloniaBitmap(diskPixels);
+                    if (pixelBitmap != null)
+                    {
+                        Cache.AddOrUpdate(textureId, pixelBitmap);
+                        Dispatcher.UIThread.Post(() => onComplete(pixelBitmap));
+                        return;
+                    }
+                }
+                finally
+                {
+                    diskPixels.Dispose();
+                }
+            }
+
             var diskJ2k = TextureDiskCache.TryGet(textureId);
             if (diskJ2k != null)
             {
@@ -371,6 +444,16 @@ public static class GridTextureHelper
                     if (bitmap == null) return;
                     Cache.AddOrUpdate(textureId, bitmap);
                     Dispatcher.UIThread.Post(() => onComplete(bitmap));
+
+                    try
+                    {
+                        var ktx2Bytes = Ktx2Codec.Encode(raw);
+                        _ = TextureDiskCache.PutPixelsAsync(textureId, ktx2Bytes);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"GridTextureHelper: KTX2 pixel-cache encode failed for {textureId}.", ex);
+                    }
                 }
                 catch
                 {
@@ -408,7 +491,18 @@ public static class GridTextureHelper
                     {
                         bitmap = SkBitmapToAvaloniaBitmap(skBitmap);
                         if (bitmap != null)
+                        {
                             Cache.AddOrUpdate(textureId, bitmap);
+                            try
+                            {
+                                var ktx2Bytes = Ktx2Codec.Encode(skBitmap);
+                                _ = TextureDiskCache.PutPixelsAsync(textureId, ktx2Bytes);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Debug($"GridTextureHelper: KTX2 pixel-cache encode failed for {textureId}.", ex);
+                            }
+                        }
                     }
                 }
                 catch
@@ -521,13 +615,11 @@ public static class GridTextureHelper
         // Winner: run the actual decode.
         //
         // Scheduled with CancellationToken.None — NOT `ct` — so the lambda body always runs.
-        // If we passed a `ct` that was already cancelled, Task.Run would hand back a cancelled
-        // task and never execute the body: winnerTcs would stay uncompleted and the
-        // _inflightDecodes entry would be orphaned forever. Every later request for this UUID
-        // joins that dead task (see TryGetValue above) and hangs permanently — the whole
-        // texture pipeline appears to deadlock on one stuck texture. Cancellation is instead
-        // observed cooperatively via DecodeGate.WaitAsync(ct) inside the body, where the
-        // catch/finally guarantee winnerTcs completes and the inflight entry is removed.
+        // If `ct` were already cancelled, Task.Run would hand back a cancelled task and never
+        // execute the body: winnerTcs would stay uncompleted and the _inflightDecodes entry
+        // would be orphaned, hanging every later request for this UUID permanently. Cancellation
+        // is instead observed cooperatively via DecodeGate.WaitAsync(ct) inside the body, where
+        // the catch/finally guarantee winnerTcs completes and the inflight entry is removed.
         return Task.Run(async () =>
         {
             try
@@ -545,20 +637,85 @@ public static class GridTextureHelper
                         }
                     }
 
-                    // Store the decoded bitmap directly in the cache (no second copy).
-                    // raw is NOT wrapped in using — ownership transfers to SkBitmapCache.
+                    // raw's pixels can be backed by a buffer CoreJ2K.Skia rents from
+                    // ArrayPool<byte>.Shared for 3- and 5-component source images, returned to
+                    // the pool as soon as raw itself is disposed/finalized. SkBitmapCache must
+                    // never hold raw directly: a different, unrelated decode could later rent
+                    // the same recycled array and silently overwrite pixels this cache still
+                    // believes it owns. Copy to a genuine Skia-allocated bitmap (independent
+                    // native memory for its whole lifetime) and dispose raw immediately, before
+                    // caching or publishing it.
                     var raw = J2kImage.FromBytes(j2kBytes, FullDecoderCfg).As<SKBitmap>();
-                    if (raw != null)
+                    SKBitmap? owned = null;
+                    SKBitmap? winnerCopy = null;
+                    if (raw != null && raw.Handle != IntPtr.Zero)
                     {
-                        SkBitmapCache.AddOrUpdate(textureId, raw);
+                        owned = raw.Copy(raw.ColorType);
+                        raw.Dispose();
+                        if (owned != null)
+                        {
+                            // Populate the pixel-cache tier so the next request for this
+                            // UUID (this session or a future one) skips this decode entirely.
+                            // Encode synchronously here (still on this winner's own background
+                            // thread, before `owned` is handed anywhere else) -- only the file
+                            // write itself is backgrounded, per PutPixelsAsync's own contract.
+                            //
+                            // Deliberately done BEFORE SkBitmapCache.AddOrUpdate below: both
+                            // encodes are CPU-heavy synchronous passes over `owned`'s pixels that
+                            // can run for hundreds of ms under load, and at this point `owned`
+                            // is still exclusively local -- nothing else can see or evict it yet.
+                            try
+                            {
+                                var ktx2Bytes = Ktx2Codec.Encode(owned);
+                                _ = TextureDiskCache.PutPixelsAsync(textureId, ktx2Bytes);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Debug($"GridTextureHelper: KTX2 pixel-cache encode failed for {textureId}.", ex);
+                            }
+
+                            // Also populate the compressed (BC3) tier, consumed only by the
+                            // Vulkan scene-object texture path (VkViewportControl). Every
+                            // full-res decode gets one here regardless of whether the decoded
+                            // texture is ever actually GPU-sampled as color (sculpt maps,
+                            // particles, water textures all funnel through this same winner
+                            // path) -- see TextureDiskCache's "Compressed pixel tier" doc
+                            // comment for why that's an accepted, disk-budget-bounded tradeoff
+                            // rather than plumbing a per-call opt-in flag through this method.
+                            // Still gated by the same decode-gate permit this whole block holds,
+                            // so a region-entry burst can't spawn unbounded concurrent encodes.
+                            try
+                            {
+                                var bc3Bytes = Ktx2Codec.EncodeCompressedBc3(owned);
+                                _ = TextureDiskCache.PutCompressedPixelsAsync(textureId, bc3Bytes);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Debug($"GridTextureHelper: BC3 pixel-cache encode failed for {textureId}.", ex);
+                            }
+
+                            // Capture the winner's own return copy HERE, before `owned` is
+                            // published to anyone else (cache insertion below, then
+                            // TrySetResult unblocking every late-joiner's ContinueWith). Every
+                            // read of `owned` -- both encodes above and this copy -- happens
+                            // while this thread still holds the only reference, so nothing else
+                            // can race a dispose against it. This is the fix for the actual
+                            // fault site: the trace showed get_ColorType() crashing inside this
+                            // lambda, and the only ColorType read reachable AFTER publish used
+                            // to be here (`owned.Copy(owned.ColorType)` after TrySetResult) --
+                            // moved earlier instead of leaving it exposed to a same-cache
+                            // eviction (LRU churn) or a slow-continuation late-joiner race.
+                            winnerCopy = owned.Copy(owned.ColorType);
+
+                            SkBitmapCache.AddOrUpdate(textureId, owned);
+                        }
                     }
-                    // Signal late-joiners with the cached bitmap directly — no extra Copy.
-                    // This eliminates one full-resolution SKBitmap allocation per cold
-                    // decode (~4 MB for a 1024² texture), which on a teleport burst of
-                    // ~100 unique textures saves ~400 MB of transient managed memory.
-                    winnerTcs.TrySetResult(raw);
-                    // Return a separate copy to the winner's own caller (which owns / disposes it).
-                    return raw != null && raw.Handle != IntPtr.Zero ? raw.Copy(raw.ColorType) : null;
+                    else
+                    {
+                        raw?.Dispose();
+                    }
+                    winnerTcs.TrySetResult(owned);
+                    return winnerCopy;
                 }
                 finally
                 {
@@ -599,8 +756,9 @@ public static class GridTextureHelper
     public static async Task PrefetchJ2KBytesAsync(GridClient client, UUID textureId, CancellationToken ct = default)
     {
         if (textureId == UUID.Zero) return;
-        if (SkBitmapCache.TryGetValue(textureId, out _)) return; // already decoded in memory
-        if (TextureDiskCache.Contains(textureId)) return;        // bytes already on disk
+        if (SkBitmapCache.TryGetValue(textureId, out _)) return;      // already decoded in memory
+        if (TextureDiskCache.ContainsPixels(textureId)) return;       // decoded pixels already on disk -- no decode needed later
+        if (TextureDiskCache.Contains(textureId)) return;              // bytes already on disk
 
         var asset = await client.Assets.RequestImageAsync(textureId, ImageType.Normal, ct).ConfigureAwait(false);
         if (asset?.AssetData is { Length: > 0 } data)
@@ -651,6 +809,16 @@ public static class GridTextureHelper
         {
             Interlocked.Increment(ref _cacheHits);
             return Task.FromResult<SKBitmap?>(cachedBmp.Copy(cachedBmp.ColorType));
+        }
+
+        // Pixel-cache tier: a KTX2 hit skips the CoreJ2K decode entirely -- see
+        // TextureDiskCache's class doc comment for why this is worth a separate tier.
+        var cachedPixels = TextureDiskCache.TryGetPixels(textureId);
+        if (cachedPixels != null)
+        {
+            Interlocked.Increment(ref _cacheHits);
+            SkBitmapCache.AddOrUpdate(textureId, cachedPixels);
+            return Task.FromResult<SKBitmap?>(cachedPixels.Copy(cachedPixels.ColorType));
         }
         Interlocked.Increment(ref _cacheMisses);
 
@@ -736,6 +904,14 @@ public static class GridTextureHelper
         }
 
         var lodKey = (textureId, resolutionLevel);
+
+        // Already decoded at this exact (UUID, level) earlier this session — skip the decode
+        // entirely instead of paying for it again. See LodBitmapCache's own doc comment.
+        if (LodBitmapCache.TryGetValue(lodKey, out var cachedLod))
+        {
+            Interlocked.Increment(ref _cacheHits);
+            return Task.FromResult<SKBitmap?>(cachedLod.Copy(cachedLod.ColorType));
+        }
 
         // Dedup: if another task is already decoding at this level, join it.
         TaskCompletionSource<SKBitmap?>? winnerTcs = null;
@@ -826,6 +1002,19 @@ public static class GridTextureHelper
                     return thumbCopy;              // winner's own copy
                 }
 
+                long totalCalls = Interlocked.Increment(ref _lodDecodeCalls);
+                _lodDecodeSeenKeys.TryAdd(lodKey, 0);
+                long now = Environment.TickCount64;
+                if (now - Interlocked.Read(ref _lastLodDecodeLogTicks) >= 1000)
+                {
+                    Interlocked.Exchange(ref _lastLodDecodeLogTicks, now);
+                    LibreMetaverse.Logger.Warn(
+                        $"[GridTextureHelper] DownloadSkBitmapLodAsync: totalCalls={totalCalls}, " +
+                        $"distinct(UUID,level)Seen={_lodDecodeSeenKeys.Count} -- a growing gap " +
+                        "between these two numbers means the same texture is being re-decoded " +
+                        "at the same LOD repeatedly.");
+                }
+
                 // Decode at the requested LOD level — pays only for the wavelet levels needed.
                 await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
                 try
@@ -833,9 +1022,11 @@ public static class GridTextureHelper
                     var cfg = new J2KDecoderConfiguration { ResolutionLevel = resolutionLevel };
                     var raw = J2kImage.FromBytes(j2kBytes, cfg).As<SKBitmap>();
                     if (raw == null) { winnerTcs.TrySetResult(null); return null; }
-                    var shared = raw.Copy(raw.ColorType); // late-joiners copy from this
-                    winnerTcs.TrySetResult(shared);
-                    using (raw) return raw.Copy(raw.ColorType); // winner's own copy
+                    // raw's ownership transfers to LodBitmapCache -- no longer disposed here.
+                    // Late-joiners and the winner's own caller each get their own Copy().
+                    LodBitmapCache.AddOrUpdate(lodKey, raw);
+                    winnerTcs.TrySetResult(raw); // late-joiners copy from this
+                    return raw.Copy(raw.ColorType); // winner's own copy
                 }
                 finally { DecodeGate.Release(); }
             }
@@ -887,19 +1078,11 @@ public static class GridTextureHelper
         // after wearing/removing an alpha layer keeps the same textureId for that bake
         // slot). Evict any stale entry a prior session may have written.
         //
-        // This used to evict only TextureDiskCache (Veles's own disk cache) on the
-        // reasoning that Client.Assets.Cache — LibreMetaverse's general-purpose asset
-        // cache, which RequestServerBakedImageAsync also checks before hitting the
-        // network (AssetManager.cs, RequestServerBakedImageAsync) — "handles SSB caching"
-        // correctly. It doesn't: it's a plain persistent disk cache keyed by UUID with no
-        // versioning, so it's just as vulnerable to the reused-UUID problem. Confirmed via
-        // a diagnostic that showed this avatar's downloaded "upper"/"lower" bakes (the
-        // slots whose alpha-layer content had just changed) came back with a completely
-        // flat, unmasked alpha channel while "head"/"hair" (unchanged since an earlier,
-        // correctly-cached fetch) decoded with a real mask — the signature of a stale
-        // Client.Assets.Cache hit serving pre-alpha-layer bytes for a reused UUID, not a
-        // grid-side SSB compositing failure (confirmed this avatar is on the official SL
-        // grid, where SSB alpha compositing is known to work).
+        // Both TextureDiskCache (Veles's own disk cache) AND Client.Assets.Cache
+        // (LibreMetaverse's general-purpose asset cache, which RequestServerBakedImageAsync
+        // also checks before hitting the network) must be evicted: Client.Assets.Cache is
+        // just as vulnerable to the reused-UUID problem since it's a plain persistent disk
+        // cache keyed by UUID with no versioning.
         TextureDiskCache.Evict(textureId);
         var cachedPath = client.Assets.Cache.AssetFileName(textureId);
         if (cachedPath != null)
@@ -923,8 +1106,8 @@ public static class GridTextureHelper
                 // RequestServerBakedImageAsync's own Cache.HasAsset/TryGetCachedAssetBytes
                 // call is outside its try/catch, so a corrupt LMV asset-cache entry throws
                 // here uncaught instead of returning null. Without this catch the exception
-                // faulted the Task.Run and tcs was never completed, so the caller silently
-                // hung until its own timeout — with nothing in the log to explain why.
+                // faulted the Task.Run and tcs was never completed, so the caller hung until
+                // its own timeout.
                 reg.Dispose();
                 Logger.Warn($"GridTextureHelper: RequestServerBakedImageAsync threw for bake {bakeName} ({textureId}).", ex, client);
                 tcs.TrySetResult(null);

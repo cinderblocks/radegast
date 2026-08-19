@@ -46,8 +46,7 @@ internal enum AvatarRenderTier
 /// <para>
 /// This is Veles's own weighting, not a port of Second Life's Avatar Rendering Cost:
 /// SL's ARC has no notion of Veles-specific costs like real-time shadow cubemaps per
-/// point light or CPU flexi simulation, so those are weighted here explicitly (see
-/// <c>project_veles_shadows</c>/<c>project_veles_flexi_review</c> history) — a plain
+/// point light or CPU flexi simulation, so those are weighted here explicitly — a plain
 /// Second Life ARC number would systematically undercount what actually costs Veles.
 /// </para>
 /// </summary>

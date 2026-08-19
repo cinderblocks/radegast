@@ -40,7 +40,7 @@ public readonly record struct LocalLight(
 /// <summary>
 /// Tracks root prims carrying SL "Light" extra params (lamps, torches, glow
 /// props, ...) within stream radius of the avatar, feeding the local-light
-/// forward-lighting and shadow-casting passes in <see cref="GlViewportControl"/>.
+/// forward-lighting and shadow-casting passes in <see cref="VkViewportControl"/>.
 /// <para>
 /// Modeled on <see cref="SceneParticleStreamer"/>: current-sim-only, event-driven
 /// off the same ObjectUpdate/TerseObjectUpdate/KillObject hooks. Unlike particle
@@ -149,7 +149,7 @@ public sealed class SceneLightStreamer : IDisposable
             WorldPosition: new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z),
             Color:         new Vector3(l.Color.R, l.Color.G, l.Color.B) * l.Intensity,
             Intensity:     l.Intensity,
-            // Floored well above GlViewportControl.PointShadowNear (0.1m) so a light's
+            // Floored well above the point-shadow near plane (0.1m) so a light's
             // radius can never collapse the point-shadow perspective's near/far range.
             Radius:        MathF.Max(1.0f, l.Radius),
             Falloff:       l.Falloff);

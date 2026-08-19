@@ -42,7 +42,7 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneAnimeshStreamer : IDisposable
 {
     private readonly GridClient           _client;
-    private readonly GlViewportControl    _viewport;
+    private readonly ISceneViewport       _viewport;
     private readonly SceneObjectStreamer  _objectStreamer;
     private readonly LindenSkeleton?      _skeleton;
 
@@ -57,7 +57,7 @@ internal sealed class SceneAnimeshStreamer : IDisposable
 
     public SceneAnimeshStreamer(
         GridClient client,
-        GlViewportControl viewport,
+        ISceneViewport viewport,
         SceneObjectStreamer objectStreamer)
     {
         _client        = client;
@@ -157,7 +157,6 @@ internal sealed class SceneAnimeshStreamer : IDisposable
             _animators[localId] = animator;
         }
 
-        // Tick all active animators.
         foreach (var kv in _animators)
             kv.Value.AnimTick();
     }

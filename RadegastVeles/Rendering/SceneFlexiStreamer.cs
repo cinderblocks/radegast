@@ -35,7 +35,7 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneFlexiStreamer : IDisposable
 {
     private readonly GridClient        _client;
-    private readonly GlViewportControl _viewport;
+    private readonly ISceneViewport    _viewport;
     private readonly SceneObjectStreamer  _objectStreamer;
     private          SceneAvatarStreamer?           _avatarStreamer;
     private          SceneAvatarAnimationStreamer?  _animationStreamer;
@@ -52,7 +52,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
 
     private bool _disposed;
 
-    public SceneFlexiStreamer(GridClient client, GlViewportControl viewport,
+    public SceneFlexiStreamer(GridClient client, ISceneViewport viewport,
         SceneObjectStreamer objectStreamer)
     {
         _client        = client;
@@ -128,11 +128,10 @@ internal sealed class SceneFlexiStreamer : IDisposable
     {
         if (_disposed) return;
         // The initial world position is already seeded directly onto each FlexiPrimInfo's
-        // ExternalTransform by SceneAvatarStreamer.BuildAsync before this event fires
-        // (SceneAvatarStreamer.cs, AvatarWorldMatrix seeding block) — no separate seed
-        // needed here. (A prior attempt to seed via OnFlexiWorldUpdate at this point was
-        // always a no-op: this handler runs before SceneAvatarAnimationStreamer's, so the
-        // target SceneAvatarAnimator does not exist yet.)
+        // ExternalTransform by SceneAvatarStreamer.BuildAsync before this event fires, so no
+        // separate seed is needed here. Note this handler runs before
+        // SceneAvatarAnimationStreamer's, so the target SceneAvatarAnimator does not exist yet --
+        // seeding via OnFlexiWorldUpdate at this point would be a no-op.
         StartAnimator(sceneKey, result.Submission, sceneKey: sceneKey, avatarLocalId: localId);
     }
 
@@ -147,9 +146,9 @@ internal sealed class SceneFlexiStreamer : IDisposable
 
         // Grab whatever animator is currently serving this key (if any) BEFORE removing it,
         // so its spine physics state can carry over into the replacement instead of every
-        // rebuild (LOD change, draw-distance change, appearance rebake, tab-switch/GL reset)
-        // snapping the flexi prim back to its straight rest pose and making it visibly
-        // re-settle even though nothing about its own motion actually changed.
+        // rebuild (LOD change, draw-distance change, appearance rebake, tab switch) snapping
+        // the flexi prim back to its straight rest pose and making it visibly re-settle even
+        // though nothing about its own motion actually changed.
         _animators.TryGetValue(key, out var priorAnimator);
         RemoveAnimator(key);
 
@@ -157,9 +156,11 @@ internal sealed class SceneFlexiStreamer : IDisposable
         var vp = _viewport;
         // ScheduleSceneVertexUpdate takes uint; safe cast because object keys are current-sim localIds
         // (uint range) and avatar keys (AvatarKeyOffset + localId) also fit in uint.
+        //
         Action<int, float[], int, bool> schedule = sceneKey != 0
-            ? (faceIndex, verts, len, pooled) => vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
-            : FlexiPrimAnimator.CreateSingleObjectScheduler(vp);
+            ? (faceIndex, verts, len, pooled) =>
+                vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
+            : (_, _, _, _) => { };
 
         var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute, priorAnimator);
         // Registered with the shared scheduler, not animator.Start() — see FlexiSceneScheduler.
@@ -189,7 +190,6 @@ internal sealed class SceneFlexiStreamer : IDisposable
             if (kv.Value == rootId)
             {
                 _localToKey.TryRemove(kv.Key, out _);
-                // Clear the flexi reference from the avatar animator.
                 _animationStreamer?.SetFlexiAnimator(kv.Key, null);
                 break;
             }

@@ -40,7 +40,7 @@ namespace Radegast.Veles.Rendering;
 /// <summary>
 /// Shared tessellation + texture pipeline used by prim and HUD viewers.
 /// Converts a linkset of <see cref="Primitive"/> objects into a
-/// <see cref="PrimRenderSubmission"/> ready for <see cref="GlViewportControl.Submit"/>.
+/// <see cref="PrimRenderSubmission"/> ready for <see cref="VkViewportControl.Submit"/>.
 /// </summary>
 internal sealed class PrimMeshBuilder(GridClient client)
 {
@@ -127,8 +127,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
     /// opportunistically refine a mesh-prim's cost estimate when its asset happens to
     /// already be decoded (e.g. a common mesh worn by several nearby avatars). Unlike
     /// <see cref="TryGetCachedMesh"/> this deliberately does not touch LRU order or the
-    /// hit/miss counters — it's a passive read for cost estimation, not a real mesh
-    /// fetch, and must never influence eviction ordering or telemetry.
+    /// hit/miss counters, and must never influence eviction ordering or telemetry.
     /// </summary>
     public static bool TryPeekCachedMeshVertexCount(UUID assetId, out int vertexCount)
     {
@@ -332,7 +331,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
         // and make the object visible without waiting for any downloads.
         var faces = BuildFacesWithoutTextures(rawFaces, materials, pbrMaterials);
 
-        // Mark flexi faces so GlViewportControl.ApplySceneTransformOverrides does NOT
+        // Mark flexi faces so VkViewportControl.ApplySceneTransformOverrides does NOT
         // stomp their identity Transform with the per-frame root world matrix — their
         // vertex buffers are already produced in world space by FlexiPrimAnimator.
         foreach (var fp in flexiPrims)
@@ -358,7 +357,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
         };
 
         // Stream textures asynchronously in the background — report each patch as it
-        // arrives so the caller can forward it to GlViewportControl.PatchSceneObjectTexture.
+        // arrives so the caller can forward it to VkViewportControl.PatchSceneObjectTexture.
         int texCount = CountUniqueTextures(rawFaces, materials, pbrMaterials);
         if (texCount > 0)
         {
@@ -775,7 +774,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
     // Each gate slot spans: network I/O → J2K decode → Preprocess (flip/convert) →
     // spin-wait inside PatchSceneObjectTexture until the GL queue drains below 2 000.
     // 8 slots keeps the network pipeline full while bounding peak in-flight bitmap RAM
-    // to ~8 × 4 MB (worst-case 4K RGBA) = ~32 MB, vs. the multi-GB seen without any gate.
+    // to ~8 × 4 MB (worst-case 4K RGBA) = ~32 MB.
     private static readonly SemaphoreSlim GlobalTextureGate = new(8, 8);
 
     private async Task StreamTexturesAsync(
@@ -904,6 +903,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                                 {
                                     TextureHasAlpha    = texHasAlpha,
                                     ResolutionLevel    = textureResolutionLevel,
+                                    TextureId          = id,
                                 });
                             }
                         }
@@ -957,8 +957,6 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (pixels[i] < 250) return true;
         return false;
     }
-
-    // ── Material fetching ────────────────────────────────────────────────────────
 
     // ── Material fetching ────────────────────────────────────────────────────────
 
@@ -1325,8 +1323,6 @@ internal sealed class PrimMeshBuilder(GridClient client)
     }
 
     // ── Attachment tessellation ───────────────────────────────────────────────────
-    // AttachmentRiggedSkin (the per-face rigged-skin DTO) now lives in
-    // LibreMetaverse.Rendering — pure data, no OpenGL/UI dependency, reusable by any backend.
 
     /// <summary>
     /// Tessellates an attachment linkset and downloads its textures.
@@ -1421,7 +1417,22 @@ internal sealed class PrimMeshBuilder(GridClient client)
             var prim = prims[pi];
 
             var mesh = await GetPrimMeshAsync(prim, ct, DetailLevel.High).ConfigureAwait(false);
-            if (mesh == null) continue;
+            if (mesh == null)
+            {
+                // Diagnostic (2026-08-19, chasing "sculptie attachment prim never renders while
+                // flexi sibling prims in the SAME linkset do" -- this silent per-prim skip is
+                // the only place in TessellateAttachmentAsync that could produce exactly that
+                // shape: one child prim of a multi-prim attachment linkset dropped, the rest
+                // (built in the same loop, same call) unaffected. GetPrimMeshAsync only returns
+                // null via its SculptType.Mesh branch's DownloadMeshAsync failing -- the legacy
+                // (non-Mesh) sculpt branch always falls back to a parametric mesh and should
+                // never reach here, so this fires proves which of those two it actually is.
+                Logger.Log($"[AttachPrimSkip] linkset prim {prim.LocalID} (pcode={prim.PrimData.PCode}, " +
+                    $"sculptType={prim.Sculpt?.Type.ToString() ?? "none"}) — GetPrimMeshAsync returned null, " +
+                    "this prim will not render.",
+                    Microsoft.Extensions.Logging.LogLevel.Warning, client);
+                continue;
+            }
 
             Matrix4x4 transform;
             if (pi == 0)

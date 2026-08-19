@@ -48,6 +48,22 @@ internal sealed class AvatarFaceSkinData
     /// <summary>Secondary bone weight per vertex (0–1).</summary>
     public float[] Weight2 = [];
 
+    /// <summary>
+    /// True for a rigid attachment bound entirely to one bone with weight 1.0 and no second
+    /// influence (see AvatarMeshBuilder's rigid-attachment branch, which sets this at the point
+    /// it already knows the face is rigid rather than making AnimTick/ApplyPendingSubmission
+    /// re-derive it by scanning Bone1/Weight2). Every vertex on such a face gets the identical
+    /// invBind[Bone1] * animBones[Bone1] product, so LBS reduces to one whole-face transform --
+    /// AnimTick skips per-vertex GPU/CPU skinning entirely for these and drives
+    /// ISingleObjectViewport.ScheduleFaceTransformUpdate instead, avoiding per-vertex skinning
+    /// dispatch for faces that don't need it -- an avatar with many rigid attachments (rings,
+    /// hair strands, jewelry) can register hundreds of faces, well past VkSkinDeformer's
+    /// MaxJobsPerFrame, starving whichever faces the dispatch cap leaves behind each frame.
+    /// Only ever true on the 2-bone body/attachment path (JointNames == null) -- a rigged/fitted
+    /// mesh face is never marked rigid here even if its own weights happen to be single-influence.
+    /// </summary>
+    public bool IsRigidSingleBone;
+
     // ── Rigged / fitted mesh path ────────────────────────────────────────────
     // When <see cref="JointNames"/> is non-null, AnimTick uses the 4-bone-influence
     // skinning path with per-face inverse bind matrices supplied by the mesh asset.
@@ -65,13 +81,11 @@ internal sealed class AvatarFaceSkinData
 
     /// <summary>
     /// Interleaved joint indices: <c>Joints[vi * 4 + k]</c> is influence k of vertex vi.
-    /// Replaces the former J0–J3 parallel arrays.
     /// </summary>
     public int[]? Joints;
 
     /// <summary>
     /// Interleaved weights: <c>Weights[vi * 4 + k]</c> is weight k of vertex vi.
-    /// Replaces the former W0–W3 parallel arrays.
     /// </summary>
     public float[]? Weights;
 
@@ -83,9 +97,11 @@ internal sealed class AvatarFaceSkinData
     public bool UseVpBoneTransforms;
 
     /// <summary>
-    /// GPU compute resources for this face, assigned on the GL thread after upload.
-    /// Null until the GL thread registers this face; AnimTick falls back to the CPU
-    /// path for any tick where GpuData is null or disposed.
+    /// GPU compute resources for this face, assigned on the render thread after upload
+    /// (<c>VkViewportControl.ApplyPendingSubmission</c>/<c>UploadSceneObjectNoRebuild</c>). Null
+    /// until registered; AnimTick falls back to the CPU path for any tick where GpuData is null
+    /// or disposed. Write-once by the registering call, read from the animation background
+    /// thread -- <c>volatile</c> gives the necessary happens-before visibility.
     /// </summary>
-    internal volatile AvatarSkinGpuData? GpuData;
+    internal volatile VkAvatarSkinGpuData? GpuData;
 }

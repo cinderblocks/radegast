@@ -28,7 +28,7 @@ namespace Radegast.Veles.Rendering;
 /// <para>
 /// The box uses the prim's sim-space scale and position so the placeholder occupies
 /// roughly the correct footprint from frame one.  When <see cref="SceneObjectStreamer"/>
-/// finishes its async build it calls <see cref="GlViewportControl.SubmitSceneObject"/>
+/// finishes its async build it calls <see cref="ISceneViewport.SubmitSceneObject"/>
 /// again with the real geometry, replacing the placeholder in-place with no visible gap.
 /// </para>
 /// </summary>

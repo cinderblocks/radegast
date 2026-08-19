@@ -33,7 +33,7 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Streams in-world prim objects from all connected simulators into the
-/// scene-object layer of a <see cref="GlViewportControl"/>.
+/// scene-object layer of a <see cref="VkViewportControl"/>.
 /// <para>
 /// Objects from neighboring regions within <see cref="DrawDistance"/> metres of
 /// the agent are automatically included and offset to world-space coordinates.
@@ -44,7 +44,7 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneObjectStreamer : IDisposable
 {
     private readonly GridClient          _client;
-    private readonly GlViewportControl   _viewport;
+    private readonly ISceneViewport      _viewport;
     private readonly PrimMeshBuilder     _builder;
     private readonly SceneBuildScheduler _scheduler;
 
@@ -53,8 +53,35 @@ internal sealed class SceneObjectStreamer : IDisposable
     // manager provides the actual connection-level throttle.
     private readonly SceneBuildScheduler _fetchScheduler = new(maxConcurrent: 8);
 
-    // sceneKey → CancellationTokenSource for the in-flight build task.
-    private readonly ConcurrentDictionary<ulong, CancellationTokenSource> _inflight = new();
+    // sceneKey → the in-flight build attempt for that key. Completed is set on every exit path
+    // of PrefetchThenScheduleBuildAsync/BuildObjectAsync (see MarkAttemptCompleted) -- it is what
+    // lets EnqueueBuild tell "a build for this key is still genuinely running" apart from "a build
+    // for this key finished a while ago and this entry is just stale bookkeeping" (the dictionary
+    // entry itself outlives a *successful* build by design, per BuildObjectAsync's finally-block
+    // comment, so ContainsKey/TryGetValue alone can never make that distinction).
+    private sealed class BuildAttempt
+    {
+        public readonly CancellationTokenSource Cts;
+        public readonly long StartedAtTicks;
+        public volatile bool Completed;
+        public BuildAttempt(CancellationTokenSource cts)
+        {
+            Cts            = cts;
+            StartedAtTicks = Environment.TickCount64;
+        }
+    }
+
+    // Safety valve for the defer gate in EnqueueBuild: SceneBuildScheduler.Enqueue silently
+    // evicts the lowest-priority pending entry when its MaxQueueDepth (500) is exceeded -- that
+    // factory then NEVER runs, so MarkAttemptCompleted never fires for it and Completed would
+    // stay false forever without this, permanently starving that key (every future EnqueueBuild
+    // would defer indefinitely, never actually rebuilding it -- silent and worse than the churn
+    // this fix targets). Past this many ms with no completion, treat the attempt as abandoned
+    // and fall through to cancel+restart instead of deferring forever. Far above any legitimate
+    // build's observed duration (small objects near-instant, worst logged case ~350ms).
+    private const long StuckAttemptTimeoutMs = 10_000;
+
+    private readonly ConcurrentDictionary<ulong, BuildAttempt> _inflight = new();
 
     // Dirty roots queued for tessellation (sceneKey → timestamp of first enqueue).
     private readonly ConcurrentDictionary<ulong, long> _dirty = new();
@@ -69,6 +96,44 @@ internal sealed class SceneObjectStreamer : IDisposable
 
     // Reverse parent index: rootSceneKey → set of child scene keys.
     private readonly ConcurrentDictionary<ulong, ConcurrentDictionary<ulong, byte>> _childrenByParent = new();
+
+    // The pose this streamer last *completed* a full rebuild at, per multi-prim linkset -- see
+    // OnTerseObjectUpdate's own epsilon-gate comment for why this exists. Seeded by
+    // BuildObjectAsync on completion, not by the terse-update handler that decides to rebuild:
+    // recording the pose at decision time would mark a pose "rebuilt" even when the rebuild it
+    // triggered later fails (e.g. the viewport drops the GPU upload under OOM pressure), which
+    // would wrongly suppress a later, genuinely-needed retry at that same pose.
+    private readonly ConcurrentDictionary<ulong, (Vector3 Position, Quaternion Rotation, Vector3 Scale)> _lastRebuiltPose = new();
+
+    // Diagnostic-only (2026-08-19, chasing a "1800+ Upload Q, Obj/SceneFaces bit-identical for
+    // 28+ seconds, Build Q drains to 0 and stays there" churn session). EnqueueBuild's
+    // "Progressive placeholder for first appearance" branch (below) fires every time this
+    // method runs for a key not yet in _rendered -- including a key whose PREVIOUS build got
+    // cancelled by this same call (see the _inflight.TryRemove+Cancel a few lines above that
+    // branch) and is being retried. If something keeps re-dirtying the same small set of keys
+    // faster than their builds can complete, each retry re-submits a fresh placeholder via
+    // SubmitSceneObject -- real render-thread work with zero net effect on _rendered/Obj count,
+    // which is exactly the shape logged above. totalCalls vs. distinctKeysSeen (same pattern as
+    // GridTextureHelper's DownloadSkBitmapLodAsync dedup diagnostic) distinguishes "many
+    // different objects each appearing once" from "a small set of objects re-entering this
+    // branch over and over."
+    private long _placeholderSubmitCalls;
+    private readonly ConcurrentDictionary<ulong, byte> _placeholderSubmitSeenKeys = new();
+    private long _lastPlaceholderDiagLogTicks;
+
+    // Diagnostic-only (2026-08-19, fix for the churn above): EnqueueBuild now DEFERS instead of
+    // cancelling when a build for the key is still genuinely running (BuildAttempt.Completed ==
+    // false), re-marking the key dirty so ProcessDirty retries it once the running attempt
+    // finishes -- this is the replacement signal for what used to be an inflightCancels counter
+    // that fired on every cancel-and-restart; it should climb where that used to. The one way
+    // this fix can go wrong is starvation: if Completed is ever left unset on some exit path,
+    // that key defers FOREVER and never rebuilds again. _inflight.Values.Count(a => !a.Completed)
+    // sampled alongside this counter (below, as "stillRunning") is the canary -- it must stay
+    // bounded/draining, not grow monotonically. _staleAttemptTimeouts is the release valve for
+    // the one concrete leak found: SceneBuildScheduler.Enqueue's queue-depth eviction drops a
+    // factory without ever running it (see StuckAttemptTimeoutMs's own comment).
+    private long _deferredBuildCount;
+    private long _staleAttemptTimeouts;
 
     // ── Sim index registry ────────────────────────────────────────────────────────
     // Upper 32 bits of a scene key encode a sim index (0 = current sim, 1-N for neighbors).
@@ -100,7 +165,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
     }
 
-    public SceneObjectStreamer(GridClient client, GlViewportControl viewport,
+    public SceneObjectStreamer(GridClient client, ISceneViewport viewport,
         SceneBuildScheduler scheduler)
     {
         _client    = client;
@@ -200,9 +265,42 @@ internal sealed class SceneObjectStreamer : IDisposable
                 // and physical object motion reads as continuous instead of teleporting.
                 _viewport.SetSceneObjectMotion(sceneKey, scale, rotation, position, velocity, angularVelocity, acceleration);
 
+                // Only rebuild a multi-prim linkset when its pose actually changed meaningfully
+                // since the last rebuild -- SetSceneObjectMotion above already applies the cheap
+                // whole-object transform on every terse update regardless (and
+                // ExtrapolateMovingSceneObjects dead-reckons it every frame), so a linkset that's
+                // stationary but still sending terse updates (a texture-anim object, a rotating
+                // sign holding a keyframe, a physics object jittering at rest) was paying for a
+                // full mesh/texture/material rebuild on every single packet for no visual benefit.
+                // The original reason this rebuild exists at all -- child-face positions need
+                // recalculating at the new root location -- is preserved for a REAL pose change;
+                // this only skips the redundant rebuild when nothing actually moved. Scale
+                // included alongside position/rotation since a resize should still trigger a
+                // rebuild.
                 bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
                 if (!isSinglePrim)
-                    EnqueueDirty(sceneKey);
+                {
+                    const float posEpsilon = 0.01f;   // 1cm
+                    const float scaleEpsilon = 0.01f;
+                    const float rotDotEpsilon = 1e-4f;
+                    bool poseChanged = true;
+                    if (_lastRebuiltPose.TryGetValue(sceneKey, out var last))
+                    {
+                        poseChanged =
+                            Vector3.DistanceSquared(last.Position, position) > posEpsilon * posEpsilon ||
+                            Vector3.DistanceSquared(last.Scale, scale) > scaleEpsilon * scaleEpsilon ||
+                            MathF.Abs(1f - MathF.Abs(Quaternion.Dot(last.Rotation, rotation))) > rotDotEpsilon;
+                    }
+                    if (poseChanged)
+                    {
+                        // Not recorded here: BuildObjectAsync seeds _lastRebuiltPose itself once
+                        // the rebuild this triggers actually completes -- recording the decision
+                        // pose here instead would mark a pose "rebuilt" even when BuildObjectAsync
+                        // throws or CollectLinkset comes back empty, permanently masking a real
+                        // pose change from a later gate check.
+                        EnqueueDirty(sceneKey);
+                    }
+                }
 
                 // Check whether the object moved close enough to deserve a texture quality upgrade.
                 // Use the world-space distance already computed above.
@@ -314,10 +412,10 @@ internal sealed class SceneObjectStreamer : IDisposable
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _fetchScheduler.Clear();
 
-        foreach (var (_, cts) in _inflight)
+        foreach (var (_, attempt) in _inflight)
         {
-            cts.Cancel();
-            cts.Dispose();
+            attempt.Cts.Cancel();
+            attempt.Cts.Dispose();
         }
         _inflight.Clear();
 
@@ -331,7 +429,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _debounceTimer.Dispose();
         _textureLodTimer.Dispose();
         _fetchScheduler.Dispose();
-        foreach (var cts in _inflight.Values) { cts.Cancel(); cts.Dispose(); }
+        foreach (var attempt in _inflight.Values) { attempt.Cts.Cancel(); attempt.Cts.Dispose(); }
         _inflight.Clear();
     }
 
@@ -395,14 +493,15 @@ internal sealed class SceneObjectStreamer : IDisposable
 
     private void CancelAndRemove(ulong sceneKey)
     {
-        if (_inflight.TryRemove(sceneKey, out var cts))
+        if (_inflight.TryRemove(sceneKey, out var attempt))
         {
-            cts.Cancel();
-            cts.Dispose();
+            attempt.Cts.Cancel();
+            attempt.Cts.Dispose();
         }
         _dirty.TryRemove(sceneKey, out _);
         _rendered.TryRemove(sceneKey, out _);
         _textureLodLevel.TryRemove(sceneKey, out _);
+        _lastRebuiltPose.TryRemove(sceneKey, out _);
         _viewport.RemoveSceneObject(sceneKey);
     }
 
@@ -486,15 +585,48 @@ internal sealed class SceneObjectStreamer : IDisposable
     {
         if (_disposed) return;
 
-        if (_inflight.TryRemove(sceneKey, out var oldCts))
+        // Fix for the churn confirmed on 2026-08-19 (see class-level diagnostic comments above):
+        // a build for this key that is still genuinely running (not yet reached
+        // PrefetchThenScheduleBuildAsync/BuildObjectAsync's completion) is left alone instead of
+        // being cancelled-and-restarted. Killing it here unconditionally, as the old code did,
+        // meant an object whose terse-update rate exceeds its own build completion rate (e.g. a
+        // continuously moving/rotating linkset) had every attempt killed by the next one before
+        // it could ever finish -- confirmed via inflightCancels climbing 179->438 over ~24s while
+        // distinctKeysSeen stayed flat at 727-728 (same ~728 objects, never completing). Instead,
+        // re-mark the key dirty so ProcessDirty retries it on a LATER tick once the running
+        // attempt actually finishes -- bounded by real build throughput, not re-dirty rate.
+        if (_inflight.TryGetValue(sceneKey, out var runningAttempt) && !runningAttempt.Completed)
         {
-            oldCts.Cancel();
-            oldCts.Dispose();
+            long ageMs = Environment.TickCount64 - runningAttempt.StartedAtTicks;
+            if (ageMs < StuckAttemptTimeoutMs)
+            {
+                Interlocked.Increment(ref _deferredBuildCount);
+                _dirty.AddOrUpdate(sceneKey, Environment.TickCount64, (_, _) => Environment.TickCount64);
+                _debounceTimer.Change(DebounceMs, Timeout.Infinite);
+                return;
+            }
+            // Past the timeout with no completion -- most likely evicted from a scheduler queue
+            // (see StuckAttemptTimeoutMs's comment) rather than genuinely still progressing.
+            // Fall through to cancel+restart below instead of deferring forever.
+            Interlocked.Increment(ref _staleAttemptTimeouts);
         }
 
-        var cts   = new CancellationTokenSource();
-        var token = cts.Token;
-        _inflight[sceneKey] = cts;
+        if (_inflight.TryRemove(sceneKey, out var oldAttempt))
+        {
+            // Either the build already COMPLETED, or it timed out above without completing
+            // (most likely evicted from a scheduler queue before its factory ever ran). Either
+            // way, cancelling here is safe: if the old factory somehow still runs later, its
+            // MarkAttemptCompleted call is reference-equality-guarded against the NEW attempt
+            // this call is about to install below, so it will safely no-op instead of clobbering
+            // the new one's state.
+            oldAttempt.Cts.Cancel();
+            oldAttempt.Cts.Dispose();
+        }
+
+        var cts     = new CancellationTokenSource();
+        var token   = cts.Token;
+        var attempt = new BuildAttempt(cts);
+        _inflight[sceneKey] = attempt;
 
         var avatarPos   = _client.Self.SimPosition;
         float distSq    = DistanceSq(sceneKey, avatarPos);
@@ -531,10 +663,47 @@ internal sealed class SceneObjectStreamer : IDisposable
                 var placeholder = PlaceholderMeshFactory.Build(
                     $"ph:{rootLocalId}", scale, wPos, rootPrimLocalId: rootLocalId);
                 _viewport.SubmitSceneObject(sceneKey, placeholder);
+
+                long totalCalls = Interlocked.Increment(ref _placeholderSubmitCalls);
+                _placeholderSubmitSeenKeys.TryAdd(sceneKey, 0);
+                long now2 = Environment.TickCount64;
+                if (now2 - Interlocked.Read(ref _lastPlaceholderDiagLogTicks) >= 1000)
+                {
+                    Interlocked.Exchange(ref _lastPlaceholderDiagLogTicks, now2);
+                    int stillRunning = 0;
+                    foreach (var a in _inflight.Values)
+                        if (!a.Completed) stillRunning++;
+                    LibreMetaverse.Logger.Debug(
+                        $"[SceneObjectStreamer] EnqueueBuild placeholder-path: totalCalls={totalCalls}, "
+                        + $"distinctKeysSeen={_placeholderSubmitSeenKeys.Count}, "
+                        + $"deferredBuilds={Interlocked.Read(ref _deferredBuildCount)}, "
+                        + $"staleTimeouts={Interlocked.Read(ref _staleAttemptTimeouts)}, "
+                        + $"stillRunning={stillRunning} -- deferredBuilds climbing (replacing the "
+                        + "old cancel-and-restart churn, fixed 2026-08-19 by deferring instead of "
+                        + "cancelling) is expected and fine. stillRunning must stay bounded/"
+                        + "draining, not grow monotonically -- if it does, some exit path is "
+                        + "failing to mark its BuildAttempt Completed and the affected keys will "
+                        + "never rebuild again (a worse, silent regression) unless staleTimeouts "
+                        + "is also climbing to match, which means the 10s safety valve is "
+                        + "catching it and retrying instead.");
+                }
             }
         }
 
-        _fetchScheduler.Enqueue(priority, _ => PrefetchThenScheduleBuildAsync(sceneKey, priority, token));
+        _fetchScheduler.Enqueue(priority, _ => PrefetchThenScheduleBuildAsync(sceneKey, priority, token, attempt));
+    }
+
+    // Marks a BuildAttempt as completed, guarded by reference equality: if a newer EnqueueBuild
+    // (via CancelAndRemove or, after the churn fix, a build that genuinely finished and was later
+    // replaced) already swapped _inflight[sceneKey] for a different BuildAttempt, this must not
+    // touch it -- doing so would let a stale attempt's completion incorrectly mark a NEWER,
+    // still-running attempt as done, which would let EnqueueBuild cancel it prematurely again.
+    // Called from every exit path of the two build stages below -- see the class-level comment on
+    // _deferredBuildCount for why a missed call site here is a silent, worse-than-churn regression.
+    private void MarkAttemptCompleted(ulong sceneKey, BuildAttempt attempt)
+    {
+        if (_inflight.TryGetValue(sceneKey, out var current) && ReferenceEquals(current, attempt))
+            current.Completed = true;
     }
 
     /// <summary>
@@ -544,9 +713,14 @@ internal sealed class SceneObjectStreamer : IDisposable
     /// shared build scheduler against warm caches, so tessellation slots do pure CPU work
     /// instead of serialising on one download per prim.
     /// </summary>
-    private async Task PrefetchThenScheduleBuildAsync(ulong sceneKey, float priority, CancellationToken token)
+    private async Task PrefetchThenScheduleBuildAsync(
+        ulong sceneKey, float priority, CancellationToken token, BuildAttempt attempt)
     {
-        if (_disposed || token.IsCancellationRequested) return;
+        if (_disposed || token.IsCancellationRequested)
+        {
+            MarkAttemptCompleted(sceneKey, attempt);
+            return;
+        }
 
         try
         {
@@ -561,16 +735,29 @@ internal sealed class SceneObjectStreamer : IDisposable
                     await _builder.PrefetchLinksetAssetsAsync(prims, token).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException) { return; }
+        catch (OperationCanceledException)
+        {
+            MarkAttemptCompleted(sceneKey, attempt);
+            return;
+        }
         catch { /* prefetch is best-effort; BuildObjectAsync downloads on cache miss */ }
 
-        if (_disposed || token.IsCancellationRequested) return;
-        _scheduler.Enqueue(priority, _ => BuildObjectAsync(sceneKey, token));
+        if (_disposed || token.IsCancellationRequested)
+        {
+            MarkAttemptCompleted(sceneKey, attempt);
+            return;
+        }
+        // Ownership of marking Completed now passes to BuildObjectAsync's own finally block.
+        _scheduler.Enqueue(priority, _ => BuildObjectAsync(sceneKey, token, attempt));
     }
 
-    private async Task BuildObjectAsync(ulong sceneKey, CancellationToken token)
+    private async Task BuildObjectAsync(ulong sceneKey, CancellationToken token, BuildAttempt attempt)
     {
-        if (_disposed) return;
+        if (_disposed)
+        {
+            MarkAttemptCompleted(sceneKey, attempt);
+            return;
+        }
 
         try
         {
@@ -608,12 +795,12 @@ internal sealed class SceneObjectStreamer : IDisposable
                     {
                         // Record the quality level so we can detect upgrade opportunities later.
                         _textureLodLevel[sceneKey] = patch.ResolutionLevel;
-                        // Stamp the full scene key so the viewport resolves the owning
-                        // linkset by direct dictionary lookup. _sceneObjects is keyed by
-                        // sceneKey (sim index << 32 | rootLocalId); without this the lookup
-                        // falls back to (ulong)RootLocalId — the *child* prim's localId for
-                        // linkset faces — which never matches a root sceneKey, so the texture
-                        // patch is deferred and ultimately dropped (faces stay untextured).
+                        // Stamp the full scene key so the viewport resolves the owning linkset by
+                        // direct dictionary lookup: _sceneObjects is keyed by sceneKey (sim index
+                        // << 32 | rootLocalId). Without this the lookup falls back to
+                        // (ulong)RootLocalId -- the *child* prim's localId for linkset faces --
+                        // which never matches a root sceneKey, so the patch is deferred and
+                        // ultimately dropped (faces stay untextured).
                         _viewport.PatchSceneObjectTexture(patch with { SceneKey = sceneKey }, token);
                     }
                     catch (OperationCanceledException)
@@ -663,11 +850,27 @@ internal sealed class SceneObjectStreamer : IDisposable
                     BoundsMin  = submission.BoundsMin  + worldPos,
                     BoundsMax  = submission.BoundsMax  + worldPos,
                     FlexiPrims = submission.FlexiPrims,
+                    // AnimeshSkinData defaults to [] on PrimRenderSubmission -- must be carried
+                    // forward explicitly here, or an animesh object's rigged faces lose their
+                    // subAnimated dynamic:true flag and hit VkMesh.UpdateVertices's re-stage path
+                    // every tick once PrimMeshBuilder's CPU-LBS animates them.
+                    AnimeshSkinData = submission.AnimeshSkinData,
                 };
             }
 
             _viewport.SubmitSceneObject(sceneKey, submission);
             _rendered[sceneKey] = 0;
+            // Seeds the epsilon-gate baseline here too (not just for later rebuilds) so the very
+            // first terse update after initial OnObjectUpdate doesn't immediately re-trigger a
+            // redundant rebuild for a stationary object -- see OnTerseObjectUpdate's comment.
+            // Caveat: SubmitSceneObject is fire-and-forget (the viewport drains and uploads to
+            // the GPU later, on the render thread) -- this records that the CPU-side build
+            // completed, not that the GPU upload actually succeeded. An object that OOMs during
+            // upload still gets its pose recorded here, so it won't be retried again until it
+            // genuinely moves; there is no upload-success feedback wired back from the viewport.
+            var scaleV = new Vector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
+            var rotQ   = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
+            _lastRebuiltPose[sceneKey] = (worldPos, rotQ, scaleV);
             ObjectBuilt?.Invoke(rootLocalId, submission);
         }
         catch (OperationCanceledException) { }
@@ -677,14 +880,20 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
         finally
         {
-            // Do NOT unconditionally TryRemove here: EnqueueBuild may have already
-            // replaced _inflight[sceneKey] with a NEWER build's CTS while this build
-            // was running.  Removing and disposing that CTS would corrupt the newer
-            // build — its texture downloads would observe ODsE from a disposed token.
-            // Lifecycle: each CTS is cancelled+disposed by the NEXT EnqueueBuild for
-            // the same key (or by Dispose() on tear-down), not by the build that owns it.
-            // StreamTexturesAsync is still live in the background and uses this token,
-            // so disposing it here would also corrupt in-flight texture delivery.
+            // Do NOT unconditionally TryRemove here: EnqueueBuild may have already replaced
+            // _inflight[sceneKey] with a NEWER build's CTS while this build was running. Removing
+            // and disposing that CTS would corrupt the newer build -- its texture downloads would
+            // observe ODsE from a disposed token. Lifecycle: each CTS is cancelled+disposed by the
+            // NEXT EnqueueBuild for the same key (or by Dispose() on tear-down), not by the build
+            // that owns it. StreamTexturesAsync is still live in the background and uses this
+            // token, so disposing it here would also corrupt in-flight texture delivery.
+            //
+            // What DOES need to happen unconditionally (success, cancellation, or swallowed
+            // exception alike) is marking this attempt Completed -- this is the last exit point
+            // for a build that made it into this method, and it's what lets a later EnqueueBuild
+            // for this key start a fresh attempt instead of deferring forever. See
+            // MarkAttemptCompleted's own comment for why this is reference-equality-guarded.
+            MarkAttemptCompleted(sceneKey, attempt);
         }
     }
 

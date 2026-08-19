@@ -34,15 +34,15 @@ namespace Radegast.Veles.Rendering;
 /// One driver per root linkset is kept alive for as long as the root is within
 /// the stream radius and has an active particle emitter.  The viewport's single
 /// particle render pass is shared across all drivers via
-/// <see cref="GlViewportControl.SubmitParticles"/>; each driver overwrites the
+/// <see cref="ISceneViewport.SubmitParticles"/>; each driver overwrites the
 /// previous submission on its tick, which is acceptable for a scene viewer
 /// where multiple distant emitters blend together in the same pass.
 /// </para>
 /// </summary>
 internal sealed class SceneParticleStreamer : IDisposable
 {
-    private readonly GridClient        _client;
-    private readonly GlViewportControl _viewport;
+    private readonly GridClient      _client;
+    private readonly ISceneViewport  _viewport;
 
     // rootLocalId → active driver
     private readonly ConcurrentDictionary<uint, ParticleViewerDriver> _drivers = new();
@@ -56,7 +56,7 @@ internal sealed class SceneParticleStreamer : IDisposable
     private readonly Timer _debounceTimer;
     private bool           _disposed;
 
-    public SceneParticleStreamer(GridClient client, GlViewportControl viewport)
+    public SceneParticleStreamer(GridClient client, ISceneViewport viewport)
     {
         _client   = client;
         _viewport = viewport;
@@ -191,7 +191,6 @@ internal sealed class SceneParticleStreamer : IDisposable
             return;
         }
 
-        // Dispose existing driver if present.
         if (_drivers.TryRemove(rootId, out var old))
             old.Dispose();
 

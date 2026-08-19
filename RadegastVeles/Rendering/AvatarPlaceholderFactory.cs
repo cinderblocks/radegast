@@ -34,16 +34,12 @@ namespace Radegast.Veles.Rendering;
 /// </para>
 /// <para>
 /// When <see cref="SceneAvatarStreamer"/> finishes its async build it calls
-/// <see cref="GlViewportControl.SubmitSceneObject"/> again with the real geometry,
+/// <see cref="VkViewportControl.SubmitSceneObject"/> again with the real geometry,
 /// silently replacing this placeholder.
 /// </para>
 /// </summary>
 internal static class AvatarPlaceholderFactory
 {
-    // Fully transparent: this mesh is now only a pick/touch target and world-footprint
-    // placeholder (feeds the spatial-culling grid, TryApplyTexturePatch's "1 face = still
-    // placeholder" check, etc.) — the visible cloud effect is entirely AvatarCloudDriver's
-    // particle burst now, not this mesh. See RadegastVeles/Rendering/AvatarCloudDriver.cs.
     private static readonly Vector4 CloudColor = new(1.00f, 1.00f, 1.00f, 0.00f);
 
     // Ellipsoid radii (half-extents) in avatar-local space.

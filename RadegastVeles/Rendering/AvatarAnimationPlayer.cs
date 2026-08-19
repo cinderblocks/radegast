@@ -216,7 +216,6 @@ internal sealed class AvatarAnimationPlayer : IDisposable
         _snapshotBuf.Clear();
         lock (_lock) _snapshotBuf.AddRange(_active);
 
-        // Alias locals for readability — same names as before so the loop body is unchanged.
         var contributions = _contribs;
         morphWeights      = morphBuf;
 
@@ -224,7 +223,6 @@ internal sealed class AvatarAnimationPlayer : IDisposable
         {
             var reader = entry.Reader;
 
-            // Advance time.
             entry.CurrentTime += dt;
 
             float inPt  = reader.InPoint;
@@ -400,11 +398,10 @@ internal sealed class AvatarAnimationPlayer : IDisposable
     ///
     /// Rationale: the SL viewer has typically been running for minutes or hours before
     /// you view an avatar, so every loop animation on that avatar is at a pseudo-random
-    /// phase relative to its <see cref="BinBVHAnimationReader.InPoint"/>.  Veles
-    /// previously always started at InPoint, which caused high-amplitude AO poses
-    /// (e.g. an elbow bent 96° at t≈2s of a 30s cycle) to be visible on every fresh
-    /// load — producing the cross-weighted-vertex spike that is only occasionally
-    /// visible in the SL viewer.
+    /// phase relative to its <see cref="BinBVHAnimationReader.InPoint"/>. Always starting
+    /// at InPoint would make high-amplitude AO poses (e.g. an elbow bent 96° at t≈2s of
+    /// a 30s cycle) visible on every fresh load, rather than only occasionally as in the
+    /// SL viewer.
     ///
     /// Non-looping animations (one-shots) are always started from InPoint so they
     /// play through in full.
@@ -438,13 +435,10 @@ internal sealed class AvatarAnimationPlayer : IDisposable
         {
             // Download failed (timeout, dropped request, missing asset, etc.). _requested
             // guards against re-issuing a request while one is already in flight, but
-            // without this, a single failed fetch would permanently block this animation
-            // from ever being retried for this player's lifetime — no other code path
-            // clears the entry (Dispose() clears all of them, but that means closing and
-            // reopening the whole avatar view, not just re-selecting Live Animation).
-            // Removing it here lets the next SetActiveAnimations call (routine — fires on
-            // every AvatarAnimation event) retry instead of leaving the avatar permanently
-            // undeformed for that joint set.
+            // removing the entry here lets the next SetActiveAnimations call retry the
+            // fetch -- without it, a single failed fetch would permanently block this
+            // animation for the player's lifetime, since no other code path clears the
+            // entry except Dispose().
             lock (_lock) { _requested.Remove(id); }
             return;
         }

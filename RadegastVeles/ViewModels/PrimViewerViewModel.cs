@@ -36,7 +36,7 @@ namespace Radegast.Veles.ViewModels;
 /// Fetches the root prim and its linkset children from the current simulator,
 /// tessellates them with <c>MeshFoundry</c>, fetches face textures from the
 /// asset server, and submits a <see cref="PrimRenderSubmission"/> to the
-/// <see cref="GlViewportControl"/> for rendering.
+/// <see cref="VkViewportControl"/> for rendering.
 /// </summary>
 public partial class PrimViewerViewModel : ObservableObject, IDisposable
 {
@@ -45,7 +45,7 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
 
     private readonly uint             _rootLocalId;
     private readonly PrimMeshBuilder   _builder;
-    private          GlViewportControl? _viewport;
+    private          ISingleObjectViewport? _viewport;
     private          CancellationTokenSource? _cts;
     private          bool          _disposed;
 
@@ -89,10 +89,10 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Attach the GL viewport so the VM can submit geometry to it.
+    /// Attach the <see cref="ISingleObjectViewport"/> so the VM can submit geometry to it.
     /// Call this from the view's code-behind after the control tree is ready.
     /// </summary>
-    public void SetViewport(GlViewportControl viewport)
+    public void SetViewport(ISingleObjectViewport viewport)
     {
         if (_viewport != null)
             _viewport.FaceClicked -= OnFaceClicked;
@@ -104,6 +104,15 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
         _viewport.Sky         = SkySettings.Studio;
         _viewport.FaceClicked += OnFaceClicked;
 
+        // ParticleViewerDriver.SetViewport needs ISceneViewport (SubmitParticles/RemoveParticles
+        // aren't declared on ISingleObjectViewport, this method's own parameter type), so the
+        // concrete viewport is cross-cast rather than passed through as-is; VkViewportControl
+        // implements ISceneViewport directly, so this works on Vulkan. Flexi-prim animation
+        // (FlexiPrimAnimator) never needed this guard -- see AvatarViewerViewModel.SetViewport's
+        // own comment (its single-object scheduler only calls
+        // ISingleObjectViewport.ScheduleVertexUpdate).
+        var sceneViewport = viewport as ISceneViewport;
+
         // If geometry was already loaded before the viewport was attached, send it now.
         if (_lastSubmission != null)
         {
@@ -113,13 +122,13 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
             // because the viewport was not yet attached at that time.
             if (_flexi == null && _lastSubmission.FlexiPrims.Length > 0)
             {
-                var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
+                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport));
                 _flexi.Start();
             }
         }
 
-        _particles?.SetViewport(viewport);
+        if (sceneViewport != null)
+            _particles?.SetViewport(sceneViewport);
     }
 
     [RelayCommand]
@@ -170,22 +179,22 @@ public partial class PrimViewerViewModel : ObservableObject, IDisposable
 
             _lastSubmission = submission;
 
-            // Start particle simulation for emitter prims.
+            // See SetViewport's own comment on the same ISceneViewport cross-cast.
+            var sceneViewport = _viewport as ISceneViewport;
+
             _particles?.Dispose();
             // Use rootLocalId as key; world pos is zero since the object viewer
             // renders in object-local space (no world translation needed).
             _particles = new ParticleViewerDriver(Client, prims, (ulong)_rootLocalId,
                 Vector3.Zero);
-            if (_viewport != null) _particles.SetViewport(_viewport);
+            if (sceneViewport != null) _particles.SetViewport(sceneViewport);
             _particles.Start();
 
-            // Start flexi-prim animation if the linkset contains any flexi prims.
             _flexi?.Dispose();
             _flexi = null;
             if (submission.FlexiPrims.Length > 0 && _viewport != null)
             {
-                var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
+                _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport));
                 _flexi.Start();
             }
 

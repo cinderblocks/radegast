@@ -24,7 +24,7 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Coarse uniform spatial hash grid over scene-object world AABBs, used as a fast
-/// pre-filter in front of the exact per-face frustum test in <see cref="GlViewportControl"/>.
+/// pre-filter in front of the exact per-face frustum test in <see cref="VkViewportControl"/>.
 /// <para>
 /// World space is unbounded/continuous across neighbour regions (see
 /// <c>SceneObjectStreamer.RegionOffset</c>), so cells are a sparse hash keyed by integer
@@ -32,7 +32,7 @@ namespace Radegast.Veles.Rendering;
 /// </para>
 /// <para>
 /// GL-thread-only, like the <c>_sceneObjects</c> dictionary it parallels in
-/// <see cref="GlViewportControl"/> — no locking. Every mutating call (<see cref="Upsert"/>,
+/// <see cref="VkViewportControl"/> — no locking. Every mutating call (<see cref="Upsert"/>,
 /// <see cref="Remove"/>, <see cref="Clear"/>) and <see cref="QueryVisible"/> must happen on
 /// the render thread.
 /// </para>

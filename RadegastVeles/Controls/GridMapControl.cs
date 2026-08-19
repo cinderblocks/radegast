@@ -370,7 +370,6 @@ public class GridMapControl : Control
         double h = bounds.Height;
         if (w < 1 || h < 1) return;
 
-        // Background
         ctx.DrawRectangle(BackgroundBrush, null, new Rect(0, 0, w, h));
 
         double pxPerReg = GetPixelsPerRegion();
@@ -462,7 +461,6 @@ public class GridMapControl : Control
             }
         }
 
-        // Draw avatar markers
         var avatars = Avatars;
         if (avatars != null)
         {
@@ -479,7 +477,6 @@ public class GridMapControl : Control
             }
         }
 
-        // Draw "You" marker
         var self = SelfEntry;
         if (self != null)
         {
@@ -501,7 +498,6 @@ public class GridMapControl : Control
             double mx = (_markerGridX + _markerLocalX / 256.0 - _centerGridX) * pxPerReg + w / 2;
             double my = (_centerGridY - _markerGridY - _markerLocalY / 256.0) * pxPerReg + h / 2;
 
-            // Crosshair
             var markerPen = new Pen(MarkerBrush, 2);
             ctx.DrawLine(markerPen, new Point(mx - 8, my), new Point(mx + 8, my));
             ctx.DrawLine(markerPen, new Point(mx, my - 8), new Point(mx, my + 8));

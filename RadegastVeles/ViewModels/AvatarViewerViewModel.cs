@@ -53,7 +53,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     private readonly bool              _isSelf;
     private readonly AvatarMeshBuilder _builder;
 
-    private GlViewportControl?        _viewport;
+    private ISingleObjectViewport?    _viewport;
     private CancellationTokenSource?  _cts;
     private Timer?                    _debounceTimer;
     private volatile uint             _avatarLocalId;
@@ -74,6 +74,16 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     private AvatarAnimationPlayer?             _animPlayer;
     private CancellationTokenSource?           _animCts;
     private ImmutableArray<AvatarFaceMorphData> _faceMorphData = ImmutableArray<AvatarFaceMorphData>.Empty;
+    // Cached alongside _faceMorphData, one HashSet<int> per assignment rather than rebuilt
+    // every AnimTick (30 Hz). GPU compute skinning (VkAvatarSkinGpuData) uploads BindVerts
+    // ONCE into a static SSBO at registration time, but AnimTick's own morph-application code
+    // below mutates skin.BindVerts in place, per tick -- a GPU-dispatched face would keep
+    // animating skeletal pose correctly but never see those BindVerts changes again, silently
+    // breaking facial expressions. AnimTick's GPU-dispatch branches skip (fall through to CPU)
+    // any face whose FaceIndex is in this set, since the CPU path re-reads mutated BindVerts
+    // every tick. SceneAvatarAnimator has no equivalent morph-mutation code, so this gate is
+    // AvatarViewer-specific.
+    private HashSet<int> _morphableFaceIndices = new();
 
     // ── Physics wearable simulation ───────────────────────────────────────────────
     private readonly AvatarPhysicsSimulator    _physics = new();
@@ -84,8 +94,6 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     // LOD is selected based on the avatar's on-screen pixel height.
     // MinPixelWidth thresholds from avatar_lad.xml:  lod0≥320, lod1≥160, lod2≥80.
     private int _currentLod = 0;
-    // Projected screen-height thresholds for LOD selection (pixels).
-    // Thresholds match avatar_lad.xml: lod0 ≥ 320 px, lod1 ≥ 160 px, lod2 ≥ 80 px.
     // Driven by Camera3D.ComputeProjectedPixelHeight so zoom/distance changes
     // trigger LOD switches without requiring a panel resize.
     private static int PixelHeightToLod(double pixelHeight) => pixelHeight switch
@@ -113,15 +121,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     // used to keep flexi attachment prims aligned with the static AttachTransform
     // built at mesh-build time.
     //
-    // Ping-pong buffers, not a single reused Dictionary: FlexiPrimAnimator.RunAsync runs
-    // its own independent ~30 Hz timer loop on a separate thread from AnimationLoopAsync
-    // (no synchronization between them), and its SetBoneProvider closure calls TryGetValue
-    // on whatever this field pointed to at Set time. A single Dictionary mutated in place
-    // via Clear()+refill each AnimTick is not thread-safe against a concurrent reader —
-    // this produced exactly the observed symptom (flexi prims plausibly placed once, then
-    // frozen forever regardless of the animation-physics toggle, since the race silently
-    // returns stale/empty lookups instead of throwing). Mirrors the identical fix already
-    // used by the Scene Viewer's own separate implementation, SceneAvatarAnimator.
+    // Ping-pong buffers, not a single reused Dictionary: FlexiPrimAnimator.RunAsync runs its
+    // own independent ~30 Hz timer loop on a separate thread from AnimationLoopAsync (no
+    // synchronization between them), and its SetBoneProvider closure calls TryGetValue on
+    // whatever this field pointed to at Set time. A single Dictionary mutated in place via
+    // Clear()+refill each AnimTick is not thread-safe against a concurrent reader -- the race
+    // would silently return stale/empty lookups instead of throwing. Mirrors the same pattern
+    // used by the Scene Viewer's own implementation, SceneAvatarAnimator.
     private readonly Dictionary<string, Matrix4x4> _attachBonesPing = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Matrix4x4> _attachBonesPong = new(StringComparer.Ordinal);
     private bool _attachUsePing = true;
@@ -245,7 +251,7 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
     /// Attach the GL viewport so the VM can submit geometry to it.
     /// Call from the view's code-behind once the visual tree is ready.
     /// </summary>
-    public void SetViewport(GlViewportControl viewport)
+    public void SetViewport(ISingleObjectViewport viewport)
     {
         if (_viewport != null) _viewport.FaceClicked -= OnFaceClicked;
         _viewport            = viewport;
@@ -254,6 +260,14 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
         _viewport.ShowSky     = false;
         _viewport.Sky         = SkySettings.Studio;
         _viewport.FaceClicked += OnFaceClicked;
+
+        // ParticleViewerDriver.SetViewport needs ISceneViewport (SubmitParticles/RemoveParticles
+        // aren't on ISingleObjectViewport, this method's own parameter type) -- see
+        // PrimViewerViewModel.SetViewport's identical cross-cast for the full explanation.
+        // Flexi-prim animation (FlexiPrimAnimator) does NOT need this guard -- its single-object
+        // scheduler (CreateSingleObjectScheduler) calls nothing but ISingleObjectViewport's own
+        // already-both-backends ScheduleVertexUpdate.
+        var sceneViewport = viewport as ISceneViewport;
 
         // A fresh viewport always needs SubmitAvatarFront so the camera gets framed,
         // regardless of whether loading already completed (_firstLoad is false).
@@ -265,18 +279,23 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             // because the viewport was not yet attached at that time.
             if (_flexi == null && _lastSubmission.FlexiPrims.Length > 0)
             {
-                var vp = _viewport;
-                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(vp));
+                _flexi = new FlexiPrimAnimator(_lastSubmission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport),
+                    _viewport.ScheduleFlexiCompute);
                 _flexi.Start();
             }
         }
 
-        _particles?.SetViewport(viewport);
+        if (sceneViewport != null)
+            _particles?.SetViewport(sceneViewport);
 
         // LOD is driven by Camera3D.ComputeProjectedPixelHeight inside AnimTick
         // so that zoom / orbit changes are reflected at ~3 Hz without needing a resize.
         // A resize still resets the tick counter so the next tick rechecks immediately.
-        _viewport.SizeChanged += (_, _) => _lodTickCounter = 0;
+        // SizeChanged is an Avalonia Control event, not part of ISingleObjectViewport's own
+        // (deliberately viewport-API-only) surface -- VkViewportControl genuinely is a Control
+        // at runtime, so this cast is safe; it's just not something the interface itself needs
+        // to declare.
+        ((Avalonia.Controls.Control)_viewport).SizeChanged += (_, _) => _lodTickCounter = 0;
     }
 
     private void OnViewportBoundsChanged(double pixelHeight)
@@ -419,13 +438,16 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 onGeometryReady,
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
-                    // Drop patches that belong to a superseded build.  When a reload is
-                    // triggered, _cts is cancelled before the new LoadAsync starts, so
-                    // any streaming callbacks still in-flight from the old BuildAsync will
-                    // see ct.IsCancellationRequested == true and silently discard the
-                    // bitmap instead of forwarding it to the viewport — preventing stale
-                    // patches from overwriting fresh geometry or leaking SKBitmaps.
-                    if (ct.IsCancellationRequested) { patch.Bitmap?.Dispose(); return; }
+                    // Drop patches that belong to a superseded build. When a reload triggers,
+                    // _cts is cancelled before the new LoadAsync starts, so any streaming
+                    // callback still in-flight from the old BuildAsync sees
+                    // ct.IsCancellationRequested == true and discards the bitmap instead of
+                    // forwarding it, preventing stale patches from overwriting fresh geometry.
+                    if (ct.IsCancellationRequested)
+                    {
+                        patch.Bitmap?.Dispose();
+                        return;
+                    }
                     _viewport?.PatchSubmissionTexture(patch);
                 })).ConfigureAwait(false);
 
@@ -445,13 +467,14 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 }
             }
 
-            // (Re)start particle simulation for any emitter attachments.
+            // (Re)start particle simulation for any emitter attachments -- see SetViewport's
+            // own comment on the ISceneViewport cross-cast.
             _particles?.Dispose();
             if (attachments.Count > 0)
             {
                 _particles = new ParticleViewerDriver(Client, attachments,
                     (ulong)localId, Vector3.Zero);
-                if (_viewport != null) _particles.SetViewport(_viewport);
+                if (_viewport is ISceneViewport sceneVp1) _particles.SetViewport(sceneVp1);
                 _particles.Start();
             }
             else
@@ -492,15 +515,15 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                         _viewport.Submit(submission);
 
                     // (Re)start flexi-prim animation now that _faceMeshes matches this
-                    // submission. Starting this any earlier (e.g. right after BuildAsync,
-                    // before Submit ran) let the animator's ~30 Hz loop begin writing face
-                    // indices computed against the new submission while the viewport's
-                    // _faceMeshes still reflected the previous (or grey-preview) one —
-                    // every update in that window silently dropped via ScheduleVertexUpdate's
-                    // bounds check, leaving flexi attachments frozen at their build-time pose.
+                    // submission. Starting any earlier (e.g. right after BuildAsync, before
+                    // Submit ran) would let the animator's ~30 Hz loop write face indices
+                    // computed against the new submission while the viewport's _faceMeshes
+                    // still reflected the previous one, silently dropped via
+                    // ScheduleVertexUpdate's bounds check, leaving flexi attachments frozen.
                     if (submission.FlexiPrims.Length > 0)
                     {
-                        _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport));
+                        _flexi = new FlexiPrimAnimator(submission, FlexiPrimAnimator.CreateSingleObjectScheduler(_viewport),
+                            _viewport!.ScheduleFlexiCompute);
                         _flexi.Start();
                     }
                 }
@@ -512,12 +535,13 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                     _pendingReload = false;
                     ScheduleReload();
                 }
-                // Update skin/anim fields only after the new submission has been
-                // queued for upload.  FreeGpuResources() inside UploadSubmission
-                // drains any stale _pendingVertexUpdates, so AnimTick writes from
-                // here onward will land on the correct new _faceMeshes.
+                // Update skin/anim fields only after the new submission has been queued for
+                // upload.
                 _skinData             = result.SkinData;
                 _faceMorphData        = result.FaceMorphData;
+                _morphableFaceIndices = _faceMorphData.Length == 0
+                    ? new HashSet<int>()
+                    : new HashSet<int>(_faceMorphData.Select(m => m.FaceIndex));
                 _prevLiveDeltaCount   = -1;
                 _avatarDef            = result.AvatarDef;
                 _vpBoneTransforms     = result.BoneTransforms;
@@ -757,15 +781,12 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    // AnimTick previously had no per-tick guard. This loop is started via
-                    // "_ = AnimationLoopAsync(...)" (fire-and-forget, no observer), so an
-                    // unhandled exception here would silently kill the ENTIRE loop forever:
-                    // the avatar freezes at whatever pose was last applied and stays frozen
-                    // no matter what pose mode is selected afterward (T-pose, A-pose, Live
-                    // Animation all look identical once this loop is dead) — indistinguishable
-                    // from a genuine hang without this being surfaced. Catch, report once
-                    // (avoid spamming ErrorText/log at 30 Hz if it throws every tick), and
-                    // keep ticking so a transient bad frame doesn't kill animation permanently.
+                    // This loop is started via "_ = AnimationLoopAsync(...)" (fire-and-forget,
+                    // no observer), so an unhandled exception here would silently kill the
+                    // entire loop forever: the avatar freezes at its last-applied pose
+                    // regardless of pose mode, indistinguishable from a genuine hang. Catch,
+                    // report once (avoid spamming ErrorText/log at 30 Hz), and keep ticking so
+                    // a transient bad frame doesn't kill animation permanently.
                     if (!loggedError)
                     {
                         loggedError = true;
@@ -804,8 +825,11 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             if (last != null)
             {
                 float objHeight = (last.BoundsMax - last.BoundsMin).Y;
+                // Bounds is an Avalonia Control property, not part of ISingleObjectViewport's
+                // own surface (same reasoning as SetViewport's SizeChanged cast) -- safe since
+                // both real implementations genuinely are Controls at runtime.
                 float projPx    = viewport.Camera.ComputeProjectedPixelHeight(
-                    objHeight, (float)viewport.Bounds.Height);
+                    objHeight, (float)((Avalonia.Controls.Control)viewport).Bounds.Height);
                 int newLod = PixelHeightToLod(projPx);
                 if (newLod != _currentLod)
                 {
@@ -871,6 +895,20 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             foreach (var skin in skinData)
             {
                 if (skin.Bone1.Length == 0 && skin.JointNames == null) continue;
+
+                // Rigid faces (see IsRigidSingleBone's own doc comment) never get their VBO
+                // rewritten by the LiveAnimation/APose fast path below -- it drives the whole
+                // face via face.Transform instead, leaving the VBO at its build-time bind pose
+                // permanently. ScheduleVertexUpdate here is a harmless no-op for these faces;
+                // what matters is resetting face.Transform to Identity, since a stale
+                // non-identity matrix from the last LiveAnimation/APose tick would otherwise
+                // stay applied at draw time and misplace the attachment.
+                if (skin.IsRigidSingleBone)
+                {
+                    viewport.ScheduleFaceTransformUpdate(skin.FaceIndex, Matrix4x4.Identity);
+                    continue;
+                }
+
                 viewport.ScheduleVertexUpdate(skin.FaceIndex, skin.BindVerts);
             }
             return;
@@ -983,13 +1021,49 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
             {
                 var bonesMap = (skin.UseVpBoneTransforms && vpAnimBones != null)
                     ? vpAnimBones : animBones;
+                var joints = skin.JointNames;
+                var ibms   = skin.InvBindMatrices;
+                int jointCount = joints.Length;
+
+                // GPU fast-path: pack skin matrices and enqueue a compute job instead of running
+                // the CPU vertex loop. Falls back to CPU when GpuData is not yet registered
+                // (first 1-2 frames after upload), compute is unavailable, or -- AvatarViewer-
+                // specific -- this face has facial-morph capability (see _morphableFaceIndices'
+                // own doc comment: GPU compute uploads BindVerts once into a static SSBO, so a
+                // morphed face's per-tick BindVerts mutation below would never reach the GPU).
+                if (skin.GpuData is { IsDisposed: false } gpuData && !_morphableFaceIndices.Contains(skin.FaceIndex))
+                {
+                    // skinMats is pure scratch (packed into mats below, then discarded) -- pooled
+                    // like SceneAvatarAnimator's identical intermediate array. mats itself is
+                    // gpuData's own reused buffer, not pooled or allocated fresh -- see
+                    // AcquireSkinMatsWriteBuffer's own doc comment for why a per-tick allocation
+                    // isn't needed and a single in-place buffer isn't safe.
+                    Matrix4x4[] skinMats = ArrayPool<Matrix4x4>.Shared.Rent(jointCount);
+                    for (int ji = 0; ji < jointCount; ji++)
+                    {
+                        // Absent joint -> honest bind-pose passthrough (Identity), matching
+                        // SceneAvatarAnimator's own reasoning: a zero matrix here would collapse
+                        // any vertex weighted to that joint toward the mesh's local origin.
+                        skinMats[ji] = bonesMap.TryGetValue(joints[ji], out var bm) ? ibms[ji] * bm : Matrix4x4.Identity;
+                    }
+                    var mats = gpuData.AcquireSkinMatsWriteBuffer();
+                    for (int ji = 0; ji < jointCount; ji++)
+                    {
+                        int b = ji * 16;
+                        ref readonly var m = ref skinMats[ji];
+                        mats[b +  0] = m.M11; mats[b +  1] = m.M12; mats[b +  2] = m.M13; mats[b +  3] = m.M14;
+                        mats[b +  4] = m.M21; mats[b +  5] = m.M22; mats[b +  6] = m.M23; mats[b +  7] = m.M24;
+                        mats[b +  8] = m.M31; mats[b +  9] = m.M32; mats[b + 10] = m.M33; mats[b + 11] = m.M34;
+                        mats[b + 12] = m.M41; mats[b + 13] = m.M42; mats[b + 14] = m.M43; mats[b + 15] = m.M44;
+                    }
+                    ArrayPool<Matrix4x4>.Shared.Return(skinMats);
+                    viewport.ScheduleSkinCompute(new VkSkinComputeJob(gpuData, mats));
+                    continue;
+                }
 
                 // Stride is 12 floats (pos3+normal3+uv2+tangent4) — see AvatarFaceSkinData.BindVerts.
                 int nvR = skin.BindVerts.Length / 12;
                 float[] nvBufR = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
-                var joints = skin.JointNames;
-                var ibms   = skin.InvBindMatrices;
-                int jointCount = joints.Length;
 
                 for (int vi = 0; vi < nvR; vi++)
                 {
@@ -1056,7 +1130,49 @@ public partial class AvatarViewerViewModel : ObservableObject, IDisposable
 
             if (skin.Bone1.Length == 0) continue;
 
-            // Stride is 12 floats (pos3+normal3+uv2+tangent4) — see AvatarFaceSkinData.BindVerts.
+            // Rigid single-bone fast path -- see AvatarFaceSkinData.IsRigidSingleBone's own doc
+            // comment for why this exists: every vertex on such a face gets the identical
+            // invBind[Bone1] * animBones[Bone1] product (weight 1.0, no second influence), so
+            // per-vertex GPU/CPU LBS below is redundant work computing the same 4x4 product once
+            // per vertex instead of once per face. Skips both the GPU dispatch branch and the CPU
+            // loop entirely -- neither ever registers/runs for these faces (see
+            // ApplyPendingSubmission's matching skip on the registration side).
+            if (skin.IsRigidSingleBone)
+            {
+                var rigidBone = skin.Bone1[0];
+                var rigidTransform = (animBones.TryGetValue(rigidBone, out var rm)
+                                      && invBind.TryGetValue(rigidBone, out var rib))
+                    ? rib * rm
+                    : Matrix4x4.Identity; // absent bone -> honest bind-pose passthrough, same
+                                           // reasoning as the GPU-path fallbacks above/below.
+                viewport.ScheduleFaceTransformUpdate(skin.FaceIndex, rigidTransform);
+                continue;
+            }
+
+            // GPU fast-path for the 2-bone body path -- see the rigged-mesh branch's own comment
+            // above (same registration/fallback/morph-gate contract). Unlike SceneAvatarAnimator
+            // this file has no precomputed per-bone skin-matrix dictionary (its CPU path below
+            // does a per-vertex-per-bone invBind*animBones lookup instead), so the combined
+            // matrix is computed inline here, once per bone -- cheap, boneNames is a short list
+            // (SL's 2-bone body skeleton), not per-vertex.
+            if (skin.GpuData is { IsDisposed: false } gpuData2 && !_morphableFaceIndices.Contains(skin.FaceIndex))
+            {
+                var boneNames = gpuData2.BoneNames!;
+                var mats2     = gpuData2.AcquireSkinMatsWriteBuffer();
+                for (int bi = 0; bi < boneNames.Length; bi++)
+                {
+                    if (!animBones.TryGetValue(boneNames[bi], out var m) || !invBind.TryGetValue(boneNames[bi], out var ib)) continue;
+                    var sm = ib * m;
+                    int b = bi * 16;
+                    mats2[b +  0] = sm.M11; mats2[b +  1] = sm.M12; mats2[b +  2] = sm.M13; mats2[b +  3] = sm.M14;
+                    mats2[b +  4] = sm.M21; mats2[b +  5] = sm.M22; mats2[b +  6] = sm.M23; mats2[b +  7] = sm.M24;
+                    mats2[b +  8] = sm.M31; mats2[b +  9] = sm.M32; mats2[b + 10] = sm.M33; mats2[b + 11] = sm.M34;
+                    mats2[b + 12] = sm.M41; mats2[b + 13] = sm.M42; mats2[b + 14] = sm.M43; mats2[b + 15] = sm.M44;
+                }
+                viewport.ScheduleSkinCompute(new VkSkinComputeJob(gpuData2, mats2));
+                continue;
+            }
+
             int     nv    = skin.BindVerts.Length / 12;
             float[] nvBuf = ArrayPool<float>.Shared.Rent(skin.BindVerts.Length);
 

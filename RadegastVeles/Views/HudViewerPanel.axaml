@@ -6,7 +6,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Radegast.Veles.ViewModels"
-             xmlns:rendering="using:Radegast.Veles.Rendering"
              x:Class="Radegast.Veles.Views.HudViewerPanel"
              x:DataType="vm:HudViewerViewModel"
              AutomationProperties.Name="HUD viewer">
@@ -168,11 +167,15 @@
                            AutomationProperties.Name="Error message" />
             </Border>
 
-            <!-- 3-D viewport -->
-            <rendering:GlViewportControl x:Name="Viewport"
-                                         HorizontalAlignment="Stretch"
-                                         VerticalAlignment="Stretch"
-                                         AutomationProperties.Name="HUD viewport" />
+            <!-- 3-D viewport: constructed in code-behind, GL or Vulkan, since XAML can't
+                 conditionally declare one of two control types. See HudViewerPanel.axaml.cs's
+                 UseVulkanViewport build-time flag (plan Section 2's dual-backend design, "build
+                 constant during early phases" form), same pattern PrimViewerPanel and
+                 AvatarViewerPanel already use. -->
+            <ContentControl x:Name="ViewportHost"
+                            Background="Transparent"
+                            HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 
         </DockPanel>
     </Grid>

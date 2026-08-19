@@ -55,14 +55,25 @@
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.3" />
     <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.3" />
     <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.3.91" />
+    <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     <PackageReference Include="NVorbis" Version="0.10.5" />
     <PackageReference Include="SharpCompress" Version="0.49.1" />
-    <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Direct3D11" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.DXGI" Version="2.23.0" />
+    <PackageReference Include="XenoAtom.ShaderCompiler.Build" Version="1.2.2" />
   </ItemGroup>
-  <!-- Bakes every PackageReference's id+version into the assembly's metadata attributes so the
-       About dialog's Libraries tab (AboutWindow.axaml.cs, PopulateLibraries) can list them at
-       runtime without ever going stale. Metadata-batching (%(...)) only expands inside a
-       Target, so this has to run as a Target rather than a bare ItemGroup. -->
+  <PropertyGroup>
+    <EnableDefaultShaderCompileItems>false</EnableDefaultShaderCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <ShaderCompile Include="Rendering\shader_data\vulkan\*.vert;Rendering\shader_data\vulkan\*.frag;Rendering\shader_data\vulkan\*.comp">
+      <ShaderCompilerOption_output_kind>content</ShaderCompilerOption_output_kind>
+      <ShaderCompilerOption_target_env>vulkan1.0</ShaderCompilerOption_target_env>
+    </ShaderCompile>
+    <ShaderCompilerGlobalOption_include_directory Include="Rendering\shader_data\vulkan" />
+  </ItemGroup>
   <Target Name="EmbedPackageReferenceMetadata" BeforeTargets="GetAssemblyAttributes">
     <ItemGroup>
       <AssemblyMetadata Include="PackageRef_%(PackageReference.Identity)" Value="%(PackageReference.Version)" />
@@ -76,7 +87,8 @@
     <AvaloniaResource Include="Assets\veles.ico" />
     <AvaloniaResource Include="Assets\veles.png" />
     <AvaloniaResource Include="Assets\sidebar.png" />
-    <AvaloniaResource Include="Rendering\shader_data\*" />
+    <AvaloniaResource Include="Rendering\shader_data\normalmap.png" />
+    <AvaloniaResource Include="Rendering\shader_data\dudvmap.png" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="..\Radegast\grids.xml" Link="grids.xml">

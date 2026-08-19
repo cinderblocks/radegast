@@ -72,7 +72,7 @@ public sealed class HoverTextItem
 internal sealed class SceneNameTagService : IDisposable
 {
     private readonly GridClient          _client;
-    private readonly GlViewportControl   _viewport;
+    private readonly ISceneViewport   _viewport;
     private readonly SceneAvatarStreamer _avatarStreamer;
 
     // Height above avatar root position where the name tag is anchored (metres).
@@ -100,7 +100,7 @@ internal sealed class SceneNameTagService : IDisposable
     /// </summary>
     public event Action<IReadOnlyList<HoverTextItem>>?  HoverTagsUpdated;
 
-    public SceneNameTagService(GridClient client, GlViewportControl viewport, SceneAvatarStreamer avatarStreamer)
+    public SceneNameTagService(GridClient client, ISceneViewport viewport, SceneAvatarStreamer avatarStreamer)
     {
         _client         = client;
         _viewport       = viewport;

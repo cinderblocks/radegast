@@ -41,10 +41,6 @@ namespace Radegast.Veles.ViewModels;
 /// disposable so the GL viewport, shaders, FBOs, and per-frame rendering loop can
 /// be torn down completely when the user closes the tab (saving CPU/GPU/RAM).
 /// </para>
-/// <para>
-/// Slice 1 only hosts an empty <see cref="GlViewportControl"/>; terrain, water,
-/// prim streaming, avatars, and movement are added in later slices.
-/// </para>
 /// </summary>
 public partial class SceneViewerViewModel : ObservableObject, IDisposable
 {
@@ -53,7 +49,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     // ProcessChatInput (gesture/command/RLV handling) rather than reimplemented here, and
     // its history buffer is shared so Ctrl+Up/Down recall works across both chat surfaces.
     private readonly NearbyViewModel _chat;
-    private GlViewportControl? _viewport;
+    private ISceneViewport? _viewport;
     private bool _disposed;
 
     private SceneTerrainBuilder? _terrainBuilder;
@@ -108,7 +104,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private string _chatInput = string.Empty;
     /// <summary>Whether the viewport's chat input box is shown (toggled by Enter / the chat button).</summary>
     [ObservableProperty] private bool   _chatInputVisible;
-    /// <summary>True while the viewport is in first-person mouselook (see <see cref="GlViewportControl.MouselookActive"/>).</summary>
+    /// <summary>True while the viewport is in first-person mouselook (see <see cref="ISceneViewport.MouselookActive"/>).</summary>
     [ObservableProperty] private bool   _mouselookActive;
     [ObservableProperty] private bool   _isFlying;
     [ObservableProperty] private bool   _isRunning;
@@ -242,7 +238,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     /// Attach the GL viewport so the VM can configure it and submit
     /// geometry to it. Called from the view's code-behind after the visual tree is ready.
     /// </summary>
-    public void SetViewport(GlViewportControl viewport)
+    public void SetViewport(ISceneViewport viewport)
     {
         _viewport                           = viewport;
         _viewport.Wireframe                  = Wireframe;
@@ -261,7 +257,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.Stats.FrameCompleted  += OnFrameCompleted;
         _viewport.InitFailed += msg =>
         {
-            StatusText = $"GL init failed: {msg}";
+            // This event is the only place a panel-fatal RenderFrame/init failure (e.g. an
+            // OOM not caught by a narrower per-object try/catch) surfaces at all, so it must
+            // be logged, not just reflected in the StatusText UI label.
+            LibreMetaverse.Logger.Error($"[SceneViewer] Viewport init failed: {msg}");
+            StatusText = $"Viewport init failed: {msg}";
         };
         _viewport.SceneReset            += OnSceneReset;
         _viewport.FaceClicked           += OnFaceClicked;
@@ -368,7 +368,6 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _objectStreamer?.OnObjectUpdate(sim, prim, isAttachment: false);
         }
 
-        // Seed avatars.
         foreach (var avatar in sim.ObjectsAvatars.Values)
         {
             _avatarStreamer?.OnAvatarUpdate(sim, avatar);
@@ -425,9 +424,6 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _objectStreamer.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _particleStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
         _lightStreamer?.OnObjectUpdate(e.Simulator, e.Prim, e.IsAttachment);
-        // Other-avatar attachments were previously never forwarded here at all, so an
-        // avatar attaching new mesh after being rendered never re-triggered a rebuild —
-        // now load-bearing for the complexity system's recompute-on-attachment-change.
         if (e.IsAttachment)
             _avatarStreamer?.OnAttachmentObjectUpdate(e.Simulator, e.Prim, e.IsNew);
 
@@ -593,10 +589,22 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                 _viewport.WaterHeight = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
             _ = RefreshTerrainAsync(centerCamera: true);
 
-            // Re-seed from whatever is already present in the new sim's object cache,
-            // then seed any already-connected neighbor sims.
-            SeedStreamersFromCurrentSim();
-            SeedNeighborSims();
+            // Re-seed from whatever is already present in the new sim's object cache, then seed
+            // any already-connected neighbor sims. Backgrounded: both walk every cached prim in
+            // the current sim plus every connected neighbor sim's full cache, synchronously,
+            // every crossing (Clear() above just wiped _rendered, and the coordinate frame
+            // shifted, so everything genuinely needs re-enqueuing) -- at a busy border with
+            // multiple neighbors connected that's tens of thousands of prims, enough to freeze
+            // the UI thread for the better part of a minute if run inline. Safe to move off-
+            // thread: every streamer method called here (OnObjectUpdate, OnAvatarUpdate,
+            // SeedFromCurrentSim) is already invoked routinely from LibreMetaverse network I/O
+            // threads during normal operation, and each one only touches ConcurrentDictionary-
+            // backed streamer state -- no Avalonia UI-bound collection or dispatcher affinity involved.
+            _ = Task.Run(() =>
+            {
+                SeedStreamersFromCurrentSim();
+                SeedNeighborSims();
+            });
         });
     }
 
@@ -611,7 +619,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                 _viewport.WaterHeight = e.Simulator.WaterHeight;
             _envService?.OnRegionChanged();
             _ = RefreshTerrainAsync(centerCamera: true);
-            SeedStreamersFromCurrentSim();
+            // Backgrounded like the seed walks in OnSimChanged/OnSceneReset: this is the handler
+            // for a FRESH connect (first login, or a neighbor sim finishing its own handshake),
+            // not a crossing between already-known sims, but LibreMetaverse can have a
+            // substantial on-disk object cache already populated for a previously-visited region
+            // the moment SimConnected fires, so this must not run inline on the calling thread.
+            _ = Task.Run(SeedStreamersFromCurrentSim);
         }
         else
         {
@@ -832,7 +845,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Mirrors <see cref="GlViewportControl.MouselookActive"/> and switches the camera between
+    /// Mirrors <see cref="ISceneViewport.MouselookActive"/> and switches the camera between
     /// third-person orbit and first-person mouselook. Only the view is first-person in this
     /// slice — avatar body rotation and movement direction still follow the third-person
     /// turn/strafe keys, not the look direction.
@@ -987,7 +1000,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (MouselookActive)
         {
             // In mouselook the user's mouse drives Yaw/Pitch directly (see
-            // GlViewportControl.OnPointerMoved) — just keep the fixed eye position
+            // VkViewportControl.OnPointerMoved) — just keep the fixed eye position
             // tracking the avatar, don't auto-rotate yaw to face heading.
             var eye = new Vector3(pos.X, pos.Y, pos.Z + 1.0f);
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
@@ -1372,6 +1385,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _viewport.SceneReset       -= OnSceneReset;
             _viewport.GroundClicked    -= OnGroundClicked;
             _viewport.MouselookChanged -= OnMouselookChanged;
+            _viewport.Stats.FrameCompleted -= OnFrameCompleted;
+        }
+
+        if (_nameTagService != null)
+        {
+            _nameTagService.TagsUpdated      -= OnNameTagsUpdated;
+            _nameTagService.HoverTagsUpdated -= OnHoverTagsUpdated;
         }
 
         // Release any held movement keys so the avatar doesn't keep moving.
@@ -1455,17 +1475,17 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
     // ── GL context lifecycle ──────────────────────────────────────────────────────
 
-    // Called on the UI thread by GlViewportControl after every successful GlInit.
-    // Avalonia's TabControl detaches the visual tree on tab switch, which destroys
-    // the GL context (GlDeinit) and frees all GPU scene data. When the user returns
-    // to the SceneViewer tab, GlInit fires again — but the streamers' _rendered sets
-    // still think all objects are uploaded. Re-dirtying everything triggers a full
-    // re-upload into the fresh GL context.
+    // Called on the UI thread by the viewport (VkViewportControl) via its SceneReset event
+    // after every successful init, including tab-switch re-attaches. Avalonia's TabControl
+    // detaches the visual tree on tab switch, which destroys the GPU context and frees all
+    // GPU scene data. When the user returns to the SceneViewer tab, init fires again — but
+    // the streamers' _rendered sets still think all objects are uploaded. Re-dirtying
+    // everything triggers a full re-upload into the fresh GPU context.
     private void OnSceneReset()
     {
         if (_disposed) return;
 
-        // Re-dirty everything that was rendered before the GL context teardown.
+        // Re-dirty everything that was rendered before the GPU context teardown.
         _objectStreamer?.RebuildAllRendered();
         _avatarStreamer?.RebuildAllRendered();
 
@@ -1474,8 +1494,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // nothing. SeedStreamersFromCurrentSim covers those objects. Both paths key on
         // rootId in _dirty (a ConcurrentDictionary), so duplicates are simply
         // overwritten — the scheduler never sees duplicate entries.
-        SeedStreamersFromCurrentSim();
-        SeedNeighborSims();
+        // Backgrounded: this method itself runs on the UI thread (per its own header comment),
+        // so the seed walk must not run inline on it -- same reasoning as OnSimChanged's Task.Run.
+        _ = Task.Run(() =>
+        {
+            SeedStreamersFromCurrentSim();
+            SeedNeighborSims();
+        });
 
         // Terrain geometry was disposed with the old GL context.  Rebuild it now.
         _ = RefreshTerrainAsync();
@@ -1483,20 +1508,42 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
     // ── Frame-stats callback ──────────────────────────────────────────────────────
 
+    private long _lastPerfOverlayLogTicks;
+
     // Called on the GL thread by FrameStatsTracker; marshal to UI thread for binding.
     private void OnFrameCompleted(FrameStats stats)
     {
-        if (_disposed || !ShowPerfOverlay) return;
+        if (_disposed) return;
 
         // Snapshot in-flight counters on the calling thread — all reads are O(1) atomic/lock-free.
         int buildQueue   = _buildScheduler?.QueueCount          ?? 0;
         int objBuilds    = _objectStreamer?.InflightCount        ?? 0;
         int avBuilds     = _avatarStreamer?.InflightCount        ?? 0;
-        int pendingUpl   = _viewport?.PendingUploadCount        ?? 0;
+        int pendingUpl   = _viewport?.PendingSceneUploadCount   ?? 0;
         int texDecodes   = GridTextureHelper.InflightDecodeCount;
         int patchQueue   = _viewport?.QueuedTexturePatchCount   ?? 0;
         int patchDeferred = _viewport?.DeferredTexturePatchCount ?? 0;
         int sceneFaces   = _viewport?.SceneFaceCount            ?? 0;
+        double drainObj  = _viewport?.DrainSceneObjectsMs      ?? 0;
+        double drainPatch = _viewport?.DrainTexturePatchesMs    ?? 0;
+        double skinMs    = _viewport?.SkinDispatchMs            ?? 0;
+        double flexiMs   = _viewport?.FlexiDispatchMs           ?? 0;
+        double vertUpdMs = _viewport?.VertexUpdateDrainMs       ?? 0;
+        double recordMs  = _viewport?.MainPassRecordMs          ?? 0;
+        double submitMs  = _viewport?.MainPassSubmitWaitMs      ?? 0;
+        double preCullMs = _viewport?.PreCullMs                 ?? 0;
+        double subPassCumMs = _viewport?.SubPassMs              ?? 0;
+        double subPassMs = subPassCumMs - preCullMs;
+        double mainDrawMs = recordMs - subPassCumMs;
+        double particleDrainMs = _viewport?.ParticleDrainMs     ?? 0;
+        double beginDrawCumMs = _viewport?.BeginDrawMs          ?? 0;
+        double beginDrawMs = beginDrawCumMs - particleDrainMs;
+        double depthCullMs = preCullMs - beginDrawCumMs;
+        double swapFreeMs = _viewport?.SwapchainFreeCmdBuffersMs ?? 0;
+        double swapAcquireMs = _viewport?.SwapchainBeginDrawCoreMs ?? 0;
+        double submitCallMs = _viewport?.SubmitCallMs ?? 0;
+        double fenceWaitMs = _viewport?.FenceWaitMs ?? 0;
+        int liveInstances = _viewport?.LiveInstanceCount ?? 0;
 
         var text = $"CPU {stats.CpuTimeMs:F1} ms" +
                    (stats.GpuTimeMs > 0 ? $"  GPU {stats.GpuTimeMs:F1} ms" : string.Empty) +
@@ -1505,7 +1552,26 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                    $"\nBuild Q:{buildQueue}  Obj:{objBuilds}  Av:{avBuilds}" +
                    $"\nUpload Q:{pendingUpl}  TexDec:{texDecodes}" +
                    $"\nPatches Q:{patchQueue}  Deferred:{patchDeferred}  SceneFaces:{sceneFaces:#,0}" +
+                   $"\nDrain SObj:{drainObj:F1}ms Patch:{drainPatch:F1}ms" +
+                   $"\nDeformer Skin:{skinMs:F1}ms Flexi:{flexiMs:F1}ms VertexUpd:{vertUpdMs:F1}ms" +
+                   $"\nRecord:{recordMs:F1}ms SubmitWait:{submitMs:F1}ms(Call:{submitCallMs:F1}ms Fence:{fenceWaitMs:F1}ms) Panels:{liveInstances}" +
+                   $"\nPreCull:{preCullMs:F1}ms SubPass:{subPassMs:F1}ms MainDraw:{mainDrawMs:F1}ms" +
+                   $"\nParticles:{particleDrainMs:F1}ms BeginDraw:{beginDrawMs:F1}ms(Free:{swapFreeMs:F1}ms Acquire:{swapAcquireMs:F1}ms) DepthCull:{depthCullMs:F1}ms" +
                    $"\nMeshCache {PrimMeshBuilder.MeshCacheHits}h/{PrimMeshBuilder.MeshCacheMisses}m";
+
+        // Logged unconditionally (not gated on ShowPerfOverlay), throttled to 1/sec -- same
+        // pattern VkSkinDeformer/GridTextureHelper use for their own per-tick diagnostics.
+        // FrameCompleted already fires every frame regardless of the overlay toggle, so this
+        // costs nothing extra when the UI isn't showing it.
+        long nowTicks = Environment.TickCount64;
+        if (nowTicks - _lastPerfOverlayLogTicks >= 1000)
+        {
+            _lastPerfOverlayLogTicks = nowTicks;
+            LibreMetaverse.Logger.Debug("[SceneViewerViewModel] Perf: " + text.Replace('\n', ' '));
+        }
+
+        if (!ShowPerfOverlay) return;
+
         Dispatcher.UIThread.Post(() =>
         {
             if (!_disposed) PerfOverlayText = text;

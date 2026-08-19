@@ -59,9 +59,22 @@ internal sealed class SceneBuildScheduler : IDisposable
     private readonly object _queueLock = new();
 
     // Priority queue: highest-priority items dequeued first.
-    // Key: unique entry id (scheduler-assigned). Value: (priority, factory).
-    // We use a sorted list so the highest entry is always at the tail.
-    private readonly SortedList<float, Func<CancellationToken, Task>> _queue = new(PriorityComparer.Instance);
+    // Key: (priority, insertion sequence) -- the sequence number breaks ties, guaranteeing
+    // uniqueness regardless of how many entries share a priority. We use a sorted list so the
+    // highest entry is always at the tail.
+    //
+    // Previously nudged colliding float priorities by 1e-7f in a loop instead of using a
+    // sequence tiebreaker. That's silently unsound: IEEE-754 float has ~7 decimal digits of
+    // precision, so for any priority magnitude >= ~1.0 (ordinary for a close-range avatar --
+    // AvatarMultiplier=8, up to 24 with FrustumBoost), `priority + 1e-7f == priority` -- the
+    // nudge is a no-op and the while loop spins forever while holding _queueLock. Root-caused
+    // 2026-08-19 after a checkpoint bisection through VkViewportControl.RenderFrame ->
+    // VkFrameStatsTracker.EndFrame -> SceneViewerViewModel.OnFrameCompleted traced a
+    // region-crossing UI freeze to exactly this lock never being released; confirmed via direct
+    // IEEE-754 arithmetic (priority>=1.0f collisions never advance) before landing this fix.
+    private readonly SortedList<(float Priority, long Seq), Func<CancellationToken, Task>> _queue = new(PriorityComparer.Instance);
+
+    private long _seq;
 
     private bool _disposed;
 
@@ -139,10 +152,9 @@ internal sealed class SceneBuildScheduler : IDisposable
 
         lock (_queueLock)
         {
-            // SortedList requires unique keys — nudge duplicates by a tiny epsilon.
-            while (_queue.ContainsKey(priority))
-                priority += 1e-7f;
-            _queue[priority] = factory;
+            // The sequence number guarantees a unique key with no loop, no matter how many
+            // entries share this exact priority.
+            _queue[(priority, _seq++)] = factory;
 
             // Drop the lowest-priority entry when the queue overflows so we never
             // accumulate hundreds of pending tasks during a burst scene load.
@@ -222,10 +234,16 @@ internal sealed class SceneBuildScheduler : IDisposable
         }
     }
 
-    // IComparer that orders floats ascending so the SortedList tail is the max.
-    private sealed class PriorityComparer : IComparer<float>
+    // Orders by priority ascending (so the SortedList tail is the max), then by insertion
+    // sequence ascending on a priority tie -- ties are common (many objects at the same
+    // distance/type) and previously required the now-removed epsilon-nudge loop to break.
+    private sealed class PriorityComparer : IComparer<(float Priority, long Seq)>
     {
         public static readonly PriorityComparer Instance = new();
-        public int Compare(float x, float y) => x.CompareTo(y);
+        public int Compare((float Priority, long Seq) x, (float Priority, long Seq) y)
+        {
+            int c = x.Priority.CompareTo(y.Priority);
+            return c != 0 ? c : x.Seq.CompareTo(y.Seq);
+        }
     }
 }

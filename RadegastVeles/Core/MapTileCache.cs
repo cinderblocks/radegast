@@ -83,11 +83,9 @@ public static class MapTileCache
             // If a download is already in-flight, the callback is now registered; nothing else to do.
             if (TextureDownloadQueue.Instance.IsPending(queueKey)) return;
 
-            // cacheResult: false — this class is the sole owner of the decoded tile bitmaps
-            // (see the Cache field above). Letting TextureDownloadQueue's own internal cache
-            // also hold a reference would give the same Bitmap instance to two independently
-            // evicting/disposing LRU caches, which could dispose a tile out from under a live
-            // GetTile() result mid-render (ObjectDisposedException in GridMapControl.Render).
+            // cacheResult: false — this class must be the sole owner of the decoded tile bitmap.
+            // If TextureDownloadQueue's own cache also held a reference, two independently
+            // evicting LRU caches could dispose the same Bitmap out from under a live GetTile().
             var url = $"https://map.secondlife.com/map-1-{gridX}-{gridY}-objects.jpg";
             TextureDownloadQueue.Instance.Enqueue(queueKey, url, bitmap =>
             {

@@ -132,13 +132,11 @@ internal sealed class FlexiSceneScheduler : IDisposable
 
                     if (skipped >= divisor)
                     {
-                        // Catch-up dt: the physics forces (gravity/wind/tension impulses)
-                        // are scaled by dt, so a throttled animator needs the elapsed time
-                        // since its last real tick, not just this cycle's slice, or it would
-                        // settle into a visibly stiffer rest pose than an un-throttled one.
-                        // Still clamped to the same 0.1s stability bound TickAndUpload's own
-                        // per-cycle dt uses — the friction/tension terms are exponentiated by
-                        // dt and were never meant to see a value this large.
+                        // Catch-up dt: the physics forces (gravity/wind/tension impulses) are
+                        // scaled by dt, so a throttled animator needs the elapsed time since its
+                        // last real tick, not just this cycle's slice, or it would settle into a
+                        // visibly stiffer rest pose than an un-throttled one. Still clamped to
+                        // the same 0.1s stability bound TickAndUpload's own per-cycle dt uses.
                         animator.Tick(Math.Min(dt * skipped, 0.1f));
                         _registered[animator] = 0;
                     }

@@ -30,9 +30,8 @@ namespace Radegast.Veles.Rendering;
 /// Bridges EEP / Windlight region environment data from LibreMetaverse to the
 /// scene renderer.  Subscribes to <c>RegionEnvironmentUpdated</c>, parses the
 /// LLSD day-cycle (EEP and legacy Windlight formats), and computes per-frame sky
-/// and water parameters that are sampled by <see cref="GlViewportControl"/> once
-/// per render pass via <see cref="GetCurrentSky"/> and
-/// <see cref="GetCurrentWaterFogColor"/>.
+/// and water parameters that are sampled once per render pass via
+/// <see cref="GetCurrentSky"/> and <see cref="GetCurrentWaterFogColor"/>.
 /// </summary>
 public sealed class SceneEnvironmentService : IDisposable
 {
@@ -47,7 +46,7 @@ public sealed class SceneEnvironmentService : IDisposable
     private long _lastFetchTick;
 
     // Parsed keyframe tracks – sorted by normalised time [0, 1).
-    // Written from the network thread, read from the GL thread.
+    // Written from the network thread, read from the render thread.
     // List references are replaced atomically; reads always see a consistent snapshot.
     private volatile IReadOnlyList<(double t, ParsedSkyFrame sf)>   _skyTrack;
     private volatile IReadOnlyList<(double t, ParsedWaterFrame wf)> _waterTrack;
@@ -115,11 +114,11 @@ public sealed class SceneEnvironmentService : IDisposable
         _ = _instance.Client.Environment.GetRegionEnvironmentAsync();
     }
 
-    // ── GL-thread API ─────────────────────────────────────────────────────────────
+    // ── Render-thread API ────────────────────────────────────────────────────────
 
     /// <summary>
     /// Returns interpolated <see cref="SkySettings"/> for the current day-cycle time.
-    /// Call once per frame from the GL render loop.
+    /// Call once per frame from the render loop.
     /// </summary>
     public SkySettings GetCurrentSky()
     {
@@ -141,7 +140,7 @@ public sealed class SceneEnvironmentService : IDisposable
 
     /// <summary>
     /// Returns interpolated water fog colour for the current day-cycle time.
-    /// Call once per frame from the GL render loop.
+    /// Call once per frame from the render loop.
     /// </summary>
     public Vector4 GetCurrentWaterFogColor()
         => InterpolateWater(ComputeProgress(), _waterTrack);
@@ -222,11 +221,10 @@ public sealed class SceneEnvironmentService : IDisposable
         _skyTrack   = skyKeys  .Count > 0 ? (IReadOnlyList<(double, ParsedSkyFrame)>)skyKeys   : MakeDefaultSkyTrack();
         _waterTrack = waterKeys.Count > 0 ? (IReadOnlyList<(double, ParsedWaterFrame)>)waterKeys : MakeDefaultWaterTrack();
 
-        // Region WL/EEP params vary wildly (ambient-dominant skies, extreme
-        // densities…) and have repeatedly been the root cause of sky-rendering
-        // bugs; one line per environment update makes the actual inputs visible.
-        // Keyframe times + current progress let the rendered time-of-day be
-        // checked against the sim's (frame0 is usually the midnight key, so a
+        // Region WL/EEP params vary wildly (ambient-dominant skies, extreme densities…) and
+        // have repeatedly caused sky-rendering bugs, so log the actual inputs on every
+        // environment update. Keyframe times + current progress let the rendered time-of-day
+        // be checked against the sim's (frame0 is usually the midnight key, so a
         // "wrong-looking" sky is often just the cycle sitting near night).
         if (skyKeys.Count > 0)
         {
@@ -320,13 +318,12 @@ public sealed class SceneEnvironmentService : IDisposable
             // fields like sunlight_color, not this legacy compatibility block). Using
             // the intensity-multiplying reader here was zeroing blue_density out
             // whenever legacy_haze's 4th array slot happened to be 0.
-            // Clamped defensively: live region data has already shown an "ambient" value
-            // with a channel at 3.0 (way outside a normal [0,1] colour range — confirmed
-            // via the diagnostic log), which blows out into an "unintended glow" across
-            // everything lit by it (this same Ambient feeds both the sky dome and
-            // GlViewportControl.DrawFaces's scene-geometry lighting). 1.5 gives some
-            // headroom for a legitimately bright/glowy region without letting a bad or
-            // unusually-encoded value blow out the render.
+            // Clamped defensively: live region data has shown an "ambient" value with a
+            // channel at 3.0 (way outside a normal [0,1] colour range), which blows out into
+            // an "unintended glow" across everything lit by it (this same Ambient feeds both
+            // the sky dome and the scene's geometry lighting). 1.5 gives some headroom for a
+            // legitimately bright/glowy region without letting a bad or unusually-encoded
+            // value blow out the render.
             var maxColor = new Vector3(1.5f);
             var  blueH  = Vector3.Clamp(ReadVec3(legacy, "blue_horizon", new Vector3(0.24f, 0.35f, 0.75f)), Vector3.Zero, maxColor);
             var  blueD  = Vector3.Clamp(ReadVec3(legacy, "blue_density", new Vector3(0.15f, 0.25f, 0.35f)), Vector3.Zero, maxColor);
@@ -337,9 +334,8 @@ public sealed class SceneEnvironmentService : IDisposable
             var  sunC   = Vector3.Clamp(map.ContainsKey("sunlight_color")
                 ? ReadColorRgb(map, "sunlight_color", new Vector3(0.73f, 0.78f, 0.90f))
                 : ReadColorRgb(map, "sun_moon_color", new Vector3(0.73f, 0.78f, 0.90f)), Vector3.Zero, maxColor);
-            // legacy_haze's own field is "ambient", not "sky_ambient" (confirmed via
-            // live key dump — sky_ambient never matched, so this always fell back to
-            // the local default).
+            // legacy_haze's own field is "ambient", not "sky_ambient" -- sky_ambient never
+            // matches, so using it would always fall back to the local default.
             var  amb    = Vector3.Clamp(ReadVec3(legacy, "ambient", new Vector3(0.25f, 0.25f, 0.25f)), Vector3.Zero, maxColor);
 
             float[] g     = ReadFloatArr(map, "glow", [5.0f, 0f, -0.01f, 1.0f]);

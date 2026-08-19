@@ -18,6 +18,7 @@
  */
 
 using System.Numerics;
+using Silk.NET.Vulkan;
 using SkiaSharp;
 
 namespace Radegast.Veles.Rendering;
@@ -44,8 +45,8 @@ public struct ParticleVertex
 
 /// <summary>
 /// A complete snapshot of particle data for one emitter, ready to be uploaded to the GPU.
-/// Transferred from the simulation thread to the GL thread via
-/// <see cref="GlViewportControl.SubmitParticles"/>.
+/// Transferred from the simulation thread to the render thread via
+/// <see cref="VkViewportControl.SubmitParticles"/>.
 /// </summary>
 public sealed class ParticleRenderSubmission
 {
@@ -59,11 +60,13 @@ public sealed class ParticleRenderSubmission
     public          SKBitmap?   Texture { get; init; }
 
     /// <summary>
-    /// OpenGL-compatible source blend factor (matches <c>Primitive.ParticleSystem.BlendFunc</c>).
-    /// Defaults to SRC_ALPHA.
+    /// Source blend factor (matches <c>Primitive.ParticleSystem.BlendFunc</c>, mapped by
+    /// <c>ParticleViewerDriver.MapBlendFunc</c>). Vulkan <see cref="Silk.NET.Vulkan.BlendFactor"/>
+    /// enum directly, consumed by <see cref="VkParticlePipeline.GetOrCreate"/> with no translation
+    /// layer. Defaults to SrcAlpha.
     /// </summary>
-    public          int BlendSrc { get; init; } = (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha;
+    public          BlendFactor BlendSrc { get; init; } = BlendFactor.SrcAlpha;
 
-    /// <summary>Defaults to ONE_MINUS_SRC_ALPHA.</summary>
-    public          int BlendDst { get; init; } = (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcAlpha;
+    /// <summary>Defaults to OneMinusSrcAlpha.</summary>
+    public          BlendFactor BlendDst { get; init; } = BlendFactor.OneMinusSrcAlpha;
 }

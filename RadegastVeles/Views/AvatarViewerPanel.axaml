@@ -6,7 +6,6 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:Radegast.Veles.ViewModels"
-             xmlns:rendering="using:Radegast.Veles.Rendering"
              xmlns:conv="using:Radegast.Veles.Converters"
              xmlns:sconv="using:Avalonia.Data.Converters"
              x:Class="Radegast.Veles.Views.AvatarViewerPanel"
@@ -158,12 +157,17 @@
                        AutomationProperties.Name="Error message" />
         </Border>
 
-        <!-- 3-D viewport -->
-        <rendering:GlViewportControl x:Name="Viewport"
-                                     Wireframe="{Binding Wireframe}"
-                                     HorizontalAlignment="Stretch"
-                                     VerticalAlignment="Stretch"
-                                     AutomationProperties.Name="3D avatar viewport" />
+        <!-- 3-D viewport: constructed in code-behind, GL or Vulkan, since XAML can't
+             conditionally declare one of two control types, see AvatarViewerPanel.axaml.cs's
+             UseVulkanViewport build-time flag (plan Section 2's dual-backend design, mirroring
+             PrimViewerPanel's own Milestone 12 pattern exactly). The Wireframe binding that
+             used to live here is redundant with AvatarViewerViewModel.SetViewport/
+             OnWireframeChanged, which already push Wireframe to whichever viewport is
+             attached, so it was dropped rather than replicated in code-behind. -->
+        <ContentControl x:Name="ViewportHost"
+                        Background="Transparent"
+                        HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
 
     </DockPanel>
 </UserControl>

@@ -21,11 +21,10 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Numerics;
-using System.Threading;
-using System.Threading.Tasks;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
 using Quaternion = System.Numerics.Quaternion;
+using Vector3    = System.Numerics.Vector3;
 using Vector4    = System.Numerics.Vector4;
 
 namespace Radegast.Veles.Rendering;
@@ -40,7 +39,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
     private readonly GridClient          _client;
     private readonly uint                _localId;   // avatar local ID
     private readonly uint                _sceneKey;  // key used in SubmitSceneObject
-    private readonly GlViewportControl   _viewport;
+    private readonly ISceneViewport      _viewport;
     private readonly AvatarBuildResult   _buildResult;
     private readonly AvatarAnimationPlayer _player;
 
@@ -63,11 +62,41 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
     private FlexiPrimAnimator? _flexi;
 
-    private readonly CancellationTokenSource _cts = new();
+    // World matrix received via UpdateAvatarWorldMatrix; forwarded to _flexi and also retained so
+    // AvatarSceneScheduler can distance-bucket this animator the same way FlexiSceneScheduler
+    // already does for FlexiPrimAnimator.ApproximateWorldPosition. Defaults to Identity
+    // (Translation = Zero) before the first update.
+    //
+    // Read (torn-read-tolerant) ONLY by ApproximateWorldPosition below, which just needs a
+    // coarse distance estimate for LOD bucketing -- NOT safe for anything render-affecting.
+    // See _publishedWorldMatrix immediately below for the render-affecting equivalent.
+    private Matrix4x4 _lastWorldMatrix = Matrix4x4.Identity;
+
+    // Reference-typed wrapper so a Matrix4x4 (64 bytes, not atomically writable/readable as a
+    // plain field) can be published across threads via a single atomic reference assignment --
+    // same fix shape as _attachBonesPublished above, for a single matrix instead of a dictionary.
+    // UpdateAvatarWorldMatrix (terse-update thread) writes it; Tick()'s rigid-single-bone branch
+    // (AvatarSceneScheduler's background thread) reads it to compose with each rigid face's local
+    // bone transform. A torn 64-byte read here would corrupt a matrix used to place rendered
+    // geometry.
+    private sealed class WorldMatrixBox { internal readonly Matrix4x4 Value; internal WorldMatrixBox(Matrix4x4 v) => Value = v; }
+    private volatile WorldMatrixBox? _publishedWorldMatrix;
+
+    // This tick's rigid-single-bone faces' LOCAL transforms (invBind*animBone per face, no world
+    // placement), published so UpdateAvatarWorldMatrix (terse-update thread) can safely recompose
+    // them with a freshly received world matrix between Tick() calls, avoiding a visible
+    // snap-to-bind-pose flicker on every terse update. A direct cross-thread read of
+    // _skinMatByName itself is NOT safe: Tick() clears and repopulates that dictionary in place
+    // every tick, so a concurrent read while Clear()/Add() run can throw or read a corrupted
+    // bucket -- not just a torn value. A freshly allocated array published via this field,
+    // written only once fully formed, sidesteps that. Null before the first Tick() call --
+    // UpdateAvatarWorldMatrix treats that as "not yet posed" and skips the re-push.
+    private volatile (int FaceIndex, Matrix4x4 Local)[]? _rigidLocalSnapshot;
+
     private bool _disposed;
 
     public SceneAvatarAnimator(GridClient client, uint localId, uint sceneKey,
-        GlViewportControl viewport, AvatarBuildResult buildResult)
+        ISceneViewport viewport, AvatarBuildResult buildResult)
     {
         _client      = client;
         _localId     = localId;
@@ -99,21 +128,61 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
     /// <summary>
     /// Updates the world-placement matrix on the flexi attachment animator so
-    /// flexi prims follow the avatar as it moves around the region.
-    /// Called from <see cref="SceneAvatarAnimationStreamer"/> on each terse update.
+    /// flexi prims follow the avatar as it moves around the region, and retains it for
+    /// <see cref="ApproximateWorldPosition"/>. Called from <see cref="SceneAvatarAnimationStreamer"/>
+    /// on each terse update.
     /// </summary>
     public void UpdateAvatarWorldMatrix(Matrix4x4 world)
-        => _flexi?.SetExternalTransform(world);
+    {
+        _lastWorldMatrix = world;
+        _publishedWorldMatrix = new WorldMatrixBox(world);
+        _flexi?.SetExternalTransform(world);
 
-    public void Start()
-        => _ = RunAsync(_cts.Token);
+        // Immediately re-push rigid-attachment transforms composed with the NEW world matrix --
+        // see Tick()'s rigid-single-bone branch for why face.Transform must carry both the local
+        // bone pose AND the world placement for these faces specifically (ordinary faces get
+        // their world placement from ApplySceneTransformOverrides alone and never have
+        // face.Transform touched by Tick(), so they don't need this). Without this, a terse
+        // update landing between two Tick() calls would have ApplySceneTransformOverrides/
+        // ExtrapolateMovingSceneObjects overwrite these faces' face.Transform with world-only (no
+        // bone data), producing a visible snap-to-bind-pose flicker until the next Tick() call.
+        // This call is fired from the same terse-update call site as SetSceneObjectTransform (see
+        // SceneAvatarStreamer.cs's own call site), and runs AFTER ApplySceneTransformOverrides in
+        // RenderFrame, so it deterministically wins within the same frame instead of racing it.
+        //
+        // Reads _rigidLocalSnapshot (published by the last Tick() call), NOT _skinMatByName
+        // directly -- see that field's own doc comment for why a direct cross-thread read of the
+        // dictionary Tick() mutates in place every tick is unsafe (not just torn, can throw).
+        // Null before the first Tick() call -- skip the re-push, an acceptable "not yet posed"
+        // gap matching every other bind-pose-fallback case in this file.
+        var snapshot = _rigidLocalSnapshot;
+        if (snapshot != null)
+        {
+            foreach (var (faceIndex, local) in snapshot)
+                _viewport.ScheduleSceneFaceTransformUpdate(_sceneKey, faceIndex, local * world);
+        }
+    }
+
+    /// <summary>
+    /// Cheap proxy for "where is this avatar right now" — mirrors
+    /// <see cref="FlexiPrimAnimator.ApproximateWorldPosition"/>'s own doc comment exactly.
+    /// Used by <see cref="AvatarSceneScheduler"/> to bucket animators into distance-based tick
+    /// rates — not precise enough for anything else.
+    /// </summary>
+    internal Vector3 ApproximateWorldPosition => _lastWorldMatrix.Translation;
+
+    /// <summary>
+    /// Lets <see cref="AvatarSceneScheduler"/> prune a disposed animator from its registry
+    /// instead of writing its throttle counter back — mirrors
+    /// <see cref="FlexiPrimAnimator.IsDisposed"/>'s own doc comment: a plain "is it still
+    /// registered" check isn't enough because disposal can race a tick already in flight.
+    /// </summary>
+    internal bool IsDisposed => _disposed;
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        _cts.Cancel();
-        _cts.Dispose();
         _player.Dispose();
     }
 
@@ -136,36 +205,15 @@ internal sealed class SceneAvatarAnimator : IDisposable
         }
     }
 
-    private async Task RunAsync(CancellationToken ct)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1.0 / 30.0));
-        var sw   = System.Diagnostics.Stopwatch.StartNew();
-        float prev = 0f;
-        try
-        {
-            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
-            {
-                float now = (float)sw.Elapsed.TotalSeconds;
-                float dt  = Math.Min(now - prev, 0.1f);
-                prev = now;
-                try
-                {
-                    AnimTick(dt);
-                }
-                catch (Exception ex)
-                {
-                    // A fire-and-forget RunAsync task previously swallowed any exception
-                    // here other than OperationCanceledException, silently killing the
-                    // whole per-tick loop (and every downstream diagnostic) with zero log
-                    // output — indistinguishable from AnimTick never being entered at all.
-                    Logger.DebugLog($"[AnimTickFail] AnimTick threw: {ex}");
-                }
-            }
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    private void AnimTick(float dt)
+    /// <summary>
+    /// Runs one animation step: advances the animation player, recomputes this avatar's
+    /// bone-hierarchy world matrices, and pushes deformed geometry (GPU-dispatched or CPU
+    /// fallback) to the viewport. Called at ~30 Hz (or a throttled fraction thereof for
+    /// avatars far from the camera) by <see cref="AvatarSceneScheduler"/>, which also owns
+    /// this animator's per-tick exception handling -- see that class's own doc comment for why
+    /// a shared scheduler needs that guard where a self-driven per-avatar timer didn't.
+    /// </summary>
+    public void Tick(float dt)
     {
         if (_disposed) return;
 
@@ -174,13 +222,13 @@ internal sealed class SceneAvatarAnimator : IDisposable
         var vpBt      = _buildResult.BoneTransforms;
         var invBind   = _invBindMatrices;
 
-        // Flexi attachments only need avatarDef + vpBt — they do NOT depend on rigged
-        // skin data, fitted bone transforms, or the inverse-bind dictionary.  If we
-        // gate the bone-provider push on those (as the rigged-skin path below must),
-        // an avatar that has no rigged faces (or whose skin data is still building)
-        // will never receive an AttachBoneProvider and its flexi attachments will
-        // sit at the static T-pose AttachTransform forever.  Push the provider
-        // unconditionally as soon as the skeleton is available.
+        // Flexi attachments only need avatarDef + vpBt -- they do NOT depend on rigged skin
+        // data, fitted bone transforms, or the inverse-bind dictionary. If we gate the
+        // bone-provider push on those (as the rigged-skin path below must), an avatar with no
+        // rigged faces (or whose skin data is still building) will never receive an
+        // AttachBoneProvider and its flexi attachments will sit at the static T-pose
+        // AttachTransform forever. Push the provider unconditionally as soon as the skeleton is
+        // available.
         IReadOnlyDictionary<string, Quaternion>? liveDeltas = null;
         Dictionary<string, float>?               morphWeights = null;
 
@@ -227,14 +275,23 @@ internal sealed class SceneAvatarAnimator : IDisposable
             }
         }
 
-        // Fix 3a: precompute combined skin matrix (invBind * animMat) for every named bone
-        // so the body/2-bone vertex loop does 1 lookup + 1 TransformRow instead of 2 + 2.
         _skinMatByName.Clear();
         foreach (var kv in invBind)
         {
             if (animBones.TryGetValue(kv.Key, out var anim))
                 _skinMatByName[kv.Key] = kv.Value * anim;
         }
+
+        // Read via the published box, not _lastWorldMatrix directly -- see
+        // _publishedWorldMatrix's own field comment for why a torn read of the plain field would
+        // be render-affecting. Read once for the whole tick, not per rigid face: all rigid faces
+        // on this avatar should compose against the SAME world placement snapshot, not whatever
+        // happened to land mid-loop if UpdateAvatarWorldMatrix races this tick.
+        var currentWorld = _publishedWorldMatrix?.Value ?? Matrix4x4.Identity;
+        // Accumulated below (rigid branch only) and published once, after the loop, via
+        // _rigidLocalSnapshot -- see that field's own doc comment for why UpdateAvatarWorldMatrix
+        // needs this rather than reading _skinMatByName directly.
+        List<(int FaceIndex, Matrix4x4 Local)>? rigidSnapshotBuilder = null;
 
         foreach (var skin in sd)
         {
@@ -248,8 +305,6 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 var ibms       = skin.InvBindMatrices;
                 int jointCount = joints.Length;
 
-                // Fix 3b: precompute per-joint skin matrix (invBind[ji] * animMat) before the
-                // vertex loop — replaces 1 dict lookup + 2 TransformRow with 1 array read + 1 TransformRow.
                 Matrix4x4[] skinMats = ArrayPool<Matrix4x4>.Shared.Rent(jointCount);
                 bool[]      hasSkin  = ArrayPool<bool>.Shared.Rent(jointCount);
                 for (int ji = 0; ji < jointCount; ji++)
@@ -259,24 +314,24 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     else
                     {
                         // GPU fast-path below packs skinMats unconditionally (no per-vertex
-                        // hasSkin branch like the CPU path has) — a joint absent from bonesMap
+                        // hasSkin branch like the CPU path has) -- a joint absent from bonesMap
                         // must resolve to Identity here so it packs as an honest bind-pose
-                        // passthrough, matching the CPU fallback (ap += w * bp) below. Leaving
-                        // this as the zero-initialized default produced a zero skin matrix on
-                        // the GPU path, which collapses any vertex weighted to that joint
-                        // toward the mesh's local origin — a plausible source of fanned-spike
-                        // artifacts distinct from (and worse than) the CPU path's behavior.
+                        // passthrough, matching the CPU fallback (ap += w * bp) below. A
+                        // zero-initialized default here would produce a zero skin matrix on the
+                        // GPU path, collapsing any vertex weighted to that joint toward the
+                        // mesh's local origin.
                         skinMats[ji] = Matrix4x4.Identity;
                         hasSkin[ji] = false;
                     }
                 }
 
-                // GPU fast-path: pack skin matrices and enqueue a compute job instead of
-                // running the CPU vertex loop.  Falls back to CPU when GpuData is not yet
-                // registered (first 1-2 frames) or if compute is unavailable.
+                // GPU fast-path: pack skin matrices and enqueue a compute job instead of running
+                // the CPU vertex loop. Falls back to CPU when GpuData is not yet registered (first
+                // 1-2 frames after upload, before UploadSceneObjectNoRebuild's registration
+                // catches up on the render thread) or if compute is unavailable.
                 if (skin.GpuData is { IsDisposed: false } gpuData)
                 {
-                    var mats = new float[jointCount * 16];
+                    var mats = gpuData.AcquireSkinMatsWriteBuffer();
                     for (int ji = 0; ji < jointCount; ji++)
                     {
                         // Always pack — skinMats[ji] is Identity (not the zero-initialized
@@ -291,7 +346,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     }
                     ArrayPool<Matrix4x4>.Shared.Return(skinMats);
                     ArrayPool<bool>.Shared.Return(hasSkin);
-                    _viewport.ScheduleSkinCompute(new SkinComputeJob(gpuData, mats));
+                    _viewport.ScheduleSkinCompute(new VkSkinComputeJob(gpuData, mats));
                     continue;
                 }
 
@@ -335,7 +390,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
                 }
 
                 _viewport.ScheduleSceneVertexUpdate(_sceneKey, skin.FaceIndex, nvBufR, skin.BindVerts.Length, isPoolRented: true);
-                // nvBufR ownership transferred to viewport queue; it will be returned to ArrayPool after GL upload.
+                // nvBufR ownership transferred to viewport queue; it will be returned to ArrayPool after upload.
                 ArrayPool<Matrix4x4>.Shared.Return(skinMats);
                 ArrayPool<bool>.Shared.Return(hasSkin);
                 continue;
@@ -343,11 +398,46 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
             if (skin.Bone1.Length == 0) continue;
 
-            // GPU fast-path for the 2-bone body path.
+            // Rigid single-bone fast path -- see AvatarFaceSkinData.IsRigidSingleBone's own doc
+            // comment: weight 1.0 with no second influence means every vertex on this face gets
+            // the identical invBind*animBone product, so per-vertex GPU/CPU LBS below is
+            // redundant. _skinMatByName[bone] is already exactly that product (precomputed above
+            // for the branches below), so this is a single dictionary hit, no extra math.
+            //
+            // Scene-object faces are built in avatar-LOCAL space (confirmed via
+            // ApplySceneTransformOverrides -> ApplyTransformToFaces, which stamps the avatar's
+            // world placement uniformly onto every non-flexi face's own face.Transform every
+            // terse update -- there would be no reason to do that if BindVerts already carried
+            // world position). The non-rigid branches below don't need to know this: they write
+            // deformed vertices into the VBO and leave face.Transform alone, so the terse-update
+            // machinery's write to face.Transform still supplies the world placement on top,
+            // untouched by AnimTick. But THIS branch replaces face.Transform outright -- composing
+            // with the avatar's current world placement (currentWorld, populated by
+            // UpdateAvatarWorldMatrix from the same worldMatrix value SceneAvatarStreamer hands
+            // SetSceneObjectTransform) is required, or every rigid attachment on every scene
+            // avatar renders at the region origin instead of on the avatar. Row-vector convention
+            // (Vector4.Transform(v, M) == v * M) throughout this codebase, so local-then-world is
+            // rigidLocal * currentWorld, matching ApplyTransformToFaces's own single
+            // world-placement write for every other face.
+            if (skin.IsRigidSingleBone)
+            {
+                var rigidLocal = _skinMatByName.TryGetValue(skin.Bone1[0], out var rsm)
+                    ? rsm
+                    : Matrix4x4.Identity; // absent bone -> honest bind-pose passthrough, same
+                                           // reasoning as the GPU-path fallbacks elsewhere in
+                                           // this method.
+                (rigidSnapshotBuilder ??= new List<(int, Matrix4x4)>()).Add((skin.FaceIndex, rigidLocal));
+                _viewport.ScheduleSceneFaceTransformUpdate(
+                    _sceneKey, skin.FaceIndex, rigidLocal * currentWorld);
+                continue;
+            }
+
+            // GPU fast-path for the 2-bone body path -- see the rigged-skin branch's own comment
+            // above (same registration/fallback contract).
             if (skin.GpuData is { IsDisposed: false } gpuData2)
             {
                 var boneNames = gpuData2.BoneNames!;
-                var mats2     = new float[boneNames.Length * 16];
+                var mats2     = gpuData2.AcquireSkinMatsWriteBuffer();
                 for (int bi = 0; bi < boneNames.Length; bi++)
                 {
                     if (!_skinMatByName.TryGetValue(boneNames[bi], out var sm)) continue;
@@ -357,7 +447,7 @@ internal sealed class SceneAvatarAnimator : IDisposable
                     mats2[b +  8] = sm.M31; mats2[b +  9] = sm.M32; mats2[b + 10] = sm.M33; mats2[b + 11] = sm.M34;
                     mats2[b + 12] = sm.M41; mats2[b + 13] = sm.M42; mats2[b + 14] = sm.M43; mats2[b + 15] = sm.M44;
                 }
-                _viewport.ScheduleSkinCompute(new SkinComputeJob(gpuData2, mats2));
+                _viewport.ScheduleSkinCompute(new VkSkinComputeJob(gpuData2, mats2));
                 continue;
             }
 
@@ -379,7 +469,6 @@ internal sealed class SceneAvatarAnimator : IDisposable
 
                 var   b1 = skin.Bone1[vi];
                 float w1 = skin.Weight1[vi];
-                // Fix 3a applied: single lookup into _skinMatByName (= invBind * animMat)
                 if (w1 > 1e-4f && _skinMatByName.TryGetValue(b1, out var sm1))
                 {
                     ap += w1 * Vector4.Transform(bp, sm1);
@@ -410,7 +499,12 @@ internal sealed class SceneAvatarAnimator : IDisposable
             }
 
             _viewport.ScheduleSceneVertexUpdate(_sceneKey, skin.FaceIndex, nvBuf, skin.BindVerts.Length, isPoolRented: true);
-            // nvBuf ownership transferred to viewport queue; it will be returned to ArrayPool after GL upload.
         }
+
+        // Publish this tick's rigid-face local transforms -- see _rigidLocalSnapshot's own field
+        // comment for why UpdateAvatarWorldMatrix needs this rather than reading _skinMatByName
+        // directly. Always assigned (even null, when this avatar has no rigid faces) so a stale
+        // snapshot from a since-changed skin-data set can't linger.
+        _rigidLocalSnapshot = rigidSnapshotBuilder?.ToArray();
     }
 }

@@ -547,7 +547,7 @@ public partial class MainWindow : Window
     // via "{Binding SceneViewer}", relying on an inherited DataContext that resolves to null
     // the moment the control is reparented (briefly parentless mid-move, then under
     // PanelHostWindow, which never sets a DataContext of its own) — silently collapsing
-    // Content to null and tearing down the templated SceneViewerPanel/GlViewportControl
+    // Content to null and tearing down the templated SceneViewerPanel/VkViewportControl
     // entirely. So instead: detaching closes the docked instance and opens a brand new one
     // hosted directly in its own window, the same pattern already used for
     // PrimViewer/AvatarViewer (RadegastInstanceAvalonia.ShowPrimViewer/ShowAvatarViewer).

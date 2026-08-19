@@ -34,11 +34,11 @@ namespace Radegast.Veles.Rendering;
 /// <para>
 /// Unlike the original CPU-side splatting approach (which pre-composited the four detail
 /// textures into one texture using the terrain mesh's simple top-down planar UVs), the
-/// blending itself now happens in <c>prim.frag</c> at draw time via triplanar projection —
-/// see <see cref="GlViewportControl"/>'s terrain path. That avoids the severe stretching a
-/// pre-baked, planar-UV-mapped texture suffers on steep terrain (a single top-down UV
-/// coordinate is shared by every vertex at that (x,y), regardless of how tall the slope
-/// is there), and removes a real per-rebuild CPU cost (a 2048×2048 parallel pixel blend).
+/// blending itself now happens in <c>prim.frag</c> at draw time via triplanar projection.
+/// That avoids the severe stretching a pre-baked, planar-UV-mapped texture suffers on steep
+/// terrain (a single top-down UV coordinate is shared by every vertex at that (x,y),
+/// regardless of how tall the slope is there), and removes a real per-rebuild CPU cost (a
+/// 2048×2048 parallel pixel blend).
 /// </para>
 /// </summary>
 /// <remarks>Layer-map math ported from Radegast.Rendering.TerrainSplat — see

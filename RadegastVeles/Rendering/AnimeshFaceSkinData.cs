@@ -31,7 +31,7 @@ internal sealed class AnimeshFaceSkinData
     /// <summary>
     /// Zero-based index into <see cref="PrimRenderSubmission.Faces"/>.
     /// Used as the <c>faceOffset</c> argument of
-    /// <see cref="GlViewportControl.ScheduleSceneVertexUpdate"/>.
+    /// <see cref="VkViewportControl.ScheduleSceneVertexUpdate"/>.
     /// </summary>
     public required int FaceIndex { get; init; }
 

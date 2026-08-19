@@ -21,12 +21,18 @@ using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Radegast.Veles.Rendering;
 using Radegast.Veles.ViewModels;
 
 namespace Radegast.Veles.Views;
 
 public partial class SceneViewerPanel : UserControl
 {
+    /// <summary>The Vulkan viewport hosted by this panel, exposed through the backend-agnostic
+    /// interface <see cref="SceneViewerViewModel.SetViewport"/> consumes.</summary>
+    public readonly ISceneViewport Viewport;
+
     public SceneViewerPanel()
     {
         InitializeComponent();
@@ -35,10 +41,24 @@ public partial class SceneViewerPanel : UserControl
         // toolbar buttons can consume arrow keys for Avalonia's focus traversal.
         AddHandler(KeyDownEvent, OnTunnelKeyDown, RoutingStrategies.Tunnel);
         AddHandler(KeyUpEvent,   OnTunnelKeyUp,   RoutingStrategies.Tunnel);
+
+        var vk = new VkViewportControl();
+        Viewport = vk;
+        Control control = vk;
+        control.HorizontalAlignment = HorizontalAlignment.Stretch;
+        control.VerticalAlignment = VerticalAlignment.Stretch;
+        Avalonia.Automation.AutomationProperties.SetName(control, "3D scene viewport");
+        // Steal keyboard focus to this panel whenever the user clicks the viewport, so that
+        // WASD / arrow keys are dispatched to our OnKeyDown handler. Wired here (on the
+        // concrete Control) rather than through ISceneViewport, since PointerPressed is a
+        // plain Avalonia routed event with no viewport-specific meaning -- not worth adding
+        // to the interface for this.
+        control.PointerPressed += (_, _) => Focus();
+        ViewportHost.Content = control;
     }
 
     /// <summary>
-    /// Wire the GL viewport into the VM once the visual tree is ready.
+    /// Wire the viewport into the VM once the visual tree is ready.
     /// </summary>
     protected override void OnDataContextChanged(System.EventArgs e)
     {
@@ -46,9 +66,6 @@ public partial class SceneViewerPanel : UserControl
         if (DataContext is SceneViewerViewModel vm)
         {
             vm.SetViewport(Viewport);
-            // Steal keyboard focus to this panel whenever the user clicks the viewport,
-            // so that WASD / arrow keys are dispatched to our OnKeyDown handler.
-            Viewport.PointerPressed += (_, _) => Focus();
 
             // Focusing isn't bindable from XAML, so grab it here whenever the chat
             // input box is revealed (Enter in the viewport, or the toolbar button).
@@ -112,7 +129,6 @@ public partial class SceneViewerPanel : UserControl
             return;
         }
 
-        // Shift held → fast/run movement.
         if (e.Key is Key.LeftShift or Key.RightShift)
         {
             vm?.SetFastMove(true);

@@ -37,9 +37,9 @@ namespace Radegast.Veles.ViewModels;
 public sealed record HudEntry(uint LocalId, UUID Id, string Name, string AttachPoint);
 
 /// <summary>
-/// ViewModel for the HUD viewer: lists HUD attachments worn by the current
-/// avatar, tessellates the selected one in a <see cref="GlViewportControl"/>,
-/// and surfaces live hover-text updates from the simulator.
+/// ViewModel for the HUD viewer: lists HUD attachments worn by the current avatar,
+/// tessellates the selected one in an <see cref="ISingleObjectViewport"/>, and surfaces
+/// live hover-text updates from the simulator.
 /// </summary>
 public partial class HudViewerViewModel : ObservableObject, IDisposable
 {
@@ -47,9 +47,27 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     private GridClient Client => _instance.Client;
     private readonly PrimMeshBuilder _builder;
 
-    private GlViewportControl?        _viewport;
+    private ISingleObjectViewport?    _viewport;
     private CancellationTokenSource?  _cts;
     private bool                      _disposed;
+
+    // Monotonic build counter + last-applied-generation-per-face-slot map, guarding against
+    // out-of-order texture-patch delivery across successive LoadHudAsync calls. A live HUD
+    // menu script fires ObjectUpdate/TerseObjectUpdate on every prim in the linkset for trivial
+    // changes (highlight state, position nudges during expand/collapse), and HandlePrimChange
+    // re-triggers a full retessellation -- debounced only 250ms -- on every one of them, so two
+    // consecutive builds' texture downloads for the same face can both be in flight at once.
+    // Network completion order isn't request order, so an older build's download for that
+    // face's previous texture can finish and apply after a newer build's download for its
+    // current (correct) texture already did, silently overwriting it -- the existing
+    // ct.IsCancellationRequested check in LoadHudAsync's texturePatch callback only catches a
+    // build cancelled before its own delivery, not this last-write-wins race between two builds
+    // that were each still "current" when their own request went out. Keyed identically to
+    // VkViewportControl's own _faceTextureSlots so the "current" generation for a given
+    // face+slot only ever advances, never regresses.
+    private long _hudBuildGeneration;
+    private readonly System.Collections.Generic.Dictionary<(uint RootLocalId, int FaceIndex, TextureSlot Slot), long>
+        _appliedTextureGeneration = new();
 
     // ── Observable state ─────────────────────────────────────────────────────────
 
@@ -73,6 +91,11 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+
+        // A new HUD selection means the (LocalId, FaceIndex) key space starts over --
+        // clear so a stale generation entry from a previous HUD can't suppress a
+        // legitimate first patch for the newly selected one.
+        lock (_appliedTextureGeneration) { _appliedTextureGeneration.Clear(); }
 
         HasError      = false;
         ErrorText     = string.Empty;
@@ -102,12 +125,18 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     // ── Viewport wiring ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Wire the GL viewport into this VM after the visual tree is ready.
-    /// Called from the view's code-behind once DataContext is set.
+    /// Wire the viewport into this VM after the visual tree is ready. Called from the
+    /// view's code-behind once DataContext is set.
     /// </summary>
-    public void SetViewport(GlViewportControl viewport)
+    public void SetViewport(ISingleObjectViewport viewport)
     {
         _viewport = viewport;
+        // A HUD is rendered isolated (no world context), same posture as PrimViewer/
+        // AvatarViewer's own SetViewport -- Studio's flat, fixed lighting is what those two
+        // already use. Sky's sun/ambient/atmosphere fields feed prim.frag's per-face lighting
+        // unconditionally regardless of ShowSky, so Sky itself must also be set to Studio.
+        _viewport.ShowSky = false;
+        _viewport.Sky     = SkySettings.Studio;
         _viewport.FaceClicked += OnFaceClicked;
     }
 
@@ -187,7 +216,6 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         var sim = Client.Network.CurrentSim;
         if (sim == null) return;
 
-        // Convert System.Numerics Vector3 → OpenMetaverse Vector3.
         static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
 
         try
@@ -248,6 +276,7 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
 
     private async Task LoadHudAsync(HudEntry hud, CancellationToken ct, bool frontFrame = false)
     {
+        long myGeneration = ++_hudBuildGeneration;
         IsLoading  = true;
         HasError   = false;
         ErrorText  = string.Empty;
@@ -261,13 +290,12 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
             if (!sim.ObjectsPrimitives.TryGetValue(hud.LocalId, out var root))
                 throw new InvalidOperationException($"HUD prim {hud.LocalId} not found in simulator.");
 
-            // Root prim + all linkset children. Root must come first so TessellateAsync
-            // picks up the correct rootRot from prims[0]. Children are sorted by LocalID
-            // for a deterministic tessellation order. ObjectsPrimitives is a
-            // ConcurrentDictionary whose iteration order is undefined.
-            // Note: for attachment linksets the SL server puts the attachment point in
-            // Primitive.PrimData.State for ALL prims (root and children), so State cannot
-            // be used to recover SL link numbers for attachments.
+            // Root prim + all linkset children. Root must come first so TessellateAsync picks
+            // up the correct rootRot from prims[0]. Children are sorted by LocalID for a
+            // deterministic tessellation order, since ObjectsPrimitives (a ConcurrentDictionary)
+            // has undefined iteration order. For attachment linksets the SL server puts the
+            // attachment point in Primitive.PrimData.State for ALL prims (root and children),
+            // so State cannot be used to recover SL link numbers for attachments.
             var prims = sim.ObjectsPrimitives.Values
                 .Where(p => p.LocalID == hud.LocalId || p.ParentID == hud.LocalId)
                 .OrderBy(p => p.LocalID == hud.LocalId ? 0u : p.LocalID)
@@ -284,12 +312,60 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
             var progress = new Progress<string>(msg =>
                 Dispatcher.UIThread.Post(() => StatusText = msg));
 
+            // Without a texturePatch callback, PrimMeshBuilder.StreamTexturesAsync still
+            // downloads and decodes every texture but just disposes each bitmap once decoded
+            // instead of delivering it anywhere, leaving every HUD face untextured forever.
+            // PrimViewerViewModel/AvatarViewerViewModel both already wire this.
+            //
+            // Drop patches that belong to a superseded build. HandlePrimChange re-triggers a
+            // full retessellation on EVERY prim update in the linkset (debounced 250ms), so a
+            // HUD with live menu/texture changes generates superseded builds far more often
+            // than any other viewer panel -- without this guard, an in-flight download from an
+            // old, already-cancelled build can still complete and get applied against a newer
+            // submission's face list, landing the wrong (or partially-decoded) texture on a
+            // face. Mirrors AvatarViewerViewModel's own identical guard exactly.
+            var texturePatch = new Progress<SceneTexturePatch>(patch =>
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    patch.Bitmap?.Dispose();
+                    return;
+                }
+
+                // Reject a patch whose OWN build is still current but has been overtaken by a
+                // later build's already-applied patch for this exact face+slot -- see the
+                // _appliedTextureGeneration field comment. Without this, an older build's
+                // download that finishes after a newer one's (network completion order isn't
+                // request order) silently wins and sticks, since neither side's own ct is
+                // cancelled at the time it's checked above.
+                //
+                // Progress<T>'s callback is expected to marshal back to the UI thread, but
+                // that's Avalonia/BCL behavior this method doesn't control, so lock rather than
+                // assume when touching this dictionary from a network-completion continuation.
+                var key = (patch.RootLocalId, patch.FaceIndex, patch.Slot);
+                lock (_appliedTextureGeneration)
+                {
+                    if (_appliedTextureGeneration.TryGetValue(key, out var lastApplied) && lastApplied > myGeneration)
+                    {
+                        patch.Bitmap?.Dispose();
+                        return;
+                    }
+                    _appliedTextureGeneration[key] = myGeneration;
+                }
+
+                _viewport?.PatchSubmissionTexture(patch);
+            });
+
             var submission = await _builder.BuildAsync(prims, hud.LocalId, hud.Name, progress, ct,
-                                                        isHud: true)
+                                                        isHud: true, texturePatch: texturePatch)
                                            .ConfigureAwait(false);
 
             Dispatcher.UIThread.Post(() =>
             {
+                // Guard: if a newer build was started while this one was finishing, discard this
+                // stale submission so it cannot replace fresh geometry with old -- mirrors
+                // AvatarViewerViewModel's own identical guard.
+                if (ct.IsCancellationRequested) return;
                 if (frontFrame)
                     _viewport?.SubmitFront(submission);
                 else
@@ -367,10 +443,8 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
     private void HandlePrimChange(Primitive prim)
     {
         if (SelectedHud == null) return;
-        // Only react to prims that belong to the currently displayed HUD linkset.
         if (prim.LocalID != SelectedHud.LocalId && prim.ParentID != SelectedHud.LocalId) return;
 
-        // Update hover text from the root prim.
         if (prim.LocalID == SelectedHud.LocalId)
         {
             var ht = prim.Text?.Trim() ?? string.Empty;
@@ -424,7 +498,6 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
             var hud = SelectedHud;
             if (hud == null || ct.IsCancellationRequested) return;
 
-            // Cancel any existing full load and start a fresh build.
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
@@ -443,7 +516,7 @@ public partial class HudViewerViewModel : ObservableObject, IDisposable
         // "HUDTopRight" → "HUD Top Right" for readability.
         var raw = p.ToString();
         if (!raw.StartsWith("HUD", StringComparison.Ordinal)) return raw;
-        var suffix = raw[3..]; // strip "HUD"
+        var suffix = raw[3..];
         // Insert spaces before each uppercase letter after the first.
         var spaced = System.Text.RegularExpressions.Regex.Replace(suffix, "(?<!^)([A-Z])", " $1");
         return "HUD " + spaced.TrimStart();

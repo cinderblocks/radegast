@@ -35,7 +35,7 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneAvatarAnimationStreamer : IDisposable
 {
     private readonly GridClient          _client;
-    private readonly GlViewportControl   _viewport;
+    private readonly ISceneViewport      _viewport;
     private readonly SceneAvatarStreamer _avatarStreamer;
 
     // avatarLocalId → active animator
@@ -46,14 +46,22 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
     // handler fires first).  These get applied as soon as the animator exists.
     private readonly ConcurrentDictionary<uint, FlexiPrimAnimator> _pendingFlexi = new();
 
+    // Ticks every animator in _animators from one shared timer/task instead of each one
+    // owning its own -- a busy region can have dozens of avatars, and also applies
+    // distance-based tick throttling (see AvatarSceneScheduler), mirroring SceneFlexiStreamer's
+    // own _scheduler field exactly.
+    private readonly AvatarSceneScheduler _scheduler;
+
     private bool _disposed;
 
-    public SceneAvatarAnimationStreamer(GridClient client, GlViewportControl viewport,
+    public SceneAvatarAnimationStreamer(GridClient client, ISceneViewport viewport,
         SceneAvatarStreamer avatarStreamer)
     {
         _client         = client;
         _viewport       = viewport;
         _avatarStreamer = avatarStreamer;
+        _scheduler      = new AvatarSceneScheduler(client);
+        _scheduler.Start();
 
         _avatarStreamer.AvatarBuilt          += OnAvatarBuilt;
         _client.Avatars.AvatarAnimation      += OnAvatarAnimation;
@@ -108,7 +116,11 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
     /// <summary>Stop all animators and clear state (sim change / viewer close).</summary>
     public void Clear()
     {
-        foreach (var kv in _animators) kv.Value.Dispose();
+        foreach (var kv in _animators)
+        {
+            _scheduler.Unregister(kv.Value);
+            kv.Value.Dispose();
+        }
         _animators.Clear();
         _pendingFlexi.Clear();
     }
@@ -120,6 +132,7 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         _avatarStreamer.AvatarBuilt     -= OnAvatarBuilt;
         _client.Avatars.AvatarAnimation -= OnAvatarAnimation;
         Clear();
+        _scheduler.Dispose();
     }
 
     // ── Internals ─────────────────────────────────────────────────────────────────
@@ -137,12 +150,12 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         var animator = new SceneAvatarAnimator(_client, localId, (uint)sceneKey, _viewport, result);
         _animators[localId] = animator;
 
-        // If a flexi animator arrived ahead of us, hook it up before Start()
-        // so the very first AnimTick already pushes live bone matrices into it.
+        // If a flexi animator arrived ahead of us, hook it up before registering with the
+        // scheduler so the very first Tick already pushes live bone matrices into it.
         if (hadPending)
             animator.SetFlexiAnimator(pendingFlexi);
 
-        animator.Start();
+        _scheduler.Register(animator);
     }
 
     private void OnAvatarAnimation(object? sender, AvatarAnimationEventArgs e)
@@ -160,7 +173,6 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         }
         else
         {
-            // Scan the avatar list to find the local ID for this UUID.
             foreach (var kv in sim.ObjectsAvatars)
             {
                 if (kv.Value.ID == e.AvatarID) { localId = kv.Key; break; }
@@ -176,7 +188,10 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
     private void RemoveAnimator(uint localId)
     {
         if (_animators.TryRemove(localId, out var anim))
+        {
+            _scheduler.Unregister(anim);
             anim.Dispose();
+        }
         _pendingFlexi.TryRemove(localId, out _);
     }
 }

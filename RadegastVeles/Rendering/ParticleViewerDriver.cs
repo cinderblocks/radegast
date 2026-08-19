@@ -35,7 +35,7 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Drives the CPU particle simulation for all emitter prims in a linkset
-/// and submits billboard quads to a <see cref="GlViewportControl"/> at ~30 Hz.
+/// and submits billboard quads to an <see cref="ISceneViewport"/> at ~30 Hz.
 /// <para>
 /// Usage: construct, call <see cref="SetViewport"/>, then <see cref="StartAsync"/>.
 /// Call <see cref="Dispose"/> when the viewer closes.
@@ -46,7 +46,7 @@ internal sealed class ParticleViewerDriver : IDisposable
     private readonly GridClient               _client;
     private readonly IReadOnlyList<Primitive> _prims;
     private readonly ulong                    _key;
-    private          GlViewportControl?       _viewport;
+    private          ISceneViewport?          _viewport;
     private          CancellationTokenSource? _cts;
     private          bool                     _disposed;
 
@@ -84,7 +84,7 @@ internal sealed class ParticleViewerDriver : IDisposable
         lock (_worldPosLock) _worldPos = worldPos;
     }
 
-    public void SetViewport(GlViewportControl viewport) => _viewport = viewport;
+    public void SetViewport(ISceneViewport viewport) => _viewport = viewport;
 
     public void Start()
     {
@@ -247,23 +247,23 @@ internal sealed class ParticleViewerDriver : IDisposable
         return v * q;
     }
 
-    private static int MapBlendFunc(byte slBlend)
+    private static Silk.NET.Vulkan.BlendFactor MapBlendFunc(byte slBlend)
     {
-        // Maps Primitive.ParticleSystem.BlendFunc enum to OpenTK BlendingFactor int values.
+        // Maps Primitive.ParticleSystem.BlendFunc enum to Vulkan BlendFactor values directly.
         // Matches lldrawpoolalpha.cpp blend func mapping in the SL viewer.
         return slBlend switch
         {
-            0 => (int)Silk.NET.OpenGL.BlendingFactor.One,
-            1 => (int)Silk.NET.OpenGL.BlendingFactor.Zero,
-            2 => (int)Silk.NET.OpenGL.BlendingFactor.DstColor,
-            3 => (int)Silk.NET.OpenGL.BlendingFactor.SrcColor,
-            4 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusDstColor,
-            5 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcColor,
-            6 => (int)Silk.NET.OpenGL.BlendingFactor.DstAlpha,
-            7 => (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha,
-            8 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusDstAlpha,
-            9 => (int)Silk.NET.OpenGL.BlendingFactor.OneMinusSrcAlpha,
-            _ => (int)Silk.NET.OpenGL.BlendingFactor.SrcAlpha,
+            0 => Silk.NET.Vulkan.BlendFactor.One,
+            1 => Silk.NET.Vulkan.BlendFactor.Zero,
+            2 => Silk.NET.Vulkan.BlendFactor.DstColor,
+            3 => Silk.NET.Vulkan.BlendFactor.SrcColor,
+            4 => Silk.NET.Vulkan.BlendFactor.OneMinusDstColor,
+            5 => Silk.NET.Vulkan.BlendFactor.OneMinusSrcColor,
+            6 => Silk.NET.Vulkan.BlendFactor.DstAlpha,
+            7 => Silk.NET.Vulkan.BlendFactor.SrcAlpha,
+            8 => Silk.NET.Vulkan.BlendFactor.OneMinusDstAlpha,
+            9 => Silk.NET.Vulkan.BlendFactor.OneMinusSrcAlpha,
+            _ => Silk.NET.Vulkan.BlendFactor.SrcAlpha,
         };
     }
 }

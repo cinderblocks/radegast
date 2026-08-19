@@ -121,11 +121,10 @@ internal sealed class SceneTerrainBuilder
             FaceIndex   = 0,
             Centroid    = terrainCentroid,
             // Real triplanar terrain: reuse the PBR material texture slots to carry the
-            // four raw detail textures + baked layer map (not PBR data) — see
-            // GlViewportControl's terrain path in prim.frag. HasMaterial=false and
-            // IsPBR=false (default) keep the legacy-material specular/normal-map lighting
-            // code from misinterpreting these slots; prim.frag's uIsTerrain gate is the
-            // authoritative guard.
+            // four raw detail textures + baked layer map (not PBR data) — see prim.frag's
+            // terrain path. HasMaterial=false and IsPBR=false (default) keep the
+            // legacy-material specular/normal-map lighting code from misinterpreting these
+            // slots; prim.frag's uIsTerrain gate is the authoritative guard.
             IsTerrain                = detail != null,
             HasMaterial              = false,
             Texture                  = detail?[0] ?? fallbackBmp,

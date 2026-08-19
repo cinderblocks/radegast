@@ -108,7 +108,8 @@ internal static class Program
         var availableMb = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024.0 * 1024.0);
         Logger.Log(
             $"J2K decode gate tuned: MaxConcurrentDecodes={GridTextureHelper.MaxConcurrentDecodes} " +
-            $"(available RAM: {availableMb:F0} MB, reserved: {reservedMb:F0} MB, per-decode: {perDecodeMb:F1} MB)",
+            $"(available RAM: {availableMb:F0} MB, reserved: {reservedMb:F0} MB, per-decode: {perDecodeMb:F1} MB, " +
+            $"ProcessorCount={Environment.ProcessorCount}, reservedCores={GridTextureHelper.DefaultDecodeReservedCores})",
             LogLevel.Information);
 
         // Initialize BugSplat if a database has been configured at build time

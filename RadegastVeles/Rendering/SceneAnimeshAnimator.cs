@@ -37,14 +37,14 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneAnimeshAnimator
 {
     private readonly uint                  _sceneKey;
-    private readonly GlViewportControl     _viewport;
+    private readonly ISceneViewport        _viewport;
     private readonly AnimeshPlayer         _player;
     private readonly LindenSkeleton        _skeleton;
     private readonly AnimeshFaceSkinData[] _skinFaces;
 
     public SceneAnimeshAnimator(
         uint sceneKey,
-        GlViewportControl viewport,
+        ISceneViewport viewport,
         AnimeshPlayer player,
         LindenSkeleton skeleton,
         AnimeshFaceSkinData[] skinFaces)

@@ -35,7 +35,7 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Streams nearby avatar meshes into the scene-object layer of a
-/// <see cref="GlViewportControl"/>.
+/// <see cref="VkViewportControl"/>.
 /// <para>
 /// Uses a negative key space to avoid collisions with prim LocalIDs managed
 /// by <see cref="SceneObjectStreamer"/>: avatar scene keys are stored as
@@ -45,7 +45,7 @@ namespace Radegast.Veles.Rendering;
 internal sealed class SceneAvatarStreamer : IDisposable
 {
     private readonly GridClient          _client;
-    private readonly GlViewportControl   _viewport;
+    private readonly ISceneViewport      _viewport;
     private readonly AvatarMeshBuilder   _builder;
     private readonly SceneBuildScheduler _scheduler;
 
@@ -145,7 +145,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// <summary>
     /// Raised after a successful avatar build.
     /// Arguments: (sceneKey, localId, buildResult).
-    /// The sceneKey is the ulong used in <see cref="GlViewportControl.SubmitSceneObject"/>.
+    /// The sceneKey is the ulong used in <see cref="VkViewportControl.SubmitSceneObject"/>.
     /// </summary>
     public event Action<ulong, uint, AvatarBuildResult>? AvatarBuilt;
 
@@ -158,7 +158,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
     public void SetAnimationStreamer(SceneAvatarAnimationStreamer animationStreamer)
         => _animationStreamer = animationStreamer;
 
-    public SceneAvatarStreamer(GridClient client, GlViewportControl viewport,
+    public SceneAvatarStreamer(GridClient client, ISceneViewport viewport,
         SceneBuildScheduler scheduler, AvatarRenderOverrideStore overrides)
     {
         _client    = client;
@@ -319,6 +319,16 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // the new sim, so the old-sim guard would wrongly ignore kill packets from
         // the previous region and leave the avatar visible.  RemoveAvatar is a
         // no-op when the localId isn't tracked.
+        //
+        // EXCEPTION for self: LocalIDs are scoped per simulator, not globally unique -- a
+        // neighbor/child sim (this client stays connected to several for region-crossing
+        // lookahead) can send a kill for some unrelated object whose LocalID happens to collide
+        // with whatever the CURRENT sim assigned to the local agent's own avatar. Unlike the
+        // any-sim case above (which exists for OTHER avatars legitimately killed by their origin
+        // sim after a region crossing), self never receives a real kill for itself this way -- so
+        // a foreign-sim kill naming self's LocalID is always a coincidental collision, not a real
+        // event.
+        if (localId == _client.Self.LocalID && sim != _client.Network.CurrentSim) return;
         RemoveAvatar(localId);
     }
 
@@ -562,20 +572,35 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
 
         var now = Environment.TickCount64;
-        var due = new List<uint>();
+        var due = new List<(uint Id, long Enqueued)>();
         foreach (var (id, enqueued) in _dirty)
         {
-            if (now - enqueued >= DebounceMs)
-                due.Add(id);
+            int delay = id == _client.Self.LocalID ? SelfDebounceMs : DebounceMs;
+            if (now - enqueued >= delay)
+                due.Add((id, enqueued));
         }
-        foreach (var id in due)
+
+        // Cap dispatch per tick, mirroring SceneObjectStreamer.MaxBuildsPerTick. Without this, a
+        // burst where dozens of avatars become due in the same tick (region crossing, initial
+        // scene seed) enqueues all of their builds at once; since asset fetches for already-cached
+        // avatars can return near-instantly, those builds tend to complete in the same clustered
+        // window too, flooding the render thread's DrainPendingSceneObjects queue and turning
+        // into a multi-second freeze. Oldest-due first so no avatar starves indefinitely; anything
+        // left over stays in _dirty and is picked up on the next debounce tick below.
+        due.Sort((a, b) => a.Enqueued.CompareTo(b.Enqueued));
+        int dispatched = 0;
+        foreach (var (id, _) in due)
         {
+            if (dispatched >= MaxBuildsPerTick) break;
             _dirty.TryRemove(id, out _);
             EnqueueBuild(id);
+            dispatched++;
         }
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
+
+    private const int MaxBuildsPerTick = 20;
 
     /// <summary>
     /// Submits a T-pose placeholder mesh (invisible; pick/touch + world-footprint target
@@ -589,16 +614,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
     private void EnsurePlaceholderVisible(uint localId)
     {
         if (_disposed || _rendered.ContainsKey(localId)) return;
-        // Once a cloud driver already exists, both the (invisible) placeholder mesh and
-        // the particle cloud are already showing — skip resubmitting the placeholder.
-        // This matters beyond tidiness: EnqueueDirty calls this un-debounced on every
-        // terse update via OnAvatarUpdate, and an avatar permanently in the Cloud
-        // complexity tier (not just transiently loading, which is normally brief) would
-        // otherwise resubmit a full scene-object every single terse update for as long
-        // as it stays in view and keeps moving. The cloud driver's own position (and so
-        // the visible particle effect) is kept current separately via UpdateWorldPos
-        // from OnTerseAvatarUpdate; only the invisible pick-footprint mesh goes stale
-        // here, same as it already could during the ordinary loading window.
+        // Once a cloud driver already exists, both the (invisible) placeholder mesh and the
+        // particle cloud are already showing -- skip resubmitting the placeholder. This matters
+        // beyond tidiness: EnqueueDirty calls this un-debounced on every terse update via
+        // OnAvatarUpdate, and an avatar permanently in the Cloud complexity tier would otherwise
+        // resubmit a full scene-object every single terse update for as long as it stays in view
+        // and keeps moving. The cloud driver's own position (and so the visible particle effect)
+        // is kept current separately via UpdateWorldPos from OnTerseAvatarUpdate; only the
+        // invisible pick-footprint mesh goes stale here.
         if (_cloudDrivers.ContainsKey(localId)) return;
 
         var sim = _client.Network.CurrentSim;
@@ -638,12 +661,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// </summary>
     private AvatarRenderTier DetermineRenderTier(Simulator sim, Avatar avatarObj)
     {
-        // Cost is always computed/cached, even for exempt avatars — mirrors SL's own
-        // isTooComplex()/getVisualComplexity() split: complexity is computed for every
-        // character regardless of exemption, only the muting decision short-circuits for
-        // self/friend/always-render. Needed so AvatarRenderInfoReporter can report an
-        // honest weight for exempt avatars too, not just the ones Veles actually tiers
-        // down. Cheap due to the cache — see _cachedCost's declaration comment.
+        // Cost is always computed/cached, even for exempt avatars -- mirrors SL's own
+        // isTooComplex()/getVisualComplexity() split: complexity is computed for every character
+        // regardless of exemption, only the muting decision short-circuits for
+        // self/friend/always-render. Needed so AvatarRenderInfoReporter can report an honest
+        // weight for exempt avatars too, not just the ones Veles actually tiers down. Cheap due
+        // to the cache -- see _cachedCost's declaration comment.
         float cost = _cachedCost.GetOrAdd(avatarObj.LocalID,
             id => AvatarComplexityEstimator.EstimateCost(sim, id));
 
@@ -685,15 +708,13 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// <see cref="AvatarRenderInfoReporter"/>'s network reporting pass. Weight is always
     /// reported as 0: Veles's complexity-points estimate runs 0-~500 while SL's real ARC
     /// weights run in the tens to hundreds of thousands, and this is a crowd-sourced
-    /// capability — the region combines every present viewer's report for the same avatar,
-    /// so sending our number as-is risks corrupting other viewers' "how others see you"
-    /// readout for a target avatar in an unknown direction, depending on how the region
-    /// aggregates (average/sum/max). 0 is a deliberately inert placeholder until the real
-    /// aggregation behaviour is confirmed in-world. TooComplex mirrors what SL's own
-    /// isTooComplex() means: whether *this* viewer has judged the avatar too complex to
-    /// render fully — always false for exempt avatars, same as SL — and is scale-independent,
-    /// so it's reported honestly. Avatars not yet evaluated at least once (no cache entry
-    /// yet) are skipped.
+    /// capability -- the region combines every present viewer's report for the same avatar, so
+    /// sending our number as-is risks corrupting other viewers' "how others see you" readout,
+    /// depending on how the region aggregates (average/sum/max). 0 is a deliberately inert
+    /// placeholder until the real aggregation behaviour is confirmed in-world. TooComplex mirrors
+    /// what SL's own isTooComplex() means: whether *this* viewer has judged the avatar too complex
+    /// to render fully -- always false for exempt avatars, same as SL -- and is scale-independent,
+    /// so it's reported honestly. Avatars not yet evaluated at least once are skipped.
     /// </summary>
     public IReadOnlyList<(UUID AgentId, int Weight, bool TooComplex)> SnapshotReportableAvatars()
     {
@@ -975,6 +996,14 @@ internal sealed class SceneAvatarStreamer : IDisposable
                     BoundsMin  = submission.BoundsMin + worldPos,
                     BoundsMax  = submission.BoundsMax + worldPos,
                     FlexiPrims = submission.FlexiPrims,
+                    // SkinData/AnimeshSkinData both default to [] on PrimRenderSubmission and
+                    // must be carried forward explicitly here, or every scene avatar's
+                    // subAnimated check in UploadSceneObjectNoRebuild comes back false and its
+                    // skinned body faces get built dynamic:false -- SceneAvatarAnimator's CPU-LBS
+                    // fallback then hits VkMesh.UpdateVertices's destroy+recreate re-stage path on
+                    // every tick for every such face.
+                    SkinData        = submission.SkinData,
+                    AnimeshSkinData = submission.AnimeshSkinData,
                 };
             }
 
@@ -996,11 +1025,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
                     var freshWorldMatrix = AvatarWorldMatrix(freshWorldPos, freshRot);
                     _viewport.SetSceneObjectTransform(SceneKey(localId), freshWorldMatrix);
                     // AvatarBuilt hasn't fired yet at this point in the build, so the
-                    // SceneAvatarAnimator this avatar's flexi prims will be driven by
-                    // doesn't exist yet — OnFlexiWorldUpdate would silently no-op (same
-                    // event-ordering trap as the seed call removed from SceneFlexiStreamer.
-                    // OnAvatarBuilt). Write ExternalTransform directly onto the FlexiPrims
-                    // the animator will read once it's created, mirroring the seed above.
+                    // SceneAvatarAnimator this avatar's flexi prims will be driven by doesn't
+                    // exist yet -- OnFlexiWorldUpdate would silently no-op. Write ExternalTransform
+                    // directly onto the FlexiPrims the animator will read once it's created.
                     foreach (var fp in submission.FlexiPrims)
                         fp.ExternalTransform = freshWorldMatrix;
                 }
@@ -1022,10 +1049,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            // Previously fully silent — swallowing here means AvatarBuilt (line ~1019)
-            // never fires, so OnAvatarBuilt never constructs/starts a SceneAvatarAnimator
-            // for this avatar, and AnimTick is never entered at all. That is
-            // indistinguishable from a healthy avatar sitting frozen at whatever
+            // Swallowing here means AvatarBuilt never fires, so OnAvatarBuilt never
+            // constructs/starts a SceneAvatarAnimator for this avatar, and AnimTick is never
+            // entered at all -- indistinguishable from a healthy avatar sitting frozen at whatever
             // pose BuildAsync last submitted. Log so a failure here is visible.
             Logger.DebugLog($"[AvatarBuildFail] avatar build failed after submission for localId={localId}: {ex}");
         }

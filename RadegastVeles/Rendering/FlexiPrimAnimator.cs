@@ -32,7 +32,7 @@ namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// Simulates flexi-prim spine physics at ~30 Hz and pushes deformed vertex
-/// buffers to a <see cref="GlViewportControl"/> via a caller-supplied delegate.
+/// buffers to a <see cref="VkViewportControl"/> via a caller-supplied delegate.
 ///
 /// <para>
 /// The algorithm mirrors <c>LLVolumeImplFlexible::doFlexibleUpdate()</c> in the
@@ -125,10 +125,12 @@ internal sealed class FlexiPrimAnimator : IDisposable
     // CPU path: delivers a pre-deformed vertex buffer for one face to the viewport.
     // Args: faceIndex, buffer, logical length (buffer may be ArrayPool-oversized), isPoolRented.
     private readonly Action<int, float[], int, bool> _scheduleUpdate;
-    // GPU compute path (optional): delivers spine positions + transform for GL dispatch.
+    // GPU compute path (optional): delivers spine positions + transform for Vulkan dispatch.
     // When non-null and GpuData is set on the FlexiPrimInfo, the compute path is taken;
-    // otherwise the CPU path is used as a fallback.
-    private readonly Action<FlexiComputeJob>?  _scheduleCompute;
+    // otherwise the CPU path is used as a fallback. Only the scene-object path passes this;
+    // single-object viewers (CreateSingleObjectScheduler callers other than
+    // AvatarViewerViewModel) leave it null.
+    private readonly Action<VkFlexiComputeJob>?  _scheduleCompute;
     private          CancellationTokenSource?  _cts;
     private          bool                      _disposed;
 
@@ -144,11 +146,11 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// buffer itself may be an ArrayPool-oversized rental), and whether it must be returned
     /// to <see cref="ArrayPool{T}.Shared"/> after use. Use
     /// <see cref="CreateSingleObjectScheduler"/> for PrimViewer / AvatarViewer, or a lambda
-    /// wrapping <see cref="GlViewportControl.ScheduleSceneVertexUpdate"/> for the scene viewer.
+    /// wrapping <see cref="VkViewportControl.ScheduleSceneVertexUpdate"/> for the scene viewer.
     /// </param>
     /// <param name="scheduleCompute">
     /// Optional GPU-path delegate.  When non-null and <see cref="FlexiPrimInfo.GpuData"/>
-    /// is set (registered after GL upload), spine positions are enqueued for compute-shader
+    /// is set (registered after upload), spine positions are enqueued for compute-shader
     /// deformation instead of being processed on the CPU.
     /// </param>
     /// <param name="priorAnimator">
@@ -160,7 +162,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// disposed animator — disposal doesn't clear its state arrays.
     /// </param>
     public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[], int, bool> scheduleUpdate,
-        Action<FlexiComputeJob>? scheduleCompute = null, FlexiPrimAnimator? priorAnimator = null)
+        Action<VkFlexiComputeJob>? scheduleCompute = null, FlexiPrimAnimator? priorAnimator = null)
     {
         _flexiPrims      = submission.FlexiPrims;
         _scheduleUpdate  = scheduleUpdate;
@@ -196,11 +198,12 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
     /// <summary>
     /// Builds a CPU-path scheduler delegate for the single-object viewers (PrimViewer,
-    /// AvatarViewer). Those route through <see cref="GlViewportControl.ScheduleVertexUpdate(int, ReadOnlySpan{float})"/>,
+    /// AvatarViewer). Those route through <see cref="ISingleObjectViewport.ScheduleVertexUpdate(int, ReadOnlySpan{float})"/>,
     /// which copies into an exact-size array itself, so the pooled buffer this animator
-    /// rents can be returned immediately after that copy.
+    /// rents can be returned immediately after that copy. Takes the interface, not a concrete
+    /// viewport type -- this delegate calls nothing but <c>ScheduleVertexUpdate</c>.
     /// </summary>
-    public static Action<int, float[], int, bool> CreateSingleObjectScheduler(GlViewportControl vp)
+    public static Action<int, float[], int, bool> CreateSingleObjectScheduler(ISingleObjectViewport vp)
         => (faceIndex, verts, vertsLength, isPoolRented) =>
         {
             vp.ScheduleVertexUpdate(faceIndex, verts.AsSpan(0, vertsLength));
@@ -305,12 +308,10 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     // This loop is started via "_ = RunAsync(...)" (fire-and-forget, no
-                    // observer). Previously an unhandled exception here would silently kill
-                    // the whole loop forever: every flexi prim this animator owns freezes at
-                    // whatever pose it last reached, with no error shown anywhere — the same
-                    // failure mode already found and fixed in AvatarViewerViewModel.AnimTick's
-                    // driving loop. Catch, report once (avoid log spam if it throws every
-                    // tick), and keep ticking instead.
+                    // observer). An unhandled exception here would silently kill the whole loop
+                    // forever: every flexi prim this animator owns freezes at whatever pose it
+                    // last reached, with no error shown anywhere. Catch, report once (avoid log
+                    // spam if it throws every tick), and keep ticking instead.
                     if (!loggedError)
                     {
                         loggedError = true;
@@ -350,7 +351,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
     // ── Simulation tick + vertex upload ──────────────────────────────────────────
 
     private static void TickAndUpload(FlexiState state, float dt,
-        Action<int, float[], int, bool> scheduleUpdate, Action<FlexiComputeJob>? scheduleCompute,
+        Action<int, float[], int, bool> scheduleUpdate, Action<VkFlexiComputeJob>? scheduleCompute,
         bool simulate)
     {
         var info   = state.Info;
@@ -487,31 +488,30 @@ internal sealed class FlexiPrimAnimator : IDisposable
             }
         }
 
-        // Nothing left to do once simulation is disabled and attachTx hasn't changed since
-        // the last time we placed this prim: WorldBounds and the vertex buffer are already
-        // correct (the last-published WorldBounds stays valid — it was computed from this
-        // same, unchanged, attachTx/state.Positions pair). Still runs on the first tick ever
-        // (LastAttachTx is null) and on every tick where attachTx did change (avatar moved,
-        // bone moved, seat/build correction, ...) even with physics simulation off, so a
-        // frozen flexi prim still tracks its owner correctly instead of sitting wherever the
-        // mesh builder's raw local-space coordinates happened to leave it. See AnimationEnabled.
+        // Nothing left to do once simulation is disabled and attachTx hasn't changed since the
+        // last time we placed this prim: WorldBounds and the vertex buffer are already correct
+        // (the last-published WorldBounds stays valid -- it was computed from this same,
+        // unchanged, attachTx/state.Positions pair). Still runs on the first tick ever
+        // (LastAttachTx is null) and on every tick where attachTx did change (avatar moved, bone
+        // moved, seat/build correction, ...) even with physics simulation off, so a frozen flexi
+        // prim still tracks its owner correctly instead of sitting wherever the mesh builder's
+        // raw local-space coordinates happened to leave it. See AnimationEnabled.
         if (!simulate && state.LastAttachTx == attachTx)
             return;
         state.LastAttachTx = attachTx;
 
         // ── Publish a live world-space AABB for the frustum-culler ───────────────
         //
-        // Flexi faces write their deformed vertices directly into the VBO and never
-        // update PrimRenderFace.Transform, so GlViewportControl can't use the normal
-        // cached-AABB × Transform cull test for them (see PrimRenderFace.IsFlexi). It
-        // reads FlexiPrimInfo.WorldBounds instead, computed here from the spine —
-        // exact for the centerline (spine positions are already in physical metres and
-        // normalizing by scale before applying attachTx exactly undoes the scaling
-        // AttachTransform re-applies, matching the per-vertex convention below), then
-        // padded by the profile's worst-case half-diagonal so any cross-section vertex
-        // (which the shader/CPU path additionally rotates away from the centerline by
-        // the local spine tangent) is guaranteed to still land inside the box. A little
-        // loose beats culling something that's actually on screen.
+        // Flexi faces write their deformed vertices directly into the VBO and never update
+        // PrimRenderFace.Transform, so the viewport can't use the normal cached-AABB x Transform
+        // cull test for them (see PrimRenderFace.IsFlexi). It reads FlexiPrimInfo.WorldBounds
+        // instead, computed here from the spine -- exact for the centerline (spine positions are
+        // already in physical metres and normalizing by scale before applying attachTx exactly
+        // undoes the scaling AttachTransform re-applies, matching the per-vertex convention
+        // below), then padded by the profile's worst-case half-diagonal so any cross-section
+        // vertex (which the shader/CPU path additionally rotates away from the centerline by the
+        // local spine tangent) is guaranteed to still land inside the box. A little loose beats
+        // culling something that's actually on screen.
         {
             var spineWorldMin = new Vector3(float.MaxValue);
             var spineWorldMax = new Vector3(float.MinValue);
@@ -537,13 +537,14 @@ internal sealed class FlexiPrimAnimator : IDisposable
 
         // ── Deform vertex buffers ────────────────────────────────────────────────
         //
-        // GPU compute path: if GpuData is registered (set by GlViewportControl on the
-        // GL thread after upload), pack the spine positions as a flat float[] and enqueue
-        // a FlexiComputeJob.  The compute shader (flexi.comp) does the per-vertex math
-        // in parallel directly on the GPU, writing into the mesh VBO.
+        // GPU compute path: if GpuData is registered (set on the render thread after upload),
+        // pack the spine positions as a flat float[] and enqueue a VkFlexiComputeJob. The
+        // compute shader (flexi.comp) does the per-vertex math in parallel directly on the GPU,
+        // writing into the mesh VBO.
         //
-        // CPU fallback: identical logic to the GPU shader, used for the first frame or
-        // two before GpuData is set, or permanently when compute is unavailable.
+        // CPU fallback: identical logic to the GPU shader, used for the first frame or two
+        // before GpuData is set, or permanently when compute is unavailable/scheduleCompute is
+        // null (single-object viewers other than AvatarViewer).
         if (scheduleCompute != null && info.GpuData is { IsDisposed: false } gpuData)
         {
             // Pack spine positions into a vec4 array (x,y,z,0 per segment).
@@ -557,13 +558,10 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 spineFloats[i * 4 + 2] = p.Z;
                 // [i*4+3] = 0 (zero-initialised)
             }
-            scheduleCompute(new FlexiComputeJob(gpuData, spineFloats, attachTx));
+            scheduleCompute(new VkFlexiComputeJob(gpuData, spineFloats, attachTx));
             return;
         }
 
-        // CPU path — mirrors the GPU shader exactly so the two paths produce
-        // the same result for correctness during the GPU warm-up window.
-        //
         // BaseVertices are raw prim-local (normalised) coordinates:
         //   X ∈ [≈-0.5, 0.5],  Y ∈ [≈-0.5, 0.5],  Z ∈ [-0.5, 0.5]
         //
@@ -581,7 +579,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
             // scene can have dozens of them, so a fresh allocation each tick is steady GC
             // pressure. ArrayPool.Rent returns an over-sized (next power-of-two) array, which
             // is why scheduleUpdate takes the true logical length (src.Length) as a separate
-            // argument instead of relying on the buffer's own .Length — GlMesh.UpdateVertices
+            // argument instead of relying on the buffer's own .Length — VkMesh.UpdateVertices
             // would otherwise upload the oversized tail as garbage vertex data.
             var dst    = ArrayPool<float>.Shared.Rent(src.Length);
             int vCount = src.Length / 12;
