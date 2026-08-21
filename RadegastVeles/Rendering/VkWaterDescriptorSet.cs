@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Owns the water pipeline's set 1 (WaterPass UBO + 3 samplers) -- plan Section 8c-3. Mirrors
+// Owns the water pipeline's set 1 (WaterPass UBO + 3 samplers). Mirrors
 // VkSkyDescriptorSet.cs's shape (host-visible UBO buffer + AllocateSet helper), extended to 3
 // sampler bindings instead of 1. ALL FOUR bindings are written differently from SSAO's own
 // per-target-recreation-only pattern: unlike the SSAO/G-buffer targets (which resize with the

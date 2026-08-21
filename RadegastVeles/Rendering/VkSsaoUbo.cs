@@ -18,7 +18,7 @@
  */
 
 // CPU-side mirror of the "SsaoParams" UBO declared in shader_data/vulkan/ssao.frag (set=0,
-// binding=0) -- see plan Section 8c-2b. Same std140-by-hand discipline as VkPerFrameUbo.cs/
+// binding=0). Same std140-by-hand discipline as VkPerFrameUbo.cs/
 // VkSkyUbo.cs. Field order chosen to avoid ANY implicit padding gap (each offset is simply the
 // previous field's offset + its own size, verified rather than assumed):
 //   vec3 uKernel[64]   offset 0,    size 1024 (64 * 16-byte std140 array-element stride --

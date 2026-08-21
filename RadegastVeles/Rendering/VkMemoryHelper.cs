@@ -18,12 +18,10 @@
  */
 
 // Adapted from Avalonia's own samples/GpuInterop/VulkanDemo (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia), validated working against this project's
-// pinned Avalonia version in experiments/VulkanEmbeddingSpike before porting here.
+// https://github.com/AvaloniaUI/Avalonia).
 //
 // No VMA/suballocator here by design -- one vkAllocateMemory call per resource, matching
-// Avalonia's own sample. See plan Section 4's "Memory allocator" note for why this was
-// chosen over pulling in a second Vulkan binding library just for VMA.
+// Avalonia's own sample, chosen over pulling in a second Vulkan binding library just for VMA.
 
 using Silk.NET.Vulkan;
 

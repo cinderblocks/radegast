@@ -18,8 +18,7 @@
  */
 
 // Adapted from Avalonia's own samples/GpuInterop/VulkanDemo (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia), validated working against this project's
-// pinned Avalonia version in experiments/VulkanEmbeddingSpike before porting here.
+// https://github.com/AvaloniaUI/Avalonia).
 
 using System;
 using Silk.NET.Vulkan;
@@ -31,12 +30,9 @@ namespace Radegast.Veles.Rendering;
 /// buffer with its own fence, the caller records + submits it. Waiting on and freeing a
 /// submitted buffer is the CALLER's responsibility (via a <see cref="VkFrameReapRing"/>) --
 /// this pool only owns allocation/deallocation and serializing submits against the shared
-/// <see cref="Queue"/>, plan Step 2 having moved the previous shared, process-wide
-/// pending-buffer list out to one per panel (see <see cref="VkFrameReapRing"/>'s own doc
-/// comment for why: no single process-wide "frame N" exists across independently-cadenced
-/// panels). Not yet a frame-in-flight ring buffer in the reap sense either -- see plan Section 5
-/// for why 2-frames-in-flight was deferred until profiling showed this simpler model was
-/// actually a bottleneck (it was; see the plan's Step sequence).
+/// <see cref="Queue"/>. The pending-buffer list lives one per panel (see
+/// <see cref="VkFrameReapRing"/>'s own doc comment for why: no single process-wide "frame N"
+/// exists across independently-cadenced panels), not shared process-wide.
 /// </summary>
 internal class VkCommandBufferPool : IDisposable
 {
@@ -153,9 +149,9 @@ internal class VkCommandBufferPool : IDisposable
         /// buffer did" without taking over its lifetime (its owning <see cref="VkFrameReapRing"/>
         /// still disposes it on its own schedule; a subsequent <see cref="Dispose"/> call
         /// re-waits on an already-signaled fence, which returns immediately, so this is safe to
-        /// call ahead of that with no double-free). Plan Step 6: the deformer-ordering fix uses
-        /// this to wait for the immediately-preceding frame's MainPass specifically, a stricter
-        /// guarantee than <see cref="VkFrameReapRing"/>'s own N-frames-ago per-slot reap.</summary>
+        /// call ahead of that with no double-free). Used to wait for the immediately-preceding
+        /// frame's MainPass specifically, a stricter guarantee than
+        /// <see cref="VkFrameReapRing"/>'s own N-frames-ago per-slot reap.</summary>
         public void WaitOnly() => WaitForFenceCore();
 
         // Cached so a WaitOnly() call followed by the later Dispose() (both hitting the same
@@ -211,7 +207,7 @@ internal class VkCommandBufferPool : IDisposable
         public void Submit() => Submit(null, null, null, _fence);
 
         /// <summary>Win32 keyed-mutex acquire/release for D3D11-shared-texture submissions
-        /// (Mode B's cross-import path -- see plan Section 3's D3D11 cross-import decision).</summary>
+        /// (Mode B's cross-import path -- see the D3D11 cross-import decision).</summary>
         public class KeyedMutexSubmitInfo
         {
             public ulong? AcquireKey { get; set; }
@@ -222,8 +218,8 @@ internal class VkCommandBufferPool : IDisposable
         /// <summary>Submits this buffer. Unlike <see cref="SubmitAndWait"/>, does NOT wait on or
         /// free it -- the caller must register it with its own <see cref="VkFrameReapRing"/>
         /// (<c>ring.MarkUsed(this)</c>) right after calling this, or it will never be waited on
-        /// or freed. Plan Step 2 moved this bookkeeping out of the pool (which had no way to know
-        /// which panel's frame a buffer belonged to) to the caller, which does.</summary>
+        /// or freed. This bookkeeping lives with the caller rather than the pool, since the pool
+        /// has no way to know which panel's frame a buffer belongs to.</summary>
         public void Submit(
             ReadOnlySpan<Semaphore> waitSemaphores,
             ReadOnlySpan<PipelineStageFlags> waitDstStageMask = default,

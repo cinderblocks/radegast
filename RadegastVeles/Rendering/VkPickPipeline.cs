@@ -17,8 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the picking pass (plan Section 5's pipeline table, row 3:
-// wireframe.vert + picking.frag). Structurally close to VkWireframePipeline.cs (same
+// Pipeline layout + VkPipeline for the picking pass (wireframe.vert + picking.frag).
+// Structurally close to VkWireframePipeline.cs (same
 // single-binding, position-only vertex input; reuses the main _renderPass) but with real
 // differences, not a copy-paste: TriangleList (not LineList -- picking rasterizes solid
 // faces, not edges), CullMode.None (GL's pick block explicitly disables

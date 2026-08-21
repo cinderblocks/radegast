@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// New concept, no direct GL equivalent -- see plan Section 5's pipeline table, row 1. GL has
+// New concept, no direct GL equivalent. GL has
 // no render-pass object (an FBO's attachments are just bound directly); Vulkan needs an
 // explicit VkRenderPass describing attachment formats/load-store behavior up front, which
 // every compatible VkPipeline and VkFramebuffer is then created against.
@@ -30,13 +30,11 @@ internal static class VkRenderPass
 {
     /// <summary>
     /// Creates the main scene render pass: one color attachment (matching the
-    /// interop-exported render-target image format negotiated in Phase 0 --
-    /// <c>R8G8B8A8_UNORM</c>, see <c>experiments/VulkanEmbeddingSpike</c>) plus one depth
+    /// interop-exported render-target image format, <c>R8G8B8A8_UNORM</c>) plus one depth
     /// attachment. Used by the prim/wireframe/picking/particle/navmesh-overlay/water/sky
-    /// pipelines (plan Section 5's table rows 1-5, 10-11) -- all rendering into the same
-    /// target, differing only in pipeline state, not attachments, so they share one
-    /// render-pass-compatible object per the table's row-1 note about viewport/scissor
-    /// already being dynamic state.
+    /// pipelines -- all rendering into the same target, differing only in pipeline state, not
+    /// attachments, so they share one render-pass-compatible object (viewport/scissor are
+    /// dynamic state, so the render pass itself doesn't need to vary for that).
     /// </summary>
     public static unsafe RenderPass CreateMainScenePass(VkContext vk, Format colorFormat, Format depthFormat)
     {
@@ -50,11 +48,9 @@ internal static class VkRenderPass
             StencilStoreOp = AttachmentStoreOp.DontCare,
             InitialLayout = ImageLayout.Undefined,
             // FinalLayout = ColorAttachmentOptimal, matching subpass state, NOT
-            // TransferSrcOptimal. Read directly from the validated Phase 0 spike's
-            // VulkanContent.CreateTemporalObjects/Render (experiments/VulkanEmbeddingSpike) --
-            // its render pass also ends in ColorAttachmentOptimal, and Render() does a
-            // SEPARATE explicit vkCmdPipelineBarrier transition to TransferSrcOptimal after
-            // CmdEndRenderPass, right before the blit to the interop swapchain image. Setting
+            // TransferSrcOptimal: a SEPARATE explicit vkCmdPipelineBarrier transitions to
+            // TransferSrcOptimal after CmdEndRenderPass, right before the blit to the interop
+            // swapchain image. Setting
             // FinalLayout=TransferSrcOptimal directly here would need a matching Transfer-stage
             // subpass dependency this render pass doesn't declare -- a real synchronization
             // gap, not just a style difference. The render loop code owns the post-render-pass
@@ -112,7 +108,7 @@ internal static class VkRenderPass
     }
 
     /// <summary>
-    /// G-buffer normal pre-pass (plan Section 8c-2b, pipeline table row 6: prim.vert +
+    /// G-buffer normal pre-pass (pipeline table row 6: prim.vert +
     /// gnorm.frag): one color attachment (packed view-space normal) + one depth attachment,
     /// both left in <c>ShaderReadOnlyOptimal</c> so the following SSAO pass can sample them as
     /// textures. Unlike <see cref="CreateMainScenePass"/>, this render pass -- and the SSAO/blur
@@ -206,7 +202,7 @@ internal static class VkRenderPass
     /// <summary>
     /// A single-color-attachment, no-depth render pass for a full-screen-triangle pass whose
     /// output is sampled by a LATER pass this same frame -- reused for both the SSAO-raw pass
-    /// (plan Section 5's pipeline table row 7) and the SSAO-blur pass (row 8), which share this
+    /// and the SSAO-blur pass, which share this
     /// exact attachment shape (one R8Unorm color attachment, no depth). Same entry/exit
     /// subpass-dependency reasoning as <see cref="CreateGBufferPass"/> -- see its own doc
     /// comment. <c>LoadOp = DontCare</c>, not <c>Clear</c>: the full-screen triangle these
@@ -275,7 +271,7 @@ internal static class VkRenderPass
     }
 
     /// <summary>
-    /// Depth-only shadow-caster render pass (plan Section 8c-3, pipeline table row 9): a single
+    /// Depth-only shadow-caster render pass (pipeline table row 9): a single
     /// depth attachment, NO colour attachment at all -- shadow_depth.frag writes nothing, the
     /// GPU's fixed depth-test/write stage fills the texture from gl_Position alone (matching
     /// GL's own no-colour-attachment shadow FBO, see EnsureShadowFbo's completeness-check note).

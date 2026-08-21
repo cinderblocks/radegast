@@ -17,8 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the SSAO-blur pass (plan Section 5's pipeline table, row 8:
-// quad.vert + ssaoblur.frag). One sampler descriptor set (uSsaoTex) + one 8-byte Fragment-stage
+// Pipeline layout + VkPipeline for the SSAO-blur pass (quad.vert + ssaoblur.frag).
+// One sampler descriptor set (uSsaoTex) + one 8-byte Fragment-stage
 // push constant (uTexelSize) -- see vulkan/ssaoblur.frag's own doc comment for why texel size
 // is a push constant instead of a UBO binding.
 

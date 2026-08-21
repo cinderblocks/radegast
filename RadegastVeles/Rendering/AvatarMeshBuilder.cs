@@ -1513,12 +1513,6 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 var apId = (int)root.PrimData.AttachmentPoint;
                 if (!attachPoints.TryGetValue(apId, out var apoint))
                 {
-                    // Diagnostic (2026-08-19, chasing "sculptie attachment renders in AvatarViewer
-                    // but not SceneViewer, self-avatar, nothing else on the avatar affected"):
-                    // this and the boneWorldMatrices check below were silent early returns --
-                    // attachResults' own !r.ok branch only logs for the catch block below, not
-                    // these two. An attach point missing from avatar_lad.xml's table would drop
-                    // this attachment with zero trace anywhere in the log.
                     Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
                         "unknown attach point (not in avatar_lad.xml table) — attachment dropped from render.",
                         Microsoft.Extensions.Logging.LogLevel.Warning, client);
@@ -1564,11 +1558,6 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         .ConfigureAwait(false);
                     if (attFaces.Count == 0)
                     {
-                        // Diagnostic (2026-08-19, same investigation as the two checks above):
-                        // a successful-but-empty result is otherwise indistinguishable from an
-                        // attachment that was never worn at all -- neither the catch block below
-                        // nor the results loop's `if (!r.ok) continue` fires for this case, since
-                        // ok is true and faces is just empty.
                         Logger.Log($"[AttachBuildFail] attachPoint={apId} rootPrim={root.LocalID} " +
                             $"linksetCount={linkset.Count} sculptType={root.Sculpt?.Type} " +
                             "BuildAttachmentFacesAsync returned 0 faces (no exception, no timeout) — " +

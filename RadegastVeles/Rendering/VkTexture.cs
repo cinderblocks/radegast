@@ -17,16 +17,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan port of GlTexture.cs -- see plan Section 6. Structural differences from the GL
+// Vulkan port of GlTexture.cs. Structural differences from the GL
 // original, all consequences of Vulkan's model:
 //   - No glGenerateMipmap equivalent: mip chain is built manually via a vkCmdBlitImage chain
 //     (see BuildMipChain below). Verify VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT is
 //     advertised for R8G8B8A8_UNORM on target hardware before relying on linear blits --
-//     flagged in the plan, not yet checked against real target-hardware diversity beyond
-//     this dev machine's NVIDIA GTX 760.
+//     not yet checked against real target-hardware diversity beyond this dev machine's
+//     NVIDIA GTX 760.
 //   - No global texture-unit "Bind()": Vulkan textures are attached to draws via descriptor
 //     sets, not a bind-to-unit call. DescriptorImageInfo() replaces Bind(unit) -- the caller
-//     (Section 8's per-material descriptor set assembly) writes it into a
+//     (the per-material descriptor set assembly) writes it into a
 //     VkWriteDescriptorSet at whatever binding that material's layout assigns this texture.
 //
 // Vulkan has no vertical-flip equivalent to GL's texture upload convention: without a
@@ -135,7 +135,7 @@ internal sealed unsafe class VkTexture : IDisposable
     /// <em>pre-processed</em> bitmap (RGBA8888, NOT flipped -- see <see cref="Preprocess"/>).
     /// Ownership of <paramref name="bitmap"/> transfers to this constructor; it is disposed
     /// before the constructor returns.
-    /// <paramref name="batch"/> (2026-08-13): when non-null, records this texture's base-level
+    /// <paramref name="batch"/>: when non-null, records this texture's base-level
     /// copy + full mip-chain build into the batch's already-open command buffer instead of
     /// doing its own submit+wait -- see <see cref="VkStagedUploadBatch"/>'s own doc comment.
     /// Every recorded command here only ever references THIS texture's own <see cref="_image"/>
@@ -517,7 +517,7 @@ internal sealed unsafe class VkTexture : IDisposable
     }
 
     /// <summary>Descriptor info for writing this texture into a per-material descriptor set
-    /// (plan Section 5's set 2) -- the Vulkan replacement for <c>GlTexture.Bind(unit)</c>.</summary>
+    /// (the set 2) -- the Vulkan replacement for <c>GlTexture.Bind(unit)</c>.</summary>
     public DescriptorImageInfo DescriptorImageInfo => new()
     {
         ImageLayout = ImageLayout.ShaderReadOnlyOptimal,

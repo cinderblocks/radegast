@@ -22,7 +22,7 @@
 // class-level note); this is its own small, self-contained class since the pixel-generation
 // math, format (R8 vs RGBA8), and mip-count policy (4 explicit levels, not a full log2 chain
 // -- see below) all genuinely differ, and nothing else in this port needs a single-channel
-// procedural texture. See plan Section 8c-2.
+// procedural texture.
 //
 // The noise-generation algorithm (tileable value noise, 6 octaves, smoothstep-interpolated
 // lattice) is pure C# math with no GPU dependency.

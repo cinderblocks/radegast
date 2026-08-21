@@ -18,7 +18,7 @@
  */
 
 // CPU-side mirror of the "WaterPass" UBO declared in shader_data/vulkan/water.frag (set=1,
-// binding=0) -- see plan Section 8c-3. Same std140-by-hand discipline as VkSkyUbo.cs/
+// binding=0). Same std140-by-hand discipline as VkSkyUbo.cs/
 // VkPerFrameUbo.cs. Field order below matches water.frag's own declaration order (no reordering
 // needed to pack tightly this time -- it already falls out that way: three mat4s, then a
 // vec3+float pair that packs into the vec3's tail padding exactly like VkSkyUbo's

@@ -18,10 +18,9 @@
  */
 
 // Adapted from Avalonia's own samples/GpuInterop/VulkanDemo (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia)'s VulkanContext.cs, validated working against
-// this project's pinned Avalonia version in experiments/VulkanEmbeddingSpike before being
-// ported here. Trimmed from the original: no GRContext/SkiaSharp interop (that was the
-// sample's own texture-dump debug feature, not part of the render/present pipeline itself).
+// https://github.com/AvaloniaUI/Avalonia)'s VulkanContext.cs. Trimmed from the original: no
+// GRContext/SkiaSharp interop (that was the sample's own texture-dump debug feature, not part
+// of the render/present pipeline itself).
 
 using System;
 using System.Collections.Generic;
@@ -43,25 +42,19 @@ namespace Radegast.Veles.Rendering;
 /// Holds the single, shared Vulkan instance/device/queue used by every Veles Vulkan-backed
 /// viewer panel. Unlike <see cref="GlApi"/>'s pattern (one GL context per panel, each
 /// initialised independently by Avalonia's <c>OpenGlControlBase</c>), there is exactly one
-/// <see cref="VkContext"/> for the whole process -- see plan Section 5's "Shared device
-/// design": device/instance creation happens once, at first-panel-construction, and every
-/// subsequent panel reuses it. Construct via <see cref="TryCreate"/>, never directly.
+/// <see cref="VkContext"/> for the whole process: device/instance creation happens once, at
+/// first-panel-construction, and every subsequent panel reuses it. Construct via
+/// <see cref="TryCreate"/>, never directly.
 /// </summary>
 internal sealed unsafe class VkContext : IDisposable
 {
-    // Plan Step 6: the single canonical knob every N-buffered piece of per-panel state
-    // (VkFrameStatsTracker's query pools, VkPrimDescriptorSets' per-frame UBO/FrameSet,
-    // VkFrameReapRing's slots) is sized against. CLOSED at 1 (2026-08-21) after six live N=2
-    // hangs across three genuinely distinct call-path localizations (after BeginDraw, unclear;
-    // inside a WaitForFenceCore for the BeginDraw buffer's own fence; inside the untimed
-    // PreCull/culling span with no wait in progress at all) -- no single deterministic bug stayed
-    // implicated across repeats, which points at driver/GPU-level contention from holding twice
-    // the in-flight GPU state rather than a fixable ordering bug in this codebase. A 7-hour
-    // N=1 marathon under comparable-or-heavier load had zero hangs. Measured win from real
-    // overlap was ~5-7ms/frame at this scene's content density -- not worth the risk. See the
-    // plan file's Step 6 section (search "Sixth N=2 hang confirmed") for the full six-hang
-    // history before ever attempting this again; start any future attempt from a fresh
-    // diagnostic pass rather than re-adding the same bracketing.
+    // The single canonical knob every N-buffered piece of per-panel state (VkFrameStatsTracker's
+    // query pools, VkPrimDescriptorSets' per-frame UBO/FrameSet, VkFrameReapRing's slots) is
+    // sized against. Kept at 1: N=2 reproduced driver/GPU-level hangs across multiple distinct
+    // call paths with no single deterministic root cause, pointing at contention from holding
+    // twice the in-flight GPU state rather than a fixable ordering bug in this codebase. The
+    // measured throughput win from real overlap is a few ms/frame at typical scene density --
+    // not worth the stability risk.
     public const int FramesInFlight = 1;
 
     public required Vk Api { get; init; }
@@ -75,9 +68,9 @@ internal sealed unsafe class VkContext : IDisposable
 
     // Gated on VELES_VK_VALIDATION=1 (VK_LAYER_KHRONOS_validation, availability-checked, never a
     // hard requirement) and separately VELES_VK_SYNC_VALIDATION=1 (VK_VALIDATION_FEATURE_ENABLE_
-    // SYNCHRONIZATION_VALIDATION_EXT layered on top -- per plan's "Validation layers" section,
-    // slow enough that a populated SceneViewer may be unusable with it on, so kept independently
-    // toggleable rather than bundled with core validation). _debugCallback is stored as an
+    // SYNCHRONIZATION_VALIDATION_EXT layered on top -- slow enough that a populated SceneViewer
+    // may be unusable with it on, so kept independently toggleable rather than bundled with core
+    // validation). _debugCallback is stored as an
     // instance field, not a local, because native code holds a raw pointer into this managed
     // delegate for as long as _debugMessenger exists -- letting it go out of scope would leave a
     // dangling callback the moment the GC decides to collect it.
@@ -102,16 +95,16 @@ internal sealed unsafe class VkContext : IDisposable
     /// observe. See <see cref="VkMaterialUboPool"/>'s own header comment for why it exists.</summary>
     public VkMaterialUboPool MaterialUboPool { get; private set; } = null!;
 
-    /// <summary>Non-null only on the Mode B (D3D11 cross-import) path -- see plan Section 3 --
-    /// when Avalonia's compositor backend doesn't advertise native Vulkan handle sharing and
-    /// render-target images must be exported as DXGI shared handles instead.</summary>
+    /// <summary>Non-null only on the Mode B (D3D11 cross-import) path, when Avalonia's
+    /// compositor backend doesn't advertise native Vulkan handle sharing and render-target
+    /// images must be exported as DXGI shared handles instead.</summary>
     public required ComPtr<ID3D11Device> D3DDevice { get; init; }
 
     /// <summary>
     /// Creates the shared Vulkan instance + device, negotiating whichever external
     /// memory/semaphore handle type <paramref name="gpuInterop"/> (Avalonia's compositor GPU
     /// interop feature for whatever backend it's actually running under) advertises support
-    /// for. Works under both integration modes validated in the Phase 0 spike: Mode A
+    /// for. Works under both integration modes: Mode A
     /// (Avalonia's own compositor on Vulkan, native <c>VulkanOpaqueNtHandle</c> sharing) and
     /// Mode B (Avalonia on its default ANGLE/D3D11 backend, cross-import via
     /// <c>D3D11TextureNtHandle</c>) -- the branch on <c>SupportedImageHandleTypes</c> below is

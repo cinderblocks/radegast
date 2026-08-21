@@ -40,7 +40,7 @@ namespace Radegast.Veles.Rendering;
 
 internal sealed unsafe class VkPrimDescriptorSets : IDisposable
 {
-    // Plan Step 4: this is the ONE resource in the whole descriptor-set inventory mutated in
+    // this is the ONE resource in the whole descriptor-set inventory mutated in
     // place every single frame (via UpdatePerFrame's host-visible memcpy) rather than
     // infrequently replaced -- everything else (UpdateSsaoMap/UpdateShadowMap, material
     // descriptor rewrites) is rare enough to defer instead (plan Step 5). Real N-way buffering,

@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan port of GlMesh.cs -- see plan Section 6. Structural differences from the GL
+// Vulkan port of GlMesh.cs. Structural differences from the GL
 // original, all consequences of Vulkan's model rather than style choices:
 //   - No VAO equivalent: vertex attribute layout is part of the VkPipeline (see
 //     VertexInputBindingDescription/VertexInputAttributeDescriptions below, consumed by
@@ -25,7 +25,7 @@
 //   - Draw()/DrawLines() take an explicit command buffer -- Vulkan has no "immediate" draw
 //     call, everything is recorded into a command buffer the caller owns and submits.
 //   - STATIC_DRAW/DYNAMIC_DRAW become device-local-via-staging vs. host-visible-direct-map
-//     (VkBufferHelper.AllocateDeviceLocal/AllocateHostVisible -- plan Section 6's staging
+//     (VkBufferHelper.AllocateDeviceLocal/AllocateHostVisible -- the staging
 //     design). The index buffer and line-index buffer are always device-local, matching the
 //     GL original's unconditional StaticDraw for both.
 
@@ -54,16 +54,14 @@ internal sealed unsafe class VkMesh : IDisposable
     internal Buffer Vbo => _vbo;
     internal Buffer Ebo => _ebo;
     internal int IndexCount => _indexCount;
-    // 2026-08-13: lets VkViewportControl's cross-object mesh pool detect a stale dictionary
-    // entry (its mesh already fully released, _refCount hit zero via some other object's
-    // removal) and silently replace it with a freshly-built one instead of handing out a
-    // disposed mesh with dead native handles.
+    // Lets VkViewportControl's cross-object mesh pool detect a stale dictionary entry (its mesh
+    // already fully released, _refCount hit zero via some other object's removal) and silently
+    // replace it with a freshly-built one instead of handing out a disposed mesh with dead
+    // native handles.
     internal bool IsDisposed => _disposed;
-    internal const int VertexStride = 48; // 12 floats x 4 bytes -- unchanged from GlMesh
+    internal const int VertexStride = 48; // 12 floats x 4 bytes
 
-    /// <summary>Vertex input binding for this mesh's interleaved VBO, binding slot 0. Consumed
-    /// by pipeline creation (Section 8) -- mirrors the static <c>VertexInputBindingDescription</c>
-    /// property pattern from the Phase 0 spike's <c>VulkanContent.Vertex</c>.</summary>
+    /// <summary>Vertex input binding for this mesh's interleaved VBO, binding slot 0.</summary>
     public static VertexInputBindingDescription VertexInputBindingDescription => new()
     {
         Binding = 0,
@@ -86,8 +84,8 @@ internal sealed unsafe class VkMesh : IDisposable
     /// Creates a mesh using only the first <paramref name="verticesLength"/> floats of
     /// <paramref name="vertices"/>, which may be an oversized ArrayPool-rented buffer.
     /// <paramref name="dynamic"/> selects host-visible-direct-map (fast to update, slower to
-    /// sample) vs. device-local-via-staging (opposite tradeoff) -- see plan Section 6.
-    /// <paramref name="batch"/> (2026-08-13): when non-null and <paramref name="dynamic"/> is
+    /// sample) vs. device-local-via-staging (opposite tradeoff).
+    /// <paramref name="batch"/>: when non-null and <paramref name="dynamic"/> is
     /// false, records this mesh's vbo/ebo staging copies into the batch's already-open command
     /// buffer instead of each doing its own submit+wait -- see
     /// <see cref="VkStagedUploadBatch"/>'s own doc comment. Caller owns submitting the batch and
@@ -128,7 +126,7 @@ internal sealed unsafe class VkMesh : IDisposable
     }
 
     /// <summary>Records a bind + indexed draw of the triangle-list index buffer. Caller owns
-    /// command buffer recording/submission (see plan Section 5's frame-in-flight lifecycle).</summary>
+    /// command buffer recording/submission (see the frame-in-flight lifecycle).</summary>
     public void Draw(CommandBuffer cmd)
     {
         var api = _vk.Api;

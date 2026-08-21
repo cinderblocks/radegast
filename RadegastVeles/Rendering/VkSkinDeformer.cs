@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan port of GlSkinDeformer.cs (plan Section 8b). Dispatches one compute shader invocation
+// Vulkan port of GlSkinDeformer.cs. Dispatches one compute shader invocation
 // per queued VkSkinComputeJob, writing deformed vertices directly into each job's mesh VBO --
 // same design GL uses (see GlSkinDeformer.cs's own class doc comment), no CPU vertex loop.
 //
@@ -33,11 +33,10 @@
 // same command buffer as the main draw calls.
 //
 // The VkBufferMemoryBarrier after each dispatch (ComputeShaderBit/ShaderWriteBit ->
-// VertexInputBit/VertexAttributeReadBit) is the same barrier the plan's own Section 8(b) prose
-// already specified before any of this was written, mirroring GL's per-dispatch
+// VertexInputBit/VertexAttributeReadBit) mirrors GL's per-dispatch
 // MemoryBarrier(VertexAttribArrayBarrierBit) call exactly (GL's own barrier is also per-
-// dispatch, inside the loop, not batched after it -- confirmed by reading GlSkinDeformer.cs
-// before assuming otherwise). Strictly speaking the fence wait in FreeUsedCommandBuffers
+// dispatch, inside the loop, not batched after it). Strictly speaking the fence wait in
+// FreeUsedCommandBuffers
 // already establishes host-mediated visibility for whatever command buffer records the main
 // draw calls next, but the barrier costs nothing and keeps this correct independent of that
 // argument, matching GL's own equally-defensive-looking per-dispatch barrier.
@@ -76,7 +75,6 @@ internal sealed unsafe class VkSkinDeformer : IDisposable
     private long _serviceCounter;
     private long _lastPruneTicks;
 
-    private long _lastLogTicks;
     private bool _disposed;
 
     public VkSkinDeformer(VkContext vk, VkSkinPipeline pipeline)
@@ -203,18 +201,6 @@ internal sealed unsafe class VkSkinDeformer : IDisposable
         }
 
         cmd.SubmitAndWait();
-
-        if (!_pending.IsEmpty || dispatched > 0)
-        {
-            long now = Environment.TickCount64;
-            if (now - _lastLogTicks >= 1000)
-            {
-                _lastLogTicks = now;
-                LibreMetaverse.Logger.Debug(
-                    $"[VkSkinDeformer] dispatched={dispatched}/{pendingAtStart} pending queued this frame, " +
-                    $"backlog={_pending.Count}");
-            }
-        }
     }
 
     public void Dispose()

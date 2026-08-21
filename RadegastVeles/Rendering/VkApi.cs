@@ -29,7 +29,7 @@ namespace Radegast.Veles.Rendering;
 /// <c>GlApi.Gl</c> is rebuilt per-panel (each GL context is independent),
 /// <see cref="Context"/> is created exactly once for the
 /// whole process: the first panel to construct wins, every later panel reuses the same
-/// device/queue/descriptor pool (plan Section 5, "Shared device design").
+/// device/queue/descriptor pool ("Shared device design").
 /// </summary>
 internal static class VkApi
 {
@@ -57,8 +57,7 @@ internal static class VkApi
     /// later callers' interop instances are assumed compatible since they come from the same
     /// process-wide compositor.</param>
     /// <returns>Success flag and a human-readable info string (device name on success, failure
-    /// reason otherwise) -- surface this the same way the Phase 0 spike's <c>GpuDemo.Info</c>
-    /// binding did, so init failures are visible without a debugger attached.</returns>
+    /// reason otherwise), so init failures are visible without a debugger attached.</returns>
     public static Task<(bool success, string info)> EnsureInitializedAsync(ICompositionGpuInterop gpuInterop)
     {
         lock (s_lock)

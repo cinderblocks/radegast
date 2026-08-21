@@ -1419,14 +1419,6 @@ internal sealed class PrimMeshBuilder(GridClient client)
             var mesh = await GetPrimMeshAsync(prim, ct, DetailLevel.High).ConfigureAwait(false);
             if (mesh == null)
             {
-                // Diagnostic (2026-08-19, chasing "sculptie attachment prim never renders while
-                // flexi sibling prims in the SAME linkset do" -- this silent per-prim skip is
-                // the only place in TessellateAttachmentAsync that could produce exactly that
-                // shape: one child prim of a multi-prim attachment linkset dropped, the rest
-                // (built in the same loop, same call) unaffected. GetPrimMeshAsync only returns
-                // null via its SculptType.Mesh branch's DownloadMeshAsync failing -- the legacy
-                // (non-Mesh) sculpt branch always falls back to a parametric mesh and should
-                // never reach here, so this fires proves which of those two it actually is.
                 Logger.Log($"[AttachPrimSkip] linkset prim {prim.LocalID} (pcode={prim.PrimData.PCode}, " +
                     $"sculptType={prim.Sculpt?.Type.ToString() ?? "none"}) — GetPrimMeshAsync returned null, " +
                     "this prim will not render.",

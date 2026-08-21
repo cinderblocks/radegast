@@ -17,10 +17,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan replacement for GlShader.cs's compile/link/uniform-cache role -- see plan Section 7.
+// Vulkan replacement for GlShader.cs's compile/link/uniform-cache role.
 // Much thinner than GlShader by design: Vulkan shader modules don't compile GLSL text at
 // runtime (that already happened at build time, see RadegastVeles.csproj's ShaderCompile
-// items / plan Section 4), and there's no uniform-location caching to do -- data flows
+// items), and there's no uniform-location caching to do -- data flows
 // through descriptor sets and push constants instead of glUniform* calls, both bound via
 // command-buffer calls in the render code, not through this class. This class's only job
 // is turning a .spv file into a VkShaderModule.
@@ -49,7 +49,7 @@ internal sealed unsafe class VkShaderModule : IDisposable
     /// Loads a compiled .spv file from <paramref name="path"/> (relative to
     /// <see cref="AppContext.BaseDirectory"/> -- ShaderCompile's <c>output_kind=content</c>
     /// copies compiled shaders to the output directory as loose files, not embedded
-    /// AvaloniaResource assets like the GL originals; see plan Section 4's correction).
+    /// AvaloniaResource assets like the GL originals; see the correction).
     /// </summary>
     public static VkShaderModule LoadFromFile(VkContext vk, string relativePath)
     {

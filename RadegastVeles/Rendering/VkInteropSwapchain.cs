@@ -18,8 +18,7 @@
  */
 
 // Ported from Avalonia's own samples/GpuInterop/VulkanDemo's VulkanSwapchain.cs (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia), validated working in experiments/VulkanEmbeddingSpike
-// before being ported here for the real Section 8a render loop. Bridges Veles's own rendering
+// https://github.com/AvaloniaUI/Avalonia). Bridges Veles's own rendering
 // (a VkInteropImage Veles renders into) to Avalonia's compositor via SwapchainBase<T>'s
 // double-buffering (Vendored/SwapchainBase.cs) and ICompositionGpuInterop's import/present
 // calls. BeginDraw()/Present() bracket a single frame: BeginDraw transitions the image to
@@ -61,11 +60,10 @@ internal sealed class VkInteropSwapchain : SwapchainBase<VkInteropSwapchainImage
 
     protected override VkInteropSwapchainImage CreateImage(PixelSize size) => new(_vk, size, Interop, Target, _reapRing);
 
-    // Diagnostic-only (2026-08-18, bisecting a "PreCull" CPU-ms spike): the reap here is where
-    // the PREVIOUS frame's VkInteropSwapchainImage.Present() submit -- never waited on within
-    // the frame it belongs to, by design (see that method's own doc comment) -- actually gets
-    // reaped. If the compositor/present pipeline is backed up, that deferred wait lands here, on
-    // the NEXT frame, not in RenderFrame's own explicit main-pass SubmitWait.
+    // The reap here is where the PREVIOUS frame's VkInteropSwapchainImage.Present() submit --
+    // never waited on within the frame it belongs to, by design (see that method's own doc
+    // comment) -- actually gets reaped. If the compositor/present pipeline is backed up, that
+    // deferred wait lands here, on the NEXT frame, not in RenderFrame's own main-pass SubmitWait.
     public double LastFreeUsedCommandBuffersMs { get; private set; }
     public double LastBeginDrawCoreMs { get; private set; }
     private readonly System.Diagnostics.Stopwatch _diagStopwatch = new();
@@ -76,22 +74,15 @@ internal sealed class VkInteropSwapchain : SwapchainBase<VkInteropSwapchainImage
     /// pass to <see cref="VkRenderPass"/>/framebuffer creation for this frame.</summary>
     public IDisposable BeginDraw(PixelSize size, out VkInteropImage image)
     {
-        // Plan Step 6 hang fix (2026-08-20): BeginDrawCore now runs FIRST, FreeUsed() second --
-        // reversed from the pre-Step-6 order. BeginDrawCore -> img.BeginDraw() is what issues
-        // THIS frame's own keyed-mutex acquire submit and is what advances the
-        // Veles-render/compositor-consume handshake. At FramesInFlight=1 the old order (FreeUsed
-        // first) never mattered because the slot FreeUsed reaped always held exactly last
-        // frame's already-fully-cycled buffers. Under real frame-in-flight overlap (N>1) that
-        // slot would instead hold buffers from an earlier frame, including that frame's own
-        // present-path submission -- reaping (waiting on) it BEFORE this frame's own
-        // BeginDrawCore call risks blocking the one call that would let the handshake advance,
-        // on the same thread, with nothing else able to make progress. A live SceneViewer
-        // session under heavy load at N=2 hung exactly this way once (render thread stopped
-        // inside a scene-object upload immediately after a fresh RenderFrame started). Running
-        // BeginDrawCore first removes this specific ordering hazard regardless of the exact
-        // fence dependency chain. Kept even though Step 6's flip to N=2 was ultimately abandoned
-        // (see VkContext.FramesInFlight's own comment for the full six-hang history) -- it's a
-        // real improvement and a no-op risk at N=1, just not a complete fix on its own.
+        // BeginDrawCore runs FIRST, FreeUsed() second. BeginDrawCore -> img.BeginDraw() issues
+        // THIS frame's own keyed-mutex acquire submit and advances the Veles-render/
+        // compositor-consume handshake. At FramesInFlight=1 the reverse order would never
+        // matter, since the slot FreeUsed reaps always holds exactly last frame's already-
+        // fully-cycled buffers -- but under frame-in-flight overlap (N>1) that slot could hold
+        // buffers from an earlier frame, including that frame's own present-path submission, and
+        // reaping (waiting on) it before this frame's BeginDrawCore call risks blocking the one
+        // call that lets the handshake advance, with nothing else able to make progress on this
+        // thread. Running BeginDrawCore first removes that ordering hazard regardless of N.
         _diagStopwatch.Restart();
         var rv = BeginDrawCore(size, out var swapchainImage);
         LastBeginDrawCoreMs = _diagStopwatch.Elapsed.TotalMilliseconds;

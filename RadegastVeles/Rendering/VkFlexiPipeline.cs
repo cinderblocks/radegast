@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Compute pipeline for flexi-prim GPU vertex deformation (plan Section 8c-4, flexi.comp).
+// Compute pipeline for flexi-prim GPU vertex deformation (flexi.comp).
 // Mirrors VkSkinPipeline.cs's shape exactly (the second compute pipeline in this migration) --
 // two real differences from it, both mechanical, driven by flexi.comp's own declarations:
 //   - 3 storage-buffer bindings (BaseVerts/SpineData/OutVerts), not 5 -- flexi has no per-vertex

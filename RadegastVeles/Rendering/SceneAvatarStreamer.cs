@@ -143,11 +143,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
     private bool           _disposed;
 
     /// <summary>
-    /// Raised after a successful avatar build.
-    /// Arguments: (sceneKey, localId, buildResult).
-    /// The sceneKey is the ulong used in <see cref="VkViewportControl.SubmitSceneObject"/>.
+    /// Raised after a successful avatar build, with the sceneKey (the ulong used in
+    /// <see cref="VkViewportControl.SubmitSceneObject"/>), localId, build result, and the
+    /// avatar's resolved world placement -- used to seed subscribers that place per-tick-posed
+    /// geometry.
     /// </summary>
-    public event Action<ulong, uint, AvatarBuildResult>? AvatarBuilt;
+    public event Action<ulong, uint, AvatarBuildResult, Matrix4x4>? AvatarBuilt;
 
     private SceneAvatarAnimationStreamer? _animationStreamer;
 
@@ -382,8 +383,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
     /// <summary>
     /// Called when an attachment prim belonging to a tracked avatar is added or its
-    /// metadata updated, so a new attachment's cost is picked up by a re-evaluation
-    /// without waiting for an unrelated position/appearance update.
+    /// properties change (e.g. an LSL texture/color change). Triggers a debounced rebuild
+    /// of the owning avatar. Cost-cache invalidation is scoped to <paramref name="isNew"/>,
+    /// since only wearing something new changes the avatar's estimated render cost.
     /// </summary>
     public void OnAttachmentObjectUpdate(Simulator sim, Primitive prim, bool isNew)
     {
@@ -392,10 +394,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (!_trackedLocalIds.ContainsKey(prim.ParentID)) return;
         _attachmentOwner[prim.LocalID] = prim.ParentID;
         if (isNew)
-        {
             _cachedCost.TryRemove(prim.ParentID, out _);
-            EnqueueDirty(prim.ParentID);
-        }
+        EnqueueDirty(prim.ParentID);
     }
 
     /// <summary>Called when a prim is killed, in case it was a tracked avatar's attachment.</summary>
@@ -955,10 +955,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
             worldPos = new Vector3(rawWorldPos.X, rawWorldPos.Y, rawWorldPos.Z);
 
             // Apply world-space position so the avatar stands at its sim-local coords.
+            var worldMatrix = Matrix4x4.Identity;
             var submission = result.Submission;
             if (rawWorldPos != OmVector3.Zero)
             {
-                var worldMatrix = AvatarWorldMatrix(worldPos, worldRot);
+                worldMatrix = AvatarWorldMatrix(worldPos, worldRot);
 
                 // Flexi faces have Transform = Identity (set by AvatarMeshBuilder) and are
                 // fully positioned by FlexiPrimAnimator each tick via AttachTransform.
@@ -1030,6 +1031,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
                     // directly onto the FlexiPrims the animator will read once it's created.
                     foreach (var fp in submission.FlexiPrims)
                         fp.ExternalTransform = freshWorldMatrix;
+                    // AvatarBuilt's payload should carry this fresher value too.
+                    worldMatrix = freshWorldMatrix;
                 }
             }
 
@@ -1044,7 +1047,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // Avatar fully loaded — stop the cloud particle effect.
             StopCloudDriver(localId);
 
-            AvatarBuilt?.Invoke(SceneKey(localId), localId, result);
+            AvatarBuilt?.Invoke(SceneKey(localId), localId, result, worldMatrix);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

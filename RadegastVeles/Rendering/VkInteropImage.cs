@@ -18,20 +18,18 @@
  */
 
 // Ported from Avalonia's own samples/GpuInterop/VulkanDemo's VulkanImage.cs (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia), validated working against this project's pinned
-// Avalonia version in experiments/VulkanEmbeddingSpike before being ported here for the real
-// Section 8a render loop. Represents a single interop-exportable VkImage: either the render
-// target Veles renders into (constructed with exportable=true, used by VkInteropSwapchain), or
-// -- not used by Veles today -- a non-exportable image if some future pass needed one.
+// https://github.com/AvaloniaUI/Avalonia). Represents a single interop-exportable VkImage:
+// either the render target Veles renders into (constructed with exportable=true, used by
+// VkInteropSwapchain), or -- not used by Veles today -- a non-exportable image if some future
+// pass needed one.
 //
 // Trimmed from the original in two ways: (1) no GRContext/SkiaSharp SaveTexture() debug/
 // screenshot feature (matches the same trim VkContext.cs already made -- not part of the
 // render/present pipeline); (2) no macOS IOSurface export path -- that needs
-// Silk.NET.Vulkan.Extensions.EXT, which plan Section 4 deliberately did NOT add to
-// RadegastVeles.csproj ("only needed if the Phase 0 fallback path is ever pursued"). Kept: the
-// Windows D3D11-shared-handle / native-Vulkan-opaque-Win32 branch (Mode B, plan Section 3,
-// what Veles actually runs) and the generic Linux opaque-FD branch (unused today but zero
-// extra package cost, unlike the EXT-gated macOS path).
+// Silk.NET.Vulkan.Extensions.EXT, deliberately not added to RadegastVeles.csproj since it's
+// only needed if a macOS fallback path is ever pursued. Kept: the Windows D3D11-shared-handle
+// / native-Vulkan-opaque-Win32 branch (Mode B, what Veles actually runs) and the generic Linux
+// opaque-FD branch (unused today but zero extra package cost, unlike the EXT-gated macOS path).
 
 using System;
 using System.Collections.Generic;
@@ -244,7 +242,7 @@ internal sealed unsafe class VkInteropImage : IDisposable
         return new PlatformHandle(new IntPtr(ExportFd()), KnownPlatformGraphicsExternalImageHandleTypes.VulkanOpaquePosixFileDescriptor);
     }
 
-    /// <summary>True on Mode B (plan Section 3): this image's memory is a DXGI-shared D3D11
+    /// <summary>True on Mode B: this image's memory is a DXGI-shared D3D11
     /// texture, not a native Vulkan opaque handle, so submissions touching it must use the
     /// Win32-keyed-mutex acquire/release protocol (see <see cref="VkCommandBufferPool.VkCommandBuffer.Submit"/>'s
     /// <c>KeyedMutexSubmitInfo</c>) rather than semaphores.</summary>

@@ -17,10 +17,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Descriptor set layouts for the prim pipeline family (plan Section 5's set 0/1/2 scheme).
-// Binding numbers here must match the layout(set=,binding=) declarations in
-// shader_data/vulkan/prim.vert, prim.frag and shadow.glsl exactly -- verified by grepping all
-// three for "layout(set" before writing this file (2026-07-29).
+// Descriptor set layouts for the prim pipeline family (set 0/1/2 scheme). Binding numbers here
+// must match the layout(set=,binding=) declarations in shader_data/vulkan/prim.vert, prim.frag
+// and shadow.glsl exactly.
 
 using Silk.NET.Vulkan;
 
@@ -112,8 +111,7 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
-    /// <summary>Set 1 of the sky pipeline (plan Section 8c-2, pipeline table row 11) --
-    /// NOT shared with the prim pipeline family's own set 1 (per-pass samplers): the sky
+    /// <summary>Set 1 of the sky pipeline -- NOT shared with the prim pipeline family's own set 1 (per-pass samplers): the sky
     /// pipeline's set 0 reuses <see cref="VkPrimPipeline.PerFrameLayout"/> directly, but its
     /// set 1 is sky-only data nothing else needs (uInvViewProj/cloud parameters, binding 0
     /// UBO; the tiling cloud-noise texture, binding 1 sampler). Fragment-only -- sky.vert
@@ -147,8 +145,7 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
-    /// <summary>Set 0 of the SSAO pipeline (plan Section 8c-2b, pipeline table row 7) --
-    /// binding 0 = the <c>SsaoParams</c> UBO (kernel + projection + screen/noise/radius/
+    /// <summary>Set 0 of the SSAO pipeline -- binding 0 = the <c>SsaoParams</c> UBO (kernel + projection + screen/noise/radius/
     /// bias/strength), bindings 1-3 = uDepthTex/uNormalTex/uNoiseTex. Fragment-only:
     /// quad.vert (this pipeline's vertex shader) has no uniforms of its own.</summary>
     public static unsafe DescriptorSetLayout CreateSsaoParamsLayout(VkContext vk)
@@ -181,8 +178,7 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
-    /// <summary>Set 0 of the SSAO-blur pipeline (plan Section 8c-2b, pipeline table row 8) --
-    /// a single uSsaoTex sampler binding. uTexelSize is a push constant instead (see
+    /// <summary>Set 0 of the SSAO-blur pipeline -- a single uSsaoTex sampler binding. uTexelSize is a push constant instead (see
     /// vulkan/ssaoblur.frag), not worth a UBO for two floats.</summary>
     public static unsafe DescriptorSetLayout CreateBlurSamplerLayout(VkContext vk)
     {
@@ -203,7 +199,7 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
-    /// <summary>Set 1 of the water pipeline (plan Section 8c-3, pipeline table row 10) -- NOT
+    /// <summary>Set 1 of the water pipeline -- NOT
     /// shared with the prim pipeline family's own set 1: the water pipeline's set 0 reuses
     /// <see cref="VkPrimPipeline.PerFrameLayout"/> directly (same pattern as the sky pipeline's
     /// set 0), but its set 1 is water-only data nothing else needs. Binding 0 = the

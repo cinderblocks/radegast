@@ -65,7 +65,6 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
     private long _serviceCounter;
     private long _lastPruneTicks;
 
-    private long _lastLogTicks;
     private bool _disposed;
 
     public VkFlexiDeformer(VkContext vk, VkFlexiPipeline pipeline)
@@ -102,7 +101,6 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
 
         int pendingAtStart = _pending.Count;
         int dispatchedJobs = 0;
-        int dispatchedFaces = 0;
 
         var api = _vk.Api;
         var cmd = _vk.Pool.CreateCommandBuffer("VkFlexiDeformer.DispatchPending");
@@ -117,8 +115,7 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
         //
         // NOT _pending.OrderBy(...) directly -- see VkSkinDeformer.cs's identical comment for
         // why that throws (LINQ's internal Count-then-CopyTo buffering races a concurrent
-        // Enqueue, confirmed live 2026-08-12). Snapshot through the safe foreach first, then
-        // sort the plain List.
+        // Enqueue). Snapshot through the safe foreach first, then sort the plain List.
         IEnumerable<KeyValuePair<VkFlexiGpuData, VkFlexiComputeJob>> drain;
         if (pendingAtStart > MaxJobsPerFrame)
         {
@@ -185,24 +182,10 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
                 };
                 api.CmdPipelineBarrier(cmd.InternalHandle, PipelineStageFlags.ComputeShaderBit,
                     PipelineStageFlags.VertexInputBit, DependencyFlags.None, 0, null, 1, &barrier, 0, null);
-                dispatchedFaces++;
             }
         }
 
         cmd.SubmitAndWait();
-
-        // Throttled diagnostic -- see VkSkinDeformer.cs's identical block for why this exists.
-        if (!_pending.IsEmpty || dispatchedJobs > 0)
-        {
-            long now = Environment.TickCount64;
-            if (now - _lastLogTicks >= 1000)
-            {
-                _lastLogTicks = now;
-                LibreMetaverse.Logger.Debug(
-                    $"[VkFlexiDeformer] dispatched={dispatchedJobs}/{pendingAtStart} jobs " +
-                    $"({dispatchedFaces} face dispatches), backlog={_pending.Count}");
-            }
-        }
     }
 
     public void Dispose()

@@ -228,30 +228,6 @@ internal static class TextureDiskCache
     /// this skips the CoreJ2K decode entirely -- callers own the returned <see cref="SKBitmap"/>
     /// and must dispose it (or hand ownership to a cache that will).
     /// </summary>
-    // Diagnostic-only counters (2026-08-17, investigating a "cached textures don't render"
-    // report): TryDecode/TryDecodeCompressed's own catch blocks return null silently on ANY
-    // structural mismatch, with no logging at all -- indistinguishable from an ordinary "not
-    // cached yet" miss from the caller's side. If an encode/decode round-trip bug exists (e.g.
-    // BcEncoder's actual per-level byte counts not matching the ceil(w/4)*ceil(h/4)*16 formula
-    // TryDecodeCompressed validates against), every entry silently "misses" forever and falls
-    // back to the uncompressed/live-decode path -- these counters distinguish that from a
-    // genuine file-not-found miss, which the existing code has no way to tell apart today.
-    private static long _pixelFileFound, _pixelDecodeNull, _compressedFileFound, _compressedDecodeNull;
-    private static long _lastCacheDiagLogTicks;
-
-    private static void LogCacheDiagIfDue()
-    {
-        long now = Environment.TickCount64;
-        if (now - Interlocked.Read(ref _lastCacheDiagLogTicks) < 1000) return;
-        Interlocked.Exchange(ref _lastCacheDiagLogTicks, now);
-        Logger.Debug("[TextureDiskCache] pixel tier: fileFound=" + Interlocked.Read(ref _pixelFileFound) +
-            " decodeNull=" + Interlocked.Read(ref _pixelDecodeNull) +
-            " -- compressed tier: fileFound=" + Interlocked.Read(ref _compressedFileFound) +
-            " decodeNull=" + Interlocked.Read(ref _compressedDecodeNull) +
-            " (decodeNull>0 means the file existed but TryDecode[Compressed] rejected it -- a" +
-            " silent round-trip mismatch, not an ordinary cache miss)");
-    }
-
     public static SKBitmap? TryGetPixels(UUID textureId)
     {
         if (!_enabled) return null;
@@ -259,7 +235,6 @@ internal static class TextureDiskCache
         {
             var path = PixelFilePath(textureId);
             if (!File.Exists(path)) return null;
-            Interlocked.Increment(ref _pixelFileFound);
 
             File.SetLastAccessTimeUtc(path, DateTime.UtcNow);
 
@@ -275,10 +250,7 @@ internal static class TextureDiskCache
                 if (read == 0) break;
                 offset += read;
             }
-            var result = Ktx2Codec.TryDecode(buffer);
-            if (result == null) Interlocked.Increment(ref _pixelDecodeNull);
-            LogCacheDiagIfDue();
-            return result;
+            return Ktx2Codec.TryDecode(buffer);
         }
         catch (Exception ex)
         {
@@ -313,7 +285,6 @@ internal static class TextureDiskCache
         {
             var path = CompressedPixelFilePath(textureId);
             if (!File.Exists(path)) return null;
-            Interlocked.Increment(ref _compressedFileFound);
 
             File.SetLastAccessTimeUtc(path, DateTime.UtcNow);
 
@@ -327,10 +298,7 @@ internal static class TextureDiskCache
                 if (read == 0) break;
                 offset += read;
             }
-            var result = Ktx2Codec.TryDecodeCompressed(buffer);
-            if (result == null) Interlocked.Increment(ref _compressedDecodeNull);
-            LogCacheDiagIfDue();
-            return result;
+            return Ktx2Codec.TryDecodeCompressed(buffer);
         }
         catch (Exception ex)
         {

@@ -63,15 +63,11 @@ internal sealed class SceneBuildScheduler : IDisposable
     // uniqueness regardless of how many entries share a priority. We use a sorted list so the
     // highest entry is always at the tail.
     //
-    // Previously nudged colliding float priorities by 1e-7f in a loop instead of using a
-    // sequence tiebreaker. That's silently unsound: IEEE-754 float has ~7 decimal digits of
-    // precision, so for any priority magnitude >= ~1.0 (ordinary for a close-range avatar --
-    // AvatarMultiplier=8, up to 24 with FrustumBoost), `priority + 1e-7f == priority` -- the
-    // nudge is a no-op and the while loop spins forever while holding _queueLock. Root-caused
-    // 2026-08-19 after a checkpoint bisection through VkViewportControl.RenderFrame ->
-    // VkFrameStatsTracker.EndFrame -> SceneViewerViewModel.OnFrameCompleted traced a
-    // region-crossing UI freeze to exactly this lock never being released; confirmed via direct
-    // IEEE-754 arithmetic (priority>=1.0f collisions never advance) before landing this fix.
+    // Do not replace the sequence tiebreaker with nudging colliding float priorities (e.g.
+    // `while (dup) priority += 1e-7f`): IEEE-754 float has ~7 decimal digits of precision, so
+    // for any priority magnitude >= ~1.0 (ordinary for a close-range avatar -- AvatarMultiplier=8,
+    // up to 24 with FrustumBoost), `priority + 1e-7f == priority`. The nudge is a no-op and that
+    // loop spins forever while holding _queueLock.
     private readonly SortedList<(float Priority, long Seq), Func<CancellationToken, Task>> _queue = new(PriorityComparer.Instance);
 
     private long _seq;

@@ -117,7 +117,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// functioning, just GPU-timing-less, tracker if timestamp queries aren't supported.</summary>
     public VkFrameStatsTracker Stats => _stats;
 
-    /// <summary>Section 8e: explicit ISceneViewport interface satisfaction -- see
+    /// <summary>explicit ISceneViewport interface satisfaction -- see
     /// ISceneViewport.Stats's own doc comment for why this is explicit rather than changing the
     /// public property above's return type.</summary>
     IFrameStatsTracker ISceneViewport.Stats => _stats;
@@ -203,12 +203,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     private RenderPass _renderPass;
     private VkInteropSwapchain? _swapchain;
-    // Plan Step 2: this panel's own pending-command-buffer list, replacing the old
+    // this panel's own pending-command-buffer list, replacing the old
     // process-wide one VkCommandBufferPool used to own. Shared with _swapchain (and the
     // VkInteropSwapchainImage instances it creates) so BeginDraw/Present/MainPass submissions
     // all reap through the same per-panel ring, matching pre-Step-2 timing exactly.
     private readonly VkFrameReapRing _reapRing = new();
-    // Plan Step 6 (deformer-ordering fix): the reap ring's own per-slot reaping only guarantees
+    // the reap ring's own per-slot reaping only guarantees
     // "FramesInFlight frames ago is done" -- too weak for the skin/flexi deformers' single
     // (not N-buffered) SSBOs, which every frame's MainPass reads and every frame's DispatchPending
     // overwrites, so the actual requirement is "the IMMEDIATELY PRECEDING frame's MainPass is
@@ -302,7 +302,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private DescriptorImageInfo _shadowMapInfo;
     private Matrix4x4 _shadowLightVp;
 
-    // ── Water: surface pass + reflection pre-pass (plan Section 8c-3) ──────────────────────
+    // ── Water: surface pass + reflection pre-pass ──────────────────────
     /// <summary>Default
     /// <c>false</c>: when false, <see cref="DrawWater"/> still draws the water surface (if
     /// <see cref="WaterHeight"/> is valid and the camera is above it) but with no reflection
@@ -390,7 +390,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // attachments. Same created/disposed-alongside-_opaqueFaces/_alphaFaces lifecycle.
     private readonly List<VkFlexiGpuData> _submissionFlexiGpu = new();
 
-    // Section 8c-4b: particle billboard rendering. Best-effort, same posture as the skin/flexi
+    // particle billboard rendering. Best-effort, same posture as the skin/flexi
     // pipelines above -- created in InitializeAsync inside a try/catch.
     private VkParticlePipeline? _particlePipeline;
     private VkParticleBuffer? _particleBuf;
@@ -406,7 +406,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // rewritten only when that emitter's texture actually changes.
     private readonly Dictionary<ulong, (ParticleRenderSubmission Sub, VkTexture? Tex, DescriptorSet Set)> _particleMap = new();
     // CPU scratch for the combined per-frame billboard-vertex array, grown on demand -- mirrors
-    // _instanceDataBuf's own grow-on-demand pattern (Section 8c-1).
+    // _instanceDataBuf's own grow-on-demand pattern.
     private float[] _particleDataBuf = Array.Empty<float>();
 
     // _pendingSubmission is handed off via Interlocked.Exchange and consumed at the top of
@@ -540,7 +540,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private readonly ConcurrentDictionary<ulong, Matrix4x4> _sceneObjectTransformOverrides = new();
     private readonly ConcurrentQueue<(ulong RootId, Matrix4x4 Transform)> _pendingTransformOverrides = new();
 
-    // Section 8b (AvatarViewer): faces in submission-array-POSITION order (NOT PrimRenderFace.
+    // AvatarViewer: faces in submission-array-POSITION order (NOT PrimRenderFace.
     // FaceIndex, which is caller-assigned and not guaranteed to match array position -- confirmed
     // via the original ScheduleVertexUpdate doc comment: "faceIndex is the index into
     // PrimRenderSubmission.Faces"), independent of the _opaqueFaces/_alphaFaces alpha split above.
@@ -574,15 +574,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // namespace from _pendingVertexUpdates' FaceIndex above).
     private readonly ConcurrentQueue<(uint RootId, int FaceOffset, float[] Verts, int VertsLength, bool IsPoolRented)> _pendingSceneVertexUpdates = new();
     // Scene-object counterpart to _pendingFaceTransformUpdates -- ScheduleSceneFaceTransformUpdate's
-    // queue, for SceneAvatarAnimator's rigid-attachment fast path (2026-08-12, ported from the
-    // AvatarViewer single-object fix of the same date). Same (RootId, FaceOffset) indexing as
-    // _pendingSceneVertexUpdates immediately above, drained against the same _sceneObjects list.
+    // queue, for SceneAvatarAnimator's rigid-attachment fast path. Same (RootId, FaceOffset)
+    // indexing as _pendingSceneVertexUpdates immediately above, drained against the same
+    // _sceneObjects list.
     private readonly ConcurrentQueue<(uint RootId, int FaceOffset, Matrix4x4 Transform)> _pendingSceneFaceTransformUpdates = new();
     // SubmitAvatarFront sets this, then
     // ApplyPendingSubmission (render thread) consumes it and calls Camera3D.FrameBoundsAvatarFront
     // instead of the plain bounds-refresh-only behavior a normal Submit() gets.
     private volatile bool _frameAvatarFrontPending;
-    // Section 8d (HudViewer): same
+    // HudViewer: same
     // flag-then-consume shape as _frameAvatarFrontPending above, but for the "front-on" framing
     // HudViewer/PrimViewer-style flat-panel views want instead of the avatar-specific framing.
     // The original ordering checks _frameAvatarFrontPending first, this second (an
@@ -628,7 +628,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     private bool _pickRequested;
     private Point _pickPoint;
-    // Section 8e: see RequestPick's own doc comment for the exact GL mirror this implements.
+    // see RequestPick's own doc comment for the exact GL mirror this implements.
     private bool _groundPickRequested;
 
     // Pointer-input/camera-drag-gesture state -- see OnPointerPressed/Released/Moved
@@ -857,15 +857,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     private volatile bool _initializing;
 
-    // Diagnostic-only (2026-08-18) -- see RenderFrame's own per-frame breadcrumb comment.
-    private long _frameCounter;
-
     protected override void OnDetachedFromLogicalTree(LogicalTreeAttachmentEventArgs e)
     {
-        // Kept as a permanent diagnostic (not just the 2026-08-08 investigation that found the
-        // OnAttachedToVisualTree reattach-leak bug) -- this is the only place _attached flips
-        // back to false, so a genuine full teardown vs. a same-tab no-op is worth being able to
-        // tell apart in the log if a future issue looks similar.
+        // This is the only place _attached flips back to false, so a genuine full teardown vs.
+        // a same-tab no-op is worth being able to tell apart in the log.
         LibreMetaverse.Logger.Info($"[VkViewportControl] OnDetachedFromLogicalTree (_attached={_attached})");
         if (_attached)
         {
@@ -887,9 +882,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         base.OnPropertyChanged(change);
     }
 
-    /// <summary>Backend-agnostic replacement for <c>OpenGlControlBase.RequestNextFrameRendering()</c>
-    /// -- flagged as needed in plan Section 5, first implemented here. Queues one composition
-    /// update; safe to call redundantly (coalesces via <see cref="_updateQueued"/>).
+    /// <summary>Backend-agnostic replacement for <c>OpenGlControlBase.RequestNextFrameRendering()</c>.
+    /// Queues one composition update; safe to call redundantly (coalesces via <see cref="_updateQueued"/>).
     /// <para>
     /// Genuinely safe to call from any thread, matching every "any thread" contract documented
     /// on <see cref="Submit"/>/<see cref="PatchSubmissionTexture"/>/<see cref="SubmitSceneObject"/>
@@ -930,7 +924,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         RequestRender();
     }
 
-    /// <summary>Section 8b (AvatarViewer): read-only access to the underlying camera, needed by
+    /// <summary>AvatarViewer: read-only access to the underlying camera, needed by
     /// <c>AvatarViewerViewModel.AnimTick</c>'s LOD selection (projected pixel height against the
     /// current camera/viewport).</summary>
     public Camera3D Camera => _camera;
@@ -949,7 +943,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// drained by <see cref="DrainPendingSceneObjects"/>.</summary>
     public int PendingSceneUploadCount => _pendingSceneObjects.Count;
 
-    /// <summary>Section 8e: number of normal-priority scene texture patches still waiting to be
+    /// <summary>number of normal-priority scene texture patches still waiting to be
     /// drained by <see cref="DrainScenePendingTexturePatches"/>.</summary>
     public int QueuedTexturePatchCount => _pendingScenePatches.Count;
 
@@ -1053,7 +1047,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private const double SceneWorkBudgetMs = 6.0;
 
     /// <summary>
-    /// Section 8b (AvatarViewer): like <see cref="Submit"/>, but frames the camera "avatar
+    /// AvatarViewer: like <see cref="Submit"/>, but frames the camera "avatar
     /// front" style once the submission is actually applied, instead of leaving the camera
     /// untouched. Works by setting
     /// a flag here and consuming it inside <see cref="ApplyPendingSubmission"/> (render thread),
@@ -1068,7 +1062,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8d (HudViewer): like <see cref="Submit"/>, but frames the camera front-on
+    /// HudViewer: like <see cref="Submit"/>, but frames the camera front-on
     /// (matching legacy Radegast's HUD viewer) once the submission is actually applied -- see
     /// <see cref="SubmitAvatarFront"/>'s
     /// own doc comment for why the flag-then-consume shape is used instead of a synchronous call.
@@ -1143,12 +1137,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// any hit is delivered via <see cref="FaceClicked"/> on the UI thread.
     /// </summary>
     /// <param name="point">Click point in this control's own coordinate space.</param>
-    /// <param name="isGroundPickCandidate">Section 8e: mirrors GL's own
+    /// <param name="isGroundPickCandidate">Mirrors GL's own
     /// <c>_groundPickRequested = _pressClickCount == 2</c> -- set true for a double-click, so a
     /// miss against every object in the pick buffer falls through to
     /// <see cref="TryGetGroundHit"/>/<see cref="GroundClicked"/> instead of resolving to
     /// nothing. Defaults false since this method currently has no real pointer-event caller
-    /// (Section 8e's own pointer-input port, task #57, is what will pass this for real).</param>
+    /// (a future pointer-input port is what will pass this for real).</param>
     public void RequestPick(Point point, bool isGroundPickCandidate = false)
     {
         _pickPoint = point;
@@ -1336,7 +1330,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8c-1 (SceneViewer streaming substrate): queue an additive scene-object
+    /// SceneViewer streaming substrate: queue an additive scene-object
     /// submission for the given scene key. Replaces any previously queued submission for the
     /// same key. Safe to call from any thread. See the <see cref="_pendingSceneObjects"/> field comment for why the actual
     /// GPU upload is deferred to the render thread rather than done here inline.
@@ -1371,7 +1365,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <summary>
     /// Queue a transform-only update for every (non-flexi) face belonging to
     /// <paramref name="sceneKey"/>, applied on the next render without a full mesh re-upload.
-    /// Safe to call from any thread. <c>SetSceneObjectMotion</c>'s dead-reckoning wrapper around this is Section 8c's
+    /// Safe to call from any thread. <c>SetSceneObjectMotion</c>'s dead-reckoning wrapper around this is the
     /// later motion-extrapolation sub-phase, not ported here.
     /// </summary>
     public void SetSceneObjectTransform(ulong sceneKey, Matrix4x4 transform)
@@ -1493,7 +1487,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
 
             var vk = VkApi.Context;
-            // Section 8e: best-effort, matching every other optional resource here -- Initialize
+            // best-effort, matching every other optional resource here -- Initialize
             // already swallows its own failures internally (falls back to a CPU-only-timing
             // tracker rather than throwing).
             _stats.Initialize(vk);
@@ -1525,7 +1519,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _skyReady = false;
             }
 
-            // Section 8c-2b, best-effort matching GL's own EnsureGbufferFbo/EnsureSsaoFbos
+ // best-effort matching GL's own EnsureGbufferFbo/EnsureSsaoFbos
             // completeness-check posture (see _ssaoReady's own field comment) -- a pipeline/
             // descriptor-set creation failure here disables SSAO for this panel instance,
             // not the whole panel. The per-size targets themselves (G-buffer/SSAO/blur images)
@@ -1584,7 +1578,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _ssaoReady = false;
             }
 
-            // Section 8c-3: directional shadow pass. Best-effort, same posture as sky/SSAO --
+            // directional shadow pass. Best-effort, same posture as sky/SSAO --
             // a pipeline/target creation failure disables shadows for this panel instance
             // (ShadowsEnabled stays whatever the caller set, but _shadowReady gates every use).
             // Placed BEFORE the water block below so CreateShadowTarget's UpdateShadowMap call
@@ -1606,7 +1600,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _shadowReady = false;
             }
 
-            // Section 8c-3: water surface + reflection pre-pass. Best-effort, matching GL's own
+            // water surface + reflection pre-pass. Best-effort, matching GL's own
             // InitWater posture (a reflection-FBO completeness failure still leaves the water
             // surface itself drawable via the analytic sky-gradient reflection fallback -- see
             // _waterReady vs. _waterReflReady's separate gates). Unlike GL, a Vulkan resource
@@ -1648,13 +1642,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
             catch (Exception waterInitEx)
             {
-                // Diagnostic-only (2026-08-19, user report "water definitely not rendering"):
-                // this catch previously swallowed any init failure with zero logging -- if any
-                // step above throws (missing/undecodable embedded texture, reflection-target
-                // creation, pipeline/shader mismatch, descriptor-set creation), _waterReady
-                // silently stays false and DrawWater is never called again for the rest of the
-                // panel's life, regardless of camera height or WaterHeight -- indistinguishable
-                // from a gating-logic bug without this log line.
+                // If any step above throws, _waterReady stays false and DrawWater is never
+                // called again for the rest of the panel's life -- log so that's diagnosable.
                 LibreMetaverse.Logger.Warn(
                     $"[VkViewportControl] Water init failed, water surface disabled for this panel: {waterInitEx}");
                 _frameSetsRefl?.Dispose(); _frameSetsRefl = null;
@@ -1684,7 +1673,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _skinDeformer = null;
             }
 
-            // Section 8c-4: same best-effort posture as the skin block immediately above.
+            // same best-effort posture as the skin block immediately above.
             try
             {
                 _flexiPipeline = VkFlexiPipeline.Create(vk);
@@ -1697,7 +1686,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _flexiDeformer = null;
             }
 
-            // Section 8c-4b: same best-effort posture as the skin/flexi blocks above.
+            // same best-effort posture as the skin/flexi blocks above.
             try
             {
                 _particlePipeline = VkParticlePipeline.Create(vk, _renderPass);
@@ -1800,7 +1789,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         while (_pendingVertexUpdates.TryDequeue(out _)) { }
         while (_pendingFaceTransformUpdates.TryDequeue(out _)) { }
 
-        // Section 8b: submissions carrying skin/animesh data get their vertex buffers rewritten
+        // submissions carrying skin/animesh data get their vertex buffers rewritten
         // every animation tick (AvatarViewerViewModel.AnimTick -> ScheduleVertexUpdate), so
         // those faces' meshes need host-visible-direct-map (dynamic: true) rather than the
         // device-local-via-staging default -- VkMesh.UpdateVertices on a dynamic:false mesh
@@ -1980,8 +1969,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _lastBoundsMin = submission.BoundsMin;
         _lastBoundsMax = submission.BoundsMax;
 
-        // Section 8b/8d: consumes _frameAvatarFrontPending/
-        // _frameFrontPending, including the
+        // Consumes _frameAvatarFrontPending/_frameFrontPending, including the
         // if/else-if precedence (avatar-front wins if somehow both were set) -- only
         // SubmitAvatarFront/SubmitFront set these flags, and they're consumed (and reset) here
         // rather than acted on synchronously inside those methods, since this control's bounds
@@ -1999,7 +1987,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8c-1: drains <see cref="_pendingSceneObjects"/> under a 6ms-per-frame time
+    /// drains <see cref="_pendingSceneObjects"/> under a 6ms-per-frame time
     /// budget (always admits at least one upload so progress is guaranteed even when a single
     /// upload is expensive), including requesting another render tick when
     /// the budget is exhausted with work still pending. Runs on the render thread only, called
@@ -2010,18 +1998,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_pendingClearScene)
         {
             _pendingClearScene = false;
-            // Diagnostic breadcrumb (2026-08-18, chasing a region-crossing UI hang): CONFIRMED
-            // via this exact pair of log lines that FreeSceneObjectResources was the hang --
-            // 1323.1ms disposing 487 objects in one synchronous, unbudgeted pass, bracketed
-            // inside a single RenderFrame call while every other drain-style operation in this
-            // file yields to SceneWorkBudgetMs. Fixed at the source: FreeSceneObjectResources
-            // no longer disposes anything itself -- it enqueues a removal for every live object
-            // into the same queue RemoveSceneObject uses, so the actual per-object Vulkan
-            // disposal is now spread across subsequent frames via DrainPendingSceneObjects'
-            // existing budget (see FreeSceneObjectResources' own doc comment for the full
-            // reasoning). Kept as a permanent (not one-off) diagnostic: "done" should now log a
-            // small number (just the enqueue loop) every time -- if it's ever large again, the
-            // fix regressed or something else slow got added to this method.
+            // FreeSceneObjectResources only enqueues removals (actual per-object Vulkan
+            // disposal is spread across subsequent frames via DrainPendingSceneObjects'
+            // budget) -- this should stay a small, fast enqueue loop regardless of scene size.
             int objCountBeforeClear = _sceneObjects.Count;
             var clearStopwatch = System.Diagnostics.Stopwatch.StartNew();
             LibreMetaverse.Logger.Debug(
@@ -2061,7 +2040,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8c-4b: drains <see cref="_pendingParticleMap"/> into <see cref="_particleMap"/>,
+    /// drains <see cref="_pendingParticleMap"/> into <see cref="_particleMap"/>,
     /// including its texture-
     /// inheritance behavior (keep the old texture when this tick brings none -- load-bearing for
     /// an emitter whose texture download hasn't landed yet). Called from the top of RenderFrame,
@@ -2176,7 +2155,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8c-4b: draws every live particle emitter as camera-facing billboard quads.
+    /// draws every live particle emitter as camera-facing billboard quads.
     /// Matches GL's DrawParticles for the camera-basis
     /// extraction and per-emitter draw order, but builds ONE combined vertex array covering
     /// every emitter before uploading -- see VkParticleBuffer's own header comment for why GL's
@@ -2267,10 +2246,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="VertexHash"/>, subAnimated dynamic-mesh selection, picker/normal-UV
     /// extraction) but WITHOUT GL's cross-rebuild texture-inheritance snapshot (deliberately out
     /// of scope, see <see cref="_sceneObjectTextures"/>'s own doc comment) and without
-    /// registering flexi/skin GPU compute resources (Section 8c-4 scope, not this increment).
+    /// registering flexi/skin GPU compute resources here.
     /// Caller is responsible for calling <see cref="RebuildSceneFlatLists"/> once after a batch.
     /// </summary>
-    // 2026-08-12: the streamer's build task marks an object _rendered as soon as it hands the
+    // The streamer's build task marks an object _rendered as soon as it hands the
     // submission to SubmitSceneObject (enqueue, fire-and-forget) -- it never learns whether the
     // GPU upload drained from that queue actually succeeded, so nothing on the streamer side
     // backs off a chronically-failing object. In a scene dense enough to exceed
@@ -2282,14 +2261,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private const int SceneUploadFailureCooldownMs = 5000;
     private readonly Dictionary<ulong, long> _recentSceneUploadFailures = new();
 
-    // 2026-08-13: was a fresh Dictionary local to each UploadSceneObjectNoRebuild call --
-    // dedup only ever caught identical-geometry faces WITHIN one object/linkset (e.g. a
-    // repeated prim copy inside the same build). Real SL regions duplicate geometry ACROSS
-    // objects constantly (many separate copies of the same tree/rock/window prim, each its own
-    // linkset), and every one of those got its own independent VkMesh -- two full
-    // vkAllocateMemory allocations (vbo+ebo) per duplicate, on top of the per-face material-UBO
-    // cost already fixed via VkMaterialUboPool. Hoisted to a field so identical geometry is
-    // shared across every scene object that ever needs it, not just faces within one build.
+    // Hoisted to a field (rather than a Dictionary local to each UploadSceneObjectNoRebuild
+    // call) so identical geometry is shared across every scene object that ever needs it, not
+    // just faces within one build -- real SL regions duplicate geometry across objects
+    // constantly (many separate copies of the same tree/rock/window prim, each its own
+    // linkset), and a per-call dedup dictionary would give each duplicate its own independent
+    // VkMesh: two full vkAllocateMemory allocations (vbo+ebo) per duplicate.
     // VkMesh.AddRef/Dispose is now ref-counted specifically to make this safe (see VkMesh's own
     // field comment) -- a mesh two different objects both reference must not be freed when only
     // one of them is removed. The existing `!face.IsFlexi && !subAnimated` exclusion below is
@@ -2311,19 +2288,6 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             && Environment.TickCount64 - failedAt < SceneUploadFailureCooldownMs)
             return;
 
-        // Diagnostic breadcrumb (2026-08-18, chasing a sim-crossing render-thread freeze: the
-        // perf overlay's last log line was healthy, then NOTHING logged again for 38+ seconds
-        // while background network/decode threads kept running -- consistent with the render
-        // thread stuck inside a single call that never returns, not a GPU wait (the one
-        // WaitForFences call site is already bounded to 5s and didn't fire) and not a managed
-        // lock (nothing here takes one). This method's own "upload took Xms" log only fires on
-        // RETURN, so a call that never returns leaves zero trace -- this start-of-call line is
-        // what makes that diagnosable: the last one logged before a repeat freeze names the
-        // object and face count. See the phase breadcrumbs below (skin/flexi registration,
-        // final submit) for narrowing WHICH part of this method it's stuck in.
-        LibreMetaverse.Logger.Debug(
-            $"[VkViewportControl] Scene object {rootId} upload starting, {sub.Faces.Length} faces.");
-
         RemoveSceneObjectGpuNoRebuild(rootId);
 
         var faces = new List<(VkMesh, VkMaterialDescriptorSet, PrimRenderFace)>(sub.Faces.Length);
@@ -2342,9 +2306,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // of any skipped faces earlier in the object.
         var faceIndexToMesh = new Dictionary<int, VkMesh>(sub.Faces.Length);
 
-        // Section 8c-1 (post-advisor-review addition): a whole-object try/catch, not present in
-        // any earlier increment. GL has no equivalent failure mode here -- it has no descriptor
-        // pool to exhaust -- but this port's per-face VkMaterialDescriptorSet allocates from
+        // A whole-object try/catch: GL has no equivalent failure mode here -- it has no
+        // descriptor pool to exhaust -- but this port's per-face VkMaterialDescriptorSet allocates from
         // VkContext's shared, FIXED-capacity DescriptorPool (see its own sizing comment), and
         // AllocateDescriptorSets ThrowOnError()s at VK_ERROR_OUT_OF_POOL_MEMORY. Without this
         // guard, hitting that ceiling mid-object would leave already-built VkMesh/VkTexture/
@@ -2368,15 +2331,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // CmdCopyBuffer still targets that handle; submitting only after Dispose runs (which a
         // finally attached after catch would do) would copy into freed memory.
         //
-        // 2026-08-18 (chasing a sustained-lag session, Upload Q backlogged in the thousands
-        // with no sim crossing): originally covered mesh vbo/ebo staging only. TryUpload's
-        // per-face VkTexture construction below was found to ALSO do its own independent
-        // submit+wait when no batch is passed -- VkTexture's constructor has supported an
-        // optional VkStagedUploadBatch since 2026-08-13 (used for meshes here), but it was
-        // never threaded through to texture uploads. Up to 5 texture slots per face, each its
-        // own fence wait -- a start/face-loop-done breadcrumb pair measured 226ms for a single
-        // 6-face object with ZERO mesh-batch flushes yet, i.e. all texture-upload cost. Now
-        // shares this same batch/flush-threshold mechanism -- see TryUpload below.
+        // Shared by mesh AND per-face texture uploads (see TryUpload below) -- both share this
+        // batch/flush-threshold mechanism instead of each doing its own independent submit+wait.
         var meshCmd = vk.Pool.CreateCommandBuffer("VkViewportControl.UploadSceneObjectNoRebuild.meshBatch");
         meshCmd.BeginRecording();
         var meshBatch = new VkStagedUploadBatch(meshCmd, new List<(Buffer, DeviceMemory)>());
@@ -2387,21 +2343,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // per-item submit+wait gives. MeshBatchFlushEvery bounds the peak: submit+wait+free every
         // N items' worth of staging, then start a fresh command buffer for the rest -- still a
         // large reduction in round-trips versus fully unbatched (1 per item vs. 1 per 16), just
-        // bounded rather than unbounded. Shared across mesh AND texture uploads (see 2026-08-18
-        // note above) so an object with many textured faces but few/cached meshes still gets
-        // bounded, not unbounded, batch growth.
+        // bounded rather than unbounded. Shared across mesh AND texture uploads so an object
+        // with many textured faces but few/cached meshes still gets bounded batch growth.
         const int MeshBatchFlushEvery = 16;
         int facesInCurrentMeshBatch = 0;
-        // Diagnostic-only (2026-08-18, bisecting "Drain SObj" spikes of ~1000ms+ for a single
-        // object with Build Q/Upload Q both near 0): each FlushMeshBatch call is its own
-        // SubmitAndWait -- a full synchronous fence wait. A large linkset with many uncached
-        // static faces does one of these every 16 faces; if per-submit overhead is even a few
-        // ms, a few dozen flushes on one object alone could plausibly account for a full second.
-        int flushCount = 0;
-        var uploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
         void FlushMeshBatch()
         {
-            flushCount++;
             meshCmd.SubmitAndWait();
             VkBufferHelper.FreeBatchStagingBuffers(vk, meshBatch);
             meshCmd = vk.Pool.CreateCommandBuffer("VkViewportControl.UploadSceneObjectNoRebuild.meshBatch");
@@ -2447,8 +2394,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // keeps null placeholders so ScheduleVertexUpdate's array-position indexing
                 // survives skipped faces), `faces` here has NO such placeholder -- a skipped face
                 // means `faces` no longer aligns 1:1 with sub.Faces by position. The skin/flexi
-                // GPU registration pass below (2026-08-09) indexes by sub.Faces position via
-                // faceIndexToMesh instead, exactly to sidestep this misalignment.
+                // GPU registration pass below indexes by sub.Faces position via faceIndexToMesh
+                // instead, exactly to sidestep this misalignment.
                 if (face.Vertices == null) continue;
 
                 int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices.Length;
@@ -2504,10 +2451,6 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
                 faces.Add((mesh, material, face));
             }
-
-            LibreMetaverse.Logger.Debug(
-                $"[VkViewportControl] Scene object {rootId} face loop done ({faces.Count} built), "
-                + $"starting skin/flexi registration.");
 
             // Register skin/flexi GPU compute data for this object's scene faces. Runs after the
             // face loop (not interleaved) for the same reason ApplyPendingSubmission's own
@@ -2579,17 +2522,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // the staging buffers that fed it -- see meshBatch's own comment above for why this
             // beats one submit+wait per buffer. Must happen before the method returns
             // successfully (a draw call could sample these buffers as soon as next frame).
-            LibreMetaverse.Logger.Debug(
-                $"[VkViewportControl] Scene object {rootId} skin/flexi registration done, "
-                + $"starting final mesh-batch submit ({flushCount} prior flush(es)).");
-            flushCount++;
             meshCmd.SubmitAndWait();
             VkBufferHelper.FreeBatchStagingBuffers(vk, meshBatch);
-            double uploadMs = uploadStopwatch.Elapsed.TotalMilliseconds;
-            if (uploadMs >= 50.0)
-                LibreMetaverse.Logger.Debug(
-                    $"[VkViewportControl] Scene object {rootId} upload took {uploadMs:F1}ms, "
-                    + $"{sub.Faces.Length} faces, {flushCount} mesh-batch flush(es).");
         }
         catch (Exception e)
         {
@@ -2672,25 +2606,25 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _recentSceneUploadFailures.Remove(rootId);
         if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
 
-        // mesh.Dispose() is ref-counted (2026-08-13, see VkMesh._refCount's own field comment)
-        // -- correctly decrements-only when this mesh is still shared with another live scene
-        // object, and only actually frees native resources once this was the last reference.
+        // mesh.Dispose() is ref-counted (see VkMesh._refCount's own field comment) -- correctly
+        // decrements-only when this mesh is still shared with another live scene object, and
+        // only actually frees native resources once this was the last reference.
         foreach (var (mesh, material, face) in faces)
         {
             mesh.Dispose();
             material.Dispose();
-            _sceneFaceTextureSlots.Remove((face.PrimLocalId, face.FaceIndex)); // Section 8e
+            _sceneFaceTextureSlots.Remove((face.PrimLocalId, face.FaceIndex));
             _scenePrimLocalIdToSceneKey.Remove(face.PrimLocalId);
         }
         _sceneObjects.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
         _spatialGrid.Remove(rootId);
-        _sceneObjectMotion.TryRemove(rootId, out _); // Section 8e
+        _sceneObjectMotion.TryRemove(rootId, out _);
 
         if (_sceneObjectTextures.Remove(rootId, out var textures))
             foreach (var tex in textures) tex.Dispose();
 
-        // 2026-08-09: dispose this object's GPU skin/flexi compute data, if any was registered.
+        // Dispose this object's GPU skin/flexi compute data, if any was registered.
         if (_sceneSkinGpuDataMap.Remove(rootId, out var skinGpuList))
             foreach (var gpu in skinGpuList) gpu.Dispose();
         if (_sceneFlexiGpuDataMap.Remove(rootId, out var flexiGpuList))
@@ -2699,8 +2633,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     /// <summary>
     /// Discards every scene object and all pending scene-object work (e.g. on sim change).
-    /// The actual per-object Vulkan disposal is NOT done here -- see the 2026-08-18 comment
-    /// below for why -- it's spread across subsequent frames via the same budgeted drain
+    /// The actual per-object Vulkan disposal is NOT done here (see the comment below for why)
+    /// -- it's spread across subsequent frames via the same budgeted drain
     /// <see cref="RemoveSceneObject"/> already uses for an ordinary single-object removal.
     /// </summary>
     private void FreeSceneObjectResources()
@@ -2718,25 +2652,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _recentSceneUploadFailures.Clear();
         _sceneObjectTransformOverrides.Clear();
 
-        // 2026-08-18 (confirmed via breadcrumb timing: 1323.1ms disposing 487 objects in one
-        // synchronous call, entirely inside a single RenderFrame -- the exact cause of a
-        // region-crossing UI freeze): this used to dispose every live scene object's
-        // mesh/material/textures/skin-flexi-GPU-data inline, right here, unlike every OTHER
-        // drain-style operation in this file (scene-object upload, texture patches, vertex
-        // updates), which all admit-then-check-SceneWorkBudgetMs-and-yield. A large scene
-        // (hundreds of objects, each several Vulkan destroy/free calls) paid for all of it in
-        // one frame with zero opportunity to render or process input in between.
+        // Disposing every live scene object's mesh/material/textures/skin-flexi-GPU-data inline,
+        // right here, would do so synchronously and unbudgeted, unlike every OTHER drain-style
+        // operation in this file (scene-object upload, texture patches, vertex updates), which
+        // all admit-then-check-SceneWorkBudgetMs-and-yield -- a large scene (hundreds of
+        // objects, each several Vulkan destroy/free calls) would pay for all of it in one frame
+        // with zero opportunity to render or process input in between.
         //
-        // Fixed by reusing RemoveSceneObject's own mechanism instead of duplicating it: enqueue
-        // a null (removal) submission for every currently-live object into the SAME
+        // Instead this reuses RemoveSceneObject's own mechanism rather than duplicating it:
+        // enqueue a null (removal) submission for every currently-live object into the SAME
         // _pendingSceneObjects queue, so DrainPendingSceneObjects' existing per-frame budget
         // drains them via RemoveSceneObjectGpuNoRebuild over as many frames as it takes -- byte
         // for byte the same per-object disposal code an ordinary KillObject-driven removal
-        // already runs today. This is not a new class of visual state: a KillObject burst
-        // already produces "some old objects gone, some not yet" for a few frames via that same
+        // already runs. This is not a new class of visual state: a KillObject burst already
+        // produces "some old objects gone, some not yet" for a few frames via that same
         // per-object path, and new-region content only starts arriving after a background
         // Task.Run seed walk (see OnSimChanged's own comment) -- a brief window of old-scene
-        // objects still fading out during that gap is a strictly better trade than a 1.3s freeze.
+        // objects still fading out during that gap is an acceptable trade against a multi-
+        // second synchronous freeze.
         foreach (var key in _sceneObjects.Keys)
             _pendingSceneObjects.AddOrUpdate(
                 key,
@@ -2788,9 +2721,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// same face instances, so they pick the change up automatically). Overrides for roots
     /// whose upload has not landed yet are parked in <see cref="_sceneObjectTransformOverrides"/>
     /// and applied by <see cref="UploadSceneObjectNoRebuild"/> when the object appears. Includes
-    /// the spatial-grid
-    /// upsert (Section 8e; previously not ported, per this method's own now-stale
-    /// scope-narrowing note).
+    /// the spatial-grid upsert.
     /// </summary>
     private void ApplySceneTransformOverrides()
     {
@@ -2886,7 +2817,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8e: dead-reckons every scene object tracked in <see cref="_sceneObjectMotion"/>
+    /// dead-reckons every scene object tracked in <see cref="_sceneObjectMotion"/>
     /// forward from its last terse update using the velocity/angular-velocity/acceleration the
     /// simulator reported, and writes the extrapolated pose straight into the faces' <see
     /// cref="PrimRenderFace.Transform"/>. Called once per rendered frame (after
@@ -2935,7 +2866,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
-    /// <summary>Section 8e: unions <see cref="PrimRenderFace.GetWorldAabb"/> over every face in
+    /// <summary>unions <see cref="PrimRenderFace.GetWorldAabb"/> over every face in
     /// <paramref name="faces"/> (including flexi faces -- an object's overall visibility should
     /// account for their extents even though individual flexi faces bypass the fine-grained
     /// per-face cull, see <see cref="IsFaceCulled"/>). Used to feed <see cref="_spatialGrid"/>.
@@ -2957,7 +2888,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         return (min, max);
     }
 
-    /// <summary>Section 8e: true if <paramref name="face"/> should be skipped this frame --
+    /// <summary>true if <paramref name="face"/> should be skipped this frame --
     /// either its owning scene object isn't in <paramref name="visibleSceneKeys"/>, or its
     /// world-space bounds don't intersect <paramref name="frustum"/>. Flexi faces never update
     /// <see cref="PrimRenderFace.Transform"/> (their vertices are written directly into the VBO
@@ -2982,7 +2913,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         return !FrustumCuller.IntersectsAabb(frustum, min, max);
     }
 
-    /// <summary>Section 8e: fills <paramref name="dest"/> (cleared first) with the subset of
+    /// <summary>fills <paramref name="dest"/> (cleared first) with the subset of
     /// <paramref name="source"/> that survives <see cref="IsFaceCulled"/> against
     /// <paramref name="frustum"/>/<paramref name="visibleSceneKeys"/>. When
     /// <paramref name="frustum"/> is <c>null</c> (culling disabled for this pass), copies
@@ -3000,7 +2931,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var f = frustum.Value;
         foreach (var entry in source)
         {
-            // Section 8e: mirrors GL's own DrawFaces call sites (RecordFaceConsidered
+            // mirrors GL's own DrawFaces call sites (RecordFaceConsidered
             // unconditionally, RecordFaceCulled only on an actual cull) -- only recorded when
             // frustum.HasValue, matching that IsFaceCulled itself is never invoked otherwise.
             _stats.RecordFaceConsidered();
@@ -3011,7 +2942,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
-    /// <summary>Section 8e: like <see cref="FilterVisible"/> but APPENDS survivors to
+    /// <summary>like <see cref="FilterVisible"/> but APPENDS survivors to
     /// <paramref name="dest"/> without clearing it first -- used to merge two culled sources
     /// (base-alpha + scene-alpha) into one combined list, mirroring GL's own
     /// <c>AppendVisibleAlpha</c> (called twice per frame into the same <c>_mergedAlpha</c>,
@@ -3157,12 +3088,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 }
                 catch (Exception ex)
                 {
-                    // Fall through to the uncompressed path below. Logged (2026-08-17, was
-                    // previously silent) while investigating a "cached textures don't render"
-                    // report -- a construction failure here degrades gracefully to the
-                    // uncompressed path, so it should NOT explain missing textures on its own,
-                    // but this closes the one remaining unlogged branch in the compressed-tier
-                    // path.
+                    // Falls through to the uncompressed path below.
                     LibreMetaverse.Logger.Debug(
                         $"[VkViewportControl] Compressed-tier VkTexture construction failed for {patch.TextureId}, falling back: {ex.Message}");
                 }
@@ -3284,7 +3210,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (oldTex != null)
         {
             _textures.Remove(oldTex);
-            // 2026-08-13: when batched, defer the actual native Dispose() until after the whole
+            // When batched, defer the actual native Dispose() until after the whole
             // drain call's shared batch has been submitted and waited on -- oldTex may be a
             // texture THIS SAME batch already recorded an upload for (e.g. a progressive-preview
             // patch immediately followed by the full-res patch for the same face/slot within one
@@ -3297,12 +3223,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8e: drains <see cref="_highPriorityScenePatches"/>/<see cref="_pendingScenePatches"/>
+    /// Drains <see cref="_highPriorityScenePatches"/>/<see cref="_pendingScenePatches"/>
     /// (plus their deferred-retry lists), high-priority first, then deferred retries, then new
-    /// patches -- originally GL's own count-based budget scheme (<c>ApplyTexturePatches</c>),
-    /// now a single shared <see cref="SceneWorkBudgetMs"/> time budget across all three sections
-    /// (see this method's own 2026-08-13 comment for why). <see cref="_pendingScenePatches"/>'
-    /// own dequeue loop still releases one gate permit per dequeued entry up to
+    /// patches, all against a single shared <see cref="SceneWorkBudgetMs"/> time budget.
+    /// <see cref="_pendingScenePatches"/>' own dequeue loop still releases one gate permit per
+    /// dequeued entry up to
     /// <see cref="TexturePatchQueueDepth"/> regardless of the time budget, so producers keep
     /// flowing even on a frame where the budget is already spent. Called once per frame on the
     /// render thread, mirroring GL's own call-site placement inside its per-frame texture-patch
@@ -3491,7 +3416,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             _sceneObjectTextures.TryGetValue(lookupKey, out var owningList);
             owningList?.Remove(oldTex);
-            // 2026-08-13: deferred when batched -- see DrainSubmissionTexturePatches'
+            // Deferred when batched -- see DrainSubmissionTexturePatches'
             // deferredOldTextures comment for the destroy-before-submit hazard this avoids
             // (identical here: two patches for the same face/slot within one drain pass, e.g. a
             // progressive preview followed by its full-res replacement).
@@ -3590,22 +3515,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var pixelSize = PixelSize.FromSize(Bounds.Size, source.RenderScaling);
         if (pixelSize.Width <= 0 || pixelSize.Height <= 0) return;
 
-        // Diagnostic breadcrumb (2026-08-18, chasing a region-crossing UI hang): unconditional,
-        // no throttle -- the perf-overlay's own "Perf: CPU" line only logs once/sec, so its
-        // last-seen timestamp before a hang is only a bound of up to 1s on when the render
-        // thread actually stopped, not the exact frame. This line closes that gap: the last
-        // one logged before a repeat hang names the exact frame, letting the gap between it and
-        // whatever hung be read precisely instead of guessed within a second-wide window.
-        LibreMetaverse.Logger.Debug($"[VkViewportControl] RenderFrame #{++_frameCounter} starting");
-
-        // Section 8e: this placement covers CPU time
+        // This placement covers CPU time
         // for the whole frame, not just command-buffer recording.
         _stats.BeginFrame();
         // Must run before any MarkUsed/FreeUsed call this frame -- see VkFrameReapRing's own doc
         // comment for why "this frame's slot" and "the slot due for reaping" are the same index.
         _reapRing.BeginFrame();
 
-        // Plan Step 6: MUST run before anything below that disposes or rewrites a live GPU
+        // MUST run before anything below that disposes or rewrites a live GPU
         // resource (ApplyPendingSubmission's mesh/material/texture/skin-GPU/flexi-GPU disposal,
         // DrainPendingSceneObjects' scene-object removal path, the texture-patch drains'
         // descriptor rewrites, the deformer SSBO overwrites) -- every one of those can run on
@@ -3635,7 +3552,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 }
                 catch (Exception e)
                 {
-                    // 2026-08-12: unlike UploadSceneObjectNoRebuild's own per-object try/catch
+                    // Unlike UploadSceneObjectNoRebuild's own per-object try/catch
                     // (drops just that one scene object on failure), this single-object path
                     // (AvatarViewer/PrimViewer/HudViewer) had no guard at all -- a
                     // VkMaterialUboPool/DescriptorPool exhaustion here would propagate to this
@@ -3649,7 +3566,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 }
             }
 
-            // Section 8c-1: drains queued scene-object uploads/removals under a per-frame time
+            // drains queued scene-object uploads/removals under a per-frame time
             // budget, then applies any queued whole-object transform overrides -- both run
             // before the draw section below reads _sceneOpaque/_sceneAlpha/face.Transform.
             // Placed early in the frame, before other per-frame updates and before any pass
@@ -3659,18 +3576,18 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             DrainSceneObjectsMs = _drainStopwatch.Elapsed.TotalMilliseconds;
             ApplySceneTransformOverrides();
 
-            // Section 8e: dead-reckon any scene objects currently in motion forward from their
+            // dead-reckon any scene objects currently in motion forward from their
             // last terse update. Must run after ApplySceneTransformOverrides (which lands the
             // exact received pose at t=0) and before any culling/draw pass so they see the same
             // extrapolated face.Transform this frame.
             ExtrapolateMovingSceneObjects();
 
-            // Section 8e: local point-light selection, once per frame, before frameUbo is
+            // local point-light selection, once per frame, before frameUbo is
             // populated below (its PointLightPos/Color/Radius/Falloff/Count fields read
             // straight from _litLights/_litLightCount).
             SelectLocalLights();
 
-            // Section 8e: pull the current EEP-driven Sky/WaterFogColor sample once per frame,
+            // pull the current EEP-driven Sky/WaterFogColor sample once per frame,
             // before either is read below (Sky feeds frameUbo just past this point; WaterFogColor
             // feeds DrawWater later in this same method). Includes the ShowSky gate
             // (EnvironmentService
@@ -3692,10 +3609,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // just this one.
             _drainStopwatch.Restart();
             DrainSubmissionTexturePatches(vk);
-            DrainScenePendingTexturePatches(vk); // Section 8e
+            DrainScenePendingTexturePatches(vk);
             DrainTexturePatchesMs = _drainStopwatch.Elapsed.TotalMilliseconds;
 
-            // Section 8b: apply per-face vertex updates queued by the CPU LBS animation loop
+            // apply per-face vertex updates queued by the CPU LBS animation loop
             // (AvatarViewerViewModel.AnimTick -> ScheduleVertexUpdate) or flexi-prim animation.
             // Includes the bounds check (a
             // stale faceIndex from a since-replaced submission, or one beyond the current face
@@ -3707,7 +3624,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     _faceMeshesByPosition[vertUpd.FaceIndex]?.UpdateVertices(vertUpd.Verts);
             }
 
-            // 2026-08-12: apply per-face model-matrix updates queued by AnimTick's/
+            // Apply per-face model-matrix updates queued by AnimTick's/
             // SceneAvatarAnimator's rigid-attachment fast path (see
             // ScheduleFaceTransformUpdate/ScheduleSceneFaceTransformUpdate's own doc comments)
             // -- same indexing/bounds-check/silent-drop contract as the vertex-update drains
@@ -3729,7 +3646,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     targetFace.Transform = xformUpd.Transform;
             }
 
-            // Section 8c-4: apply per-scene-object vertex updates (SceneAvatarAnimator's CPU-LBS
+            // Apply per-scene-object vertex updates (SceneAvatarAnimator's CPU-LBS
             // fallback, FlexiPrimAnimator's scene-object CPU path), including the ArrayPool
             // return for rented buffers (VertsLength
             // carries the true logical length since a rented buffer's own .Length may be a larger
@@ -3747,7 +3664,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     System.Buffers.ArrayPool<float>.Shared.Return(su.Verts);
             }
 
-            // 2026-08-12: scene-object counterpart to the single-submission face-transform drain
+            // Scene-object counterpart to the single-submission face-transform drain
             // above -- SceneAvatarAnimator's rigid-attachment fast path for other avatars in the
             // scene. Same (rootId, faceOffset) indexing as _pendingSceneVertexUpdates immediately
             // above, same silent-drop-on-stale-index contract.
@@ -3761,25 +3678,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
             VertexUpdateDrainMs = _vertexUpdateStopwatch.Elapsed.TotalMilliseconds;
 
-            // Section 8b/8c-4: both run their own synchronous one-off command buffer (see
-            // VkSkinDeformer/VkFlexiDeformer's own doc comments for why) BEFORE the main frame's
-            // command buffer is built below, so any GPU-deformed mesh this frame's draw calls
-            // read is guaranteed fully written. Matches the call-site
-            // placement and ordering (flexi before skin, after the per-face vertex-update drains
-            // above).
+            // Both run their own synchronous one-off command buffer (see VkSkinDeformer/
+            // VkFlexiDeformer's own doc comments for why) BEFORE the main frame's command
+            // buffer is built below, so any GPU-deformed mesh this frame's draw calls read is
+            // guaranteed fully written -- flexi before skin, after the per-face vertex-update
+            // drains above.
             //
-            // Plan Step 6 (deformer-ordering fix): DispatchPending overwrites the skin/flexi
+            // DispatchPending overwrites the skin/flexi
             // SSBOs, which the PREVIOUS frame's MainPass may still be reading under real overlap
             // (those SSBOs are single-buffered, not N-buffered like VkPrimDescriptorSets' UBO) --
             // a write-after-read hazard the reap ring's own per-slot reaping does NOT cover (it
             // only guarantees "FramesInFlight frames ago is done," not "the immediately preceding
             // frame is done"). Already covered by the _previousMainPassCmd.WaitOnly() call near
             // the top of this method (see that call site's own comment) -- nothing between there
-            // and here submits a new MainPass that would invalidate the wait. Trade-off (per the
-            // plan): deformer dispatch can no longer overlap with the previous frame's own draw --
-            // avatar/flexi-heavy content gets less of the pipelining win than static-geometry-
-            // heavy content. Revisit by N-buffering the deformer SSBOs instead, if that trade-off
-            // turns out to matter in practice.
+            // and here submits a new MainPass that would invalidate the wait. Trade-off: deformer
+            // dispatch can no longer overlap with the previous frame's own draw -- avatar/flexi-
+            // heavy content gets less of the pipelining win than static-geometry-heavy content.
+            // Revisit by N-buffering the deformer SSBOs instead, if that trade-off turns out to
+            // matter in practice.
 
             _deformerStopwatch.Restart();
             _flexiDeformer?.DispatchPending();
@@ -3791,7 +3707,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             _renderStopwatch.Restart();
 
-            // Section 8c-4b: must run before the render pass begins (see DrainPendingParticles'
+            // must run before the render pass begins (see DrainPendingParticles'
             // own doc comment for why -- lazy pipeline creation on a blend-pair cache miss is
             // illegal mid-render-pass).
             DrainPendingParticles(vk);
@@ -3802,7 +3718,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SwapchainFreeCmdBuffersMs = _swapchain.LastFreeUsedCommandBuffersMs;
             SwapchainBeginDrawCoreMs = _swapchain.LastBeginDrawCoreMs;
 
-            // Plan Step 6: BeginDraw's own FreeUsed() call (timed above as
+            // BeginDraw's own FreeUsed() call (timed above as
             // SwapchainFreeCmdBuffersMs) is what confirms this frame's slot is fence-signaled --
             // moved here from the old tail-of-frame call site, since the tail no longer waits on
             // anything (see the Submit block below). See VkFrameStatsTracker.EndFrame's own doc
@@ -3817,7 +3733,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // proj.M22 *= -1f (the textbook GL-Y-up -> Vulkan-Y-down NDC fix) is intentionally
             // NOT applied here -- see VkPrimPipeline.cs's matching FrontFace comment for why.
 
-            // Section 8c-2b: computed early (before frameUbo, since HasSsao must land in the
+            // computed early (before frameUbo, since HasSsao must land in the
             // SAME UpdatePerFrame call below), using a
             // three-way gate (SsaoEnabled && pipeline ready && face-count budget).
             int opaqueCount = _opaqueFaces.Count;
@@ -3850,7 +3766,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             int mainSceneOpaqueCount = _mainSceneOpaqueVisible.Count;
             int mainOpaqueFaceCount = mainOpaqueCount + mainSceneOpaqueCount;
 
-            // Section 8c-3: directional shadow gate + light-VP computation. Mirrors GL's
+            // directional shadow gate + light-VP computation. Mirrors GL's
             // RenderShadowPasses/RenderDirectionalShadow gating exactly -- ShadowsEnabled &&
             // ready && face-count budget first, then a separate NaN-guarded computation that
             // can still bail per-frame (EEP transitions, degenerate camera state).
@@ -3873,7 +3789,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 shadowSceneOpaqueCount = _shadowSceneOpaqueVisible.Count;
             }
 
-            // Section 8c-3: water surface + reflection gates. Mirrors GL's own doWater/
+            // water surface + reflection gates. Mirrors GL's own doWater/
             // WaterReflectionsEnabled split exactly -- the
             // surface can draw with no reflection FBO at all (water.frag's analytic
             // atmSkyGradient fallback), so its gate is independent of the reflection pass's own,
@@ -3957,7 +3873,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             frameUbo.FogDensity = ShowSky && AtmosphericsEnabled
                 ? 0.0012f * Math.Clamp(sky.HazeDensity, 0f, 2f) : 0f;
-            // Section 8c-2b: set BEFORE UpdatePerFrame so the SAME write carries it -- 1 only on
+            // set BEFORE UpdatePerFrame so the SAME write carries it -- 1 only on
             // frames where SSAO actually ran (doSsao), matching GL's own ssaoTex!=0 -> HasSsao
             // gate. prim.frag never samples uSsaoMap when this is 0, so PassSet's binding 0 can
             // stay pointed at whatever it was last written to (see EnsureSsaoTargets' own note
@@ -3996,7 +3912,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             _frameSets.UpdatePerFrame(frameUbo);
 
-            // Section 8c-3: the reflection pass's OWN PerFrame UBO, written only on frames it
+            // the reflection pass's OWN PerFrame UBO, written only on frames it
             // actually runs. View/ViewInv/SunDir are recomputed relative to reflView (mirrors
             // GL's DrawFaces recomputing these fresh from whichever `view` parameter that
             // specific call received); HasSsao is forced to 0 regardless of doSsao (the SSAO
@@ -4045,7 +3961,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                                        || doShadow || doWaterReflThisFrame;
             if (needInstanceBuffer)
             {
-                // Section 8c-1/8e: merge the single-submission path's own alpha faces with
+                // Merge the single-submission path's own alpha faces with
                 // scene-object alpha faces into one back-to-front sorted list, frustum-culling
                 // during the merge (against the MAIN pass's frustum -- alpha is never drawn in
                 // the shadow/reflection passes, so there is no per-pass alpha visibility to
@@ -4079,7 +3995,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     totalCount += reflOpaqueCount + reflSceneOpaqueCount;
                 }
 
-                // Section 8c-1: a reused, grow-on-demand field, not a fresh `new float[]` every
+                // a reused, grow-on-demand field, not a fresh `new float[]` every
                 // frame -- at PrimViewer/AvatarViewer's own small face counts a per-frame
                 // allocation here was harmless (a few hundred bytes, why this went unnoticed
                 // through 8a/8b), but a streamed scene's totalCount can run into the hundreds of
@@ -4129,13 +4045,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var scissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height) };
             vk.Api.CmdSetScissor(cmd.InternalHandle, 0, 1, &scissor);
 
-            // Section 8c-3: shadow pass first, matching GL's own GlRenderCore ordering
+            // shadow pass first, matching GL's own GlRenderCore ordering
             // (RenderShadowPasses precedes the SSAO block). Own fixed-2048 viewport/scissor,
             // restored to pixelSize internally before returning.
             if (doShadow)
                 RenderShadowPass(vk, cmd.InternalHandle, pixelSize, shadowBase, shadowSceneBase, shadowOpaqueCount, shadowSceneOpaqueCount);
 
-            // Section 8c-2b: recorded as three SEPARATE render-pass instances, entirely before
+            // recorded as three SEPARATE render-pass instances, entirely before
             // the main render pass begins -- see RenderSsaoPasses' own doc comment for why this
             // ordering (relative to the instance-data upload above) is load-bearing, not
             // incidental. Viewport/scissor set above already match every offscreen target's own
@@ -4143,7 +4059,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (doSsao)
                 RenderSsaoPasses(vk, cmd.InternalHandle, pixelSize, proj, mainOpaqueCount, mainSceneOpaqueCount);
 
-            // Section 8c-3: water reflection pre-pass, after SSAO and before the main pass --
+            // water reflection pre-pass, after SSAO and before the main pass --
             // matches GL's own ordering exactly (GlRenderCore: shadow -> SSAO -> water
             // reflection -> main pass). Must run before DrawWater (inside the main pass, below)
             // samples _lastReflViewProj/the reflection texture. Own fixed-512 viewport/scissor,
@@ -4155,7 +4071,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _reflLastTick = nowTick;
             }
 
-            // Section 8c-2: clear-colour
+            // clear-colour
             // selection (minus GL's "_initError -> vivid red-tint" branch, which has no
             // equivalent here -- an init failure leaves _attached false, and RenderFrame's own
             // top-of-method guard already returns before reaching this code in that case).
@@ -4185,7 +4101,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SubPassMs = _renderStopwatch.Elapsed.TotalMilliseconds;
             vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo, SubpassContents.Inline);
 
-            // Section 8c-2: drawn before everything else so it fills pixels not covered by
+            // drawn before everything else so it fills pixels not covered by
             // geometry -- placed
             // immediately after the per-frame UBO is up to date, before the shadow/main
             // geometry passes). Depends on frameUbo already being written to _frameSets'
@@ -4210,7 +4126,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     if (mainSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainSceneOpaqueVisible, baseIndex: mainOpaqueCount);
                 }
 
-                // Section 8c-3: water surface, drawn after opaque geometry (correct depth test
+                // water surface, drawn after opaque geometry (correct depth test
                 // against real terrain/objects) but before the alpha pass (transparent objects
                 // above water render in front of it).
                 if (doWater)
@@ -4234,7 +4150,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
             else if (doWater)
             {
-                // Section 8c-3: water can still draw even with zero opaque/alpha faces this
+                // water can still draw even with zero opaque/alpha faces this
                 // frame (e.g. an empty scene over a water plane) -- the outer `if` above only
                 // guards the opaque+alpha block, so this mirrors that same doWater draw for the
                 // "nothing else to draw" case. No extra descriptor-set bind needed here: DrawWater
@@ -4246,7 +4162,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (Wireframe && _wireframe != null)
                 DrawWireframeOverlay(vk, cmd.InternalHandle, view, proj);
 
-            // Section 8c-4b: last thing drawn in the main pass, matching GL's own placement
+            // last thing drawn in the main pass, matching GL's own placement
             // (DrawParticles is called immediately before BlitSceneToFb in GlRenderCore).
             DrawParticles(vk, cmd.InternalHandle, view, proj);
 
@@ -4259,7 +4175,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _reapRing.MarkUsed(cmd);
             _previousMainPassCmd = cmd;
             SubmitCallMs = _renderStopwatch.Elapsed.TotalMilliseconds;
-            // Plan Step 6: no fence wait here anymore -- this frame's slot is reaped at the NEXT
+            // no fence wait here anymore -- this frame's slot is reaped at the NEXT
             // frame's BeginDraw instead (timed as SwapchainFreeCmdBuffersMs there), which is what
             // actually lets CPU work for the next frame start before this frame's GPU work is
             // confirmed done. FenceWaitMs stays 0 by construction; it isn't measuring "no wait
@@ -4334,7 +4250,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <summary>
     /// Records the G-buffer-normal, SSAO, and blur passes -- three separate render-pass
     /// instances, all recorded into <paramref name="cmd"/> BEFORE the main render pass begins
-    /// (plan Section 8c-2b). Caller has already uploaded this frame's shared instance buffer
+    ///. Caller has already uploaded this frame's shared instance buffer
     /// (<see cref="_instanceDrawer"/>'s <c>UploadInstanceBatch</c>) covering
     /// <paramref name="opaqueCount"/>+<paramref name="sceneOpaqueCount"/> opaque faces at the
     /// SAME index ranges the main pass will read later -- required, not a convenience: Vulkan's
@@ -4369,7 +4285,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _gnorm!.Pipeline);
         var frameSet = _frameSets!.FrameSet;
         vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _gnorm.Layout, 0, 1, &frameSet, 0, null);
-        // Section 8e: draws the same main-pass-filtered lists as the later opaque draw block
+        // draws the same main-pass-filtered lists as the later opaque draw block
         // (_mainOpaqueVisible/_mainSceneOpaqueVisible), not the raw _opaqueFaces/_sceneOpaque --
         // matches GL's own DrawFacesNormal call sites, which pass the SAME frustum/
         // visibleSceneKeys as the main pass rather than computing their own.
@@ -4672,7 +4588,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _ssaoTargetSize = default;
     }
 
-    // ── Directional shadow target/pass (plan Section 8c-3) ─────────────────────────────────
+    // ── Directional shadow target/pass ─────────────────────────────────
 
     /// <summary>Fixed 2048x2048 depth-only target, created ONCE at init (unlike the G-buffer/
     /// SSAO targets, this has no "Ensure"/resize logic -- its resolution is independent of the
@@ -4792,7 +4708,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// unchanged) if a finite matrix can't be produced this frame, mirroring GL's own
     /// early-return/_hasDirShadow=false posture. Deliberately does NOT replicate GL's
     /// _spatialGrid frustum-cull query for the shadow pass's own visible-set -- SceneSpatialGrid/
-    /// frustum culling was already deferred out of Section 8c-1's own scope (optimization on top
+    /// frustum culling was already deferred out of its own scope (optimization on top
     /// of the streaming substrate, not a prerequisite), so this draws every opaque face
     /// unconditionally, same simplification.
     /// </summary>
@@ -4869,7 +4785,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var frameSet = _frameSets!.FrameSet;
         vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _shadowPipeline.Layout, 0, 1, &frameSet, 0, null);
 
-        // Section 8e: draws this pass's own independently-culled lists (_shadowOpaqueVisible/
+        // draws this pass's own independently-culled lists (_shadowOpaqueVisible/
         // _shadowSceneOpaqueVisible), not the raw _opaqueFaces/_sceneOpaque -- the caller passes
         // this pass's own filtered counts too, matching GL's independent shadow-frustum grid
         // query (never gated on FrustumCullingEnabled).
@@ -4889,7 +4805,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         vk.Api.CmdSetScissor(cmd, 0, 1, &scissor);
     }
 
-    // ── Water: reflection target/pass + surface pass (plan Section 8c-3) ───────────────────
+    // ── Water: reflection target/pass + surface pass ───────────────────
 
     private static VkTexture? LoadEmbeddedWaterTexture(VkContext vk, string filename)
     {
@@ -5071,7 +4987,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var frameAndPassSets = stackalloc DescriptorSet[2] { _frameSetsRefl!.FrameSet, _frameSetsRefl.PassSet };
         vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSets, 0, null);
 
-        // Section 8e: draws this pass's own independently-culled lists (_reflOpaqueVisible/
+        // draws this pass's own independently-culled lists (_reflOpaqueVisible/
         // _reflSceneOpaqueVisible), not the raw _opaqueFaces/_sceneOpaque -- the caller passes
         // this pass's own filtered counts too, matching GL's independent reflection-frustum
         // grid query (never gated on FrustumCullingEnabled).
@@ -5319,7 +5235,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 Avalonia.Threading.Dispatcher.UIThread.Post(() => FaceClicked?.Invoke(primLocalId, faceIndex, hitInfo));
             }
         }
-        // Section 8e: a double-click that missed every object falls through to the ground-hit
+        // a double-click that missed every object falls through to the ground-hit
         // ray march, mirroring GL's own miss-branch exactly: TryGetGroundHit is only attempted
         // when the object pick found nothing AND the click was a
         // double-click.
@@ -5360,7 +5276,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Section 8e: CPU ray-vs-heightfield intersection for a double-click that missed every
+    /// CPU ray-vs-heightfield intersection for a double-click that missed every
     /// object in the pick buffer. Marches the same screen-to-world ray used by
     /// <see cref="ComputeHitInfo"/> in 1m steps via <see cref="TerrainHeightProvider"/> until it
     /// crosses the terrain surface, then linearly interpolates between the two straddling
@@ -5743,7 +5659,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var materialSet = faces[i].Material.Set;
             vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _prim!.Layout, 2, 1, &materialSet, 0, null);
             _instanceDrawer!.DrawBatchedInstance(cmd, faces[i].Mesh, baseIndex + i);
-            _stats.RecordDraw(faces[i].Mesh.IndexCount); // Section 8e, mirrors GL's own DrawFaces call site
+            _stats.RecordDraw(faces[i].Mesh.IndexCount); // mirrors GL's own DrawFaces call site
         }
     }
 
@@ -5813,7 +5729,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     {
         if (!VkApi.IsInitialized) return;
         var vk = VkApi.Context;
-        // Plan Step 6: MUST run before anything below -- every mesh/material/target this method
+        // MUST run before anything below -- every mesh/material/target this method
         // disposes could still be referenced by an in-flight command buffer under real overlap
         // (RenderFrame's own tail no longer waits on its own submissions; only this panel's own
         // per-slot reaping and the RenderFrame-top wait do). Draining every slot here, before the
@@ -5832,7 +5748,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _faceTextureSlots.Clear();
         _faceMeshesByPosition.Clear();
         _facesByPosition.Clear();
-        // Section 8e: drain the
+        // drain the
         // OLD queues (disposing bitmaps that will now never render) and install a FRESH
         // SemaphoreSlim BEFORE the old one is at risk of disposal, so any PatchSceneObjectTexture
         // caller still mid-Wait() on the old instance sees ObjectDisposedException (handled,
@@ -5856,7 +5772,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         foreach (var flexiGpuList in _sceneFlexiGpuDataMap.Values)
             foreach (var gpu in flexiGpuList) gpu.Dispose();
         _sceneFlexiGpuDataMap.Clear();
-        // Section 8c-1: scene-object layer, same teardown shape as the single-submission
+        // scene-object layer, same teardown shape as the single-submission
         // fields immediately above (mesh+material per face, textures tracked per object,
         // pending queues drained and their bitmaps disposed rather than silently dropped).
         foreach (var faces in _sceneObjects.Values)
@@ -5898,7 +5814,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _cloudNoiseTex?.Dispose(); _cloudNoiseTex = null;
         _skyPipeline?.Dispose(); _skyPipeline = null;
         _skyReady = false;
-        // Section 8c-2b: SSAO. Targets/framebuffers first (they reference the pipeline objects'
+        // SSAO. Targets/framebuffers first (they reference the pipeline objects'
         // render passes), then the pipeline/descriptor-set objects, then the render passes
         // themselves, then the dedicated samplers -- unwinding roughly in dependency order,
         // though Vulkan permits destroying a layout/render-pass while dependent objects still
@@ -5923,14 +5839,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_ssaoLinearSampler.Handle != 0) { unsafe { vk.Api.DestroySampler(vk.Device, _ssaoLinearSampler, null); } }
         _ssaoLinearSampler = default;
         _ssaoReady = false;
-        // Section 8c-3: shadow target/pipeline/render-pass, same unwind-order convention as
+        // shadow target/pipeline/render-pass, same unwind-order convention as
         // SSAO immediately above (targets first, then pipeline, then render pass).
         unsafe { DestroyShadowTarget(vk); }
         _shadowPipeline?.Dispose(); _shadowPipeline = null;
         if (_shadowRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _shadowRenderPass, null); } }
         _shadowRenderPass = default;
         _shadowReady = false;
-        // Section 8c-3: water -- reflection target (which also owns its own render pass, see
+        // water -- reflection target (which also owns its own render pass, see
         // DestroyWaterReflectionTarget), then descriptor sets/pipeline, then the standalone
         // normal/dudv textures.
         unsafe { DestroyWaterReflectionTarget(vk); }
@@ -5945,7 +5861,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _skinPipeline?.Dispose(); _skinPipeline = null;
         _flexiDeformer?.Dispose(); _flexiDeformer = null;
         _flexiPipeline?.Dispose(); _flexiPipeline = null;
-        _stats.Dispose(vk); // Section 8e
+        _stats.Dispose(vk);
         // Mirrors GL's own GlDeinit disposal of _pendingParticleMap/_particleMap -- unlike
         // SubmitParticles' own mid-session behavior, full teardown DOES dispose every
         // still-queued/still-live bitmap and descriptor set, since nothing will ever drain them

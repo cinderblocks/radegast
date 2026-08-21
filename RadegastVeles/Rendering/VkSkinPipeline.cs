@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Compute pipeline for avatar GPU skin deformation (plan Section 8b, skin.comp). The FIRST
+// Compute pipeline for avatar GPU skin deformation (skin.comp). The FIRST
 // compute pipeline anywhere in this migration -- every prior VkPipeline (VkPrimPipeline,
 // VkWireframePipeline, VkPickPipeline) is a graphics pipeline. Structural differences from
 // those, all consequences of it being a compute pipeline rather than style choices:

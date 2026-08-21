@@ -61,16 +61,12 @@ public static class GridTextureHelper
     // concurrent TryGetValue + Copy() call that obtained a reference just before eviction
     // to finish its synchronous Copy(), but short enough to promptly reclaim native
     // (unmanaged) SkiaSharp pixel memory that the CLR GC cannot otherwise observe.
-    // NOTE: a 2026-08-18 region-crossing crash (0xC0000005 in SKBitmap.get_ColorType) was
-    // traced to DecodeWithDeduplication publishing `owned` (cache insert + TrySetResult)
-    // BEFORE its own final ColorType read -- fixed there by reordering, not by widening this
-    // window. A late-joiner's ContinueWith continuation reading a since-evicted bitmap under
-    // ThreadPool contention is a real, separate residual risk this grace period doesn't fully
-    // close either way (it's a scheduled callback, not a bounded synchronous call), but
-    // widening it only makes that failure mode rarer/harder to reproduce without fixing it,
-    // and this cache's own history (0607cf80) is an OOM from holding allocations alive too
-    // long -- left at 500ms deliberately; don't raise this as a fix for a future report of
-    // the same crash shape without addressing the late-joiner ownership issue directly.
+    // A late-joiner's ContinueWith continuation reading a since-evicted bitmap under
+    // ThreadPool contention is a residual risk this grace period doesn't fully close (it's a
+    // scheduled callback, not a bounded synchronous call). Widening the window only makes that
+    // rarer, not fixed, and risks the opposite failure mode: holding allocations alive too long
+    // causes OOM. Left at 500ms deliberately -- the fix for a stale-bitmap read is ensuring the
+    // reader takes its own copy before publish, not lengthening this window.
     private const int EvictedBitmapGraceMs = 500;
     private static readonly LruCache<UUID, SKBitmap> SkBitmapCache = new(64,
         onEvicted: static (_, bmp) =>
@@ -131,10 +127,6 @@ public static class GridTextureHelper
         4 => 60_000, // ~512×512
         _ => int.MaxValue,
     };
-
-    private static long _lodDecodeCalls;
-    private static readonly ConcurrentDictionary<(UUID, int), byte> _lodDecodeSeenKeys = new();
-    private static long _lastLodDecodeLogTicks;
 
     // Atomic counters — incremented with Interlocked so they are safe to read from
     // any thread at any time.  Zero overhead on the hot path (single interlocked add).
@@ -253,6 +245,11 @@ public static class GridTextureHelper
     {
         get { lock (DecodeGateLock) { return _decodeGate; } }
     }
+
+    // Bounds concurrent KTX2/BC3 pixel-cache encode work (see EncodePixelCacheTiersAsync).
+    // Separate from DecodeGate so encoding never holds up a decode permit or the texture
+    // delivery waiting on it.
+    private static readonly SemaphoreSlim EncodeGate = new(2, 2);
 
     /// <summary>
     /// Maximum number of J2K decodes that may run concurrently on the ThreadPool.
@@ -654,60 +651,20 @@ public static class GridTextureHelper
                         raw.Dispose();
                         if (owned != null)
                         {
-                            // Populate the pixel-cache tier so the next request for this
-                            // UUID (this session or a future one) skips this decode entirely.
-                            // Encode synchronously here (still on this winner's own background
-                            // thread, before `owned` is handed anywhere else) -- only the file
-                            // write itself is backgrounded, per PutPixelsAsync's own contract.
-                            //
-                            // Deliberately done BEFORE SkBitmapCache.AddOrUpdate below: both
-                            // encodes are CPU-heavy synchronous passes over `owned`'s pixels that
-                            // can run for hundreds of ms under load, and at this point `owned`
-                            // is still exclusively local -- nothing else can see or evict it yet.
-                            try
-                            {
-                                var ktx2Bytes = Ktx2Codec.Encode(owned);
-                                _ = TextureDiskCache.PutPixelsAsync(textureId, ktx2Bytes);
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Debug($"GridTextureHelper: KTX2 pixel-cache encode failed for {textureId}.", ex);
-                            }
-
-                            // Also populate the compressed (BC3) tier, consumed only by the
-                            // Vulkan scene-object texture path (VkViewportControl). Every
-                            // full-res decode gets one here regardless of whether the decoded
-                            // texture is ever actually GPU-sampled as color (sculpt maps,
-                            // particles, water textures all funnel through this same winner
-                            // path) -- see TextureDiskCache's "Compressed pixel tier" doc
-                            // comment for why that's an accepted, disk-budget-bounded tradeoff
-                            // rather than plumbing a per-call opt-in flag through this method.
-                            // Still gated by the same decode-gate permit this whole block holds,
-                            // so a region-entry burst can't spawn unbounded concurrent encodes.
-                            try
-                            {
-                                var bc3Bytes = Ktx2Codec.EncodeCompressedBc3(owned);
-                                _ = TextureDiskCache.PutCompressedPixelsAsync(textureId, bc3Bytes);
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Debug($"GridTextureHelper: BC3 pixel-cache encode failed for {textureId}.", ex);
-                            }
-
-                            // Capture the winner's own return copy HERE, before `owned` is
-                            // published to anyone else (cache insertion below, then
-                            // TrySetResult unblocking every late-joiner's ContinueWith). Every
-                            // read of `owned` -- both encodes above and this copy -- happens
-                            // while this thread still holds the only reference, so nothing else
-                            // can race a dispose against it. This is the fix for the actual
-                            // fault site: the trace showed get_ColorType() crashing inside this
-                            // lambda, and the only ColorType read reachable AFTER publish used
-                            // to be here (`owned.Copy(owned.ColorType)` after TrySetResult) --
-                            // moved earlier instead of leaving it exposed to a same-cache
-                            // eviction (LRU churn) or a slow-continuation late-joiner race.
+                            // Both copies are taken before `owned` is published (cache +
+                            // TrySetResult below), while this thread still holds the only
+                            // reference, so neither races a same-cache eviction or a
+                            // late-joiner's continuation.
                             winnerCopy = owned.Copy(owned.ColorType);
+                            var encodeCopy = owned.Copy(owned.ColorType);
 
                             SkBitmapCache.AddOrUpdate(textureId, owned);
+                            winnerTcs.TrySetResult(owned);
+
+                            if (encodeCopy != null)
+                                _ = EncodePixelCacheTiersAsync(textureId, encodeCopy);
+
+                            return winnerCopy;
                         }
                     }
                     else
@@ -744,6 +701,45 @@ public static class GridTextureHelper
                 _inflightDecodes.TryRemove(textureId, out _);
             }
         }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Encodes <paramref name="bitmap"/> into the KTX2 (raw) and BC3 pixel-cache disk tiers
+    /// and disposes it when done. Runs on <see cref="EncodeGate"/>, not <see cref="DecodeGate"/>.
+    /// Caller must hand off a bitmap nothing else references.
+    /// </summary>
+    private static async Task EncodePixelCacheTiersAsync(UUID textureId, SKBitmap bitmap)
+    {
+        await EncodeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            try
+            {
+                var ktx2Bytes = Ktx2Codec.Encode(bitmap);
+                _ = TextureDiskCache.PutPixelsAsync(textureId, ktx2Bytes);
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"GridTextureHelper: KTX2 pixel-cache encode failed for {textureId}.", ex);
+            }
+
+            // Also populate the compressed (BC3) tier, consumed only by the Vulkan
+            // scene-object texture path (VkViewportControl).
+            try
+            {
+                var bc3Bytes = Ktx2Codec.EncodeCompressedBc3(bitmap);
+                _ = TextureDiskCache.PutCompressedPixelsAsync(textureId, bc3Bytes);
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"GridTextureHelper: BC3 pixel-cache encode failed for {textureId}.", ex);
+            }
+        }
+        finally
+        {
+            EncodeGate.Release();
+            bitmap.Dispose();
+        }
     }
 
     /// <summary>
@@ -1000,19 +996,6 @@ public static class GridTextureHelper
                     var thumbCopy = thumb.Copy(thumb.ColorType);
                     winnerTcs.TrySetResult(thumb); // shared with late-joiners; they copy
                     return thumbCopy;              // winner's own copy
-                }
-
-                long totalCalls = Interlocked.Increment(ref _lodDecodeCalls);
-                _lodDecodeSeenKeys.TryAdd(lodKey, 0);
-                long now = Environment.TickCount64;
-                if (now - Interlocked.Read(ref _lastLodDecodeLogTicks) >= 1000)
-                {
-                    Interlocked.Exchange(ref _lastLodDecodeLogTicks, now);
-                    LibreMetaverse.Logger.Warn(
-                        $"[GridTextureHelper] DownloadSkBitmapLodAsync: totalCalls={totalCalls}, " +
-                        $"distinct(UUID,level)Seen={_lodDecodeSeenKeys.Count} -- a growing gap " +
-                        "between these two numbers means the same texture is being re-decoded " +
-                        "at the same LOD repeatedly.");
                 }
 
                 // Decode at the requested LOD level — pays only for the wavelet levels needed.

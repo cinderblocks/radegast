@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the wireframe overlay pass (plan Section 5's pipeline
+// Pipeline layout + VkPipeline for the wireframe overlay pass (the pipeline
 // table, row 2: wireframe.vert + wireframe.frag). Mirrors GL's ES/ANGLE fallback path
 // (DrawFacesWireframeEs / DepthFunction.Lequal + DepthMask(false))
 // rather than desktop GL's PolygonMode.Line path: PolygonMode.Line requires the

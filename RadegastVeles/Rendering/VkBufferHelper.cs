@@ -19,8 +19,8 @@
 
 // Loosely adapted from Avalonia's samples/GpuInterop/VulkanDemo's VulkanBufferHelper.cs
 // (MIT licensed) -- extended with a device-local + staging-buffer path, which that sample
-// didn't need. See plan Section 6: no VMA/suballocator by design, one vkAllocateMemory call
-// per resource, matching the sample's own approach.
+// didn't need. No VMA/suballocator by design: one vkAllocateMemory call per resource,
+// matching the sample's own approach.
 
 using System;
 using System.Collections.Generic;
@@ -100,8 +100,8 @@ internal static unsafe class VkBufferHelper
     /// buffer copy, matching <c>GlMesh</c>'s <c>dynamic: false</c> (<c>STATIC_DRAW</c>) path and
     /// the always-static index buffer. Device-local memory is faster to sample from during
     /// rendering; the staging round-trip only happens once here (this is upload, not a
-    /// per-frame update path -- see plan Section 6's "single graphics+transfer queue" decision
-    /// for why no dedicated transfer queue is used for this copy).
+    /// per-frame update path -- a dedicated transfer queue isn't worth the added complexity
+    /// for a one-time copy, so this reuses the single graphics+transfer queue).
     /// </summary>
     public static void AllocateDeviceLocal<T>(VkContext vk, BufferUsageFlags usage,
         out Buffer buffer, out DeviceMemory memory, ReadOnlySpan<T> initialData) where T : unmanaged
@@ -124,9 +124,9 @@ internal static unsafe class VkBufferHelper
             vk.Api.CmdCopyBuffer(cmd.InternalHandle, stagingBuffer, buffer, 1, in copyRegion);
             // Synchronous: waits on the copy's fence before returning, matching GlMesh's own
             // synchronous glBufferData semantics -- the caller can use `buffer` immediately
-            // after this method returns. Revisit only if profiling shows upload-stall pressure
-            // (see plan Section 6's transfer-queue decision). SubmitAndWait waits only on this
-            // buffer's own fence, not every other buffer outstanding in the shared pool.
+            // after this method returns. Revisit only if profiling shows upload-stall pressure.
+            // SubmitAndWait waits only on this buffer's own fence, not every other buffer
+            // outstanding in the shared pool.
             cmd.SubmitAndWait();
         }
         finally

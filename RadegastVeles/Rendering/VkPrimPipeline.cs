@@ -156,7 +156,7 @@ internal sealed class VkPrimPipeline : IDisposable
             Topology = PrimitiveTopology.TriangleList
         };
 
-        // Viewport/scissor are dynamic state (plan Section 5's pipeline-table note) -- actual
+        // Viewport/scissor are dynamic state -- actual
         // values set per-frame via vkCmdSetViewport/vkCmdSetScissor, not baked in here.
         var viewportState = new PipelineViewportStateCreateInfo
         {

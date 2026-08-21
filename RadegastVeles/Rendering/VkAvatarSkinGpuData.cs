@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan port of AvatarSkinGpuData.cs (plan Section 8b). The joint/weight conversion logic
+// Vulkan port of AvatarSkinGpuData.cs. The joint/weight conversion logic
 // (2-bone-name-lookup vs. rigged-4-bone-passthrough) is copied byte-identical from the GL
 // original -- pure CPU-side C# with no GL dependency, so there was never a reason to
 // re-derive it. The GPU-resource shape differs, all Vulkan-model consequences:
@@ -240,10 +240,10 @@ internal sealed unsafe class VkAvatarSkinGpuData : IDisposable
 
 /// <summary>
 /// Work item queued by SceneAvatarAnimator/AvatarViewerViewModel's AnimTick (background thread)
-/// for VkSkinDeformer to execute on the render thread. Public (2026-08-09) -- it's a parameter
-/// type on ISceneViewport.ScheduleSkinCompute/ISingleObjectViewport.ScheduleSkinCompute, both
-/// public interface members; its own fields/constructor stay internal (assembly-accessible from
-/// every real caller, all in RadegastVeles), only the type itself needed widening.
+/// for VkSkinDeformer to execute on the render thread. The struct itself is public because it's
+/// a parameter type on the public ISceneViewport.ScheduleSkinCompute/
+/// ISingleObjectViewport.ScheduleSkinCompute interface members; its own fields/constructor stay
+/// internal.
 /// </summary>
 public readonly struct VkSkinComputeJob
 {

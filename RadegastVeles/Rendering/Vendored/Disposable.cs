@@ -20,8 +20,6 @@
 // Vendored from Avalonia's own source (MIT licensed, https://github.com/AvaloniaUI/Avalonia,
 // System.Reactive.Disposables.Disposable's internal Avalonia.Reactive counterpart) -- not a
 // public Avalonia API, needed only as SwapchainBase.cs's `Disposable.Create(...)` dependency.
-// Validated working (byte-for-byte) in experiments/VulkanEmbeddingSpike/Vendored/Disposable.cs
-// before being ported here for the real Section 8a render loop -- see plan Section 8a.
 
 using System;
 using System.Threading;

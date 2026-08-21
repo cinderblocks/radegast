@@ -69,7 +69,7 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
     private int _facesSubmitted;
     private int _facesCulled;
 
-    // Plan Step 6: CPU-side counters snapshotted per-slot by EndCpuWork (called right after
+    // CPU-side counters snapshotted per-slot by EndCpuWork (called right after
     // Submit, with no fence wait) so EndFrame -- now called at the point a slot's GPU work is
     // actually confirmed done, which under real overlap is a LATER frame than the one that
     // produced these numbers -- has something to pair the GPU timestamps with. Without this,

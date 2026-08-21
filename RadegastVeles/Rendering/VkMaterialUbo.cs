@@ -17,14 +17,12 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// CPU-side mirror of prim.frag's "Material" UBO (set=2, binding=5) -- see plan Section 5 and
-// VkPerFrameUbo.cs's much longer note for the full std140 rules rationale (vec3's 16-byte
-// alignment, vec4's 16-byte alignment forcing tail padding after odd runs of scalars, etc.).
-// Field list read directly from shader_data/vulkan/prim.frag lines 90-126 (28 fields, not the
-// plan's earlier "~27" estimate -- the live shader source is authoritative, not the plan
-// draft). Offsets hand-computed against std140 then verified empirically via
-// Marshal.SizeOf/Marshal.OffsetOf in a throwaway console project, the same process used for
-// VkPerFrameUbo -- every offset matched on the first run, see project memory for that check.
+// CPU-side mirror of prim.frag's "Material" UBO (set=2, binding=5) -- see VkPerFrameUbo.cs's
+// much longer note for the full std140 rules rationale (vec3's 16-byte alignment, vec4's
+// 16-byte alignment forcing tail padding after odd runs of scalars, etc.). Field list read
+// directly from shader_data/vulkan/prim.frag (28 fields) -- the live shader source is
+// authoritative. Offsets hand-computed against std140 then verified empirically via
+// Marshal.SizeOf/Marshal.OffsetOf, the same process used for VkPerFrameUbo.
 
 using System.Numerics;
 using System.Runtime.InteropServices;

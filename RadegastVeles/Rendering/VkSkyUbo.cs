@@ -18,7 +18,7 @@
  */
 
 // CPU-side mirror of the "SkyPass" UBO declared in shader_data/vulkan/sky.frag (set=1,
-// binding=0) -- see plan Section 8c-2. Same std140-by-hand discipline as VkPerFrameUbo.cs
+// binding=0). Same std140-by-hand discipline as VkPerFrameUbo.cs
 // (vec3's 16-byte alignment/tail-packing is the only rule in play here; no arrays). Field
 // order below is chosen to pack tightly, NOT to match sky.frag's own declaration order --
 // std140 only requires the OFFSETS to agree between the two sides, not textual order, and

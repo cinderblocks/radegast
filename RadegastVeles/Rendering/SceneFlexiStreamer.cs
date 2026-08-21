@@ -19,6 +19,7 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Numerics;
 using LibreMetaverse;
 
 namespace Radegast.Veles.Rendering;
@@ -124,7 +125,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         StartAnimator((ulong)rootId, submission, sceneKey: (ulong)rootId);
     }
 
-    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
+    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result, Matrix4x4 worldMatrix)
     {
         if (_disposed) return;
         // The initial world position is already seeded directly onto each FlexiPrimInfo's

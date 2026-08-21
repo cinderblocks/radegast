@@ -22,9 +22,8 @@
 // Avalonia's own source comment, hence vendoring rather than a package reference. Handles the
 // double-buffering bookkeeping any composition-backed swapchain needs: find/reuse a pending
 // image whose last present completed, or make a new one; track in-flight images so DisposeAsync
-// can wait for outstanding presents. Not Veles-specific -- validated byte-for-byte in
-// experiments/VulkanEmbeddingSpike/Vendored/SwapchainBase.cs before being ported here for the
-// real Section 8a render loop. See VkInteropSwapchain.cs for the Veles-specific subclass.
+// can wait for outstanding presents. Not Veles-specific -- see VkInteropSwapchain.cs for the
+// Veles-specific subclass.
 
 using System;
 using System.Collections.Generic;

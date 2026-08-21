@@ -137,7 +137,7 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
 
     // ── Internals ─────────────────────────────────────────────────────────────────
 
-    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result)
+    private void OnAvatarBuilt(ulong sceneKey, uint localId, AvatarBuildResult result, Matrix4x4 worldMatrix)
     {
         if (_disposed) return;
 
@@ -154,6 +154,11 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         // scheduler so the very first Tick already pushes live bone matrices into it.
         if (hadPending)
             animator.SetFlexiAnimator(pendingFlexi);
+
+        // Seed the world matrix before registering with the scheduler, so the very first
+        // tick has a correct placement for rigid-single-bone attachment faces to compose
+        // against instead of Identity.
+        animator.UpdateAvatarWorldMatrix(worldMatrix);
 
         _scheduler.Register(animator);
     }

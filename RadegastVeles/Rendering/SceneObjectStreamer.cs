@@ -105,33 +105,11 @@ internal sealed class SceneObjectStreamer : IDisposable
     // would wrongly suppress a later, genuinely-needed retry at that same pose.
     private readonly ConcurrentDictionary<ulong, (Vector3 Position, Quaternion Rotation, Vector3 Scale)> _lastRebuiltPose = new();
 
-    // Diagnostic-only (2026-08-19, chasing a "1800+ Upload Q, Obj/SceneFaces bit-identical for
-    // 28+ seconds, Build Q drains to 0 and stays there" churn session). EnqueueBuild's
-    // "Progressive placeholder for first appearance" branch (below) fires every time this
-    // method runs for a key not yet in _rendered -- including a key whose PREVIOUS build got
-    // cancelled by this same call (see the _inflight.TryRemove+Cancel a few lines above that
-    // branch) and is being retried. If something keeps re-dirtying the same small set of keys
-    // faster than their builds can complete, each retry re-submits a fresh placeholder via
-    // SubmitSceneObject -- real render-thread work with zero net effect on _rendered/Obj count,
-    // which is exactly the shape logged above. totalCalls vs. distinctKeysSeen (same pattern as
-    // GridTextureHelper's DownloadSkBitmapLodAsync dedup diagnostic) distinguishes "many
-    // different objects each appearing once" from "a small set of objects re-entering this
-    // branch over and over."
-    private long _placeholderSubmitCalls;
-    private readonly ConcurrentDictionary<ulong, byte> _placeholderSubmitSeenKeys = new();
-    private long _lastPlaceholderDiagLogTicks;
-
-    // Diagnostic-only (2026-08-19, fix for the churn above): EnqueueBuild now DEFERS instead of
-    // cancelling when a build for the key is still genuinely running (BuildAttempt.Completed ==
-    // false), re-marking the key dirty so ProcessDirty retries it once the running attempt
-    // finishes -- this is the replacement signal for what used to be an inflightCancels counter
-    // that fired on every cancel-and-restart; it should climb where that used to. The one way
-    // this fix can go wrong is starvation: if Completed is ever left unset on some exit path,
-    // that key defers FOREVER and never rebuilds again. _inflight.Values.Count(a => !a.Completed)
-    // sampled alongside this counter (below, as "stillRunning") is the canary -- it must stay
-    // bounded/draining, not grow monotonically. _staleAttemptTimeouts is the release valve for
-    // the one concrete leak found: SceneBuildScheduler.Enqueue's queue-depth eviction drops a
-    // factory without ever running it (see StuckAttemptTimeoutMs's own comment).
+    // EnqueueBuild defers (rather than cancels) a dirty re-trigger when a build for the key is
+    // still running, re-marking the key dirty so ProcessDirty retries it once the running
+    // attempt finishes. _staleAttemptTimeouts counts the release-valve case: SceneBuildScheduler.
+    // Enqueue's queue-depth eviction can drop a factory without ever running it (see
+    // StuckAttemptTimeoutMs's own comment), which would otherwise defer that key forever.
     private long _deferredBuildCount;
     private long _staleAttemptTimeouts;
 
@@ -182,8 +160,8 @@ internal sealed class SceneObjectStreamer : IDisposable
     // ── Public API ────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Fired on the thread-pool after a linkset is built and submitted to the viewport.
-    /// Arguments: (rootLocalId, submission).  Subscribe before calling <see cref="OnObjectUpdate"/>.
+    /// Fired on the thread-pool after a linkset is built and submitted to the viewport, with
+    /// the rootLocalId and submission. Subscribe before calling <see cref="OnObjectUpdate"/>.
     /// </summary>
     public event Action<uint, PrimRenderSubmission>? ObjectBuilt;
 
@@ -585,16 +563,14 @@ internal sealed class SceneObjectStreamer : IDisposable
     {
         if (_disposed) return;
 
-        // Fix for the churn confirmed on 2026-08-19 (see class-level diagnostic comments above):
-        // a build for this key that is still genuinely running (not yet reached
+        // A build for this key that is still genuinely running (not yet reached
         // PrefetchThenScheduleBuildAsync/BuildObjectAsync's completion) is left alone instead of
-        // being cancelled-and-restarted. Killing it here unconditionally, as the old code did,
-        // meant an object whose terse-update rate exceeds its own build completion rate (e.g. a
-        // continuously moving/rotating linkset) had every attempt killed by the next one before
-        // it could ever finish -- confirmed via inflightCancels climbing 179->438 over ~24s while
-        // distinctKeysSeen stayed flat at 727-728 (same ~728 objects, never completing). Instead,
-        // re-mark the key dirty so ProcessDirty retries it on a LATER tick once the running
-        // attempt actually finishes -- bounded by real build throughput, not re-dirty rate.
+        // being cancelled-and-restarted. Killing it here unconditionally would mean an object
+        // whose terse-update rate exceeds its own build completion rate (e.g. a continuously
+        // moving/rotating linkset) has every attempt killed by the next one before it could ever
+        // finish. Instead, re-mark the key dirty so ProcessDirty retries it on a LATER tick once
+        // the running attempt actually finishes -- bounded by real build throughput, not
+        // re-dirty rate.
         if (_inflight.TryGetValue(sceneKey, out var runningAttempt) && !runningAttempt.Completed)
         {
             long ageMs = Environment.TickCount64 - runningAttempt.StartedAtTicks;
@@ -663,30 +639,6 @@ internal sealed class SceneObjectStreamer : IDisposable
                 var placeholder = PlaceholderMeshFactory.Build(
                     $"ph:{rootLocalId}", scale, wPos, rootPrimLocalId: rootLocalId);
                 _viewport.SubmitSceneObject(sceneKey, placeholder);
-
-                long totalCalls = Interlocked.Increment(ref _placeholderSubmitCalls);
-                _placeholderSubmitSeenKeys.TryAdd(sceneKey, 0);
-                long now2 = Environment.TickCount64;
-                if (now2 - Interlocked.Read(ref _lastPlaceholderDiagLogTicks) >= 1000)
-                {
-                    Interlocked.Exchange(ref _lastPlaceholderDiagLogTicks, now2);
-                    int stillRunning = 0;
-                    foreach (var a in _inflight.Values)
-                        if (!a.Completed) stillRunning++;
-                    LibreMetaverse.Logger.Debug(
-                        $"[SceneObjectStreamer] EnqueueBuild placeholder-path: totalCalls={totalCalls}, "
-                        + $"distinctKeysSeen={_placeholderSubmitSeenKeys.Count}, "
-                        + $"deferredBuilds={Interlocked.Read(ref _deferredBuildCount)}, "
-                        + $"staleTimeouts={Interlocked.Read(ref _staleAttemptTimeouts)}, "
-                        + $"stillRunning={stillRunning} -- deferredBuilds climbing (replacing the "
-                        + "old cancel-and-restart churn, fixed 2026-08-19 by deferring instead of "
-                        + "cancelling) is expected and fine. stillRunning must stay bounded/"
-                        + "draining, not grow monotonically -- if it does, some exit path is "
-                        + "failing to mark its BuildAttempt Completed and the affected keys will "
-                        + "never rebuild again (a worse, silent regression) unless staleTimeouts "
-                        + "is also climbing to match, which means the 10s safety valve is "
-                        + "catching it and retrying instead.");
-                }
             }
         }
 

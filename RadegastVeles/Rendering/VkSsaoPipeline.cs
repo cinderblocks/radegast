@@ -17,8 +17,8 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the SSAO pass (plan Section 5's pipeline table, row 7:
-// quad.vert + ssao.frag). Owns its own set 0 (VkDescriptorSetLayouts.CreateSsaoParamsLayout) --
+// Pipeline layout + VkPipeline for the SSAO pass (quad.vert + ssao.frag).
+// Owns its own set 0 (VkDescriptorSetLayouts.CreateSsaoParamsLayout) --
 // unlike the sky pipeline, nothing here needs to share a descriptor set with another pipeline,
 // since quad.vert has no uniforms at all. Same empty-vertex-input full-screen-triangle shape
 // VkSkyPipeline established first.

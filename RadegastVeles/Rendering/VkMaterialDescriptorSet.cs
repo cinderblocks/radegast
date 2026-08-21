@@ -17,9 +17,9 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Set 2 (per-material) for prim.frag -- plan Section 5. One instance per distinct material a
-// scene actually uses (not per face/draw call: faces sharing a material share this set's
-// bind, matching plan Section 5's "biggest set, changes per material not per draw" note).
+// Set 2 (per-material) for prim.frag. One instance per distinct material a
+// scene actually uses (not per face/draw call): faces sharing a material share this set's
+// bind, since this is the biggest set and changes per material, not per draw.
 // Callers pass VkPlaceholderTextures' DescriptorImageInfo for any of the 5 texture slots a
 // given material doesn't use -- required, not optional, since sampling an unbound descriptor
 // is undefined behavior (see VkPlaceholderTextures.cs).

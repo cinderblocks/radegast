@@ -18,13 +18,12 @@
  */
 
 // Adapted from Avalonia's own samples/GpuInterop/VulkanDemo (MIT licensed,
-// https://github.com/AvaloniaUI/Avalonia), validated working against this project's
-// pinned Avalonia version in experiments/VulkanEmbeddingSpike before porting here.
+// https://github.com/AvaloniaUI/Avalonia).
 //
 // Mode B support: Avalonia's default Win32 backend (ANGLE/D3D11) only understands
 // D3D11-shared-texture handles, not native Vulkan opaque handles, so our separately-created
 // Vulkan device needs its own D3D11 device (matched by LUID to the same physical adapter)
-// purely to mint DXGI shared handles for the render target image. See plan Section 3.
+// purely to mint DXGI shared handles for the render target image.
 
 using System;
 using Avalonia;

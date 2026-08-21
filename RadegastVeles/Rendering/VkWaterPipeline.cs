@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the water-surface pass (plan Section 8c-3, pipeline table
+// Pipeline layout + VkPipeline for the water-surface pass (pipeline table
 // row 10: water.vert + water.frag). Drawn as a full-screen triangle into the main render pass
 // (same family as VkSkyPipeline -- an EMPTY vertex-input state, no VkMesh/VkInstanceDrawer
 // bindings), AFTER the opaque geometry pass and BEFORE the alpha pass (mirrors

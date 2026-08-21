@@ -17,10 +17,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Vulkan port of GlInstanceDrawer.cs -- see plan Section 6. Structural differences from the
+// Vulkan port of GlInstanceDrawer.cs. Structural differences from the
 // GL original:
 //   - No VAO/VertexAttribDivisor: the instance buffer is vertex input binding 1
-//     (VertexInputRate.Instance), declared once as part of pipeline creation (Section 8) via
+//     (VertexInputRate.Instance), declared once as part of pipeline creation via
 //     the static description properties below, alongside VkMesh's binding 0
 //     (VertexInputRate.Vertex). Both bindings are just bind calls at draw time here.
 //   - No separate "DrawElementsInstanced" entry point: Vulkan's vkCmdDrawIndexed always takes

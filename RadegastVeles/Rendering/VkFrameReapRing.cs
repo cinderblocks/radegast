@@ -29,7 +29,7 @@ namespace Radegast.Veles.Rendering;
 /// shared list did -- each panel renders on its own cadence, so there is no single process-wide
 /// "frame N" to reap against.
 /// <para>
-/// Plan Step 6: <see cref="VkContext.FramesInFlight"/> slots, round-robin by frame index.
+/// <see cref="VkContext.FramesInFlight"/> slots, round-robin by frame index.
 /// <see cref="BeginFrame"/> (called once, at the very top of <c>RenderFrame</c>, before any
 /// <see cref="MarkUsed"/> call for that frame) advances to this frame's slot -- the SAME
 /// physical slot index this frame will reuse N frames from now, which is exactly why reaping it

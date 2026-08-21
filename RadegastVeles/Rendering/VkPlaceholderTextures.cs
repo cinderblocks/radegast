@@ -18,10 +18,10 @@
  */
 
 // Default placeholder textures for prim.frag's set 1 (per-pass shadow/SSAO samplers) and set 2
-// (per-material samplers) -- required infrastructure, not optional, per plan Section 5's
+// (per-material samplers) -- required infrastructure, not optional, per the
 // uber-shader decision: "bind a small set of default placeholder textures into the unused
 // sampler slots instead of branching around missing bindings." Sampling an unbound Vulkan
-// descriptor is undefined behavior, and PrimViewer's pilot (Section 8a) has no real shadow
+// descriptor is undefined behavior, and PrimViewer's pilot has no real shadow
 // map / SSAO buffer / possibly-absent material textures to bind -- these placeholders are
 // what makes that legal. Created once off the shared VkContext, not per-panel.
 //
@@ -258,11 +258,11 @@ internal sealed unsafe class VkPlaceholderTextures : IDisposable
     }
 
     /// <summary>D32_SFLOAT is used unconditionally -- it's the depth format the real shadow
-    /// passes (plan Section 8c) are expected to use too, and is broadly supported, but this
+    /// passes are expected to use too, and is broadly supported, but this
     /// hasn't been cross-checked with vkGetPhysicalDeviceFormatProperties against
     /// VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT the way a production depth-format
     /// selection helper should. Fine for a 1x1 placeholder on this dev machine; revisit
-    /// alongside the real shadow-pass depth format in Section 8c.</summary>
+    /// alongside the real shadow-pass depth format.</summary>
     private const Format ShadowDepthFormat = Format.D32Sfloat;
 
     private static ShadowPlaceholder CreateShadowPlaceholder(VkContext vk, bool cube)

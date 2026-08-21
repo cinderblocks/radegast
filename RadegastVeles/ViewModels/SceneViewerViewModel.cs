@@ -1563,18 +1563,15 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                    $"\nParticles:{particleDrainMs:F1}ms BeginDraw:{beginDrawMs:F1}ms(Free:{swapFreeMs:F1}ms Acquire:{swapAcquireMs:F1}ms) DepthCull:{depthCullMs:F1}ms" +
                    $"\nMeshCache {PrimMeshBuilder.MeshCacheHits}h/{PrimMeshBuilder.MeshCacheMisses}m";
 
-        // Logged unconditionally (not gated on ShowPerfOverlay), throttled to 1/sec -- same
-        // pattern VkSkinDeformer/GridTextureHelper use for their own per-tick diagnostics.
-        // FrameCompleted already fires every frame regardless of the overlay toggle, so this
-        // costs nothing extra when the UI isn't showing it.
+        if (!ShowPerfOverlay) return;
+
+        // Throttled to 1/sec, and only while the overlay is actually being watched.
         long nowTicks = Environment.TickCount64;
         if (nowTicks - _lastPerfOverlayLogTicks >= 1000)
         {
             _lastPerfOverlayLogTicks = nowTicks;
             LibreMetaverse.Logger.Debug("[SceneViewerViewModel] Perf: " + text.Replace('\n', ' '));
         }
-
-        if (!ShowPerfOverlay) return;
 
         Dispatcher.UIThread.Post(() =>
         {

@@ -18,15 +18,15 @@
  */
 
 // CPU-side mirror of the "PerFrame" UBO declared identically in shader_data/vulkan/prim.vert
-// and prim.frag (set=0, binding=0) -- see plan Section 5. Every FieldOffset below was computed
+// and prim.frag (set=0, binding=0). Every FieldOffset below was computed
 // by hand against GLSL's std140 layout rules (the default block layout, no explicit
 // "layout(std140)" needed since it's std140 unless std430 is requested) directly from the
 // GLSL declaration order, NOT [StructLayout(LayoutKind.Sequential)] -- Sequential would pack
 // this wrong in several places (see the vec3/array notes below) and produce a struct that
-// compiles fine in C# but reads garbage in the shader, silently. This is flagged as the
-// highest-risk file in the current pipeline-creation work: a mistake here is a "lighting
-// looks subtly wrong" bug, not a crash, and there's no validation layer on this dev machine
-// to catch a size/offset mismatch (see plan Section 5's validation-layer-prerequisite note).
+// compiles fine in C# but reads garbage in the shader, silently. A mistake here is a "lighting
+// looks subtly wrong" bug, not a crash, and the validation layer (opt-in via
+// VELES_VK_VALIDATION=1, see VkContext.cs) is the main thing that would ever catch a
+// size/offset mismatch here.
 //
 // std140 rules actually in play here (the ones that bite, not an exhaustive list):
 //   - vec3 has a 16-byte base alignment (NOT 12) -- a bare vec3 leaves 4 bytes of tail

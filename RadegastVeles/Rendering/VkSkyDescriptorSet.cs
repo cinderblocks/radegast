@@ -17,7 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Owns the sky pipeline's set 1 (SkyPass UBO + cloud-noise sampler) -- plan Section 8c-2.
+// Owns the sky pipeline's set 1 (SkyPass UBO + cloud-noise sampler).
 // Mirrors VkPrimDescriptorSets.cs's shape (host-visible UBO buffer + AllocateSet helper) but
 // simpler: one set, one UBO binding whose CONTENTS change every frame (UpdateSky, host-visible
 // memory rewrite, no descriptor rewrite needed) plus one sampler binding written ONCE at

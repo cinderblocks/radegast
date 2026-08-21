@@ -109,6 +109,10 @@ internal static class Ktx2Codec
         var encoder = new BcEncoder(CompressionFormat.Bc3);
         encoder.OutputOptions.GenerateMipMaps = true;
         encoder.OutputOptions.Quality = CompressionQuality.Balanced;
+        // Single-threaded: BcEncoder defaults to fanning its own Parallel.For across every
+        // core, which would multiply out badly against callers that already run several of
+        // these concurrently on their own worker threads.
+        encoder.Options.IsParallel = false;
         byte[][] levels = encoder.EncodeToRawBytes(pixels, width, height, PixelFormat.Rgba32);
 
         return BuildCompressedFile(width, height, levels);
