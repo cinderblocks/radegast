@@ -21,13 +21,22 @@ using System;
 
 namespace Radegast.Veles.Rendering;
 
+/// <param name="IntervalMaxMs">Largest wall-clock gap between consecutive <c>BeginFrame</c>
+/// calls over a rolling window (~120 frames) -- the metric that actually answers "is it
+/// choppy": CPU/GPU ms alone can drop once frame-in-flight pipelining lands (plan Step 6)
+/// whether or not the user-visible frame pacing actually improves.</param>
+/// <param name="IntervalP99Ms">99th-percentile frame interval over the same window -- less
+/// sensitive to a single one-off spike than <see cref="IntervalMaxMs"/>, so a sustained
+/// choppiness regression shows up here even when the max is dominated by one rare outlier.</param>
 public readonly record struct FrameStats(
     double CpuTimeMs,
     double GpuTimeMs,
     int    DrawCalls,
     int    Triangles,
     int    FacesSubmitted,
-    int    FacesCulled);
+    int    FacesCulled,
+    double IntervalMaxMs,
+    double IntervalP99Ms);
 
 public interface IFrameStatsTracker
 {

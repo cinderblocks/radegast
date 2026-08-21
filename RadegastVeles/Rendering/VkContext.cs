@@ -33,7 +33,9 @@ using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.Vulkan;
+using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
+using Microsoft.Extensions.Logging;
 
 namespace Radegast.Veles.Rendering;
 
@@ -47,6 +49,21 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed unsafe class VkContext : IDisposable
 {
+    // Plan Step 6: the single canonical knob every N-buffered piece of per-panel state
+    // (VkFrameStatsTracker's query pools, VkPrimDescriptorSets' per-frame UBO/FrameSet,
+    // VkFrameReapRing's slots) is sized against. CLOSED at 1 (2026-08-21) after six live N=2
+    // hangs across three genuinely distinct call-path localizations (after BeginDraw, unclear;
+    // inside a WaitForFenceCore for the BeginDraw buffer's own fence; inside the untimed
+    // PreCull/culling span with no wait in progress at all) -- no single deterministic bug stayed
+    // implicated across repeats, which points at driver/GPU-level contention from holding twice
+    // the in-flight GPU state rather than a fixable ordering bug in this codebase. A 7-hour
+    // N=1 marathon under comparable-or-heavier load had zero hangs. Measured win from real
+    // overlap was ~5-7ms/frame at this scene's content density -- not worth the risk. See the
+    // plan file's Step 6 section (search "Sixth N=2 hang confirmed") for the full six-hang
+    // history before ever attempting this again; start any future attempt from a fresh
+    // diagnostic pass rather than re-adding the same bracketing.
+    public const int FramesInFlight = 1;
+
     public required Vk Api { get; init; }
     public required Instance Instance { get; init; }
     public required PhysicalDevice PhysicalDevice { get; init; }
@@ -55,6 +72,18 @@ internal sealed unsafe class VkContext : IDisposable
     public required uint QueueFamilyIndex { get; init; }
     public required VkCommandBufferPool Pool { get; init; }
     public required DescriptorPool DescriptorPool { get; init; }
+
+    // Gated on VELES_VK_VALIDATION=1 (VK_LAYER_KHRONOS_validation, availability-checked, never a
+    // hard requirement) and separately VELES_VK_SYNC_VALIDATION=1 (VK_VALIDATION_FEATURE_ENABLE_
+    // SYNCHRONIZATION_VALIDATION_EXT layered on top -- per plan's "Validation layers" section,
+    // slow enough that a populated SceneViewer may be unusable with it on, so kept independently
+    // toggleable rather than bundled with core validation). _debugCallback is stored as an
+    // instance field, not a local, because native code holds a raw pointer into this managed
+    // delegate for as long as _debugMessenger exists -- letting it go out of scope would leave a
+    // dangling callback the moment the GC decides to collect it.
+    private ExtDebugUtils? _debugUtils;
+    private DebugUtilsMessengerEXT _debugMessenger;
+    private DebugUtilsMessengerCallbackFunctionEXT? _debugCallback;
 
     /// <summary>
     /// Whether this device can sample a BC3 (S3TC DXT5) compressed image, checked once here
@@ -109,18 +138,68 @@ internal sealed unsafe class VkContext : IDisposable
 
         var api = Vk.GetApi();
 
+        // Dev-only, off by default: VK_LAYER_KHRONOS_validation is availability-checked, never a
+        // hard requirement, so a machine without the Vulkan SDK installed just logs a warning and
+        // runs unvalidated instead of failing to start. Sync validation is gated separately
+        // (VELES_VK_SYNC_VALIDATION) since it's expensive enough to make a populated SceneViewer
+        // unusable -- validate against PrimViewer/AvatarViewer's smaller submissions instead.
+        var wantValidation = Environment.GetEnvironmentVariable("VELES_VK_VALIDATION") == "1";
+        var wantSyncValidation = wantValidation && Environment.GetEnvironmentVariable("VELES_VK_SYNC_VALIDATION") == "1";
+        var enabledLayers = new List<string>();
+        var validationEnabled = false;
+        if (wantValidation)
+        {
+            if (IsInstanceLayerAvailable(api, "VK_LAYER_KHRONOS_validation"))
+            {
+                enabledLayers.Add("VK_LAYER_KHRONOS_validation");
+                validationEnabled = true;
+                if (IsInstanceExtensionAvailable(api, ExtDebugUtils.ExtensionName))
+                {
+                    enabledExtensions.Add(ExtDebugUtils.ExtensionName);
+                }
+                else
+                {
+                    LibreMetaverse.Logger.Log(
+                        "[VkContext] VELES_VK_VALIDATION=1 but VK_EXT_debug_utils is unavailable -- "
+                        + "validation layer will run with no message sink wired up", LogLevel.Warning);
+                }
+            }
+            else
+            {
+                LibreMetaverse.Logger.Log(
+                    "[VkContext] VELES_VK_VALIDATION=1 but VK_LAYER_KHRONOS_validation is not "
+                    + "available (Vulkan SDK not installed?) -- continuing without validation", LogLevel.Warning);
+            }
+        }
+
         Device device = default;
         DescriptorPool descriptorPool = default;
         VkCommandBufferPool? pool = null;
+        ExtDebugUtils? debugUtils = null;
+        DebugUtilsMessengerEXT debugMessenger = default;
+        DebugUtilsMessengerCallbackFunctionEXT? debugCallback = null;
         var success = false;
         try
         {
             using var pRequiredExtensions = new VkByteStringList(enabledExtensions);
-            using var pEnabledLayers = new VkByteStringList(Array.Empty<string>());
+            using var pEnabledLayers = new VkByteStringList(enabledLayers);
+
+            // Only wired up when sync validation is explicitly requested on top of core
+            // validation -- VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT catches
+            // exactly the host-visible memcpy/descriptor-rewrite-while-pending races steps 4-6 of
+            // the frame-in-flight plan are working through.
+            var syncFeature = ValidationFeatureEnableEXT.SynchronizationValidationExt;
+            var validationFeatures = new ValidationFeaturesEXT
+            {
+                SType = StructureType.ValidationFeaturesExt,
+                EnabledValidationFeatureCount = 1,
+                PEnabledValidationFeatures = &syncFeature
+            };
 
             var instanceCreateInfo = new InstanceCreateInfo
             {
                 SType = StructureType.InstanceCreateInfo,
+                PNext = (validationEnabled && wantSyncValidation) ? &validationFeatures : null,
                 PApplicationInfo = &applicationInfo,
                 PpEnabledExtensionNames = pRequiredExtensions,
                 EnabledExtensionCount = pRequiredExtensions.UCount,
@@ -130,6 +209,32 @@ internal sealed unsafe class VkContext : IDisposable
             };
 
             api.CreateInstance(in instanceCreateInfo, null, out var vkInstance).ThrowOnError();
+
+            if (validationEnabled && api.TryGetInstanceExtension<ExtDebugUtils>(vkInstance, out var extDebugUtils))
+            {
+                debugCallback = DebugCallback;
+                var messengerInfo = new DebugUtilsMessengerCreateInfoEXT
+                {
+                    SType = StructureType.DebugUtilsMessengerCreateInfoExt,
+                    MessageSeverity = DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt
+                                    | DebugUtilsMessageSeverityFlagsEXT.WarningBitExt
+                                    | DebugUtilsMessageSeverityFlagsEXT.InfoBitExt,
+                    MessageType = DebugUtilsMessageTypeFlagsEXT.GeneralBitExt
+                                | DebugUtilsMessageTypeFlagsEXT.ValidationBitExt
+                                | DebugUtilsMessageTypeFlagsEXT.PerformanceBitExt,
+                    PfnUserCallback = new PfnDebugUtilsMessengerCallbackEXT(debugCallback)
+                };
+                if (extDebugUtils.CreateDebugUtilsMessenger(vkInstance, in messengerInfo, null, out debugMessenger) == Result.Success)
+                {
+                    debugUtils = extDebugUtils;
+                    LibreMetaverse.Logger.Log(
+                        $"[VkContext] Vulkan validation layer active (sync validation: {wantSyncValidation})", LogLevel.Information);
+                }
+                else
+                {
+                    LibreMetaverse.Logger.Log("[VkContext] Failed to create debug-utils messenger", LogLevel.Warning);
+                }
+            }
 
             var requireDeviceExtensions = new List<string>();
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
@@ -316,6 +421,9 @@ internal sealed unsafe class VkContext : IDisposable
                         SupportsBc3 = supportsBc3,
                         D3DDevice = d3dDevice
                     };
+                    vkContext._debugUtils = debugUtils;
+                    vkContext._debugMessenger = debugMessenger;
+                    vkContext._debugCallback = debugCallback;
                     // Capacity matches DescriptorPool's own MaxSets above -- a material
                     // descriptor set can never exceed that ceiling regardless of this pool's
                     // size (other descriptor-set kinds share the same MaxSets budget too), so
@@ -347,8 +455,50 @@ internal sealed unsafe class VkContext : IDisposable
         }
     }
 
+    private static bool IsInstanceLayerAvailable(Vk api, string layerName)
+    {
+        uint count = 0;
+        if (api.EnumerateInstanceLayerProperties(ref count, null) != Result.Success || count == 0) return false;
+        var layers = stackalloc LayerProperties[(int)count];
+        if (api.EnumerateInstanceLayerProperties(ref count, layers) != Result.Success) return false;
+        for (uint i = 0; i < count; i++)
+        {
+            if (Marshal.PtrToStringAnsi(new IntPtr(layers[i].LayerName)) == layerName) return true;
+        }
+        return false;
+    }
+
+    private static bool IsInstanceExtensionAvailable(Vk api, string extensionName)
+    {
+        uint count = 0;
+        if (api.EnumerateInstanceExtensionProperties((byte*)null, ref count, null) != Result.Success || count == 0) return false;
+        var extensions = stackalloc ExtensionProperties[(int)count];
+        if (api.EnumerateInstanceExtensionProperties((byte*)null, ref count, extensions) != Result.Success) return false;
+        for (uint i = 0; i < count; i++)
+        {
+            if (Marshal.PtrToStringAnsi(new IntPtr(extensions[i].ExtensionName)) == extensionName) return true;
+        }
+        return false;
+    }
+
+    private static uint DebugCallback(DebugUtilsMessageSeverityFlagsEXT severity, DebugUtilsMessageTypeFlagsEXT types,
+        DebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData)
+    {
+        var message = Marshal.PtrToStringAnsi(new IntPtr(pCallbackData->PMessage)) ?? "(no message)";
+        var level = severity switch
+        {
+            DebugUtilsMessageSeverityFlagsEXT.ErrorBitExt => LogLevel.Error,
+            DebugUtilsMessageSeverityFlagsEXT.WarningBitExt => LogLevel.Warning,
+            _ => LogLevel.Debug
+        };
+        LibreMetaverse.Logger.Log($"[VkValidation] {message}", level);
+        return 0u;
+    }
+
     public void Dispose()
     {
+        if (_debugUtils != null && _debugMessenger.Handle != default)
+            _debugUtils.DestroyDebugUtilsMessenger(Instance, _debugMessenger, null);
         D3DDevice.Dispose();
         Pool.Dispose();
         MaterialUboPool.Dispose();

@@ -22,18 +22,21 @@
 // pinned Avalonia version in experiments/VulkanEmbeddingSpike before porting here.
 
 using System;
-using System.Collections.Generic;
 using Silk.NET.Vulkan;
 
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
 /// A one-time-submit command buffer pool: <see cref="CreateCommandBuffer"/> allocates a
-/// buffer with its own fence, the caller records + submits it, and <see cref="FreeUsedCommandBuffers"/>
-/// (called once per frame from the render core, mirroring <c>DispatchPending</c>'s per-frame
-/// drain pattern elsewhere in this codebase) waits on each fence and frees the buffer.
-/// Not a frame-in-flight ring buffer -- see plan Section 5 for why 2-frames-in-flight was
-/// deferred until profiling shows this simpler model is actually a bottleneck.
+/// buffer with its own fence, the caller records + submits it. Waiting on and freeing a
+/// submitted buffer is the CALLER's responsibility (via a <see cref="VkFrameReapRing"/>) --
+/// this pool only owns allocation/deallocation and serializing submits against the shared
+/// <see cref="Queue"/>, plan Step 2 having moved the previous shared, process-wide
+/// pending-buffer list out to one per panel (see <see cref="VkFrameReapRing"/>'s own doc
+/// comment for why: no single process-wide "frame N" exists across independently-cadenced
+/// panels). Not yet a frame-in-flight ring buffer in the reap sense either -- see plan Section 5
+/// for why 2-frames-in-flight was deferred until profiling showed this simpler model was
+/// actually a bottleneck (it was; see the plan's Step sequence).
 /// </summary>
 internal class VkCommandBufferPool : IDisposable
 {
@@ -42,13 +45,15 @@ internal class VkCommandBufferPool : IDisposable
     private readonly Queue _queue;
     private readonly CommandPool _commandPool;
 
-    private readonly List<VkCommandBuffer> _usedCommandBuffers = new();
+    // Guards command-buffer allocation/deallocation (AllocateCommandBuffer, VkCommandBuffer.
+    // Dispose's FreeCommandBuffers call) -- native command-pool thread safety, legitimately
+    // shared across panels since _commandPool itself is one shared native object. Distinct from
+    // _queueLock below (submission), and no longer doubles as a reap-timing lock now that
+    // pending-buffer bookkeeping lives per-panel in VkFrameReapRing instead of here.
     private readonly object _lock = new();
 
     // Guards ONLY ResetFences+QueueSubmit (VkCommandBuffer.Submit, below) -- separate from
-    // _lock, which is also held across FreeUsedCommandBuffers' blocking (up to 5s) WaitForFences.
-    // Reusing _lock here would let a submit from one thread block behind an unrelated fence wait
-    // on another. Needed because Vulkan requires external synchronization on vkQueueSubmit calls
+    // _lock. Needed because Vulkan requires external synchronization on vkQueueSubmit calls
     // against the same VkQueue, and today nothing prevents two threads (e.g. InitializeAsync's
     // post-await continuation and another panel's RenderFrame) from calling Submit() concurrently.
     private readonly object _queueLock = new();
@@ -73,7 +78,6 @@ internal class VkCommandBufferPool : IDisposable
     {
         lock (_lock)
         {
-            FreeUsedCommandBuffers();
             _api.DestroyCommandPool(_device, _commandPool, null);
         }
     }
@@ -96,22 +100,6 @@ internal class VkCommandBufferPool : IDisposable
     }
 
     public VkCommandBuffer CreateCommandBuffer(string? debugTag = null) => new(_api, _device, _queue, this, debugTag);
-
-    /// <summary>Waits on and frees every command buffer submitted since the last call. Call once
-    /// per frame (or per out-of-band upload) -- never mid-recording.</summary>
-    public void FreeUsedCommandBuffers()
-    {
-        lock (_lock)
-        {
-            foreach (var usedCommandBuffer in _usedCommandBuffers) usedCommandBuffer.Dispose();
-            _usedCommandBuffers.Clear();
-        }
-    }
-
-    private void MarkUsed(VkCommandBuffer commandBuffer)
-    {
-        lock (_lock) { _usedCommandBuffers.Add(commandBuffer); }
-    }
 
     public class VkCommandBuffer : IDisposable
     {
@@ -151,6 +139,37 @@ internal class VkCommandBufferPool : IDisposable
 
         public unsafe void Dispose()
         {
+            if (!WaitForFenceCore()) return;
+            lock (_pool._lock)
+            {
+                var handle = InternalHandle;
+                _api.FreeCommandBuffers(_device, _pool._commandPool, 1, in handle);
+            }
+            _api.DestroyFence(_device, _fence, null);
+        }
+
+        /// <summary>Waits on this buffer's fence WITHOUT freeing the command buffer or destroying
+        /// the fence -- for a caller that needs "is the GPU definitely done with whatever this
+        /// buffer did" without taking over its lifetime (its owning <see cref="VkFrameReapRing"/>
+        /// still disposes it on its own schedule; a subsequent <see cref="Dispose"/> call
+        /// re-waits on an already-signaled fence, which returns immediately, so this is safe to
+        /// call ahead of that with no double-free). Plan Step 6: the deformer-ordering fix uses
+        /// this to wait for the immediately-preceding frame's MainPass specifically, a stricter
+        /// guarantee than <see cref="VkFrameReapRing"/>'s own N-frames-ago per-slot reap.</summary>
+        public void WaitOnly() => WaitForFenceCore();
+
+        // Cached so a WaitOnly() call followed by the later Dispose() (both hitting the same
+        // fence) waits at most once -- without this, a timed-out WaitOnly() would already have
+        // destroyed _fence, and Dispose()'s own WaitForFences call would then run against a
+        // dangling handle.
+        private bool _fenceWaited;
+        private bool _fenceWaitOk;
+
+        private unsafe bool WaitForFenceCore()
+        {
+            if (_fenceWaited) return _fenceWaitOk;
+            _fenceWaited = true;
+
             var result = _api.WaitForFences(_device, 1, in _fence, true, WaitTimeoutNs);
             if (result != Result.Success)
             {
@@ -163,14 +182,11 @@ internal class VkCommandBufferPool : IDisposable
                 // the driver may still consider it in flight. Leaking it here is strictly better
                 // than freezing the whole app; the pool will simply allocate a fresh one next time.
                 _api.DestroyFence(_device, _fence, null);
-                return;
+                _fenceWaitOk = false;
+                return false;
             }
-            lock (_pool._lock)
-            {
-                var handle = InternalHandle;
-                _api.FreeCommandBuffers(_device, _pool._commandPool, 1, in handle);
-            }
-            _api.DestroyFence(_device, _fence, null);
+            _fenceWaitOk = true;
+            return true;
         }
 
         public void BeginRecording()
@@ -203,6 +219,11 @@ internal class VkCommandBufferPool : IDisposable
             public DeviceMemory DeviceMemory { get; set; }
         }
 
+        /// <summary>Submits this buffer. Unlike <see cref="SubmitAndWait"/>, does NOT wait on or
+        /// free it -- the caller must register it with its own <see cref="VkFrameReapRing"/>
+        /// (<c>ring.MarkUsed(this)</c>) right after calling this, or it will never be waited on
+        /// or freed. Plan Step 2 moved this bookkeeping out of the pool (which had no way to know
+        /// which panel's frame a buffer belonged to) to the caller, which does.</summary>
         public void Submit(
             ReadOnlySpan<Semaphore> waitSemaphores,
             ReadOnlySpan<PipelineStageFlags> waitDstStageMask = default,
@@ -212,17 +233,13 @@ internal class VkCommandBufferPool : IDisposable
             IntPtr pNext = default)
         {
             SubmitCore(waitSemaphores, waitDstStageMask, signalSemaphores, fence, keyedMutex, pNext);
-            _pool.MarkUsed(this);
         }
 
         /// <summary>Submits and immediately waits on (and frees) only THIS buffer's own fence,
-        /// without adding it to the pool's shared used-buffer list. Unlike <see cref="Submit()"/>
-        /// followed by the pool's <see cref="VkCommandBufferPool.FreeUsedCommandBuffers"/>, which
-        /// waits on and frees EVERY other buffer currently outstanding in the shared pool too
-        /// (including other panels' or other in-flight uploads' work) -- see that method's own
-        /// doc comment. Use this for one-off uploads/dispatches that only need their own
-        /// completion. Never call FreeUsedCommandBuffers for a buffer submitted this way; it was
-        /// never tracked there.</summary>
+        /// without registering it with any <see cref="VkFrameReapRing"/>. Unlike
+        /// <see cref="Submit()"/>, which requires the caller to separately mark it used on a
+        /// ring, use this for one-off uploads/dispatches that only need their own completion --
+        /// no ring involved at all.</summary>
         public void SubmitAndWait(
             ReadOnlySpan<Semaphore> waitSemaphores = default,
             ReadOnlySpan<PipelineStageFlags> waitDstStageMask = default,
@@ -247,7 +264,17 @@ internal class VkCommandBufferPool : IDisposable
 
             ulong acquireKey = keyedMutex?.AcquireKey ?? 0, releaseKey = keyedMutex?.ReleaseKey ?? 0;
             DeviceMemory devMem = keyedMutex?.DeviceMemory ?? default;
-            uint timeout = uint.MaxValue;
+            // Win32 keyed-mutex acquire timeout, in milliseconds (matches IDXGIKeyedMutex::
+            // AcquireSync's dwMilliseconds semantics, per VK_KHR_win32_keyed_mutex). Was
+            // uint.MaxValue (~49.7 days) -- an effectively unbounded, driver-level wait with no
+            // C#-side bound and no log line on expiry, unlike every other wait in this file
+            // (WaitForFenceCore's 5s WaitTimeoutNs). Two SceneViewer hangs under real
+            // frame-in-flight overlap (plan Step 6) went completely silent because whatever
+            // blocked wasn't wrapped in anything observable -- this is that observability, not a
+            // fix for whatever's actually contending for the mutex. 5s matches WaitTimeoutNs's
+            // own bound for consistency, not because 5s is independently meaningful here.
+            const uint KeyedMutexAcquireTimeoutMs = 5000;
+            uint timeout = keyedMutex != null ? KeyedMutexAcquireTimeoutMs : uint.MaxValue;
             Win32KeyedMutexAcquireReleaseInfoKHR mutex = default;
             if (keyedMutex != null)
                 mutex = new Win32KeyedMutexAcquireReleaseInfoKHR
@@ -281,10 +308,26 @@ internal class VkCommandBufferPool : IDisposable
                 };
 
                 var fenceValue = fence.Value;
+                Result submitResult;
                 lock (_pool._queueLock)
                 {
                     _api.ResetFences(_device, 1, in fenceValue);
-                    _api.QueueSubmit(_queue, 1, in submitInfo, fenceValue);
+                    submitResult = _api.QueueSubmit(_queue, 1, in submitInfo, fenceValue);
+                }
+                // Previously discarded entirely -- a keyed-mutex acquire timing out (VK_TIMEOUT)
+                // or any other QueueSubmit failure was silently swallowed, with nothing submitted
+                // and this buffer's fence left unsignaled forever (it was ResetFences'd above,
+                // never set since nothing actually ran). A later wait on that fence still
+                // recovers via WaitForFenceCore's own 5s bound, but this line is what actually
+                // names the failure instead of leaving it looking like a plain fence-wait
+                // timeout with no explanation.
+                if (submitResult != Result.Success)
+                {
+                    LibreMetaverse.Logger.Error(
+                        $"[VkCommandBufferPool] QueueSubmit returned {submitResult} on command buffer "
+                        + $"tagged \"{_debugTag}\"" + (keyedMutex != null
+                            ? $" -- keyed-mutex acquire (timeout={timeout}ms) likely expired waiting on the D3D11 compositor interop handshake"
+                            : "") + ". Nothing was submitted; this buffer's fence will never signal.");
                 }
             }
         }

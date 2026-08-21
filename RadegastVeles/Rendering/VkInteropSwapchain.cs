@@ -49,20 +49,23 @@ namespace Radegast.Veles.Rendering;
 internal sealed class VkInteropSwapchain : SwapchainBase<VkInteropSwapchainImage>
 {
     private readonly VkContext _vk;
+    private readonly VkFrameReapRing _reapRing;
 
-    public VkInteropSwapchain(VkContext vk, ICompositionGpuInterop interop, CompositionDrawingSurface target)
+    public VkInteropSwapchain(VkContext vk, ICompositionGpuInterop interop, CompositionDrawingSurface target,
+        VkFrameReapRing reapRing)
         : base(interop, target)
     {
         _vk = vk;
+        _reapRing = reapRing;
     }
 
-    protected override VkInteropSwapchainImage CreateImage(PixelSize size) => new(_vk, size, Interop, Target);
+    protected override VkInteropSwapchainImage CreateImage(PixelSize size) => new(_vk, size, Interop, Target, _reapRing);
 
-    // Diagnostic-only (2026-08-18, bisecting a "PreCull" CPU-ms spike): FreeUsedCommandBuffers()
-    // here is where the PREVIOUS frame's VkInteropSwapchainImage.Present() submit -- never
-    // waited on within the frame it belongs to, by design (see that method's own doc comment) --
-    // actually gets reaped. If the compositor/present pipeline is backed up, that deferred wait
-    // lands here, on the NEXT frame, not in RenderFrame's own explicit main-pass SubmitWait.
+    // Diagnostic-only (2026-08-18, bisecting a "PreCull" CPU-ms spike): the reap here is where
+    // the PREVIOUS frame's VkInteropSwapchainImage.Present() submit -- never waited on within
+    // the frame it belongs to, by design (see that method's own doc comment) -- actually gets
+    // reaped. If the compositor/present pipeline is backed up, that deferred wait lands here, on
+    // the NEXT frame, not in RenderFrame's own explicit main-pass SubmitWait.
     public double LastFreeUsedCommandBuffersMs { get; private set; }
     public double LastBeginDrawCoreMs { get; private set; }
     private readonly System.Diagnostics.Stopwatch _diagStopwatch = new();
@@ -73,13 +76,29 @@ internal sealed class VkInteropSwapchain : SwapchainBase<VkInteropSwapchainImage
     /// pass to <see cref="VkRenderPass"/>/framebuffer creation for this frame.</summary>
     public IDisposable BeginDraw(PixelSize size, out VkInteropImage image)
     {
-        _diagStopwatch.Restart();
-        _vk.Pool.FreeUsedCommandBuffers();
-        LastFreeUsedCommandBuffersMs = _diagStopwatch.Elapsed.TotalMilliseconds;
-
+        // Plan Step 6 hang fix (2026-08-20): BeginDrawCore now runs FIRST, FreeUsed() second --
+        // reversed from the pre-Step-6 order. BeginDrawCore -> img.BeginDraw() is what issues
+        // THIS frame's own keyed-mutex acquire submit and is what advances the
+        // Veles-render/compositor-consume handshake. At FramesInFlight=1 the old order (FreeUsed
+        // first) never mattered because the slot FreeUsed reaped always held exactly last
+        // frame's already-fully-cycled buffers. Under real frame-in-flight overlap (N>1) that
+        // slot would instead hold buffers from an earlier frame, including that frame's own
+        // present-path submission -- reaping (waiting on) it BEFORE this frame's own
+        // BeginDrawCore call risks blocking the one call that would let the handshake advance,
+        // on the same thread, with nothing else able to make progress. A live SceneViewer
+        // session under heavy load at N=2 hung exactly this way once (render thread stopped
+        // inside a scene-object upload immediately after a fresh RenderFrame started). Running
+        // BeginDrawCore first removes this specific ordering hazard regardless of the exact
+        // fence dependency chain. Kept even though Step 6's flip to N=2 was ultimately abandoned
+        // (see VkContext.FramesInFlight's own comment for the full six-hang history) -- it's a
+        // real improvement and a no-op risk at N=1, just not a complete fix on its own.
         _diagStopwatch.Restart();
         var rv = BeginDrawCore(size, out var swapchainImage);
         LastBeginDrawCoreMs = _diagStopwatch.Elapsed.TotalMilliseconds;
+
+        _diagStopwatch.Restart();
+        _reapRing.FreeUsed();
+        LastFreeUsedCommandBuffersMs = _diagStopwatch.Elapsed.TotalMilliseconds;
 
         image = swapchainImage.Image;
         return rv;
@@ -93,6 +112,7 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
     private readonly CompositionDrawingSurface _target;
     private readonly VkInteropImage _image;
     private readonly VkSemaphorePair? _semaphorePair;
+    private readonly VkFrameReapRing _reapRing;
     private ICompositionImportedGpuSemaphore? _availableSemaphore, _renderCompletedSemaphore;
     private ICompositionImportedGpuImage? _importedImage;
     private Task? _lastPresent;
@@ -102,11 +122,13 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
     public PixelSize Size { get; }
     public Task? LastPresent => _lastPresent;
 
-    public VkInteropSwapchainImage(VkContext vk, PixelSize size, ICompositionGpuInterop interop, CompositionDrawingSurface target)
+    public VkInteropSwapchainImage(VkContext vk, PixelSize size, ICompositionGpuInterop interop,
+        CompositionDrawingSurface target, VkFrameReapRing reapRing)
     {
         _vk = vk;
         _interop = interop;
         _target = target;
+        _reapRing = reapRing;
         Size = size;
         _image = new VkInteropImage(vk, Format.R8G8B8A8Unorm, size, true, interop.SupportedImageHandleTypes);
         if (!_image.IsDirectXBacked)
@@ -134,6 +156,7 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
         }
         else
             buffer.Submit(new[] { _semaphorePair!.ImageAvailableSemaphore }, new[] { PipelineStageFlags.AllGraphicsBit });
+        _reapRing.MarkUsed(buffer);
     }
 
     public void Present()
@@ -156,6 +179,7 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
         }
         else
             buffer.Submit(null, null, new[] { _semaphorePair!.RenderFinishedSemaphore });
+        _reapRing.MarkUsed(buffer);
 
         if (!_image.IsDirectXBacked)
         {

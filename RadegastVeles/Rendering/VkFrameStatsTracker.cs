@@ -30,24 +30,28 @@ namespace Radegast.Veles.Rendering;
 /// (<c>Silk.NET.OpenGL</c> query objects) and can't be reused as-is, so this is a genuinely new
 /// class, not a port of that file's own body.
 /// <para>
-/// Structurally simpler than GL's own 4-deep non-blocking query ring: GL's ring exists
-/// specifically so the CPU never stalls waiting on a GPU query result while the driver may be
-/// several frames ahead. <c>VkViewportControl</c> has no such pipelining today --
-/// <c>VkCommandBufferPool.FreeUsedCommandBuffers</c>, called synchronously at the end of every
-/// <see cref="RenderFrame"/>-equivalent call, does a blocking <c>WaitForFences</c>. Since the CPU
-/// is already blocked until the GPU finishes the frame by the time <see cref="EndFrame"/> runs,
-/// reading the timestamp query pool synchronously right there adds no additional stall beyond
-/// what already happens -- no ring buffer needed.
+/// Query pool is sized <c>2 * VkContext.FramesInFlight</c> (plan Step 3): each frame writes into
+/// its own <c>frameIndex % FramesInFlight</c> slot instead of always slot 0. At the pre-Step-2
+/// <c>FramesInFlight=1</c> this is still exactly one slot, reused every frame, with the same
+/// "no stall, CPU already blocked on this frame's own fence by the time EndFrame runs" property
+/// the original single-pool design relied on. Step 6 flipping <c>FramesInFlight</c> to 2 is what
+/// this sizing exists to make safe: once real frame overlap lands, frame N+1's command buffer
+/// could otherwise reset/write the SAME query pool frame N's still-unread results live in,
+/// before <see cref="EndFrame"/> for frame N has a chance to read them.
 /// </para>
 /// <para>
-/// Integration is a 4-call-site shape, not GL's 2-call (<c>BeginFrame</c>/<c>EndFrame</c>)
+/// Integration is a 5-call-site shape, not GL's 2-call (<c>BeginFrame</c>/<c>EndFrame</c>)
 /// shape, because Vulkan timestamp writes must be recorded INTO a command buffer
 /// (<c>vkCmdWriteTimestamp</c>), not issued standalone the way GL's context-bound
 /// <c>glBeginQuery</c>/<c>glEndQuery</c> are: <see cref="BeginFrame"/> (CPU stopwatch + counter
 /// reset, before command-buffer recording starts), <see cref="WriteStartTimestamp"/> (first
 /// thing recorded into the frame's command buffer), <see cref="WriteEndTimestamp"/> (last thing
-/// recorded, before <c>cmd.Submit()</c>), <see cref="EndFrame"/> (after the fence wait
-/// completes, reads the query pool and publishes <see cref="FrameStats"/>).
+/// recorded, before <c>cmd.Submit()</c>), <see cref="EndCpuWork"/> (right after
+/// <c>cmd.Submit()</c>, no wait -- snapshots this frame's CPU time/counters into its own slot),
+/// <see cref="EndFrame"/> (once this slot's PRIOR occupant is confirmed fence-signaled -- at
+/// <c>FramesInFlight=1</c> that's still "this frame, right after its own fence wait"; at N&gt;1
+/// it's a later frame's call, reading an older frame's snapshotted data -- see
+/// <see cref="EndFrame"/>'s own doc comment).
 /// </para>
 /// </summary>
 public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
@@ -57,6 +61,7 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
     private bool _initialized;
     private bool _disposed;
     private float _timestampPeriodNs;
+    private long _frameIndex = -1;
 
     private readonly Stopwatch _cpu = new();
     private int _drawCalls;
@@ -64,15 +69,41 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
     private int _facesSubmitted;
     private int _facesCulled;
 
+    // Plan Step 6: CPU-side counters snapshotted per-slot by EndCpuWork (called right after
+    // Submit, with no fence wait) so EndFrame -- now called at the point a slot's GPU work is
+    // actually confirmed done, which under real overlap is a LATER frame than the one that
+    // produced these numbers -- has something to pair the GPU timestamps with. Without this,
+    // EndFrame would read the live _cpu/_drawCalls fields, which by then belong to whatever
+    // frame is currently recording, not the frame whose slot just got reaped.
+    private readonly double[] _cpuMsBuf = new double[VkContext.FramesInFlight];
+    private readonly int[] _drawCallsBuf = new int[VkContext.FramesInFlight];
+    private readonly int[] _trianglesBuf = new int[VkContext.FramesInFlight];
+    private readonly int[] _facesSubmittedBuf = new int[VkContext.FramesInFlight];
+    private readonly int[] _facesCulledBuf = new int[VkContext.FramesInFlight];
+
+    // Frame-interval variance (plan Step 3): wall-clock gap between consecutive BeginFrame
+    // calls, over a rolling window -- the metric that actually answers "is it choppy" (CPU/GPU
+    // ms alone can drop once Step 6's pipelining lands whether or not real frame pacing
+    // improves). Fixed-size circular buffer, no per-frame allocation: _intervalWindow holds the
+    // raw samples in call order, _intervalScratch is a reusable buffer EndFrame sorts into to
+    // compute max/p99 without disturbing the circular buffer's write position.
+    private const int IntervalWindowSize = 120; // ~2s at 60fps
+    private readonly double[] _intervalWindow = new double[IntervalWindowSize];
+    private readonly double[] _intervalScratch = new double[IntervalWindowSize];
+    private int _intervalCount;
+    private int _intervalWriteIndex;
+    private readonly Stopwatch _frameIntervalTimer = new();
+
     /// <summary>The most recent published <see cref="FrameStats"/> value.</summary>
     public FrameStats Last { get; private set; }
 
     /// <summary>Fired (on the render thread) once per frame after <see cref="EndFrame"/>.</summary>
     public event Action<FrameStats>? FrameCompleted;
 
-    /// <summary>Allocates the 2-slot timestamp query pool (frame-start, frame-end) and checks
-    /// this device/queue family actually supports timestamp queries. Must be called once after
-    /// device creation, before the first <see cref="BeginFrame"/>.</summary>
+    /// <summary>Allocates the <c>2 * VkContext.FramesInFlight</c>-slot timestamp query pool
+    /// (frame-start, frame-end per slot) and checks this device/queue family actually supports
+    /// timestamp queries. Must be called once after device creation, before the first
+    /// <see cref="BeginFrame"/>.</summary>
     internal void Initialize(VkContext vk)
     {
         if (_initialized || _disposed) return;
@@ -101,7 +132,7 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
             {
                 SType = StructureType.QueryPoolCreateInfo,
                 QueryType = QueryType.Timestamp,
-                QueryCount = 2
+                QueryCount = (uint)(2 * VkContext.FramesInFlight)
             };
             vk.Api.CreateQueryPool(vk.Device, in poolInfo, null, out _pool).ThrowOnError();
             _supported = true;
@@ -112,11 +143,20 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
         }
     }
 
-    /// <summary>Start CPU timing and reset per-frame counters. Call before command-buffer
-    /// recording begins.</summary>
+    /// <summary>Start CPU timing, advance to this frame's query-pool slot, reset per-frame
+    /// counters, and sample the frame-interval timer. Call before command-buffer recording
+    /// begins.</summary>
     public void BeginFrame()
     {
         if (_disposed) return;
+        _frameIndex++;
+        if (_frameIntervalTimer.IsRunning)
+        {
+            _intervalWindow[_intervalWriteIndex] = _frameIntervalTimer.Elapsed.TotalMilliseconds;
+            _intervalWriteIndex = (_intervalWriteIndex + 1) % IntervalWindowSize;
+            if (_intervalCount < IntervalWindowSize) _intervalCount++;
+        }
+        _frameIntervalTimer.Restart();
         _drawCalls = 0;
         _triangles = 0;
         _facesSubmitted = 0;
@@ -124,40 +164,70 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
         _cpu.Restart();
     }
 
-    /// <summary>Records a query-pool reset + the frame-start timestamp write. Must be the first
-    /// thing recorded into the frame's command buffer (a query pool must be reset before reuse;
-    /// resetting via the command buffer, not <c>vkResetQueryPool</c>, avoids requiring Vulkan
-    /// 1.2 host query reset).</summary>
+    private uint CurrentSlot => (uint)(_frameIndex % VkContext.FramesInFlight);
+
+    /// <summary>Records a query-pool reset + the frame-start timestamp write into this frame's
+    /// own slot. Must be the first thing recorded into the frame's command buffer (a query pool
+    /// must be reset before reuse; resetting via the command buffer, not
+    /// <c>vkResetQueryPool</c>, avoids requiring Vulkan 1.2 host query reset).</summary>
     internal void WriteStartTimestamp(VkContext vk, CommandBuffer cmd)
     {
         if (_disposed || !_supported) return;
-        vk.Api.CmdResetQueryPool(cmd, _pool, 0, 2);
-        vk.Api.CmdWriteTimestamp(cmd, PipelineStageFlags.TopOfPipeBit, _pool, 0);
+        var slot = CurrentSlot;
+        vk.Api.CmdResetQueryPool(cmd, _pool, slot * 2, 2);
+        vk.Api.CmdWriteTimestamp(cmd, PipelineStageFlags.TopOfPipeBit, _pool, slot * 2);
     }
 
-    /// <summary>Records the frame-end timestamp write. Must be the last thing recorded into the
-    /// frame's command buffer, before <c>cmd.Submit()</c>.</summary>
+    /// <summary>Records the frame-end timestamp write into this frame's own slot. Must be the
+    /// last thing recorded into the frame's command buffer, before <c>cmd.Submit()</c>.</summary>
     internal void WriteEndTimestamp(VkContext vk, CommandBuffer cmd)
     {
         if (_disposed || !_supported) return;
-        vk.Api.CmdWriteTimestamp(cmd, PipelineStageFlags.BottomOfPipeBit, _pool, 1);
+        vk.Api.CmdWriteTimestamp(cmd, PipelineStageFlags.BottomOfPipeBit, _pool, CurrentSlot * 2 + 1);
     }
 
-    /// <summary>Stops CPU timing, reads the timestamp query pool (safe to do synchronously --
-    /// see this class's own doc comment for why no stall is introduced beyond what already
-    /// happens), and publishes a <see cref="FrameStats"/> value. Call after the frame's command
-    /// buffer has been submitted AND fence-waited (i.e. after
-    /// <c>VkCommandBufferPool.FreeUsedCommandBuffers</c> returns).</summary>
-    internal void EndFrame(VkContext vk)
+    /// <summary>Stops CPU timing and snapshots this frame's draw-call/triangle/face counters into
+    /// its own slot. Call once, right after the frame's command buffer is submitted (no fence
+    /// wait here -- under real overlap the GPU may still be working on it). This is what
+    /// <see cref="EndFrame"/> later reads back once that slot's GPU work is confirmed done, which
+    /// at <c>FramesInFlight&gt;1</c> is a LATER frame than the one that recorded these numbers --
+    /// see this class's own doc comment.</summary>
+    internal void EndCpuWork()
     {
         if (_disposed) return;
         _cpu.Stop();
+        var slot = CurrentSlot;
+        _cpuMsBuf[slot] = _cpu.Elapsed.TotalMilliseconds;
+        _drawCallsBuf[slot] = _drawCalls;
+        _trianglesBuf[slot] = _triangles;
+        _facesSubmittedBuf[slot] = _facesSubmitted;
+        _facesCulledBuf[slot] = _facesCulled;
+    }
+
+    /// <summary>Reads this frame's own query-pool slot (safe to do synchronously -- see this
+    /// class's own doc comment for why no stall is introduced beyond what already happens),
+    /// pairs it with the CPU-side counters <see cref="EndCpuWork"/> snapshotted into the same
+    /// slot, computes frame-interval variance over the rolling window, and publishes a
+    /// <see cref="FrameStats"/> value. Call once <see cref="VkFrameReapRing"/> has confirmed this
+    /// slot's command buffers are fence-signaled (its early reap, at this frame's own top) --
+    /// under real overlap that reaps the slot THIS frame is about to reuse, i.e. the data read
+    /// here belongs to the frame that used this slot <c>FramesInFlight</c> frames ago, not the
+    /// frame currently starting. The published <see cref="FrameStats.CpuTimeMs"/>/draw-call
+    /// numbers are therefore that older frame's, paired with its own GPU timing -- decoupled from
+    /// wall-clock "now" by design, since re-synchronizing them would mean waiting for the very
+    /// thing overlap exists to avoid. Frame-interval variance (measured off wall-clock BeginFrame
+    /// gaps, not this pairing) is the metric that stays meaningful in real time regardless.
+    /// </summary>
+    internal void EndFrame(VkContext vk)
+    {
+        if (_disposed) return;
+        var slot = CurrentSlot;
 
         double gpuMs = 0.0;
         if (_supported)
         {
             var raw = stackalloc ulong[2];
-            var result = vk.Api.GetQueryPoolResults(vk.Device, _pool, 0, 2, (nuint)(sizeof(ulong) * 2),
+            var result = vk.Api.GetQueryPoolResults(vk.Device, _pool, slot * 2, 2, (nuint)(sizeof(ulong) * 2),
                 raw, sizeof(ulong), QueryResultFlags.Result64Bit);
             // Success (not NotReady/other) -- the fence wait already completed by the time this
             // runs, so results should always be available; a non-Success result just means "no
@@ -166,13 +236,25 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
                 gpuMs = (raw[1] - raw[0]) * _timestampPeriodNs / 1_000_000.0;
         }
 
+        double intervalMaxMs = 0, intervalP99Ms = 0;
+        if (_intervalCount > 0)
+        {
+            Array.Copy(_intervalWindow, _intervalScratch, _intervalCount);
+            Array.Sort(_intervalScratch, 0, _intervalCount);
+            intervalMaxMs = _intervalScratch[_intervalCount - 1];
+            int p99Index = (int)Math.Min(_intervalCount - 1, Math.Ceiling(_intervalCount * 0.99) - 1);
+            intervalP99Ms = _intervalScratch[p99Index];
+        }
+
         var stats = new FrameStats(
-            CpuTimeMs: _cpu.Elapsed.TotalMilliseconds,
+            CpuTimeMs: _cpuMsBuf[slot],
             GpuTimeMs: gpuMs,
-            DrawCalls: _drawCalls,
-            Triangles: _triangles,
-            FacesSubmitted: _facesSubmitted,
-            FacesCulled: _facesCulled);
+            DrawCalls: _drawCallsBuf[slot],
+            Triangles: _trianglesBuf[slot],
+            FacesSubmitted: _facesSubmittedBuf[slot],
+            FacesCulled: _facesCulledBuf[slot],
+            IntervalMaxMs: intervalMaxMs,
+            IntervalP99Ms: intervalP99Ms);
         Last = stats;
         FrameCompleted?.Invoke(stats);
     }

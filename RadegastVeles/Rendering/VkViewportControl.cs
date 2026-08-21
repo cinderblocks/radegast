@@ -203,6 +203,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     private RenderPass _renderPass;
     private VkInteropSwapchain? _swapchain;
+    // Plan Step 2: this panel's own pending-command-buffer list, replacing the old
+    // process-wide one VkCommandBufferPool used to own. Shared with _swapchain (and the
+    // VkInteropSwapchainImage instances it creates) so BeginDraw/Present/MainPass submissions
+    // all reap through the same per-panel ring, matching pre-Step-2 timing exactly.
+    private readonly VkFrameReapRing _reapRing = new();
+    // Plan Step 6 (deformer-ordering fix): the reap ring's own per-slot reaping only guarantees
+    // "FramesInFlight frames ago is done" -- too weak for the skin/flexi deformers' single
+    // (not N-buffered) SSBOs, which every frame's MainPass reads and every frame's DispatchPending
+    // overwrites, so the actual requirement is "the IMMEDIATELY PRECEDING frame's MainPass is
+    // done," independent of FramesInFlight. Tracks the most recently submitted MainPass command
+    // buffer so DispatchPending can wait on it specifically (WaitOnly -- the reap ring still owns
+    // disposal). Null on the first frame (nothing to wait for yet). Deliberately NOT a full fix
+    // for real overlap of deformer work itself -- see the wait call site's own comment for the
+    // accepted trade-off.
+    private VkCommandBufferPool.VkCommandBuffer? _previousMainPassCmd;
     private VkPrimPipeline? _prim;
     private VkPlaceholderTextures? _placeholders;
     private VkPrimDescriptorSets? _frameSets;
@@ -396,10 +411,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     // _pendingSubmission is handed off via Interlocked.Exchange and consumed at the top of
     // RenderFrame rather than inline in Submit(), preserving a thread-confinement invariant:
-    // VkMesh's device-local upload path submits a command buffer
-    // through vk.Pool, the same pool RenderFrame uses via vk.Pool.FreeUsedCommandBuffers --
-    // building meshes from Submit's caller thread (the VM thread) instead of the compositor's
-    // render thread would race on the pool's internal bookkeeping.
+    // VkMesh's device-local upload path allocates/frees command buffers through vk.Pool's
+    // shared allocator (VkCommandBufferPool's own _lock, still global across panels by design --
+    // see that class's doc comment) -- building meshes from Submit's caller thread (the VM
+    // thread) instead of the compositor's render thread would race on that allocator state.
     private PrimRenderSubmission? _pendingSubmission;
     // Alpha faces are
     // drawn through VkPrimPipeline.Alpha (depth-write off, blend on) after the opaque batch,
@@ -1483,7 +1498,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // tracker rather than throwing).
             _stats.Initialize(vk);
             _renderPass = VkRenderPass.CreateMainScenePass(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat);
-            _swapchain = new VkInteropSwapchain(vk, interop, _surface);
+            _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
             _pick = VkPickPipeline.Create(vk, _renderPass);
@@ -3586,6 +3601,26 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // Section 8e: this placement covers CPU time
         // for the whole frame, not just command-buffer recording.
         _stats.BeginFrame();
+        // Must run before any MarkUsed/FreeUsed call this frame -- see VkFrameReapRing's own doc
+        // comment for why "this frame's slot" and "the slot due for reaping" are the same index.
+        _reapRing.BeginFrame();
+
+        // Plan Step 6: MUST run before anything below that disposes or rewrites a live GPU
+        // resource (ApplyPendingSubmission's mesh/material/texture/skin-GPU/flexi-GPU disposal,
+        // DrainPendingSceneObjects' scene-object removal path, the texture-patch drains'
+        // descriptor rewrites, the deformer SSBO overwrites) -- every one of those can run on
+        // ANY frame, and every one of them requires the IMMEDIATELY PRECEDING frame's MainPass to
+        // be confirmed done before touching something it might still be reading. The reap ring's
+        // own per-slot reaping (VkFrameReapRing, below) only guarantees "FramesInFlight frames
+        // ago is done" -- too weak the moment real overlap lands, since these resources are
+        // single-buffered (there's no per-slot copy the way VkPrimDescriptorSets' UBO has).
+        // Placed once, here, rather than at each individual call site: simpler than re-deriving
+        // "is this the first mutating operation this frame" at every site, and waiting slightly
+        // earlier than strictly necessary costs nothing extra (the fence is either already
+        // signaled or isn't; checking early doesn't make the GPU slower). See
+        // _previousMainPassCmd's own field comment for why this is a targeted wait instead of
+        // Step 5's general deferred-operation queue.
+        _previousMainPassCmd?.WaitOnly();
 
         var vk = VkApi.Context;
         Framebuffer framebuffer = default;
@@ -3651,14 +3686,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             // Runs AFTER ApplyPendingSubmission so a patch queued for a face that arrived in
             // this very frame's submission is applied immediately rather than deferred one
-            // frame. Safe to rewrite descriptor sets here (not just safe to enqueue): this
-            // control has no frame-in-flight overlap today -- RenderFrame's own
-            // vk.Pool.FreeUsedCommandBuffers() call below blocks (WaitForFences) until the GPU
-            // has finished the frame before this method returns, so by the time the NEXT
-            // RenderFrame call reaches this line, no in-flight command buffer can still be
-            // reading the descriptor set a patch is about to overwrite. This invariant breaks
-            // if a future increment adds real frame-in-flight pipelining (plan Section 5's
-            // "recommend starting with 2 frames in flight" note) -- revisit then.
+            // frame. Safe to rewrite descriptor sets here (not just safe to enqueue): covered by
+            // the _previousMainPassCmd.WaitOnly() call near the top of this method -- see that
+            // call site's own comment for why every mutating operation this frame needs it, not
+            // just this one.
             _drainStopwatch.Restart();
             DrainSubmissionTexturePatches(vk);
             DrainScenePendingTexturePatches(vk); // Section 8e
@@ -3735,9 +3766,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // command buffer is built below, so any GPU-deformed mesh this frame's draw calls
             // read is guaranteed fully written. Matches the call-site
             // placement and ordering (flexi before skin, after the per-face vertex-update drains
-            // above) -- a no-op today since nothing enqueues a job yet on this panel (see
-            // each deformer's own doc comment: their real callers are deferred VM/panel-wiring
-            // scope, verified independently first via the spike harness instead).
+            // above).
+            //
+            // Plan Step 6 (deformer-ordering fix): DispatchPending overwrites the skin/flexi
+            // SSBOs, which the PREVIOUS frame's MainPass may still be reading under real overlap
+            // (those SSBOs are single-buffered, not N-buffered like VkPrimDescriptorSets' UBO) --
+            // a write-after-read hazard the reap ring's own per-slot reaping does NOT cover (it
+            // only guarantees "FramesInFlight frames ago is done," not "the immediately preceding
+            // frame is done"). Already covered by the _previousMainPassCmd.WaitOnly() call near
+            // the top of this method (see that call site's own comment) -- nothing between there
+            // and here submits a new MainPass that would invalidate the wait. Trade-off (per the
+            // plan): deformer dispatch can no longer overlap with the previous frame's own draw --
+            // avatar/flexi-heavy content gets less of the pipelining win than static-geometry-
+            // heavy content. Revisit by N-buffering the deformer SSBOs instead, if that trade-off
+            // turns out to matter in practice.
+
             _deformerStopwatch.Restart();
             _flexiDeformer?.DispatchPending();
             FlexiDispatchMs = _deformerStopwatch.Elapsed.TotalMilliseconds;
@@ -3758,6 +3801,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             BeginDrawMs = _renderStopwatch.Elapsed.TotalMilliseconds;
             SwapchainFreeCmdBuffersMs = _swapchain.LastFreeUsedCommandBuffersMs;
             SwapchainBeginDrawCoreMs = _swapchain.LastBeginDrawCoreMs;
+
+            // Plan Step 6: BeginDraw's own FreeUsed() call (timed above as
+            // SwapchainFreeCmdBuffersMs) is what confirms this frame's slot is fence-signaled --
+            // moved here from the old tail-of-frame call site, since the tail no longer waits on
+            // anything (see the Submit block below). See VkFrameStatsTracker.EndFrame's own doc
+            // comment for what "this frame's slot" means under real overlap (an older frame's
+            // data, not this one's).
+            _stats.EndFrame(vk);
 
             EnsureDepthTarget(vk, pixelSize);
 
@@ -4205,12 +4256,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             _renderStopwatch.Restart();
             cmd.Submit();
+            _reapRing.MarkUsed(cmd);
+            _previousMainPassCmd = cmd;
             SubmitCallMs = _renderStopwatch.Elapsed.TotalMilliseconds;
-            _renderStopwatch.Restart();
-            vk.Pool.FreeUsedCommandBuffers();
-            FenceWaitMs = _renderStopwatch.Elapsed.TotalMilliseconds;
-            MainPassSubmitWaitMs = SubmitCallMs + FenceWaitMs;
-            _stats.EndFrame(vk);
+            // Plan Step 6: no fence wait here anymore -- this frame's slot is reaped at the NEXT
+            // frame's BeginDraw instead (timed as SwapchainFreeCmdBuffersMs there), which is what
+            // actually lets CPU work for the next frame start before this frame's GPU work is
+            // confirmed done. FenceWaitMs stays 0 by construction; it isn't measuring "no wait
+            // happened," it's measuring "this call site doesn't wait anymore."
+            FenceWaitMs = 0;
+            MainPassSubmitWaitMs = SubmitCallMs;
+            _stats.EndCpuWork();
 
             if (_pickRequested && _pick != null)
             {
@@ -5757,6 +5813,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     {
         if (!VkApi.IsInitialized) return;
         var vk = VkApi.Context;
+        // Plan Step 6: MUST run before anything below -- every mesh/material/target this method
+        // disposes could still be referenced by an in-flight command buffer under real overlap
+        // (RenderFrame's own tail no longer waits on its own submissions; only this panel's own
+        // per-slot reaping and the RenderFrame-top wait do). Draining every slot here, before the
+        // first Dispose() call, closes that window regardless of which slot(s) still have pending
+        // work -- unlike the RenderFrame-top wait (which only covers the immediately preceding
+        // frame), teardown only gets one chance to do this, so it must cover ALL slots.
+        _reapRing.FreeAll();
         DestroyDepthTarget(vk);
         DestroyPickTarget(vk);
         foreach (var (mesh, material, _) in _opaqueFaces) { mesh.Dispose(); material.Dispose(); }
