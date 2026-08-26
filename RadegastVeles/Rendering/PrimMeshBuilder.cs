@@ -29,6 +29,7 @@ using LibreMetaverse.Materials;
 using LibreMetaverse;
 using LibreMetaverse.Assets;
 using LibreMetaverse.Rendering;
+using Microsoft.Extensions.Logging;
 using Radegast.Veles.Core;
 using SkiaSharp;
 using Quaternion   = System.Numerics.Quaternion;
@@ -212,11 +213,25 @@ internal sealed class PrimMeshBuilder(GridClient client)
         {
             try
             {
+                // RequestMeshAsync catches everything internally (including cancellation from
+                // this 60s deadline) and returns null rather than throwing, so no separate
+                // timeout/cancellation handling is needed here -- see its own try/catch in
+                // AssetManager.
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
                 var meshAsset = await client.Assets.RequestMeshAsync(id, timeout.Token).ConfigureAwait(false);
-                if (meshAsset == null) return null;
+                if (meshAsset == null)
+                {
+                    // Debug, not Warning: this is the common shape of a large/multi-MB building
+                    // asset timing out or the asset server hiccupping, not evidence of a real
+                    // problem on its own -- BuildObjectAsync's per-prim skip (see its own log
+                    // line) is what actually signals a visibly broken object.
+                    Logger.Log($"PrimMeshBuilder: mesh asset {id} fetch returned null", LogLevel.Debug);
+                    return null;
+                }
 
                 var mesh = _mesher.GenerateFacetedMeshMesh(prim, meshAsset.AssetData);
+                if (mesh == null)
+                    Logger.Log($"PrimMeshBuilder: mesh asset {id} failed to decode (GenerateFacetedMeshMesh returned null)", LogLevel.Debug);
                 if (mesh != null)
                 {
                     // Detach the requesting prim before caching: a cached canonical must
@@ -398,7 +413,19 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
             // ── Sculpt / Mesh / Parametric ────────────────────────────────
             var mesh = await GetPrimMeshAsync(prim, ct, detailLevel).ConfigureAwait(false);
-            if (mesh == null) continue;
+            if (mesh == null)
+            {
+                // Silent before this: a failed mesh fetch/decode (timeout, bad asset, decode
+                // exception swallowed elsewhere) just meant this prim contributed zero faces.
+                // For a single-prim linkset -- the common shape for large mesh buildings/homes,
+                // whose multi-MB assets are the most likely to time out -- that means the WHOLE
+                // object silently renders as nothing, with no error anywhere.
+                Logger.Log(
+                    $"PrimMeshBuilder: mesh unavailable for prim {prim.LocalID} " +
+                    $"(sculpt={prim.Sculpt?.SculptTexture}), skipping -- object will be missing faces",
+                    LogLevel.Warning);
+                continue;
+            }
 
             // ── Build per-prim transform ──────────────────────────────────
             var scale = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);

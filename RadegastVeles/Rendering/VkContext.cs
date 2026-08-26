@@ -350,31 +350,43 @@ internal sealed unsafe class VkContext : IDisposable
                     // content). Sets are freed via vkFreeDescriptorSets on object removal
                     // (FreeDescriptorSetBit below), so this bounds *concurrently live*
                     // descriptor sets across the whole process (one shared VkContext/pool for
-                    // all 4 panels), not a cumulative total. Current sizing targets ~6000
+                    // all 4 panels), not a cumulative total. Sizing targets ~16000
                     // concurrently-live scene faces, budgeted by CombinedImageSampler at 5/face
                     // (the binding count observed to bind first, over UniformBuffer's larger
                     // per-face allowance).
                     //
+                    // Bumped from an original ~6000-face budget after the lightweight
+                    // region-crossing rework (SceneViewerViewModel.HandleLightweightRegionPromotion)
+                    // started keeping several already-built regions' worth of geometry resident at
+                    // once by design, instead of clearing on every crossing -- a corner with 3-4
+                    // simultaneous tracked neighbors can legitimately exceed the old single-region
+                    // budget (observed: VK_ERROR_OUT_OF_POOL_MEMORY at 7923 live faces). This is
+                    // still a stopgap, not a real fix: nothing currently bounds how many resident
+                    // regions accumulate over a long play session (SimDisconnected only fires when
+                    // the server drops a child sim, not when one is merely "far enough away now"),
+                    // so a long enough session can still exhaust any fixed budget. The real fix is
+                    // per-material descriptor-set dedup (most faces in a real build share texture
+                    // sets) or a resident-region eviction policy -- not attempted here.
+                    //
                     // These numbers are a documented budget, not a load-bearing hard limit:
                     // VK_ERROR_OUT_OF_POOL_MEMORY detection at the declared per-type counts is
-                    // spec-permitted but not guaranteed in practice. If exhausted again, the
-                    // real fix is per-material descriptor-set dedup (most faces in a real build
-                    // share texture sets) or generation-based vkResetDescriptorPool -- this
-                    // pool's FreeDescriptorSetBit means alloc/free churn from scene streaming can
-                    // still hit VK_ERROR_OUT_OF_POOL_MEMORY via fragmentation even with nominal
-                    // capacity left, regardless of how large these numbers get.
+                    // spec-permitted but not guaranteed in practice. If exhausted again, check the
+                    // maxMemoryAllocationCount logged just above first -- VkMesh/VkMaterialDescriptorSet
+                    // do 3-4 AllocateMemory calls per face, a separate ceiling from this pool that a
+                    // larger pool alone can't work around if the driver's allocation-count cap is
+                    // what's actually being hit at this face count.
                     var poolSizes = stackalloc DescriptorPoolSize[3]
                     {
-                        new DescriptorPoolSize { Type = DescriptorType.UniformBuffer, DescriptorCount = 6144 },
-                        new DescriptorPoolSize { Type = DescriptorType.CombinedImageSampler, DescriptorCount = 32768 },
-                        new DescriptorPoolSize { Type = DescriptorType.StorageBuffer, DescriptorCount = 4096 },
+                        new DescriptorPoolSize { Type = DescriptorType.UniformBuffer, DescriptorCount = 16384 },
+                        new DescriptorPoolSize { Type = DescriptorType.CombinedImageSampler, DescriptorCount = 81920 },
+                        new DescriptorPoolSize { Type = DescriptorType.StorageBuffer, DescriptorCount = 8192 },
                     };
                     var descriptorPoolInfo = new DescriptorPoolCreateInfo
                     {
                         SType = StructureType.DescriptorPoolCreateInfo,
                         PoolSizeCount = 3,
                         PPoolSizes = poolSizes,
-                        MaxSets = 8192,
+                        MaxSets = 20480,
                         Flags = DescriptorPoolCreateFlags.FreeDescriptorSetBit
                     };
                     api.CreateDescriptorPool(device, &descriptorPoolInfo, null, out descriptorPool).ThrowOnError();
@@ -417,12 +429,21 @@ internal sealed unsafe class VkContext : IDisposable
                     vkContext._debugUtils = debugUtils;
                     vkContext._debugMessenger = debugMessenger;
                     vkContext._debugCallback = debugCallback;
-                    // Capacity matches DescriptorPool's own MaxSets above -- a material
-                    // descriptor set can never exceed that ceiling regardless of this pool's
-                    // size (other descriptor-set kinds share the same MaxSets budget too), so
-                    // sizing this any larger couldn't matter and any smaller could become the
-                    // new binding constraint instead of MaxSets.
-                    vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 8192);
+                    // Capacity matches the UniformBuffer DescriptorPoolSize above (16384, not
+                    // MaxSets=20480 -- MaxSets is a looser shared ceiling across every descriptor
+                    // set kind this pool serves, not this pool's own binding constraint). Each
+                    // live scene face rents exactly one slot here (one VkMaterialDescriptorSet =
+                    // one UniformBuffer descriptor), so this pool's own real ceiling was 8192 --
+                    // HALF the ~16000-face budget the poolSizes comment above documents and the
+                    // DescriptorPool itself was actually sized for. That mismatch meant a busy
+                    // scene hit THIS pool's artificially low ceiling (observed live: object
+                    // uploads silently dropped via UploadSceneObjectNoRebuild's catch path at
+                    // ~8186/8192 faces, nowhere near the DescriptorPool's real headroom) long
+                    // before the real budget was exhausted -- and since an object's entire face
+                    // set is dropped together on the first Rent() failure, objects needing many
+                    // faces at once (large mesh buildings) were far likelier victims than small
+                    // few-face objects able to squeeze into whatever handful of slots remained.
+                    vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 16384);
                     // success is set only after MaterialUboPool's own allocation succeeds, so
                     // the finally block below still tears down pool/descriptorPool/device if
                     // that construction throws instead of leaking them.

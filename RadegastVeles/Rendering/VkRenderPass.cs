@@ -108,6 +108,78 @@ internal static class VkRenderPass
     }
 
     /// <summary>
+    /// Underwater post-process pass: one color attachment, no depth, targeting the SAME
+    /// swapchain image the main scene pass just wrote (not a separate offscreen target).
+    /// <c>LoadOp = Load</c> (not <c>Clear</c>/<c>DontCare</c> like every other pass here) --
+    /// this pass composites a full-screen tint/distortion effect ON TOP of the already-rendered
+    /// frame, it must not discard it. <c>InitialLayout = ColorAttachmentOptimal</c>, matching the
+    /// actual layout the caller's own explicit <c>CmdPipelineBarrier</c> transitions the
+    /// swapchain image back to (from <c>TransferSrcOptimal</c>, after copying it out to sample as
+    /// the pass's input) immediately before <c>CmdBeginRenderPass</c> -- <c>LoadOp = Load</c>
+    /// requires an accurate InitialLayout; <c>Undefined</c> would make the load's result
+    /// undefined. <c>FinalLayout = ColorAttachmentOptimal</c> restores the same contract
+    /// <see cref="CreateMainScenePass"/>'s output already has: <c>VkInteropSwapchainImage.
+    /// Present()</c> expects to find the image in that layout.
+    /// <para>
+    /// Only one subpass dependency, mirroring <see cref="CreateMainScenePass"/>'s (not
+    /// <see cref="CreateGBufferPass"/>'s two): this pass's output is presented, never sampled by
+    /// a later pass in the same frame, so no exit dependency is needed. The entry dependency
+    /// guards against the swapchain image pool's cross-FRAME reuse (same rationale as
+    /// <see cref="CreateMainScenePass"/>'s own dependency) -- ordering against the main pass's
+    /// write earlier in THIS frame is already fully handled by the caller's explicit barrier
+    /// sequence (copy-out, then the transition back to ColorAttachmentOptimal) immediately
+    /// preceding <c>CmdBeginRenderPass</c>.
+    /// </para>
+    /// </summary>
+    public static unsafe RenderPass CreateUnderwaterPass(VkContext vk, Format colorFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Load,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.ColorAttachmentOptimal,
+            FinalLayout = ImageLayout.ColorAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef
+        };
+
+        var dependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+            SrcAccessMask = 0,
+            DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+            DstAccessMask = AccessFlags.ColorAttachmentWriteBit
+        };
+
+        var attachments = stackalloc AttachmentDescription[1] { colorAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 1,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 1,
+            PDependencies = &dependency
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
     /// G-buffer normal pre-pass (pipeline table row 6: prim.vert +
     /// gnorm.frag): one color attachment (packed view-space normal) + one depth attachment,
     /// both left in <c>ShaderReadOnlyOptimal</c> so the following SSAO pass can sample them as

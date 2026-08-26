@@ -170,6 +170,15 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
     public string BuyButtonText => $"Buy L${SalePrice}";
 
     public ObservableCollection<ObjectEntry> Objects { get; } = [];
+    // Id -> index into Objects, rebuilt once at the end of the periodic refresh (the only place
+    // Objects' structure/order changes -- Add/RemoveAt/Move all happen there and nowhere else in
+    // this file). Lets Objects_ObjectProperties do an O(1) lookup instead of an O(n) linear scan;
+    // a burst of ObjectProperties replies during region entry can be in the thousands, each
+    // previously re-scanning the whole (possibly large) Objects list from a UI-thread-posted
+    // callback. Both this rebuild and every read of it run on the UI thread (via Dispatcher.
+    // UIThread.Post), so there's no race between a refresh rebuilding it and a property reply
+    // reading it.
+    private readonly Dictionary<UUID, int> _objectIndexById = new();
     public string[] FilterOptions { get; } = ["Rezzed", "Attached", "Both"];
     public string[] SortOptions { get; } = ["By Distance", "By Name"];
 
@@ -765,6 +774,10 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
                     SelectedObject = Objects.FirstOrDefault(o => o.Id == selectedId.Value);
                 }
 
+                _objectIndexById.Clear();
+                for (int i = 0; i < Objects.Count; i++)
+                    _objectIndexById[Objects[i].Id] = i;
+
                 _objectCount = Objects.Count;
                 OnPropertyChanged(nameof(StatusText));
 
@@ -842,45 +855,45 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             PendingCount = Math.Max(0, _pendingPropertiesCount);
-            for (int i = 0; i < Objects.Count; i++)
+
+            if (!_objectIndexById.TryGetValue(e.Properties.ObjectID, out int i)
+                || i >= Objects.Count || Objects[i].Id != e.Properties.ObjectID)
+                return; // not currently tracked (index stale or object no longer listed)
+
             {
-                if (Objects[i].Id == e.Properties.ObjectID)
+                var old = Objects[i];
+                var ownerName = _instance.Names.Get(e.Properties.OwnerID);
+                var creatorName = _instance.Names.Get(e.Properties.CreatorID);
+
+                // Detect group-owned objects (OwnerID is Zero, GroupID is set, ObjectGroupOwned flag set)
+                var isGroupOwned = e.Properties.OwnerID == UUID.Zero &&
+                                   e.Properties.GroupID != UUID.Zero &&
+                                   (old.Flags & PrimFlags.ObjectGroupOwned) != 0;
+                var groupId = isGroupOwned ? e.Properties.GroupID : UUID.Zero;
+
+                // Kick off async group name resolution if needed
+                if (isGroupOwned && !_instance.TryGetCachedGroupName(groupId, out _))
+                    Client.Groups.RequestGroupName(groupId);
+
+                Objects[i] = old with
                 {
-                    var old = Objects[i];
-                    var ownerName = _instance.Names.Get(e.Properties.OwnerID);
-                    var creatorName = _instance.Names.Get(e.Properties.CreatorID);
+                    Name = e.Properties.Name,
+                    Description = e.Properties.Description ?? string.Empty,
+                    OwnerName = isGroupOwned ? "(group)" : ownerName,
+                    CreatorName = creatorName,
+                    OwnerID = e.Properties.OwnerID,
+                    CreatorID = e.Properties.CreatorID,
+                    SaleType = e.Properties.SaleType,
+                    SalePrice = e.Properties.SalePrice,
+                    OwnerMask = e.Properties.Permissions.OwnerMask,
+                    NextOwnerMask = e.Properties.Permissions.NextOwnerMask,
+                    IsGroupOwned = isGroupOwned,
+                    GroupID = groupId,
+                };
 
-                    // Detect group-owned objects (OwnerID is Zero, GroupID is set, ObjectGroupOwned flag set)
-                    var isGroupOwned = e.Properties.OwnerID == UUID.Zero &&
-                                       e.Properties.GroupID != UUID.Zero &&
-                                       (old.Flags & PrimFlags.ObjectGroupOwned) != 0;
-                    var groupId = isGroupOwned ? e.Properties.GroupID : UUID.Zero;
-
-                    // Kick off async group name resolution if needed
-                    if (isGroupOwned && !_instance.TryGetCachedGroupName(groupId, out _))
-                        Client.Groups.RequestGroupName(groupId);
-
-                    Objects[i] = old with
-                    {
-                        Name = e.Properties.Name,
-                        Description = e.Properties.Description ?? string.Empty,
-                        OwnerName = isGroupOwned ? "(group)" : ownerName,
-                        CreatorName = creatorName,
-                        OwnerID = e.Properties.OwnerID,
-                        CreatorID = e.Properties.CreatorID,
-                        SaleType = e.Properties.SaleType,
-                        SalePrice = e.Properties.SalePrice,
-                        OwnerMask = e.Properties.Permissions.OwnerMask,
-                        NextOwnerMask = e.Properties.Permissions.NextOwnerMask,
-                        IsGroupOwned = isGroupOwned,
-                        GroupID = groupId,
-                    };
-
-                    if (SelectedObject?.Id == e.Properties.ObjectID)
-                    {
-                        SelectedObject = Objects[i];
-                    }
-                    break;
+                if (SelectedObject?.Id == e.Properties.ObjectID)
+                {
+                    SelectedObject = Objects[i];
                 }
             }
         });

@@ -416,9 +416,18 @@ public sealed class TextureDownloadQueue : IDisposable
                 }
             }
 
-            // Decode phase
+            // Decode phase. Gated by both this queue's own _decodeSemaphore AND the process-wide
+            // GlobalWorkBudget (see its own header comment) -- this is a second, wholly
+            // independent CPU-bound decode pipeline from GridTextureHelper's, so without the
+            // shared gate its peak stacks on top of everything else during a burst rather than
+            // sharing one ceiling. Not applied to the download phase above: that's network I/O,
+            // not CPU-bound, so gating it here would serialize unrelated downloads behind CPU
+            // work for no benefit.
             if (data != null)
             {
+                await GlobalWorkBudget.Gate.WaitAsync(token);
+                try
+                {
                 await _decodeSemaphore.WaitAsync(token);
                 try
                 {
@@ -430,6 +439,11 @@ public sealed class TextureDownloadQueue : IDisposable
                 finally
                 {
                     _decodeSemaphore.Release();
+                }
+                }
+                finally
+                {
+                    GlobalWorkBudget.Gate.Release();
                 }
             }
         }

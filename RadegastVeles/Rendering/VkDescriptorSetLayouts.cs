@@ -180,6 +180,33 @@ internal static class VkDescriptorSetLayouts
 
     /// <summary>Set 0 of the SSAO-blur pipeline -- a single uSsaoTex sampler binding. uTexelSize is a push constant instead (see
     /// vulkan/ssaoblur.frag), not worth a UBO for two floats.</summary>
+    /// <summary>Set 0 of the underwater post-process pipeline: binding 0 = the copied scene-color
+    /// image (post-process input), bindings 1/2 = the water pipeline's own normal/dudv maps,
+    /// reused here for the distortion/caustic samples (see underwater.frag). Fragment-only --
+    /// quad.vert reads none of these.</summary>
+    public static unsafe DescriptorSetLayout CreateUnderwaterSamplerLayout(VkContext vk)
+    {
+        var bindings = stackalloc DescriptorSetLayoutBinding[3];
+        for (uint i = 0; i < 3; i++)
+        {
+            bindings[i] = new DescriptorSetLayoutBinding
+            {
+                Binding = i,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            };
+        }
+        var createInfo = new DescriptorSetLayoutCreateInfo
+        {
+            SType = StructureType.DescriptorSetLayoutCreateInfo,
+            BindingCount = 3,
+            PBindings = bindings
+        };
+        vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();
+        return layout;
+    }
+
     public static unsafe DescriptorSetLayout CreateBlurSamplerLayout(VkContext vk)
     {
         var binding = new DescriptorSetLayoutBinding

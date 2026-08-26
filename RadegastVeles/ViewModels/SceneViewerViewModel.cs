@@ -61,6 +61,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private readonly Dictionary<ulong, SceneTerrainBuilder>      _neighborTerrainBuilders = new();
     private readonly Dictionary<ulong, CancellationTokenSource>  _neighborTerrainCts      = new();
     private readonly object                                       _neighborTerrainLock     = new();
+    // Shared across the object/avatar streamers and neighbor-terrain tracking so a given
+    // neighbor sim's objects, avatars, and terrain all derive from the same collision-free index.
+    private SceneNeighborSimIndex?           _neighborIndex;
     private SceneObjectStreamer?             _objectStreamer;
     private SceneAvatarStreamer?             _avatarStreamer;
     private SceneParticleStreamer?           _particleStreamer;
@@ -94,6 +97,13 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _atmosphericsEnabled = true;
     [ObservableProperty] private bool   _shadowsEnabled = false;
     [ObservableProperty] private bool   _avatarRenderInfoReportingEnabled = true;
+    /// <summary>
+    /// Kill switch for the lightweight region-crossing path (see <see cref="OnSimChanged"/>):
+    /// forces every crossing through the full clear+rebuild path regardless of whether the
+    /// destination is already a tracked neighbor. Default off (lightweight path enabled); flip
+    /// to true to isolate a crossing regression without reverting code.
+    /// </summary>
+    [ObservableProperty] private bool   _forceFullClearOnCrossing;
     [ObservableProperty] private bool   _showAvatarComplexityInNameTags = false;
     [ObservableProperty] private string _perfOverlayText = string.Empty;
 
@@ -277,6 +287,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _instance.Client.Terrain.LandPatchReceived        += OnLandPatchReceived;
         _instance.Client.Network.SimChanged               += OnSimChanged;
         _instance.Client.Network.SimConnected             += OnSimConnected;
+        _instance.Client.Network.SimDisconnected          += OnSimDisconnected;
         _instance.Client.Objects.ObjectUpdate             += OnObjectUpdate;
         _instance.Client.Objects.KillObject               += OnKillObject;
         _instance.Client.Objects.AvatarUpdate             += OnAvatarUpdate;
@@ -291,8 +302,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // before prims at similar distances, but 4 slots lets near-distance prims and
         // avatars overlap without starving the render thread.
         _buildScheduler      = new SceneBuildScheduler(maxConcurrent: 4);
-        _objectStreamer       = new SceneObjectStreamer(_instance.Client, viewport, _buildScheduler);
-        _avatarStreamer       = new SceneAvatarStreamer(_instance.Client, viewport, _buildScheduler, _instance.AvatarRenderOverrides);
+        _neighborIndex        = new SceneNeighborSimIndex();
+        _objectStreamer       = new SceneObjectStreamer(_instance.Client, viewport, _buildScheduler, _neighborIndex);
+        _avatarStreamer       = new SceneAvatarStreamer(_instance.Client, viewport, _buildScheduler, _instance.AvatarRenderOverrides, _neighborIndex);
         _avatarRenderInfoReporter = new AvatarRenderInfoReporter(_instance.Client, _avatarStreamer, _instance)
         {
             Enabled = AvatarRenderInfoReportingEnabled
@@ -554,14 +566,128 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _ = RefreshTerrainAsync(centerCamera: false);
         else
             _ = RefreshNeighborTerrainAsync(e.Simulator);
+
+        RefreshAdjacentNeighborTerrainIfBoundaryPatch(e.Simulator, e.X, e.Y);
+    }
+
+    /// <summary>
+    /// When the patch that just arrived sits on <paramref name="sim"/>'s boundary (patch index
+    /// 0 or 15 of the 16x16 patch grid), also refreshes whichever neighbor sits across that
+    /// specific edge, so its terrain mesh rebuilds and re-runs <see cref="SceneTerrainBuilder"/>'s
+    /// edge-blend pass against this newly-arrived data. Without this, a region's edge could sit
+    /// un-blended until something unrelated happens to trigger that neighbor's own next rebuild.
+    /// </summary>
+    private void RefreshAdjacentNeighborTerrainIfBoundaryPatch(Simulator sim, int patchX, int patchY)
+    {
+        if (patchX == 0)  TryRefreshNeighborAcross(sim, -256, 0);
+        if (patchX == 15) TryRefreshNeighborAcross(sim, 256, 0);
+        if (patchY == 0)  TryRefreshNeighborAcross(sim, 0, -256);
+        if (patchY == 15) TryRefreshNeighborAcross(sim, 0, 256);
+    }
+
+    private void TryRefreshNeighborAcross(Simulator sim, int dx, int dy)
+    {
+        var neighbor = TerrainSeamHelper.FindNeighborSim(_instance.Client, sim, dx, dy);
+        if (neighbor == null) return;
+        if (neighbor == _instance.Client.Network.CurrentSim)
+            _ = RefreshTerrainAsync(centerCamera: false);
+        else
+            _ = RefreshNeighborTerrainAsync(neighbor);
+    }
+
+    /// <summary>
+    /// Promotes an already-tracked neighbor sim to "current" in place, instead of the ordinary
+    /// full clear + re-stream <see cref="OnSimChanged"/> otherwise does on every sim change.
+    /// <para>
+    /// <see cref="SceneNeighborSimIndex"/>'s indices are permanent per-simulator, so no scene key
+    /// changes here -- only each already-built object's baked world-space transform needs
+    /// correcting (<see cref="SceneObjectStreamer.RebaseAllForRegionPromotion"/>), by the
+    /// constant grid-coordinate delta between the old and new current sim. The old-current region
+    /// is demoted into an ordinary tracked neighbor (<see cref="RefreshNeighborTerrainAsync"/>)
+    /// rather than having its content vanish.
+    /// </para>
+    /// <para>
+    /// Avatars are deliberately NOT rebased here: <see cref="SceneAvatarStreamer"/> always
+    /// resolves an avatar's world position fresh from live <c>Self.SimPosition</c>/
+    /// <c>Avatar.Position</c> (see <c>ResolveAvatarWorldTransform</c>), never cached relative to a
+    /// particular current sim, so they self-correct via their own next terse update with no
+    /// action needed here -- and flexi attachments ride along with their owning avatar's
+    /// transform for the same reason. Avatars belonging to the newly-current sim DO need an
+    /// initial seed, though: unlike objects, <see cref="SeedNeighborSims"/> never tracked them
+    /// while this sim was still a neighbor.
+    /// </para>
+    /// </summary>
+    private void HandleLightweightRegionPromotion(Simulator oldSim, Simulator newSim)
+    {
+        Utils.LongToUInts(oldSim.Handle, out uint ocx, out uint ocy);
+        Utils.LongToUInts(newSim.Handle, out uint ncx, out uint ncy);
+        var rebaseDelta = new Vector3((int)ocx - (int)ncx, (int)ocy - (int)ncy, 0f);
+
+        _objectStreamer?.RebaseAllForRegionPromotion(rebaseDelta);
+
+        // Terrain lives outside SceneObjectStreamer's own tracking -- it's submitted directly to
+        // the viewport by RefreshNeighborTerrainAsync/RefreshTerrainAsync under
+        // ((ulong)simIndex<<32)|uint.MaxValue -- so RebaseAllForRegionPromotion above never
+        // touches it. old-current's and new-current's terrain are handled below by a fresh
+        // rebuild (already correct relative to the new current sim), but any OTHER
+        // already-tracked neighbor's terrain was baked relative to the OLD current sim and needs
+        // the exact same delta objects just got, or it's left offset by one region-width -- a
+        // visible gap at that neighbor's border (reported after the crossing-rework session:
+        // "terrain seams still leave big gaps... maybe positional" -- it was).
+        if (_viewport != null && _neighborIndex != null && rebaseDelta != Vector3.Zero)
+        {
+            var otherTerrainKeys = new List<ulong>();
+            foreach (var (simIndex, trackedSim) in _neighborIndex.TrackedSims)
+            {
+                if (trackedSim.Handle == oldSim.Handle || trackedSim.Handle == newSim.Handle) continue;
+                otherTerrainKeys.Add(((ulong)simIndex << 32) | uint.MaxValue);
+            }
+            if (otherTerrainKeys.Count > 0)
+                _viewport.RebaseSceneObjectTransforms(otherTerrainKeys, rebaseDelta);
+        }
+
+        _envService?.OnRegionChanged();
+        _avatarRenderInfoReporter?.OnSimChanged();
+        if (_viewport != null)
+            _viewport.WaterHeight = newSim.WaterHeight;
+        UpdateStatusBar();
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _ = RefreshTerrainAsync(centerCamera: true); // rebuild terrain for the newly-current sim
+            _ = RefreshNeighborTerrainAsync(oldSim);      // demote old-current into a tracked neighbor
+            _ = Task.Run(() =>
+            {
+                foreach (var avatar in newSim.ObjectsAvatars.Values)
+                    _avatarStreamer?.OnAvatarUpdate(newSim, avatar);
+                SeedNeighborSims();
+            });
+        });
     }
 
     private void OnSimChanged(object? sender, SimChangedEventArgs e)
     {
         if (_disposed) return;
-        // Fired when the agent crosses into a new region — clear objects, full rebuild + re-center.
-        // Also flush the decoded-bitmap cache: textures from the old sim are unlikely to be reused
-        // and releasing them now reclaims the RAM before the new sim loads its own textures.
+
+        // Lightweight path: the destination is already a tracked neighbor (its terrain and
+        // objects are already built), so promote it in place instead of clearing and
+        // re-streaming the whole scene. Covers both an actual region crossing AND a teleport to
+        // an already-nearby region -- SimChanged doesn't distinguish the two at the source (both
+        // funnel through the same NetworkManager.SetCurrentSim), and IsTracked's answer is what
+        // actually matters here, not which packet triggered the change.
+        var oldSim = e.PreviousSimulator;
+        var newSim = _instance.Client.Network.CurrentSim;
+        if (!ForceFullClearOnCrossing && oldSim != null && newSim != null && oldSim != newSim &&
+            _neighborIndex != null && _neighborIndex.IsTracked(newSim.Handle))
+        {
+            HandleLightweightRegionPromotion(oldSim, newSim);
+            return;
+        }
+
+        // Fallback: full clear + rebuild + re-center, for teleports into an untracked region (or
+        // the very first connect, where oldSim is null). Also flush the decoded-bitmap cache:
+        // textures from the old sim are unlikely to be reused and releasing them now reclaims the
+        // RAM before the new sim loads its own textures.
         GridTextureHelper.ClearSkBitmapCache();
         CancelAllNeighborTerrainBuilds();
 
@@ -573,6 +699,12 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         Dispatcher.UIThread.Post(() =>
         {
+            // Drop pending (not-yet-started) build entries for the old region before the
+            // streamers themselves clear -- previously nothing purged this shared queue on sim
+            // change, so old-region tessellation work that was still waiting for a concurrency
+            // slot delayed new-region builds behind entries that would just be cancelled anyway
+            // the moment they ran (each factory checks its own token once it starts).
+            _buildScheduler?.Clear();
             _objectStreamer?.Clear();
             _avatarStreamer?.Clear();
             _particleStreamer?.Clear();
@@ -630,6 +762,38 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         {
             // Neighbor simulator connected — build its terrain if we have patch data.
             _ = RefreshNeighborTerrainAsync(e.Simulator);
+        }
+    }
+
+    /// <summary>
+    /// Fired when any tracked simulator (current or neighbor) disconnects. Removes that specific
+    /// sim's terrain and streamed objects without touching anything else -- previously nothing
+    /// subscribed to this event at all, so a disconnected neighbor's content only ever went away
+    /// via the next full <see cref="OnSimChanged"/> clear, which the lightweight region-crossing
+    /// path is designed to skip.
+    /// </summary>
+    private void OnSimDisconnected(object? sender, SimDisconnectedEventArgs e)
+    {
+        if (_disposed) return;
+        if (e.Simulator == _instance.Client.Network.CurrentSim) return; // full OnSimChanged/teardown handles this case
+
+        lock (_neighborTerrainLock)
+        {
+            if (_neighborTerrainCts.TryGetValue(e.Simulator.Handle, out var cts))
+            {
+                cts.Cancel();
+                cts.Dispose();
+                _neighborTerrainCts.Remove(e.Simulator.Handle);
+            }
+            _neighborTerrainBuilders.Remove(e.Simulator.Handle);
+        }
+
+        if (_neighborIndex != null && _neighborIndex.IsTracked(e.Simulator.Handle))
+        {
+            uint simIndex = _neighborIndex.GetSimIndex(e.Simulator);
+            _viewport?.RemoveSceneObject(((ulong)simIndex << 32) | uint.MaxValue); // terrain
+            _objectStreamer?.RemoveObjectsForSim(e.Simulator);
+            _neighborIndex.Forget(e.Simulator.Handle);
         }
     }
 
@@ -716,10 +880,15 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                 _neighborTerrainBuilders[sim.Handle] = new SceneTerrainBuilder(_instance.Client);
         }
 
-        // Stable scene key for this neighbor's terrain.
-        // Upper 32 bits = a 1-15 simIndex derived from the neighbor's grid position,
-        // lower 32 bits = uint.MaxValue (reserved; real prims never use this LocalID).
-        uint simIndex = (uint)((sx / 256 + sy / 256) & 0xFu) + 1u;
+        // Stable scene key for this neighbor's terrain, derived from the same collision-free
+        // per-handle index SceneObjectStreamer uses for its own scene keys (previously this was
+        // an anti-diagonal hash of grid coordinates that collided across cardinal neighbor pairs
+        // -- e.g. N/E, S/W, NW/SE all hashed identically -- silently disposing/replacing one
+        // neighbor's terrain with another's).
+        // Upper 32 bits = the sim's stable, permanent index (assigned once, unrelated to
+        // whether it's current -- see SceneNeighborSimIndex), lower 32 bits = uint.MaxValue
+        // (reserved; real prims never use this LocalID).
+        uint simIndex = _neighborIndex!.GetSimIndex(sim);
         ulong terrainKey = ((ulong)simIndex << 32) | uint.MaxValue;
 
         try
@@ -733,7 +902,26 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
-                _viewport?.SubmitSceneObject(terrainKey, submission);
+                if (_viewport == null) return;
+                _viewport.SubmitSceneObject(terrainKey, submission);
+
+                // regionOffset above was captured against CurrentSim at the START of this
+                // (potentially long-running, asset-fetch-bound) build. If a region crossing
+                // landed while it was in flight, the just-submitted mesh is baked against the
+                // OLD current sim's frame — correct it by the same delta
+                // HandleLightweightRegionPromotion applies to every other already-tracked
+                // neighbor's terrain, reusing the same rebase path (safe to call back-to-back
+                // with the submit above: DrainPendingSceneObjects always runs before
+                // ApplySceneRebases within a render frame, so this always finds a committed
+                // entry to correct rather than silently no-op-ing against an uncommitted key).
+                var currentSimNow = _instance.Client.Network.CurrentSim;
+                if (currentSimNow != null && currentSimNow != currentSim)
+                {
+                    Utils.LongToUInts(currentSim.Handle,    out uint sox, out uint soy);
+                    Utils.LongToUInts(currentSimNow.Handle, out uint snx, out uint sny);
+                    var staleDelta = new Vector3((int)sox - (int)snx, (int)soy - (int)sny, 0f);
+                    _viewport.RebaseSceneObjectTransforms(new[] { terrainKey }, staleDelta);
+                }
             });
         }
         catch (OperationCanceledException) { }
@@ -782,8 +970,17 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
         if (isAvatar)
         {
-            // Avatar hit — show name if available.
-            if (sim.ObjectsAvatars.TryGetValue(realId, out var av))
+            // Avatar hit — show name if available. Self is tracked under a fixed sentinel
+            // (SceneAvatarStreamer.SelfSceneId) rather than a real sim.ObjectsAvatars LocalID —
+            // see that field's doc comment — so it needs its own name resolution here.
+            if (realId == Radegast.Veles.Rendering.SceneAvatarStreamer.SelfSceneId)
+            {
+                var selfName = _instance.Client.Self.Name;
+                SelectedInfo = string.IsNullOrEmpty(selfName) ? "You" : selfName;
+                StatusText   = $"Avatar: {SelectedInfo}";
+                ContextLabel = SelectedInfo;
+            }
+            else if (sim.ObjectsAvatars.TryGetValue(realId, out var av))
             {
                 SelectedInfo  = $"{av.Name}";
                 StatusText    = $"Avatar: {av.Name}";
@@ -1369,6 +1566,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _instance.Client.Terrain.LandPatchReceived        -= OnLandPatchReceived;
         _instance.Client.Network.SimChanged               -= OnSimChanged;
         _instance.Client.Network.SimConnected             -= OnSimConnected;
+        _instance.Client.Network.SimDisconnected          -= OnSimDisconnected;
         _instance.Client.Objects.ObjectUpdate             -= OnObjectUpdate;
         _instance.Client.Objects.KillObject               -= OnKillObject;
         _instance.Client.Objects.AvatarUpdate             -= OnAvatarUpdate;

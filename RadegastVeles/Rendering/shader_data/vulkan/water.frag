@@ -103,9 +103,14 @@ void main()
 {
     vec3 ray = viewRay(vNdc);
 
-    // Ray must be going downward (Z-up world) to hit the water plane.
-    // Use a small epsilon so the horizon edge itself still renders.
-    if (ray.z >= -0.0001) discard;
+    // Ray must point toward the water plane to hit it: downward when the eye is above the
+    // surface (the common case), upward when the eye is below it (see VkViewportControl's
+    // `underwater` gate, which is what makes doWater/DrawWater run at all in that case -- this
+    // shader has no separate "underwater" uniform, it derives the same fact from uEyePos/
+    // uWaterHeight it already has). Same small epsilon on both branches so the horizon edge
+    // still renders.
+    bool eyeBelow = uEyePos.z < uWaterHeight;
+    if (eyeBelow ? (ray.z <= 0.0001) : (ray.z >= -0.0001)) discard;
 
     // Ray-plane intersection: eye + t*ray at z = uWaterHeight
     float t = (uWaterHeight - uEyePos.z) / ray.z;

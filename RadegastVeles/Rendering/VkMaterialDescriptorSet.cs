@@ -51,48 +51,70 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
 
         _uboSlot = vk.MaterialUboPool.Rent(data);
 
-        var setLayout = pipeline.PerMaterialLayout;
-        var allocInfo = new DescriptorSetAllocateInfo
+        // Everything past Rent() succeeding can still throw (most concretely
+        // AllocateDescriptorSets.ThrowOnError() on VK_ERROR_OUT_OF_POOL_MEMORY -- the shared
+        // VkContext.DescriptorPool has its own independent MaxSets/per-type budget, contended by
+        // skin/flexi compute sets and per-frame/per-pass sets too, so it can exhaust even while
+        // MaterialUboPool itself still has free slots). Without this try/catch, that throw
+        // propagates out of the constructor with _uboSlot already claimed from the pool but this
+        // object never fully constructed -- never assigned to a caller variable, never reachable,
+        // never Dispose()'d, so the slot it rented is never returned. UploadSceneObjectNoRebuild's
+        // own catch only disposes the faces list it already built, which never contains this
+        // half-constructed instance. One leaked slot per occurrence sounds small, but a busy
+        // scene generates thousands of pool-exhaustion drops per session (each drop attempt can
+        // trigger this on faces built before the one that exhausted the pool), and every leaked
+        // slot is gone for the rest of the session -- this is what pins the pool at capacity
+        // permanently rather than just under sustained load.
+        try
         {
-            SType = StructureType.DescriptorSetAllocateInfo,
-            DescriptorPool = vk.DescriptorPool,
-            DescriptorSetCount = 1,
-            PSetLayouts = &setLayout
-        };
-        vk.Api.AllocateDescriptorSets(vk.Device, &allocInfo, out var set).ThrowOnError();
-        Set = set;
+            var setLayout = pipeline.PerMaterialLayout;
+            var allocInfo = new DescriptorSetAllocateInfo
+            {
+                SType = StructureType.DescriptorSetAllocateInfo,
+                DescriptorPool = vk.DescriptorPool,
+                DescriptorSetCount = 1,
+                PSetLayouts = &setLayout
+            };
+            vk.Api.AllocateDescriptorSets(vk.Device, &allocInfo, out var set).ThrowOnError();
+            Set = set;
 
-        var imageInfos = stackalloc DescriptorImageInfo[5] { albedo, normal, specular, metallicRoughness, emissive };
-        var bufferInfo = new DescriptorBufferInfo
-        {
-            Buffer = vk.MaterialUboPool.Buffer,
-            Offset = (ulong)_uboSlot * vk.MaterialUboPool.Stride,
-            Range = (ulong)sizeof(VkMaterialUbo)
-        };
+            var imageInfos = stackalloc DescriptorImageInfo[5] { albedo, normal, specular, metallicRoughness, emissive };
+            var bufferInfo = new DescriptorBufferInfo
+            {
+                Buffer = vk.MaterialUboPool.Buffer,
+                Offset = (ulong)_uboSlot * vk.MaterialUboPool.Stride,
+                Range = (ulong)sizeof(VkMaterialUbo)
+            };
 
-        var writes = stackalloc WriteDescriptorSet[6];
-        for (uint i = 0; i < 5; i++)
-        {
-            writes[i] = new WriteDescriptorSet
+            var writes = stackalloc WriteDescriptorSet[6];
+            for (uint i = 0; i < 5; i++)
+            {
+                writes[i] = new WriteDescriptorSet
+                {
+                    SType = StructureType.WriteDescriptorSet,
+                    DstSet = Set,
+                    DstBinding = i,
+                    DescriptorType = DescriptorType.CombinedImageSampler,
+                    DescriptorCount = 1,
+                    PImageInfo = &imageInfos[i]
+                };
+            }
+            writes[5] = new WriteDescriptorSet
             {
                 SType = StructureType.WriteDescriptorSet,
                 DstSet = Set,
-                DstBinding = i,
-                DescriptorType = DescriptorType.CombinedImageSampler,
+                DstBinding = 5,
+                DescriptorType = DescriptorType.UniformBuffer,
                 DescriptorCount = 1,
-                PImageInfo = &imageInfos[i]
+                PBufferInfo = &bufferInfo
             };
+            vk.Api.UpdateDescriptorSets(vk.Device, 6, writes, 0, null);
         }
-        writes[5] = new WriteDescriptorSet
+        catch
         {
-            SType = StructureType.WriteDescriptorSet,
-            DstSet = Set,
-            DstBinding = 5,
-            DescriptorType = DescriptorType.UniformBuffer,
-            DescriptorCount = 1,
-            PBufferInfo = &bufferInfo
-        };
-        vk.Api.UpdateDescriptorSets(vk.Device, 6, writes, 0, null);
+            vk.MaterialUboPool.Return(_uboSlot);
+            throw;
+        }
     }
 
     /// <summary>Overwrites this material's UBO contents in place (e.g. a UV-scroll animation

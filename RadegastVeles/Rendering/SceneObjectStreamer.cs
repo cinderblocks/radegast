@@ -25,6 +25,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
+using Microsoft.Extensions.Logging;
 using OmVector3  = LibreMetaverse.Vector3;
 using Quaternion = System.Numerics.Quaternion;
 using Vector3    = System.Numerics.Vector3;
@@ -115,10 +116,10 @@ internal sealed class SceneObjectStreamer : IDisposable
 
     // ── Sim index registry ────────────────────────────────────────────────────────
     // Upper 32 bits of a scene key encode a sim index (0 = current sim, 1-N for neighbors).
-    // This lets us distinguish objects with the same LocalID in different regions.
-    private int _nextNeighborIndex = 0;
-    private readonly ConcurrentDictionary<ulong, uint> _neighborSimIndex = new(); // handle → index
-    private readonly ConcurrentDictionary<uint, Simulator> _simByIndex    = new(); // index → sim
+    // This lets us distinguish objects with the same LocalID in different regions. Shared with
+    // SceneAvatarStreamer and SceneViewerViewModel's terrain tracking so a given neighbor's
+    // objects, avatars, and terrain all derive from the same index value.
+    private readonly SceneNeighborSimIndex _neighborIndex;
 
     /// <summary>Number of object build tasks currently running.</summary>
     public int InflightCount => _inflight.Count;
@@ -128,7 +129,26 @@ internal sealed class SceneObjectStreamer : IDisposable
     private readonly Timer  _debounceTimer;
     // Fires every 10 s to upgrade textures on objects that the avatar walked closer to.
     private readonly Timer  _textureLodTimer;
+    // Fires every 10 s to catch root prims that are sitting in a tracked simulator's
+    // ObjectsPrimitives (current OR neighbor) but that this streamer never learned about --
+    // see ReconcileUntrackedPrims's own doc comment for why that gap exists and what this
+    // recovers. Self-healing regardless of the exact cause, and a diagnostic in its own right:
+    // if this recovers a real in-range object, that proves the object reached LibreMetaverse's
+    // side but never fired the event this streamer normally reacts to.
+    private readonly Timer  _reconcileTimer;
     private bool            _disposed;
+
+    // sceneKey -> tick of the last reconciliation-triggered EnqueueDirty for it. Bounds
+    // ReconcileUntrackedPrims from re-attempting the same still-failing object every single
+    // sweep forever (e.g. one whose CPU build keeps throwing, or whose GPU upload keeps getting
+    // dropped by pool exhaustion -- OnSceneObjectUploadFailed already clears _rendered on drop,
+    // which would otherwise make it immediately sweep-eligible again 10 s later).
+    private readonly ConcurrentDictionary<ulong, long> _reconcileAttempts = new();
+    private const long ReconcileRetryCooldownMs = 60_000;
+
+    // sceneKeys ReconcileUntrackedPrims has already logged a recovery for -- logged once per key
+    // (not once per sweep) so a persistently-failing recovered object doesn't spam every 10 s.
+    private readonly ConcurrentDictionary<ulong, byte> _reconcileReported = new();
 
     private float _maxStreamRadius = 96f;
 
@@ -144,17 +164,54 @@ internal sealed class SceneObjectStreamer : IDisposable
     }
 
     public SceneObjectStreamer(GridClient client, ISceneViewport viewport,
-        SceneBuildScheduler scheduler)
+        SceneBuildScheduler scheduler, SceneNeighborSimIndex neighborIndex)
     {
-        _client    = client;
-        _viewport  = viewport;
-        _builder   = new PrimMeshBuilder(client);
-        _scheduler = scheduler;
+        _client        = client;
+        _viewport      = viewport;
+        _builder       = new PrimMeshBuilder(client);
+        _scheduler     = scheduler;
+        _neighborIndex = neighborIndex;
 
         _debounceTimer   = new Timer(_ => ProcessDirty(), null,
             Timeout.Infinite, Timeout.Infinite);
         _textureLodTimer = new Timer(_ => CheckTextureLodUpgrades(), null,
             TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        _reconcileTimer  = new Timer(_ => ReconcileUntrackedPrims(), null,
+            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+
+        _viewport.SceneObjectUploadFailed += OnSceneObjectUploadFailed;
+    }
+
+    /// <summary>
+    /// A GPU upload was dropped after this streamer already recorded the build as complete (see
+    /// <see cref="ISceneViewport.SceneObjectUploadFailed"/>'s own comment for why that recording
+    /// happens before upload outcome is knowable at all). Undo that bookkeeping so the key looks
+    /// exactly like it never finished building, then re-request a build -- the viewport's own
+    /// short cooldown (<c>VkViewportControl.SceneUploadFailureCooldownMs</c>) already prevents
+    /// this from tight-looping against a still-exhausted pool.
+    /// <para>
+    /// <see cref="ISceneViewport.SubmitSceneObject"/> is shared by every streamer that puts
+    /// content into the scene layer -- <c>SceneAvatarStreamer</c> and <c>SceneViewerViewModel</c>'s
+    /// terrain submission both go through the exact same event, not just this one -- so this MUST
+    /// gate on actually owning <paramref name="sceneKey"/> before touching anything. Without the
+    /// gate, an avatar or terrain upload failure would flow into <see cref="EnqueueDirty"/> ->
+    /// <see cref="EnqueueBuild"/> -> <see cref="BuildObjectAsync"/>, whose <see cref="CollectLinkset"/>
+    /// finds no prim for that (foreign-namespaced) local ID and calls
+    /// <c>_viewport.RemoveSceneObject</c> -- actively deleting live avatar/terrain geometry this
+    /// streamer never owned. <see cref="_rendered"/> is populated ONLY by this streamer's own
+    /// <see cref="BuildObjectAsync"/>, immediately after a successful CPU-side build (before GPU
+    /// upload outcome is even knowable -- see this method's own first paragraph), so it is a
+    /// reliable "did I submit this key" check regardless of whether that upload later failed.
+    /// </para>
+    /// </summary>
+    private void OnSceneObjectUploadFailed(ulong sceneKey)
+    {
+        if (_disposed) return;
+        if (!_rendered.ContainsKey(sceneKey)) return;
+        _rendered.TryRemove(sceneKey, out _);
+        _lastRebuiltPose.TryRemove(sceneKey, out _);
+        _textureLodLevel.TryRemove(sceneKey, out _);
+        EnqueueDirty(sceneKey);
     }
 
     // ── Public API ────────────────────────────────────────────────────────────────
@@ -187,13 +244,49 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
 
         // World-space position includes region offset for neighbor sims.
-        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim);
+        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim, out bool trustworthyPos);
         var worldPos = ApplyRegionOffset(rootPos, sim, currentSim);
         var avatarPos = _client.Self.SimPosition;
 
-        if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
+        if (trustworthyPos && !IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
         {
-            _viewport.RemoveSceneObject(sceneKey);
+            // Must fully clear bookkeeping (not just the viewport draw), or this key is left
+            // with _rendered still set while the viewport no longer has it. If the object later
+            // comes back into range via OnTerseObjectUpdate, that path's _rendered.ContainsKey
+            // branch assumes the object is still actually submitted and, for a stationary
+            // linkset whose pose hasn't changed since _lastRebuiltPose, never re-enqueues a
+            // build -- permanently hiding it. Single-prim objects are hit hardest: that branch
+            // doesn't even have a pose-changed rebuild path, only SetSceneObjectMotion against a
+            // viewport entry that no longer exists. CancelAndRemove clears _rendered/
+            // _lastRebuiltPose/_textureLodLevel/_dirty/_inflight together so the object is
+            // treated as genuinely new next time it's dirtied.
+            //
+            // Gated on trustworthyPos: an untrustworthy position means the root hasn't arrived
+            // yet for this child, and its own parent-relative offset must never be read as a
+            // real distance -- doing so would let a same-tick root-after-child arrival race
+            // cancel/starve a linkset's build purely on placeholder data. Falling through to
+            // EnqueueDirty below is safe either way: the real radius gate re-runs once the root
+            // is known, in ProcessDirty/EnqueueBuild's own position lookups.
+            // Unconditional (root prims only -- not gated by scale/size): a size filter here
+            // would miss exactly the case this exists to catch, a single-prim mesh house with a
+            // small footprint but a root position that resolves wrong. This branch by
+            // construction only runs when the computed distance exceeds the stream radius, so
+            // the logged distance itself is the signal -- if it's wildly larger than what the
+            // user actually observes standing next to the object, the root position resolution
+            // is the bug, not the radius check. Rate-limited naturally: this only runs once per
+            // incoming full ObjectUpdate packet for the root, not per frame.
+            if (prim.ParentID == 0)
+            {
+                var dx = worldPos.X - avatarPos.X;
+                var dy = worldPos.Y - avatarPos.Y;
+                var dz = worldPos.Z - avatarPos.Z;
+                Logger.Log(
+                    $"SceneObjectStreamer: culled root prim {rootLocalId} " +
+                    $"(scale={prim.Scale}) at dist={MathF.Sqrt(dx * dx + dy * dy + dz * dz):F1}m " +
+                    $"(radius={_maxStreamRadius}m), rootPos={worldPos}, avatarPos=({avatarPos.X:F1},{avatarPos.Y:F1},{avatarPos.Z:F1})",
+                    LogLevel.Debug);
+            }
+            CancelAndRemove(sceneKey);
             return;
         }
 
@@ -214,11 +307,15 @@ internal sealed class SceneObjectStreamer : IDisposable
         var rootLocalId = prim.ParentID == 0 ? prim.LocalID : prim.ParentID;
         var sceneKey    = MakeSceneKey(sim, rootLocalId, currentSim);
 
-        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim);
+        var rootPos  = GetRootWorldPosition(sim, rootLocalId, prim, out bool trustworthyPos);
         var worldPos = ApplyRegionOffset(rootPos, sim, currentSim);
         var avatarPos = _client.Self.SimPosition;
 
-        if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
+        // Gated on trustworthyPos for the same reason as OnObjectUpdate's identical check: an
+        // untrustworthy position is a child's parent-relative offset, not a world position, and
+        // must never be read as "confirmed out of range" -- see GetRootWorldPosition's own
+        // comment.
+        if (trustworthyPos && !IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
         {
             CancelAndRemove(sceneKey);
             return;
@@ -374,6 +471,47 @@ internal sealed class SceneObjectStreamer : IDisposable
     }
 
     /// <summary>
+    /// Removes every currently-rendered object that belongs to <paramref name="sim"/>, without
+    /// touching any other tracked sim. Used on <see cref="Network.SimDisconnected"/> so a
+    /// disconnected neighbor's objects don't linger indefinitely -- previously the only way
+    /// stale neighbor content was ever removed was a full <see cref="Clear"/> on the next sim
+    /// change, which this streamer's lightweight region-crossing path is designed to skip.
+    /// </summary>
+    public void RemoveObjectsForSim(Simulator sim)
+    {
+        if (_disposed) return;
+        foreach (var sceneKey in _rendered.Keys)
+        {
+            if (SimForSceneKey(sceneKey) == sim)
+                CancelAndRemove(sceneKey);
+        }
+    }
+
+    /// <summary>
+    /// Shifts every currently-rendered object's already-baked world-space transform by
+    /// <paramref name="delta"/>, without a rebuild. Used by the lightweight region-crossing path
+    /// (<c>SceneViewerViewModel.OnSimChanged</c>) when the agent crosses into an already-tracked
+    /// neighbor: that neighbor's scene key never changes (see <see cref="SceneNeighborSimIndex"/>'s
+    /// header comment), but every object's <c>Transform</c> was baked using <c>RegionOffset</c>
+    /// against the OLD current sim, so it needs correcting to the new one. <paramref name="delta"/>
+    /// is the same constant vector for every object regardless of which sim it came from (old-
+    /// current or any neighbor) -- see <c>RegionOffset</c>'s own reasoning for why.
+    /// <para>
+    /// Objects still mid-build when this runs don't need correction here: they resolve
+    /// <c>RegionOffset</c> fresh against live <c>CurrentSim</c> right before they submit, so a
+    /// build that lands after the crossing already bakes the correct position on its own.
+    /// </para>
+    /// </summary>
+    public void RebaseAllForRegionPromotion(Vector3 delta)
+    {
+        if (_disposed || delta == Vector3.Zero) return;
+        // Snapshot now -- _rendered can keep mutating on other threads while the viewport
+        // processes this on the render thread later.
+        var keys = new List<ulong>(_rendered.Keys);
+        _viewport.RebaseSceneObjectTransforms(keys, delta);
+    }
+
+    /// <summary>
     /// Remove all streamed objects from the viewport and cancel all builds.
     /// Called on sim change.
     /// </summary>
@@ -384,9 +522,9 @@ internal sealed class SceneObjectStreamer : IDisposable
         _rendered.Clear();
         _textureLodLevel.Clear();
         _childrenByParent.Clear();
-        _neighborSimIndex.Clear();
-        _simByIndex.Clear();
-        Interlocked.Exchange(ref _nextNeighborIndex, 0);
+        _neighborIndex.Clear();
+        _reconcileAttempts.Clear();
+        _reconcileReported.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _fetchScheduler.Clear();
 
@@ -404,42 +542,33 @@ internal sealed class SceneObjectStreamer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _viewport.SceneObjectUploadFailed -= OnSceneObjectUploadFailed;
         _debounceTimer.Dispose();
         _textureLodTimer.Dispose();
+        _reconcileTimer.Dispose();
         _fetchScheduler.Dispose();
         foreach (var attempt in _inflight.Values) { attempt.Cts.Cancel(); attempt.Cts.Dispose(); }
         _inflight.Clear();
     }
 
     // ── Sim index helpers ─────────────────────────────────────────────────────────
+    // Thin delegations to the shared SceneNeighborSimIndex -- kept as members here so every
+    // existing call site in this file is unchanged. currentSim parameters are accepted but
+    // unused: they were needed when index 0 meant "whatever is current" (see
+    // SceneNeighborSimIndex's header comment for why that broke region crossings); indices are
+    // now permanent per-simulator and don't depend on which one is current.
 
-    // Returns 0 for the current sim, 1-N for neighbor sims (stable per handle).
-    private uint GetSimIndex(Simulator sim, Simulator? currentSim)
-    {
-        if (currentSim == null || sim == currentSim) return 0u;
-        var handle = sim.Handle;
-        if (_neighborSimIndex.TryGetValue(handle, out uint existing))
-        {
-            _simByIndex[existing] = sim;
-            return existing;
-        }
-        uint newIdx = (uint)Interlocked.Increment(ref _nextNeighborIndex);
-        uint idx    = _neighborSimIndex.GetOrAdd(handle, newIdx);
-        _simByIndex[idx] = sim;
-        return idx;
-    }
+    private uint GetSimIndex(Simulator sim, Simulator? currentSim = null)
+        => _neighborIndex.GetSimIndex(sim);
 
-    private ulong MakeSceneKey(Simulator sim, uint localId, Simulator? currentSim)
-        => ((ulong)GetSimIndex(sim, currentSim) << 32) | localId;
+    private ulong MakeSceneKey(Simulator sim, uint localId, Simulator? currentSim = null)
+        => _neighborIndex.MakeSceneKey(sim, localId);
 
     private Simulator? SimForSceneKey(ulong key)
-    {
-        uint simIndex = (uint)(key >> 32);
-        if (simIndex == 0) return _client.Network.CurrentSim;
-        return _simByIndex.TryGetValue(simIndex, out var s) ? s : null;
-    }
+        => _neighborIndex.SimForSceneKey(key);
 
-    private static uint LocalIdForSceneKey(ulong key) => (uint)(key & 0xFFFF_FFFF);
+    private static uint LocalIdForSceneKey(ulong key)
+        => SceneNeighborSimIndex.LocalIdForSceneKey(key);
 
     // ── Region offset helpers ─────────────────────────────────────────────────────
 
@@ -720,12 +849,37 @@ internal sealed class SceneObjectStreamer : IDisposable
             var prims = CollectLinkset(sim, rootLocalId);
             if (prims == null || prims.Count == 0)
             {
+                // Previously silent: a root local ID that vanished from sim.ObjectsPrimitives
+                // between being dirtied and this build actually running (object left the scene,
+                // or -- the case worth knowing about -- the root simply never arrived at all)
+                // looked identical in the log to a build that never happened. Logged so a
+                // "this object never renders" report can be told apart from "this object was
+                // never even attempted".
+                Logger.Log(
+                    $"SceneObjectStreamer: BuildObjectAsync found no linkset for sceneKey {sceneKey:x} " +
+                    $"(rootLocalId={rootLocalId}), removing", LogLevel.Debug);
                 _viewport.RemoveSceneObject(sceneKey);
                 return;
             }
 
             var rootPrimForLod = prims.Find(p => p.LocalID == rootLocalId) ?? prims[0];
-            float dist    = OmVector3.Distance(rootPrimForLod.Position, _client.Self.SimPosition);
+            // World-space position (sim-local + region offset for neighbor sims) computed
+            // up-front so dist below is in the SAME frame as the avatar's own position. This
+            // used to compute Distance(rootPrimForLod.Position, Self.SimPosition) directly --
+            // the prim's position is local to ITS OWN sim, while Self.SimPosition is local to
+            // the CURRENT sim, so for any object in a NEIGHBOR sim that silently computed a
+            // distance off by roughly one region size (~256m), which fed directly into
+            // LodForDistance/TextureLodLevelForDistance below: every neighbor-sim object was
+            // built at DetailLevel.Low regardless of true visual proximity, no matter how close
+            // the avatar actually stood to it.
+            var regionOff = RegionOffset(sim, _client.Network.CurrentSim);
+            var worldPos  = new Vector3(
+                rootPrimForLod.Position.X + regionOff.X,
+                rootPrimForLod.Position.Y + regionOff.Y,
+                rootPrimForLod.Position.Z);
+            var avatarWorldPos = new Vector3(
+                _client.Self.SimPosition.X, _client.Self.SimPosition.Y, _client.Self.SimPosition.Z);
+            float dist    = Vector3.Distance(worldPos, avatarWorldPos);
             var   lod     = LodForDistance(dist);
             int   texLod  = TextureLodLevelForDistance(dist);
 
@@ -766,13 +920,9 @@ internal sealed class SceneObjectStreamer : IDisposable
 
             if (token.IsCancellationRequested) return;
 
-            // Apply world-space translation: sim-local position + region offset for neighbor sims.
-            var rootPrim   = rootPrimForLod;
-            var regionOff  = RegionOffset(sim, _client.Network.CurrentSim);
-            var worldPos   = new Vector3(
-                rootPrim.Position.X + regionOff.X,
-                rootPrim.Position.Y + regionOff.Y,
-                rootPrim.Position.Z);
+            // worldPos was already computed above (region-offset-corrected), reused here for the
+            // actual face translation -- no need to recompute it.
+            var rootPrim = rootPrimForLod;
 
             if (worldPos != Vector3.Zero)
             {
@@ -810,7 +960,27 @@ internal sealed class SceneObjectStreamer : IDisposable
                 };
             }
 
+            // Re-check immediately before the write -- everything above (world-space translation,
+            // per-face transform) is synchronous CPU work with no await, so this is the last point
+            // cancellation can be observed before the build lands as "committed". Narrows the
+            // TOCTOU window between the check above and the actual submission from "one full
+            // recompute" down to nothing (mirrors SceneAvatarStreamer's identical fix).
+            if (token.IsCancellationRequested) return;
+
             _viewport.SubmitSceneObject(sceneKey, submission);
+            // Gated by distance rather than size (a single-prim mesh house can be prims=1,
+            // faces<=8 -- a size gate misses exactly that shape) so a successful nearby build
+            // still produces log output: previously a successful build was completely silent,
+            // making "never built" and "built fine, silently" indistinguishable from the log
+            // alone -- see BuildObjectAsync's own CollectLinkset-empty branch for the other half
+            // of this same gap.
+            if (dist < 30f)
+            {
+                Logger.Log(
+                    $"SceneObjectStreamer: built sceneKey {sceneKey:x} (rootLocalId={rootLocalId}, " +
+                    $"prims={prims.Count}, faces={submission.Faces.Length}, dist={dist:F1}m, worldPos={worldPos})",
+                    LogLevel.Debug);
+            }
             _rendered[sceneKey] = 0;
             // Seeds the epsilon-gate baseline here too (not just for later rebuilds) so the very
             // first terse update after initial OnObjectUpdate doesn't immediately re-trigger a
@@ -826,9 +996,12 @@ internal sealed class SceneObjectStreamer : IDisposable
             ObjectBuilt?.Invoke(rootLocalId, submission);
         }
         catch (OperationCanceledException) { }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Swallow per-object failures — the scene viewer continues working.
+            // Swallow per-object failures — the scene viewer continues working. Logged (not
+            // silent) so a stuck-invisible large object is diagnosable instead of indistinguishable
+            // from one that's simply out of range or hasn't been dirtied yet.
+            Logger.Log($"SceneObjectStreamer: build failed for sceneKey {sceneKey:x}: {ex.Message}", LogLevel.Warning);
         }
         finally
         {
@@ -907,6 +1080,130 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Scans every tracked simulator (current AND neighbors -- neighbor prims never fire
+    /// <c>ObjectUpdate</c> events on their own, only <c>SceneViewerViewModel.SeedNeighborSims</c>'s
+    /// one-time pass at panel-open feeds them in) for root prims that are sitting in
+    /// <c>Simulator.ObjectsPrimitives</c> and within stream radius, but that this streamer has no
+    /// record of at all (not rendered, not dirty, not mid-build).
+    /// <para>
+    /// Exists because every path that gets an object INTO this streamer's pipeline is event-
+    /// driven (<see cref="OnObjectUpdate"/>/<see cref="OnTerseObjectUpdate"/>, plus the one-time
+    /// seed passes at panel open) -- there is no periodic fallback that cross-checks against what
+    /// LibreMetaverse's own object cache actually holds. A root prim that reaches
+    /// <c>ObjectsPrimitives</c> through a path that never raises the public <c>ObjectUpdate</c>
+    /// event (the concrete suspect: <c>ObjectManager.ObjectUpdateCachedHandler</c> skips
+    /// re-requesting an object whose local disk cache CRC already matches -- plausible for a
+    /// large, unchanging building on a return visit to an already-cached parcel) is invisible to
+    /// this streamer forever, with no error anywhere, regardless of how long the session runs or
+    /// how close the avatar stands to it. This sweep is a lower-frequency, self-healing catch-all
+    /// for that entire class of gap: it doesn't matter WHY the streamer never learned about an
+    /// object, only that <c>ObjectsPrimitives</c> now disagrees with what this streamer thinks
+    /// exists.
+    /// </para>
+    /// <para>
+    /// Deliberately does not distinguish "genuinely new to me" from "I dropped this and haven't
+    /// retried yet" -- both look identical (absent from <see cref="_rendered"/>/<see cref="_dirty"/>/
+    /// live <see cref="_inflight"/>) and both are legitimately recoverable the same way.
+    /// <see cref="_reconcileAttempts"/> bounds the retry rate per key regardless of which case it is.
+    /// </para>
+    /// </summary>
+    private void ReconcileUntrackedPrims()
+    {
+        if (_disposed) return;
+        var currentSim = _client.Network.CurrentSim;
+        if (currentSim == null) return;
+        var avatarPos = _client.Self.SimPosition;
+
+        Simulator[] sims;
+        lock (_client.Network.Simulators)
+            sims = _client.Network.Simulators.ToArray();
+
+        var now = Environment.TickCount64;
+
+        foreach (var sim in sims)
+        {
+            // MakeSceneKey (via SceneNeighborSimIndex.GetSimIndex) assigns a NEW PERMANENT sim
+            // index on first use for whichever sim it's called with -- a read-only diagnostic
+            // scan must not be what first registers a sim this streamer has never actually
+            // streamed from. Restrict to sims already tracked; an untracked sim has nothing
+            // recoverable yet regardless (the normal streaming path registers it within one
+            // real ObjectUpdate, well inside this sweep's own 10 s cadence).
+            if (!_neighborIndex.IsTracked(sim.Handle)) continue;
+
+            var objs = sim.ObjectsPrimitives;
+            if (objs == null) continue;
+
+            foreach (var root in objs.Values)
+            {
+                if (root.ParentID != 0) continue; // roots only -- CollectLinkset pulls children in
+
+                // A root whose position has never been filled in (still the zero placeholder)
+                // is itself exactly the kind of "reached ObjectsPrimitives without a full
+                // update" case this sweep exists to catch -- confirmed live 2026-08-25: several
+                // large buildings straddling a region border sat in this exact state (root
+                // tracked in the NEIGHBOR sim, Position never populated) while classic Radegast,
+                // using the same LibreMetaverse ObjectManager, rendered them fine -- meaning the
+                // data genuinely becomes available given the right trigger, this streamer's
+                // purely event-driven pipeline just never receives it. There's no real position
+                // to enqueue a build against yet, so instead of waiting for an event that may
+                // never come, actively re-request the object -- the same request
+                // AlwaysRequestObjects would have issued had ObjectUpdateCachedHandler's CRC
+                // check not decided this object didn't need one. A genuine ObjectUpdate response
+                // fills in Position for real and fires the public event this streamer's own
+                // OnObjectUpdate reacts to normally, so no further special-casing is needed once
+                // that lands. Reuses _reconcileAttempts as the same 60 s per-key cooldown so a
+                // still-stuck prim isn't re-requested every single 10 s sweep.
+                if (root.Position == OmVector3.Zero)
+                {
+                    var zeroKey = MakeSceneKey(sim, root.LocalID, currentSim);
+                    if (_reconcileAttempts.TryGetValue(zeroKey, out var lastZeroAttempt) &&
+                        now - lastZeroAttempt < ReconcileRetryCooldownMs)
+                        continue;
+                    _reconcileAttempts[zeroKey] = now;
+
+                    if (_reconcileReported.TryAdd(zeroKey, 0))
+                        Logger.Log(
+                            $"SceneObjectStreamer: reconcile sweep found root prim {root.LocalID} " +
+                            $"in sim {sim.Name} with Position==Zero (never fully updated); re-requesting",
+                            LogLevel.Warning);
+                    _client.Objects.RequestObject(sim, root.LocalID);
+                    continue;
+                }
+
+                var sceneKey = MakeSceneKey(sim, root.LocalID, currentSim);
+
+                // Already known to this streamer in some form -- nothing to recover.
+                if (_rendered.ContainsKey(sceneKey)) continue;
+                if (_dirty.ContainsKey(sceneKey)) continue;
+                if (_inflight.TryGetValue(sceneKey, out var attempt) && !attempt.Completed) continue;
+
+                if (_reconcileAttempts.TryGetValue(sceneKey, out var lastAttempt) &&
+                    now - lastAttempt < ReconcileRetryCooldownMs)
+                    continue;
+
+                var worldPos = ApplyRegionOffset(
+                    new Vector3(root.Position.X, root.Position.Y, root.Position.Z), sim, currentSim);
+                if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius)) continue;
+
+                _reconcileAttempts[sceneKey] = now;
+                if (_reconcileReported.TryAdd(sceneKey, 0))
+                {
+                    var dx = worldPos.X - avatarPos.X;
+                    var dy = worldPos.Y - avatarPos.Y;
+                    var dz = worldPos.Z - avatarPos.Z;
+                    Logger.Log(
+                        $"SceneObjectStreamer: reconcile sweep recovered untracked root prim " +
+                        $"{root.LocalID} (scale={root.Scale}) at dist=" +
+                        $"{MathF.Sqrt(dx * dx + dy * dy + dz * dz):F1}m, worldPos={worldPos} -- " +
+                        $"was never dirtied/built/rendered by any event path",
+                        LogLevel.Warning);
+                }
+                EnqueueDirty(sceneKey);
+            }
+        }
+    }
+
     private List<Primitive>? CollectLinkset(Simulator sim, uint rootLocalId)
     {
         var objs = sim.ObjectsPrimitives;
@@ -938,14 +1235,38 @@ internal sealed class SceneObjectStreamer : IDisposable
     }
 
     private Vector3 GetRootWorldPosition(Simulator sim, uint rootId, Primitive prim)
+        => GetRootWorldPosition(sim, rootId, prim, out _);
+
+    /// <summary>
+    /// Resolves the root's world position, and reports via <paramref name="trustworthy"/>
+    /// whether that position is actually the root's (as opposed to the fallback below).
+    /// <para>
+    /// The fallback returns <paramref name="prim"/>'s own <c>Position</c> when the root hasn't
+    /// arrived in <c>sim.ObjectsPrimitives</c> yet (or reports <see cref="OmVector3.Zero"/>,
+    /// which the sim uses as a not-yet-known placeholder). For a CHILD prim that value is a
+    /// parent-relative offset, not a world position -- often just a few metres from the
+    /// origin. Callers that gate culling on this must not treat that as "confirmed far away":
+    /// doing so is what let an ordinary root-arrives-after-children race incorrectly cancel a
+    /// whole linkset's in-flight build (large multi-prim linksets stream the most children and
+    /// are the most likely to hit this window).
+    /// </para>
+    /// </summary>
+    private Vector3 GetRootWorldPosition(Simulator sim, uint rootId, Primitive prim, out bool trustworthy)
     {
         if (prim.ParentID == 0)
+        {
+            trustworthy = true;
             return new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
+        }
 
         var objs = sim.ObjectsPrimitives;
         if (objs != null && objs.TryGetValue(rootId, out var root) && root.Position != OmVector3.Zero)
+        {
+            trustworthy = true;
             return new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
+        }
 
+        trustworthy = false;
         return new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
     }
 

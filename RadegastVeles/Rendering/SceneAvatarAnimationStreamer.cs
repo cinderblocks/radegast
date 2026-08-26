@@ -96,21 +96,35 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
     /// </summary>
     public void SetFlexiAnimator(uint localId, FlexiPrimAnimator? flexi)
     {
-        if (_animators.TryGetValue(localId, out var anim))
+        if (flexi == null)
         {
-            anim.SetFlexiAnimator(flexi);
+            // Detach/clear is NOT part of the AvatarBuilt race handled below -- RemoveAnimator
+            // calls this whenever a flexi's own linkset goes away (e.g. an attachment being
+            // detached) independent of any avatar rebuild, so it's safe (and necessary) to apply
+            // directly to whatever animator is currently live, plus drop any not-yet-consumed
+            // pending entry so a build that's still in flight doesn't attach a since-removed
+            // flexi animator when it completes.
+            if (_animators.TryGetValue(localId, out var anim))
+                anim.SetFlexiAnimator(null);
             _pendingFlexi.TryRemove(localId, out _);
             return;
         }
 
-        // Animator not built yet (event-order race with SceneFlexiStreamer).
-        // Stash so OnAvatarBuilt can attach it immediately on creation.
-        if (flexi != null)
-        {
-            _pendingFlexi[localId] = flexi;
-        }
-        else
-            _pendingFlexi.TryRemove(localId, out _);
+        // Attach: this method's only non-null caller (SceneFlexiStreamer.OnAvatarBuilt) always
+        // fires as a same-event race against THIS class's own OnAvatarBuilt handler for the
+        // identical AvatarBuilt event (SceneFlexiStreamer subscribes first, so its handler runs
+        // first -- see that class's own comment). On the very first build no _animators entry
+        // exists yet, so attaching directly here used to be harmless. But on every SUBSEQUENT
+        // rebuild, _animators[localId] still holds the OLD animator at the moment this runs --
+        // OnAvatarBuilt below hasn't replaced it yet for THIS build cycle. Attaching directly to
+        // it meant the freshly-built flexi animator got attached to an instance that was disposed
+        // moments later (OnAvatarBuilt's RemoveAnimator call), and the brand-new animator
+        // replacing it never received a flexi animator at all -- confirmed via
+        // [FlexiAvatarBuilt]/[FlexiAnimatorAttach] logging: FlexiPrims.Length stayed non-zero on
+        // every rebuild while hadPending went false starting with the second one. Always
+        // stashing here removes the race entirely: OnAvatarBuilt unconditionally consumes
+        // _pendingFlexi itself, after the new animator already exists.
+        _pendingFlexi[localId] = flexi;
     }
 
     /// <summary>Stop all animators and clear state (sim change / viewer close).</summary>
@@ -174,7 +188,16 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         uint localId = 0;
         if (e.AvatarID == _client.Self.AgentID)
         {
-            localId = _client.Self.LocalID;
+            // Self's animator is keyed by SceneAvatarStreamer.SelfSceneId, not the raw protocol
+            // LocalID -- OnAvatarBuilt's localId parameter (used to populate _animators at line
+            // 151) already carries that translation, since it comes straight from
+            // SceneAvatarStreamer.AvatarBuilt's own invocation. Using the raw LocalID here meant
+            // this lookup always missed for self: UpdateAnimations was never called, so self's
+            // animator never learned which animation was active and stayed in bind pose
+            // permanently, regardless of region crossings or attachments -- the actual root cause
+            // behind the T-pose reports this session, not the build/dispatch path those reports
+            // were chased through.
+            localId = SceneAvatarStreamer.SelfSceneId;
         }
         else
         {

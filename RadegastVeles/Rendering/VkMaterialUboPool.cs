@@ -51,6 +51,13 @@ internal sealed unsafe class VkMaterialUboPool : IDisposable
     public ulong Stride { get; }
     public Buffer Buffer => _buffer;
 
+    /// <summary>Free slots remaining. Diagnostic: if this stays near 0 while the scene's own
+    /// live face count is well under <see cref="Capacity"/>, slots are being rented and never
+    /// returned somewhere (a leak), not genuinely exhausted by live content -- see
+    /// <c>VkMaterialDescriptorSet</c>'s constructor try/catch for the one leak path this class
+    /// has already been bitten by.</summary>
+    public int FreeSlots => _freeSlots.Count;
+
     private readonly VkContext _vk;
     private readonly DeviceMemory _memory;
     private readonly Buffer _buffer;

@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using Radegast.Veles.Core;
 
 namespace Radegast.Veles.Rendering;
 
@@ -212,7 +213,21 @@ internal sealed class SceneBuildScheduler : IDisposable
     {
         try
         {
-            await factory(CancellationToken.None).ConfigureAwait(false);
+            // Global ceiling shared across every otherwise-independent CPU-bound gate in the
+            // asset/scene pipeline (see GlobalWorkBudget's own header comment for why) -- awaited
+            // here, inside the already-backgrounded Task.Run, so a saturated global budget queues
+            // this work item rather than blocking whatever thread called Enqueue/TryDrain. Held
+            // for the duration of the actual work only, same scope as this scheduler's own
+            // _concurrencySlots.
+            await GlobalWorkBudget.Gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await factory(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                GlobalWorkBudget.Gate.Release();
+            }
         }
         catch { /* each factory is responsible for its own error handling */ }
         finally

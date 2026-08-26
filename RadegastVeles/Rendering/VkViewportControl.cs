@@ -50,6 +50,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// for the subscribe-before-fire race check).</summary>
     public event Action? SceneReset;
 
+    /// <summary>See <see cref="ISceneViewport.SceneObjectUploadFailed"/>. Raised synchronously
+    /// on the render thread from <see cref="UploadSceneObjectNoRebuild"/>'s failure path --
+    /// subscribers must not block or touch UI-thread-only state directly.</summary>
+    public event Action<ulong>? SceneObjectUploadFailed;
+
     public static readonly StyledProperty<bool> WireframeProperty =
         AvaloniaProperty.Register<VkViewportControl, bool>(nameof(Wireframe));
 
@@ -270,6 +275,37 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="SsaoEnabled"/> is true, since the G-buffer pre-pass re-renders every opaque
     /// face a second time.</summary>
     public int SsaoMaxOpaqueFaces { get; set; } = 1500;
+
+    // ── Underwater post-process ─────────────────────────────────────────────────────────────
+    // Same best-effort init posture as SSAO above: a creation failure leaves _underwaterReady
+    // false and RenderFrame's `underwater` gate simply never fires the pass, rather than taking
+    // the whole panel down. The render pass targets the swapchain image directly (LoadOp=Load,
+    // see VkRenderPass.CreateUnderwaterPass's own doc comment) -- unlike SSAO/G-buffer, there is
+    // no separate persistent color target for this pass's OUTPUT, only for its INPUT
+    // (_underwaterSourceImage below, a copy of the swapchain image taken immediately before this
+    // pass runs, since Vulkan can't sample and write the same image in one pass).
+    private RenderPass _underwaterPass;
+    private VkUnderwaterPipeline? _underwaterPipeline;
+    private VkUnderwaterDescriptorSet? _underwaterDescSet;
+    private bool _underwaterReady;
+    private float _underwaterTime;
+    private long _underwaterLastTick;
+    private PixelSize _underwaterTargetSize;
+    private Image _underwaterSourceImage;
+    private DeviceMemory _underwaterSourceMemory;
+    private ImageView _underwaterSourceView;
+    // Tracked across frames so RenderUnderwaterPass's barriers always name the image's REAL
+    // current layout/access as their source, the same discipline VkInteropImage.TransitionLayout
+    // provides for the swapchain image itself -- this image has no such built-in wrapper (it's a
+    // plain Image, not a VkInteropImage), so the tracking is hand-rolled here instead.
+    private ImageLayout _underwaterSourceLayout = ImageLayout.Undefined;
+    private AccessFlags _underwaterSourceAccess = AccessFlags.None;
+    // Dedicated, not reused from _ssaoLinearSampler: that sampler's lifetime is owned by SSAO's
+    // own (independent) best-effort init block, so it could be a null handle here even when
+    // underwater init otherwise succeeds -- a WriteDescriptorSet with a null Sampler handle is
+    // invalid Vulkan usage. Same rationale as _ssaoNearestSampler/_ssaoLinearSampler each being
+    // dedicated rather than reused from VkPlaceholderTextures.
+    private Sampler _underwaterLinearSampler;
 
     // ── Directional shadows ─────────────────────────────────────────────────────────────────
     // Point-light shadows explicitly OUT of scope -- point-light illumination itself was never
@@ -539,6 +575,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // _sceneObjectTransformOverrides/_pendingTransformOverrides pair exactly.
     private readonly ConcurrentDictionary<ulong, Matrix4x4> _sceneObjectTransformOverrides = new();
     private readonly ConcurrentQueue<(ulong RootId, Matrix4x4 Transform)> _pendingTransformOverrides = new();
+    // Queued by RebaseSceneObjectTransforms (lightweight region-crossing path); drained alongside
+    // _pendingTransformOverrides. Composed onto each face's EXISTING Transform rather than
+    // replacing it (unlike _pendingTransformOverrides), since the caller only knows the world-
+    // space delta to apply, not each object's current baked transform.
+    private readonly ConcurrentQueue<(ulong SceneKey, Vector3 Delta)> _pendingSceneRebases = new();
 
     // AvatarViewer: faces in submission-array-POSITION order (NOT PrimRenderFace.
     // FaceIndex, which is caller-assigned and not guaranteed to match array position -- confirmed
@@ -578,6 +619,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // indexing as _pendingSceneVertexUpdates immediately above, drained against the same
     // _sceneObjects list.
     private readonly ConcurrentQueue<(uint RootId, int FaceOffset, Matrix4x4 Transform)> _pendingSceneFaceTransformUpdates = new();
+    // ScheduleSceneFaceColorUpdate's queue -- see that method's own doc comment (ISceneViewport)
+    // for why this is addressed by (PrimLocalId, LocalFaceIndex) and resolved via a render-thread
+    // scan, unlike the FaceOffset-addressed queues immediately above/below.
+    private readonly ConcurrentQueue<(uint RootId, uint PrimLocalId, int LocalFaceIndex, Vector4 Color)> _pendingSceneFaceColorUpdates = new();
     // SubmitAvatarFront sets this, then
     // ApplyPendingSubmission (render thread) consumes it and calls Camera3D.FrameBoundsAvatarFront
     // instead of the plain bounds-refresh-only behavior a normal Submit() gets.
@@ -1329,6 +1374,20 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
+    /// <summary>See <see cref="ISceneViewport.ScheduleSceneFaceColorUpdate"/> for the full
+    /// rationale. Shares <see cref="_pendingSceneFaceTransformUpdates"/>'s coalesced-RequestRender
+    /// flag -- both are drained together in the same per-frame pass, so there is no benefit to a
+    /// second flag.</summary>
+    public void ScheduleSceneFaceColorUpdate(uint rootId, uint primLocalId, int localFaceIndex, Vector4 color)
+    {
+        _pendingSceneFaceColorUpdates.Enqueue((rootId, primLocalId, localFaceIndex, color));
+        if (!_faceTransformRenderRequested)
+        {
+            _faceTransformRenderRequested = true;
+            RequestRender();
+        }
+    }
+
     /// <summary>
     /// SceneViewer streaming substrate: queue an additive scene-object
     /// submission for the given scene key. Replaces any previously queued submission for the
@@ -1371,6 +1430,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     public void SetSceneObjectTransform(ulong sceneKey, Matrix4x4 transform)
     {
         _pendingTransformOverrides.Enqueue((sceneKey, transform));
+        RequestRender();
+    }
+
+    /// <inheritdoc cref="ISceneViewport.RebaseSceneObjectTransforms"/>
+    public void RebaseSceneObjectTransforms(IReadOnlyCollection<ulong> sceneKeys, Vector3 delta)
+    {
+        if (delta == Vector3.Zero) return;
+        foreach (var key in sceneKeys)
+            _pendingSceneRebases.Enqueue((key, delta));
         RequestRender();
     }
 
@@ -1654,6 +1722,57 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _waterDudvTex?.Dispose(); _waterDudvTex = null;
                 _waterReady = false;
                 _waterReflReady = false;
+            }
+
+            // Underwater post-process pass. Best-effort, same posture as the blocks above.
+            // Depends on water having initialized successfully (reuses _waterNormalTex/
+            // _waterDudvTex for its distortion/caustic samples -- see underwater.frag), so this
+            // must run after the water block above and is itself gated on _waterReady: without
+            // real water textures, there's no water surface to be "under" in the first place.
+            // The source-copy target (_underwaterSourceImage) is created lazily per-size in
+            // RenderFrame via EnsureUnderwaterTarget, mirroring the SSAO targets' own lazy
+            // pattern -- only the size-independent pipeline/render-pass/descriptor-set objects
+            // are created here.
+            if (_waterReady)
+            {
+                try
+                {
+                    _underwaterPass = VkRenderPass.CreateUnderwaterPass(vk, Format.R8G8B8A8Unorm);
+                    _underwaterPipeline = VkUnderwaterPipeline.Create(vk, _underwaterPass);
+                    var underwaterSamplerInfo = new SamplerCreateInfo
+                    {
+                        SType = StructureType.SamplerCreateInfo,
+                        MagFilter = Filter.Linear,
+                        MinFilter = Filter.Linear,
+                        MipmapMode = SamplerMipmapMode.Linear,
+                        AddressModeU = SamplerAddressMode.ClampToEdge,
+                        AddressModeV = SamplerAddressMode.ClampToEdge,
+                        AddressModeW = SamplerAddressMode.ClampToEdge,
+                        MinLod = 0,
+                        MaxLod = 0
+                    };
+                    unsafe
+                    {
+                        vk.Api.CreateSampler(vk.Device, in underwaterSamplerInfo, null, out _underwaterLinearSampler).ThrowOnError();
+                    }
+                    _underwaterDescSet = new VkUnderwaterDescriptorSet(vk, _underwaterPipeline,
+                        _waterNormalTex!.DescriptorImageInfo, _waterDudvTex!.DescriptorImageInfo);
+                    _underwaterReady = true;
+                }
+                catch (Exception underwaterInitEx)
+                {
+                    LibreMetaverse.Logger.Warn(
+                        $"[VkViewportControl] Underwater post-process init failed, disabled for this panel: {underwaterInitEx}");
+                    _underwaterDescSet?.Dispose(); _underwaterDescSet = null;
+                    unsafe
+                    {
+                        if (_underwaterLinearSampler.Handle != 0) { vk.Api.DestroySampler(vk.Device, _underwaterLinearSampler, null); _underwaterLinearSampler = default; }
+                        if (_underwaterPass.Handle != 0) { vk.Api.DestroyRenderPass(vk.Device, _underwaterPass, null); }
+                    }
+                    _underwaterPipeline?.Dispose(); _underwaterPipeline = null;
+                    _underwaterPass = default;
+                    _underwaterReady = false;
+                }
             }
 
             // Best-effort: a compute-pipeline-creation failure (e.g. no
@@ -2025,10 +2144,19 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     break;
                 if (!_pendingSceneObjects.TryRemove(key, out var sub)) continue;
                 if (sub == null)
+                {
                     RemoveSceneObjectGpuNoRebuild(key);
-                else
-                    UploadSceneObjectNoRebuild(vk, key, sub);
-                sceneListDirty = true;
+                    sceneListDirty = true;
+                }
+                // A cooldown-parked re-add (see UploadSceneObjectNoRebuild's own comment) puts
+                // `key` back into _pendingSceneObjects, but .Keys above is a fixed snapshot taken
+                // before this loop started, so it is not revisited this frame -- no risk of a
+                // same-frame infinite loop. Only mark the flat draw lists dirty when something
+                // actually changed (return true), not on a no-op park.
+                else if (UploadSceneObjectNoRebuild(vk, key, sub))
+                {
+                    sceneListDirty = true;
+                }
                 uploadsThisFrame++;
             }
         }
@@ -2282,11 +2410,47 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // relieve. Cleared wholesale in FreeSceneObjectResources.
     private readonly Dictionary<ulong, VkMesh> _sharedMeshPool = new();
 
-    private void UploadSceneObjectNoRebuild(VkContext vk, ulong rootId, PrimRenderSubmission sub)
+    /// <summary>Returns true if this object actually landed in <see cref="_sceneObjects"/> (a
+    /// real change the caller must fold into <see cref="RebuildSceneFlatLists"/>), false if the
+    /// submission was parked for a later retry (cooldown) or dropped (genuine failure -- see
+    /// <see cref="SceneObjectUploadFailed"/>).</summary>
+    private bool UploadSceneObjectNoRebuild(VkContext vk, ulong rootId, PrimRenderSubmission sub)
     {
         if (_recentSceneUploadFailures.TryGetValue(rootId, out var failedAt)
             && Environment.TickCount64 - failedAt < SceneUploadFailureCooldownMs)
-            return;
+        {
+            // Re-park rather than drop outright: this submission didn't fail, a PRIOR one for
+            // this key did, and we're just still inside that failure's cooldown window. Simply
+            // returning here (the original behavior) discarded the submission with no record of
+            // it anywhere -- SceneObjectStreamer had already marked the key as rendered when it
+            // called SubmitSceneObject, so nothing would ever resubmit it, and the object stayed
+            // invisible forever the instant a rebuild happened to race the cooldown window.
+            // Re-parking costs nothing (no GPU work, no re-tessellation) and DrainPendingSceneObjects
+            // naturally retries it every subsequent frame until the window clears.
+            _pendingSceneObjects[rootId] = sub;
+            return false;
+        }
+
+        // Diagnostic for the ghost-avatar/scene-key-collision class of bug. A key that already
+        // holds a committed object being overwritten is routine (rebuild-in-place always reuses
+        // the same key) -- only log when the identity actually changed (different PrimLocalId or
+        // terrain-ness), which is the signature an unrelated object/avatar landed on a key it
+        // shouldn't have. Turns an unreproducible field report into "which key got overwritten by
+        // what, and when" if this recurs -- see SceneNeighborSimIndex's own header comment on why
+        // sceneKey's upper 32 bits (sim index) should make a genuine collision unlikely.
+        if (_sceneObjects.TryGetValue(rootId, out var existingFaces) && existingFaces.Count > 0
+            && sub.Faces.Length > 0)
+        {
+            var (_, _, existingFace) = existingFaces[0];
+            var newFace = sub.Faces[0];
+            if (existingFace.PrimLocalId != newFace.PrimLocalId || existingFace.IsTerrain != newFace.IsTerrain)
+            {
+                LibreMetaverse.Logger.Debug(
+                    $"[VkViewportControl] SceneKey 0x{rootId:X16} identity changed on overwrite: "
+                    + $"old(IsTerrain={existingFace.IsTerrain}, PrimLocalId={existingFace.PrimLocalId}) -> "
+                    + $"new(IsTerrain={newFace.IsTerrain}, PrimLocalId={newFace.PrimLocalId}, Label=\"{sub.Label}\").");
+            }
+        }
 
         RemoveSceneObjectGpuNoRebuild(rootId);
 
@@ -2567,10 +2731,23 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // report carries the actual live counts, not just "it happened" --
             // see VkContext's own DescriptorPool sizing comment for what ceiling each number
             // corresponds to (CombinedImageSampler/5 vs. UniformBuffer, both ~1:1 with face count).
-            LibreMetaverse.Logger.Warn($"[VkViewportControl] Scene object {rootId} upload failed, dropping it "
-                + $"(live: {SceneFaceCount} faces / {_sceneObjects.Count} objects): {e.Message}");
+            // Label/requested face count included so a specific dropped object (e.g. a reported
+            // "never renders" building) can actually be identified in the log -- every other
+            // field here is scene-wide aggregate, useless for confirming whether THIS report's
+            // object was even among the drops versus failing via some earlier, unrelated path
+            // (e.g. never completing its CPU-side build at all, so it never reached here).
+            LibreMetaverse.Logger.Warn($"[VkViewportControl] Scene object {rootId} (\"{sub.Label}\", "
+                + $"{sub.Faces.Length} faces requested) upload failed, dropping it "
+                + $"(live: {SceneFaceCount} faces / {_sceneObjects.Count} objects, "
+                + $"pool free slots: {vk.MaterialUboPool.FreeSlots}/{vk.MaterialUboPool.Capacity}): {e.Message}");
             _recentSceneUploadFailures[rootId] = Environment.TickCount64;
-            return;
+            // Without this, the drop is permanent: the caller that queued this submission
+            // (SceneObjectStreamer.BuildObjectAsync) already recorded the object as rendered
+            // before this method ever ran (it has no other way to learn upload outcome -- see
+            // ISceneViewport.SceneObjectUploadFailed's own doc comment), so nothing re-requests
+            // a build for a stationary object that never gets another terse update.
+            SceneObjectUploadFailed?.Invoke(rootId);
+            return false;
         }
 
         _recentSceneUploadFailures.Remove(rootId);
@@ -2591,6 +2768,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
             _spatialGrid.Upsert(rootId, aabbMin, aabbMax);
         }
+        return true;
     }
 
     /// <summary>
@@ -2745,6 +2923,27 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
+    /// <summary>
+    /// Drains <see cref="_pendingSceneRebases"/>: composes a constant world-space translation
+    /// onto each listed root's EXISTING <see cref="PrimRenderFace.Transform"/> (rather than
+    /// replacing it, unlike <see cref="ApplySceneTransformOverrides"/> -- the caller only knows
+    /// the delta, not each object's current baked transform). Keys with no committed entry are
+    /// silently skipped: an object still mid-build resolves its position fresh against live
+    /// <c>CurrentSim</c> once it lands, so it never needed correction here in the first place
+    /// (see <c>SceneObjectStreamer.RebaseAllForRegionPromotion</c>'s own doc comment). Includes
+    /// the spatial-grid upsert, same as <see cref="ApplySceneTransformOverrides"/>.
+    /// </summary>
+    private void ApplySceneRebases()
+    {
+        while (_pendingSceneRebases.TryDequeue(out var r))
+        {
+            if (!_sceneObjects.TryGetValue(r.SceneKey, out var faces) || faces.Count == 0) continue;
+            ApplyTranslationToFaces(faces, r.Delta);
+            var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+            _spatialGrid.Upsert(r.SceneKey, aabbMin, aabbMax);
+        }
+    }
+
     private static void ApplyTransformToFaces(
         List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> faces, Matrix4x4 transform)
     {
@@ -2752,6 +2951,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             if (entry.Face.IsFlexi) continue; // never stomp flexi, matches GL exactly
             entry.Face.Transform = transform;
+        }
+    }
+
+    // Composes (post-multiplies, translation outermost -- matches PrimRenderFace.
+    // WithWorldTranslation's convention) rather than replacing, unlike ApplyTransformToFaces:
+    // the caller only supplies a delta, so the existing local rotation/scale/world-position baked
+    // into Transform must be preserved, not overwritten.
+    private static void ApplyTranslationToFaces(
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> faces, Vector3 delta)
+    {
+        var translate = Matrix4x4.CreateTranslation(delta);
+        foreach (var entry in faces)
+        {
+            if (entry.Face.IsFlexi) continue; // never stomp flexi, matches ApplyTransformToFaces
+            entry.Face.Transform *= translate;
         }
     }
 
@@ -3089,8 +3303,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 catch (Exception ex)
                 {
                     // Falls through to the uncompressed path below.
+                    // RootLocalId/FaceIndex/SceneKey included to distinguish "one face re-patched
+                    // every frame" (a producer-side loop bug) from "many different objects failing"
+                    // (genuine VRAM pressure) when this repeats rapidly in the log.
                     LibreMetaverse.Logger.Debug(
-                        $"[VkViewportControl] Compressed-tier VkTexture construction failed for {patch.TextureId}, falling back: {ex.Message}");
+                        $"[VkViewportControl] Compressed-tier VkTexture construction failed for {patch.TextureId} " +
+                        $"(root={patch.RootLocalId}, face={patch.FaceIndex}, slot={patch.Slot}, sceneKey={patch.SceneKey:X}), falling back: {ex.Message}");
                 }
             }
         }
@@ -3575,6 +3793,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             DrainPendingSceneObjects(vk);
             DrainSceneObjectsMs = _drainStopwatch.Elapsed.TotalMilliseconds;
             ApplySceneTransformOverrides();
+            ApplySceneRebases();
 
             // dead-reckon any scene objects currently in motion forward from their
             // last terse update. Must run after ApplySceneTransformOverrides (which lands the
@@ -3636,7 +3855,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // clear and request a render for its own (now-unqueued-until-next-drain) entry, or
             // that update could sit unrendered until some unrelated later call happens to
             // request one.
-            if (!_pendingFaceTransformUpdates.IsEmpty || !_pendingSceneFaceTransformUpdates.IsEmpty)
+            if (!_pendingFaceTransformUpdates.IsEmpty || !_pendingSceneFaceTransformUpdates.IsEmpty
+                || !_pendingSceneFaceColorUpdates.IsEmpty)
                 _faceTransformRenderRequested = false;
 
             while (_pendingFaceTransformUpdates.TryDequeue(out var xformUpd))
@@ -3674,6 +3894,26 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     && (uint)sxu.FaceOffset < (uint)scXformFaces.Count)
                 {
                     scXformFaces[sxu.FaceOffset].Face.Transform = sxu.Transform;
+                }
+            }
+
+            // ScheduleSceneFaceColorUpdate's drain -- see that method's own doc comment
+            // (ISceneViewport) for why this is a linear scan by (PrimLocalId, FaceIndex) rather
+            // than the FaceOffset-indexed dictionary lookup the two drains above use: the caller
+            // (SceneAvatarStreamer.OnAttachmentObjectUpdate) only knows the attachment prim's own
+            // protocol identity, not that prim's position within the avatar's combined face list.
+            // Cheap in practice -- at most a few hundred faces, on an event that fires at most a
+            // few times a second. Silently drops a stale/no-longer-live rootId or an unmatched
+            // face, same contract as every other Schedule* drain in this method.
+            while (_pendingSceneFaceColorUpdates.TryDequeue(out var scu))
+            {
+                if (_sceneObjects.TryGetValue(scu.RootId, out var scColorFaces))
+                {
+                    foreach (var entry in scColorFaces)
+                    {
+                        if (entry.Face.PrimLocalId == scu.PrimLocalId && entry.Face.FaceIndex == scu.LocalFaceIndex)
+                            entry.Face.Color = scu.Color;
+                    }
                 }
             }
             VertexUpdateDrainMs = _vertexUpdateStopwatch.Elapsed.TotalMilliseconds;
@@ -3797,9 +4037,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // this frame (reused/cached texture otherwise, same as GL's DrawWaterReflection
             // early-return).
             float waterHeightVal = WaterHeight;
-            bool doWater = _waterReady && !float.IsNaN(waterHeightVal) && _camera.EyePosition.Z >= waterHeightVal - 0.05f;
+            // No longer requires EyePosition.Z >= waterHeightVal - 0.05f: water now draws from
+            // BELOW the surface too (see water.frag's eyeBelow branch), needed for the
+            // underwater post-process pass below to have a real water surface visible from
+            // underneath, not just a color tint.
+            bool doWater = _waterReady && !float.IsNaN(waterHeightVal);
+            bool underwater = doWater && _camera.EyePosition.Z < waterHeightVal - 0.05f;
             long nowTick = Environment.TickCount64;
-            bool doWaterReflThisFrame = doWater && WaterReflectionsEnabled && _waterReflReady
+            // Reflections stay above-water only: the reflection FBO's own camera setup mirrors
+            // about the water plane assuming the real camera is above it, and nothing underwater
+            // should show a reflection of itself through the surface from below anyway.
+            bool doWaterReflThisFrame = doWater && !underwater && WaterReflectionsEnabled && _waterReflReady
                                         && (nowTick - _reflLastTick >= kReflIntervalMs);
             Matrix4x4 reflView = default, reflViewProj = default;
             int reflOpaqueCount = 0, reflSceneOpaqueCount = 0;
@@ -4130,7 +4378,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // against real terrain/objects) but before the alpha pass (transparent objects
                 // above water render in front of it).
                 if (doWater)
-                    DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal);
+                    DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater);
 
                 if (alphaCount > 0)
                 {
@@ -4156,7 +4404,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // "nothing else to draw" case. No extra descriptor-set bind needed here: DrawWater
                 // binds its own sets 0+1 through _waterPipeline.Layout unconditionally, regardless
                 // of whether the opaque block ran first.
-                DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal);
+                DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater);
             }
 
             if (Wireframe && _wireframe != null)
@@ -4169,6 +4417,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             vk.Api.CmdEndRenderPass(cmd.InternalHandle);
             _stats.WriteEndTimestamp(vk, cmd.InternalHandle);
             MainPassRecordMs = _renderStopwatch.Elapsed.TotalMilliseconds;
+
+            // Underwater post-process, recorded into this SAME command buffer immediately after
+            // the main pass ends and before submission -- see RenderUnderwaterPass's own doc
+            // comment for why (copy-out + re-entry as a color attachment, both needed because
+            // Vulkan can't sample and write the same image within one render pass).
+            if (underwater && _underwaterReady)
+                RenderUnderwaterPass(vk, cmd.InternalHandle, pixelSize, image, waterHeightVal);
 
             _renderStopwatch.Restart();
             cmd.Submit();
@@ -4571,6 +4826,85 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out view).ThrowOnError();
+    }
+
+    /// <summary>
+    /// Creates (or resizes) <see cref="_underwaterSourceImage"/>: a persistent copy target the
+    /// underwater pass copies the just-rendered swapchain image into immediately before running,
+    /// since Vulkan can't sample and write the same image within one pass. Unlike the SSAO/
+    /// G-buffer targets, this image is never a render-pass color attachment -- only a
+    /// <c>CmdCopyImage</c> destination and a sampled texture -- so it carries
+    /// <c>TransferDstBit | SampledBit</c> usage, not <c>ColorAttachmentBit</c>, and has no
+    /// framebuffer of its own. Called every frame the underwater pass actually runs (mirrors
+    /// EnsureSsaoTargets' own "only when SSAO is enabled this frame" call site), early-returning
+    /// once the size matches.
+    /// </summary>
+    private unsafe void EnsureUnderwaterTarget(VkContext vk, PixelSize size)
+    {
+        if (_underwaterTargetSize == size && _underwaterSourceView.Handle != 0) return;
+        DestroyUnderwaterTarget(vk);
+
+        var info = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type2D,
+            Format = Format.R8G8B8A8Unorm,
+            Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.SampledBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined
+        };
+        vk.Api.CreateImage(vk.Device, in info, null, out _underwaterSourceImage).ThrowOnError();
+        vk.Api.GetImageMemoryRequirements(vk.Device, _underwaterSourceImage, out var req);
+        var alloc = new MemoryAllocateInfo
+        {
+            SType = StructureType.MemoryAllocateInfo,
+            AllocationSize = req.Size,
+            MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(vk.Api, vk.PhysicalDevice, req.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+        };
+        vk.Api.AllocateMemory(vk.Device, in alloc, null, out _underwaterSourceMemory).ThrowOnError();
+        vk.Api.BindImageMemory(vk.Device, _underwaterSourceImage, _underwaterSourceMemory, 0).ThrowOnError();
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = _underwaterSourceImage,
+            ViewType = ImageViewType.Type2D,
+            Format = Format.R8G8B8A8Unorm,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
+        };
+        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _underwaterSourceView).ThrowOnError();
+
+        _underwaterTargetSize = size;
+        // Fresh image -- caller's first barrier must transition FROM Undefined/None, not a stale
+        // prior layout/access left over from the target this just destroyed.
+        _underwaterSourceLayout = ImageLayout.Undefined;
+        _underwaterSourceAccess = AccessFlags.None;
+
+        // Rewrite the underwater pass's uSceneColor binding to point at the NEW image -- only
+        // fires on (re)creation, matching VkUnderwaterDescriptorSet.UpdateSceneColorInput's own
+        // "never per-frame" contract.
+        var sceneColorInfo = new DescriptorImageInfo
+        {
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+            ImageView = _underwaterSourceView,
+            Sampler = _underwaterLinearSampler
+        };
+        _underwaterDescSet!.UpdateSceneColorInput(sceneColorInfo);
+    }
+
+    private unsafe void DestroyUnderwaterTarget(VkContext vk)
+    {
+        if (_underwaterSourceView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _underwaterSourceView, null);
+        if (_underwaterSourceImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _underwaterSourceImage, null);
+        if (_underwaterSourceMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _underwaterSourceMemory, null);
+        _underwaterSourceView = default; _underwaterSourceImage = default; _underwaterSourceMemory = default;
+        _underwaterTargetSize = default;
+        _underwaterSourceLayout = ImageLayout.Undefined;
+        _underwaterSourceAccess = AccessFlags.None;
     }
 
     private unsafe void DestroySsaoTargets(VkContext vk)
@@ -5010,7 +5344,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="VkPerFrameUbo"/> (the SECOND write, with the correct HasSsao) via
     /// <c>_frameSets.UpdatePerFrame</c> before calling this.
     /// </summary>
-    private unsafe void DrawWater(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj, float waterHeight)
+    private unsafe void DrawWater(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj, float waterHeight, bool underwater)
     {
         long now = Environment.TickCount64;
         float dt = _waterLastTick == 0 ? 0f : MathF.Min((now - _waterLastTick) / 1000f, 0.1f);
@@ -5029,13 +5363,136 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         waterUbo.WaterHeight = waterHeight;
         waterUbo.Time = _waterTime;
         waterUbo.WaterColor = WaterFogColor;
-        waterUbo.HasReflection = (_waterReflReady && WaterReflectionsEnabled) ? 1 : 0;
+        // Forced off underwater regardless of WaterReflectionsEnabled -- no reflection pass runs
+        // for an underwater frame (see doWaterReflThisFrame's own !underwater gate), so
+        // sampling uReflectionTex here would show a stale reflection from the last above-water
+        // frame rather than anything real.
+        waterUbo.HasReflection = (!underwater && _waterReflReady && WaterReflectionsEnabled) ? 1 : 0;
         _waterDescSet!.UpdateWater(waterUbo);
 
         vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _waterPipeline!.Pipeline);
         var sets = stackalloc DescriptorSet[2] { _frameSets!.FrameSet, _waterDescSet.Set };
         vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _waterPipeline.Layout, 0, 2, sets, 0, null);
         vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+    }
+
+    /// <summary>
+    /// Composites the underwater post-process effect (screen-space refraction wobble + soft
+    /// caustic highlight + depth-based fog tint, see underwater.frag) on top of the just-rendered
+    /// frame. Called from RenderFrame's main pass ONLY when <c>underwater</c> is true -- when
+    /// false this entire method, including the copy below, is skipped, so the feature costs
+    /// nothing above water.
+    /// <para>
+    /// Recorded into the SAME command buffer as the main pass, immediately after its
+    /// <c>CmdEndRenderPass</c> and before <c>cmd.Submit()</c> -- see <see cref="VkRenderPass.
+    /// CreateUnderwaterPass"/>'s own doc comment for why this needs a copy-out rather than the
+    /// subpass-dependency synchronization SSAO/blur use: this pass samples the ALREADY-COMPOSITED
+    /// swapchain image the main pass just wrote, which Vulkan cannot do within the same render
+    /// pass a color attachment is written in (no feedback-loop sampling).
+    /// </para>
+    /// <para>
+    /// The swapchain image's own layout transitions go through <see cref="VkInteropImage.
+    /// TransitionLayout"/> (same helper <see cref="VkInteropSwapchain"/> itself uses for
+    /// BeginDraw/Present), which tracks the image's current layout/access internally -- so this
+    /// method never has to guess or hardcode what layout the image is already in, only where it
+    /// needs to end up. <see cref="_underwaterSourceImage"/> has no such wrapper (it's a plain
+    /// <see cref="Image"/>), so its layout/access are tracked by hand in
+    /// <see cref="_underwaterSourceLayout"/>/<see cref="_underwaterSourceAccess"/> instead.
+    /// </para>
+    /// </summary>
+    private unsafe void RenderUnderwaterPass(VkContext vk, CommandBuffer cmd, PixelSize pixelSize,
+        VkInteropImage swapchainImage, float waterHeightVal)
+    {
+        EnsureUnderwaterTarget(vk, pixelSize);
+
+        long now = Environment.TickCount64;
+        float dt = _underwaterLastTick == 0 ? 0f : MathF.Min((now - _underwaterLastTick) / 1000f, 0.1f);
+        _underwaterLastTick = now;
+        _underwaterTime += dt;
+
+        // ── Copy the just-rendered frame out so it can be sampled as this pass's input ────────
+        swapchainImage.TransitionLayout(cmd, ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit);
+        VkMemoryHelper.TransitionLayout(vk.Api, cmd, _underwaterSourceImage,
+            _underwaterSourceLayout, _underwaterSourceAccess,
+            ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, 1);
+
+        var copyRegion = new ImageCopy
+        {
+            SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+            SrcOffset = new Offset3D(0, 0, 0),
+            DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+            DstOffset = new Offset3D(0, 0, 0),
+            Extent = new Extent3D((uint)pixelSize.Width, (uint)pixelSize.Height, 1)
+        };
+        vk.Api.CmdCopyImage(cmd, swapchainImage.InternalHandle, ImageLayout.TransferSrcOptimal,
+            _underwaterSourceImage, ImageLayout.TransferDstOptimal, 1, in copyRegion);
+
+        // ── Transition both images back to how this pass (and everything after it) needs them ─
+        VkMemoryHelper.TransitionLayout(vk.Api, cmd, _underwaterSourceImage,
+            ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit,
+            ImageLayout.ShaderReadOnlyOptimal, AccessFlags.ShaderReadBit, 1);
+        _underwaterSourceLayout = ImageLayout.ShaderReadOnlyOptimal;
+        _underwaterSourceAccess = AccessFlags.ShaderReadBit;
+
+        // Re-enter as a render target -- CreateUnderwaterPass's InitialLayout=ColorAttachmentOptimal
+        // requires this to be accurate (LoadOp=Load reads whatever's actually there).
+        swapchainImage.TransitionLayout(cmd, ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit);
+
+        // ── Draw the full-screen composite directly into the swapchain image ───────────────────
+        var attachment = new ImageView(swapchainImage.ViewHandle);
+        var fbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _underwaterPass,
+            AttachmentCount = 1,
+            PAttachments = &attachment,
+            Width = (uint)pixelSize.Width,
+            Height = (uint)pixelSize.Height,
+            Layers = 1
+        };
+        Framebuffer framebuffer = default;
+        try
+        {
+            vk.Api.CreateFramebuffer(vk.Device, in fbInfo, null, out framebuffer).ThrowOnError();
+
+            var viewport = new Viewport { X = 0, Y = 0, Width = pixelSize.Width, Height = pixelSize.Height, MinDepth = 0, MaxDepth = 1 };
+            vk.Api.CmdSetViewport(cmd, 0, 1, in viewport);
+            var scissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height) };
+            vk.Api.CmdSetScissor(cmd, 0, 1, &scissor);
+
+            var beginInfo = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                RenderPass = _underwaterPass,
+                Framebuffer = framebuffer,
+                RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
+                ClearValueCount = 0,
+                PClearValues = null
+            };
+            vk.Api.CmdBeginRenderPass(cmd, in beginInfo, SubpassContents.Inline);
+
+            vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _underwaterPipeline!.Pipeline);
+            var set = _underwaterDescSet!.Set;
+            vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _underwaterPipeline.Layout, 0, 1, &set, 0, null);
+
+            // Depth-based tint intensity: fully tinted a few metres below the surface, matching
+            // the depth falloff a real underwater "visibility" would have -- tuned by eye, not
+            // derived from any EEP parameter (SL doesn't expose an underwater visibility-distance
+            // setting).
+            float depthBelow = MathF.Max(0f, waterHeightVal - _camera.EyePosition.Z);
+            float intensity = Math.Clamp(depthBelow / 4f, 0f, 1f);
+            var waterFog = WaterFogColor;
+            var pushData = stackalloc float[5] { waterFog.X, waterFog.Y, waterFog.Z, intensity, _underwaterTime };
+            vk.Api.CmdPushConstants(cmd, _underwaterPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 20, pushData);
+
+            vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+
+            vk.Api.CmdEndRenderPass(cmd);
+        }
+        finally
+        {
+            if (framebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, framebuffer, null);
+        }
     }
 
     /// <summary>
@@ -5853,6 +6310,18 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _frameSetsRefl?.Dispose(); _frameSetsRefl = null;
         _waterDescSet?.Dispose(); _waterDescSet = null;
         _waterPipeline?.Dispose(); _waterPipeline = null;
+        // underwater post-process, disposed before water's own normal/dudv textures just below
+        // (this pass's descriptor set references them) -- descriptor-set free doesn't actually
+        // dereference the images it points to, so the order isn't load-bearing, but disposing
+        // the referencing set first keeps teardown order matching dependency order regardless.
+        unsafe { DestroyUnderwaterTarget(vk); }
+        _underwaterDescSet?.Dispose(); _underwaterDescSet = null;
+        if (_underwaterLinearSampler.Handle != 0) { unsafe { vk.Api.DestroySampler(vk.Device, _underwaterLinearSampler, null); } }
+        _underwaterLinearSampler = default;
+        _underwaterPipeline?.Dispose(); _underwaterPipeline = null;
+        if (_underwaterPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _underwaterPass, null); } }
+        _underwaterPass = default;
+        _underwaterReady = false;
         _waterNormalTex?.Dispose(); _waterNormalTex = null;
         _waterDudvTex?.Dispose(); _waterDudvTex = null;
         _waterReady = false;

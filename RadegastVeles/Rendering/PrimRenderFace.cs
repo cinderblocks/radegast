@@ -92,8 +92,18 @@ public sealed class PrimRenderFace
     /// <summary>Triangle indices into <see cref="Vertices"/> / <see cref="PickerVertices"/>.</summary>
     public required ushort[] Indices    { get; init; }
 
-    /// <summary>RGBA tint color (default: white / fully opaque).</summary>
-    public          Vector4  Color      { get; init; } = Vector4.One;
+    /// <summary>
+    /// RGBA tint color (default: white / fully opaque). Settable (not <c>init</c>) because
+    /// <c>VkViewportControl.ScheduleSceneFaceColorUpdate</c> live-patches this in place for a
+    /// color-only attachment property change -- see that method's doc comment. Read fresh every
+    /// frame by <c>WriteInstanceData</c>'s per-frame instance pack, so a plain field write is
+    /// visible on the very next frame with no GPU re-upload needed. A live patch is only ever
+    /// issued when RGB changed but the alpha (W) channel did NOT -- an alpha change can move a
+    /// face between the opaque/alpha render passes (see <see cref="HasAlpha"/>'s own doc
+    /// comment), which a bare Color mutation does not do, so that case still goes through a full
+    /// rebuild instead.
+    /// </summary>
+    public          Vector4  Color      { get; set; } = Vector4.One;
 
     public          bool     Fullbright { get; init; }
     public          float    Glow       { get; init; }

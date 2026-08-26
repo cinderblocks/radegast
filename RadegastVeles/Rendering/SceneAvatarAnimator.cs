@@ -193,7 +193,13 @@ internal sealed class SceneAvatarAnimator : IDisposable
         var sim = _client.Network.CurrentSim;
         if (sim == null) return;
 
-        if (_localId == _client.Self.LocalID)
+        // _localId is self's stable SceneAvatarStreamer.SelfSceneId sentinel, not the raw
+        // protocol LocalID (see that constant's own doc comment) -- comparing against
+        // _client.Self.LocalID here always missed, so self's animator started every build with
+        // zero seeded animations instead of whatever was already playing (idle/stand, etc.),
+        // relying entirely on the next live AvatarAnimation event to recover. Same root cause,
+        // same fix shape, as SceneAvatarAnimationStreamer.OnAvatarAnimation's self lookup.
+        if (_localId == SceneAvatarStreamer.SelfSceneId)
         {
             _player.SetActiveAnimations(_client.Self.SignaledAnimations.Keys);
         }

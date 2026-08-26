@@ -621,6 +621,13 @@ public static class GridTextureHelper
         {
             try
             {
+                // Global cross-subsystem ceiling (see GlobalWorkBudget's own header comment),
+                // acquired outermost with its own try/finally so a cancellation while waiting for
+                // the LOCAL DecodeGate below can never leak this permit -- DecodeGate's own
+                // release, further in, only runs once DecodeGate.WaitAsync itself has succeeded.
+                await GlobalWorkBudget.Gate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
                 await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
@@ -679,6 +686,11 @@ public static class GridTextureHelper
                     // Released only when WaitAsync above succeeded (we hold a permit here).
                     DecodeGate.Release();
                 }
+                }
+                finally
+                {
+                    GlobalWorkBudget.Gate.Release();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -710,6 +722,11 @@ public static class GridTextureHelper
     /// </summary>
     private static async Task EncodePixelCacheTiersAsync(UUID textureId, SKBitmap bitmap)
     {
+        // Global cross-subsystem ceiling (see GlobalWorkBudget's own header comment), acquired
+        // outermost with its own try/finally -- same nesting discipline as the decode path above.
+        await GlobalWorkBudget.Gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
         await EncodeGate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -739,6 +756,11 @@ public static class GridTextureHelper
         {
             EncodeGate.Release();
             bitmap.Dispose();
+        }
+        }
+        finally
+        {
+            GlobalWorkBudget.Gate.Release();
         }
     }
 
@@ -846,18 +868,24 @@ public static class GridTextureHelper
 
             if (progress != null)
             {
-                await DecodeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                // Global cross-subsystem ceiling -- see GlobalWorkBudget's own header comment.
+                await GlobalWorkBudget.Gate.WaitAsync().ConfigureAwait(false);
                 try
                 {
-                    using var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
-                    if (previewRaw != null)
+                    await DecodeGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                    try
                     {
-                        var previewBmp = previewRaw.Copy(previewRaw.ColorType);
-                        if (previewBmp != null) progress.Report(previewBmp);
+                        using var previewRaw = J2kImage.FromBytes(data, PreviewDecoderCfg).As<SKBitmap>();
+                        if (previewRaw != null)
+                        {
+                            var previewBmp = previewRaw.Copy(previewRaw.ColorType);
+                            if (previewBmp != null) progress.Report(previewBmp);
+                        }
                     }
+                    catch { }
+                    finally { DecodeGate.Release(); }
                 }
-                catch { }
-                finally { DecodeGate.Release(); }
+                finally { GlobalWorkBudget.Gate.Release(); }
             }
 
             var bmp = await DecodeWithDeduplication(textureId, data, progress: null, ct: CancellationToken.None)
@@ -999,6 +1027,12 @@ public static class GridTextureHelper
                 }
 
                 // Decode at the requested LOD level — pays only for the wavelet levels needed.
+                // Global cross-subsystem ceiling, acquired outermost with its own try/finally --
+                // same nesting discipline as DecodeWithDeduplication above (see GlobalWorkBudget's
+                // own header comment).
+                await GlobalWorkBudget.Gate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
                 await DecodeGate.WaitAsync(ct).ConfigureAwait(false);
                 try
                 {
@@ -1012,6 +1046,8 @@ public static class GridTextureHelper
                     return raw.Copy(raw.ColorType); // winner's own copy
                 }
                 finally { DecodeGate.Release(); }
+                }
+                finally { GlobalWorkBudget.Gate.Release(); }
             }
             catch (OperationCanceledException)
             {

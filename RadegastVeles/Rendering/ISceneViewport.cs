@@ -61,6 +61,23 @@ public interface ISceneViewport
     event Action<Vector3>? GroundClicked;
     event Action<bool>? MouselookChanged;
 
+    /// <summary>
+    /// Fires (on the render thread) when a scene object's GPU upload is dropped rather than
+    /// completing -- e.g. <c>VkMaterialUboPool</c>/descriptor-pool exhaustion in a dense scene.
+    /// The dropped submission is gone; nothing on this side retries it. Without a subscriber,
+    /// the object stays invisible for the rest of the session even after the transient
+    /// exhaustion clears, because the streamer that owns retry logic has no other way to learn
+    /// the "success" it already recorded (see <c>SceneObjectStreamer.BuildObjectAsync</c>'s own
+    /// comment on why it can't tell upload success from GPU failure any other way) never
+    /// actually happened. <paramref name="sceneKey"/> is the same key passed to
+    /// <see cref="SubmitSceneObject"/>. Subscribers should clear whatever "this key is live"
+    /// bookkeeping they hold for it and re-request a build -- the implementation's own
+    /// short cooldown before the same key can be retried (see
+    /// <c>VkViewportControl.SceneUploadFailureCooldownMs</c>) already prevents a tight
+    /// resubmit/fail loop, so subscribers don't need their own debounce on top of it.
+    /// </summary>
+    event Action<ulong>? SceneObjectUploadFailed;
+
     Func<int, int, float?>? TerrainHeightProvider { get; set; }
     SceneLightStreamer? LightStreamer { get; set; }
     // See VkViewportControl.cs's own EnvironmentService property declaration for why this
@@ -78,6 +95,16 @@ public interface ISceneViewport
     void RemoveSceneObject(ulong sceneKey);
     void ClearAllSceneObjects();
     void SetSceneObjectTransform(ulong sceneKey, Matrix4x4 transform);
+    /// <summary>
+    /// Shifts each listed scene object's already-committed <c>Transform</c> by a constant
+    /// world-space translation (composed as the outermost operation, on top of whatever local
+    /// rotation/scale/world-position is already baked in), without a rebuild or GPU re-upload.
+    /// Keys with no committed entry (not yet built, or already removed) are silently skipped.
+    /// Used by the lightweight region-crossing path to correct already-built geometry into the
+    /// new current-sim-relative frame -- see <c>SceneObjectStreamer.RebaseAllForRegionPromotion</c>.
+    /// Safe to call from any thread; the actual mutation happens on the render thread.
+    /// </summary>
+    void RebaseSceneObjectTransforms(IReadOnlyCollection<ulong> sceneKeys, Vector3 delta);
     void SetSceneObjectMotion(ulong sceneKey, Vector3 scale, Quaternion rotation, Vector3 position,
         Vector3 velocity, Vector3 angularVelocity, Vector3 acceleration);
     void PatchSceneObjectTexture(SceneTexturePatch patch, CancellationToken ct = default);
@@ -95,6 +122,32 @@ public interface ISceneViewport
     /// written directly from the calling (background animation) thread.
     /// </summary>
     void ScheduleSceneFaceTransformUpdate(uint rootId, int faceOffset, Matrix4x4 transform);
+
+    /// <summary>
+    /// Live-patches one face's tint color on an already-built scene object -- no rebuild, no
+    /// GPU texture upload. <c>PrimRenderFace.Color</c> is read fresh every frame by
+    /// <c>VkViewportControl.WriteInstanceData</c>'s per-frame instance-buffer pack, so mutating
+    /// it is the entire fix; there is nothing to re-upload.
+    /// <para>
+    /// Unlike <see cref="ScheduleSceneFaceTransformUpdate"/>, addressed by (rootId, GLOBAL
+    /// faceOffset into the object's combined face list -- known to callers that themselves built
+    /// that list, like <c>SceneAvatarAnimator</c>), this is addressed by
+    /// (<paramref name="primLocalId"/>, <paramref name="localFaceIndex"/>) -- the SL-protocol
+    /// face identity carried on every <see cref="PrimRenderFace"/> as
+    /// <c>PrimRenderFace.PrimLocalId</c>/<c>PrimRenderFace.FaceIndex</c>. This lets
+    /// <c>SceneAvatarStreamer.OnAttachmentObjectUpdate</c> (which only knows the attachment
+    /// prim's own protocol identity, not that prim's position within the avatar's combined face
+    /// list) address a face without maintaining its own global-index cache -- a cache that would
+    /// need re-deriving on every avatar rebuild anyway. The render thread resolves it against
+    /// the live face list at drain time via a linear scan (cheap: at most a few hundred faces,
+    /// on an event that fires at most a few times a second).
+    /// </para>
+    /// Silently dropped if <paramref name="rootId"/> no longer has a committed scene object, or
+    /// no face matches -- same stale-key contract as the other Schedule* methods on this
+    /// interface. Same thread-safety contract as <see cref="ScheduleSceneVertexUpdate"/> --
+    /// queued and drained on the render thread, never written directly from the calling thread.
+    /// </summary>
+    void ScheduleSceneFaceColorUpdate(uint rootId, uint primLocalId, int localFaceIndex, Vector4 color);
 
     /// <summary>Enqueues a GPU compute-skinning dispatch for one avatar face, drained on the
     /// render thread by <c>VkViewportControl.RenderFrame</c>'s existing (previously inert)

@@ -37,23 +37,62 @@ namespace Radegast.Veles.Rendering;
 /// Streams nearby avatar meshes into the scene-object layer of a
 /// <see cref="VkViewportControl"/>.
 /// <para>
-/// Uses a negative key space to avoid collisions with prim LocalIDs managed
-/// by <see cref="SceneObjectStreamer"/>: avatar scene keys are stored as
-/// <c>uint.MaxValue - localId</c>.
+/// Scene keys are sim-scoped the same way <see cref="SceneObjectStreamer"/>'s are (see
+/// <see cref="SceneNeighborSimIndex"/>): upper 32 bits are the owning sim's stable index,
+/// lower 32 bits are <c>AvatarKeyOffset + localId</c>, which is what avoids colliding with
+/// prim LocalIDs managed by <see cref="SceneObjectStreamer"/> within the same sim.
 /// </para>
 /// </summary>
 internal sealed class SceneAvatarStreamer : IDisposable
 {
-    private readonly GridClient          _client;
-    private readonly ISceneViewport      _viewport;
-    private readonly AvatarMeshBuilder   _builder;
-    private readonly SceneBuildScheduler _scheduler;
+    private readonly GridClient            _client;
+    private readonly ISceneViewport        _viewport;
+    private readonly AvatarMeshBuilder     _builder;
+    private readonly SceneBuildScheduler   _scheduler;
+    private readonly SceneNeighborSimIndex _neighborIndex;
 
     // avatar LocalID → CancellationTokenSource for in-flight build
     private readonly ConcurrentDictionary<uint, CancellationTokenSource> _inflight = new();
 
-    // dirty set: avatar LocalID → enqueue timestamp
-    private readonly ConcurrentDictionary<uint, long> _dirty = new();
+    // avatar LocalID → TickCount64 when a BuildAvatarAsync call for it was dispatched to the
+    // scheduler (set just before scheduling, cleared in BuildAvatarAsync's finally). Distinct
+    // from _inflight, whose CTS entries are deliberately never removed on completion (see the
+    // finally block's own comment) and so can't answer "is a build for this id running right
+    // now" on their own. EnqueueBuild consults this to avoid cancel-and-restart storms -- see its
+    // own comment.
+    //
+    // A timestamp, not a bool: SceneBuildScheduler can silently drop a queued build without ever
+    // running it -- both its queue-overflow eviction (SceneBuildScheduler.Enqueue, oldest/lowest
+    // priority dropped once MaxQueueDepth is exceeded) and Clear() (called on every sim change)
+    // remove an entry from its queue without invoking the factory delegate. If that happens to a
+    // build whose _building entry was already set, BuildAvatarAsync's finally never runs and a
+    // bare bool would leave this avatar permanently stuck deferring in EnqueueBuild -- an
+    // unrecoverable T-pose with no attachment-color-churn required, since region crossings alone
+    // call Clear(). EnqueueBuild treats an entry older than StaleBuildTimeoutMs as abandoned and
+    // proceeds instead of deferring, so a dropped build self-heals on the next dirty trigger
+    // instead of wedging the avatar for the rest of the session.
+    private readonly ConcurrentDictionary<uint, long> _building = new();
+
+    // Generous relative to a normal build (asset fetch + retessellation + GPU upload) so this
+    // never interrupts a genuinely slow-but-progressing build -- EnsureWearableAssetsLoadedAsync
+    // alone allows up to 30s per wearable fetch, so the overall build can legitimately approach
+    // that ceiling under load. Long enough to almost never fire spuriously, short enough that a
+    // scheduler-dropped build doesn't wedge the avatar for the rest of the session.
+    private const long StaleBuildTimeoutMs = 45_000;
+
+    // dirty set: avatar LocalID → (enqueue timestamp, whether this entry may use self's instant
+    // (0ms) debounce). False for an attachment-property-only update on an already-worn item
+    // (color/texture/size tweak via LSL, see OnAttachmentObjectUpdate's isNew==false branch) --
+    // without this, a script cycling an attachment's color every second or so retriggers a full
+    // avatar rebuild (bone recompute, full asset refetch, full retessellation) at the same rate
+    // forever, since self's zero debounce made every dirty entry immediately "due" the instant
+    // ProcessDirty next ran, regardless of what triggered it -- visibly a perpetual T-pose/
+    // mid-rebuild lock, not just wasted work. True (the default) for every other trigger,
+    // including a genuine new-attachment wear, so real appearance changes still feel instant. A
+    // merge of two triggers for the same id is last-writer-wins (see EnqueueDirty) -- NOT sticky
+    // on true, or a later property-only trigger would keep inheriting an earlier instant trigger's
+    // eligibility for as long as the entry stays pending.
+    private readonly ConcurrentDictionary<uint, (long Enqueued, bool AllowInstant)> _dirty = new();
 
     // set of avatar LocalIDs that currently have a live scene-object submission
     private readonly ConcurrentDictionary<uint, byte> _rendered = new();
@@ -84,6 +123,24 @@ internal sealed class SceneAvatarStreamer : IDisposable
     // Attachment prim LocalID → owning avatar LocalID, so a kill/update on an
     // attachment can find its avatar and re-trigger a cost re-evaluation.
     private readonly ConcurrentDictionary<uint, uint> _attachmentOwner = new();
+    // Attachment prim LocalID → (TextureEntry, Scale, Position, Rotation) as of the last update
+    // OnAttachmentObjectUpdate processed. Lets a property-only update (isNew==false) diff itself
+    // down to "only these faces' RGB tint changed" (see TryApplyColorOnlyPatch) instead of
+    // always triggering a full avatar rebuild -- a script cycling an attachment's color was the
+    // actual root cause of the T-pose/perpetual-rebuild bug (see EnqueueBuild's own comment);
+    // this removes the rebuild from that path entirely instead of just making it safe to keep
+    // triggering. Scale/Position/Rotation are tracked alongside the TextureEntry purely as a
+    // rebuild trigger, NOT patched live -- attachment geometry bakes prim scale into tessellated
+    // vertices (see AvatarMeshBuilder's own attachment-building comments), so a resize genuinely
+    // needs a rebuild; without this check a resize-only update (TextureEntry unchanged) would
+    // diff as "nothing changed" and get silently dropped instead of falling back to rebuild. A
+    // missing entry (first update since the attachment was worn, or since it was last rebuilt)
+    // means no baseline to diff against -- falls back to the full-rebuild path, same as before
+    // this cache existed, and reseeds itself either way.
+    private readonly ConcurrentDictionary<uint, AttachmentDiffState> _lastAttachmentState = new();
+
+    private readonly record struct AttachmentDiffState(
+        Primitive.TextureEntry Texture, OmVector3 Scale, OmVector3 Position, LibreMetaverse.Quaternion Rotation);
     // avatar LocalID → last-estimated complexity cost, invalidated only by
     // OnAttachmentObjectUpdate/OnAttachmentKilled. DetermineRenderTier runs on every
     // EnqueueBuild call (i.e. every dirty-settle, including position-only ones, not
@@ -139,6 +196,15 @@ internal sealed class SceneAvatarStreamer : IDisposable
     // Avatars use the range [0x8000_0000, 0xFFFF_FFFF] (top uint half, cast to ulong).
     private const uint  AvatarKeyOffset   = 0x8000_0000u;
 
+    // Self's avatar identity is tracked under this fixed sentinel instead of
+    // _client.Self.LocalID — see the SceneKey/IdFor/ProtocolId doc comment below for why.
+    // Kept far above realistic sim-assigned LocalIDs (which run low, sequential, per region
+    // session) so it never collides with another avatar's real protocol id, and low enough that
+    // AvatarKeyOffset + SelfSceneId (0xFFFF_FFFE) doesn't overflow uint or collide with a
+    // terrain scene key (SceneViewerViewModel's ((ulong)simIndex<<32)|uint.MaxValue, whose low
+    // 32 bits are 0xFFFF_FFFF -- one above self's, deliberately left as a gap).
+    internal const uint SelfSceneId = 0x7FFF_FFFEu;
+
     private readonly Timer _debounceTimer;
     private bool           _disposed;
 
@@ -160,13 +226,15 @@ internal sealed class SceneAvatarStreamer : IDisposable
         => _animationStreamer = animationStreamer;
 
     public SceneAvatarStreamer(GridClient client, ISceneViewport viewport,
-        SceneBuildScheduler scheduler, AvatarRenderOverrideStore overrides)
+        SceneBuildScheduler scheduler, AvatarRenderOverrideStore overrides,
+        SceneNeighborSimIndex neighborIndex)
     {
-        _client    = client;
-        _viewport  = viewport;
-        _builder   = new AvatarMeshBuilder(client);
-        _scheduler = scheduler;
-        _overrides = overrides;
+        _client        = client;
+        _viewport      = viewport;
+        _builder       = new AvatarMeshBuilder(client);
+        _scheduler     = scheduler;
+        _overrides     = overrides;
+        _neighborIndex = neighborIndex;
 
         _debounceTimer = new Timer(_ => ProcessDirty(), null,
             Timeout.Infinite, Timeout.Infinite);
@@ -218,8 +286,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
 
         // Also update self-avatar if seated on this linkset.
-        var selfId = _client.Self.LocalID;
-        if (_rendered.ContainsKey(selfId) && _client.Self.SittingOn != 0)
+        if (_rendered.ContainsKey(SelfSceneId) && _client.Self.SittingOn != 0)
         {
             uint parentId  = _client.Self.SittingOn;
             uint rootOfSeat = parentId;
@@ -234,8 +301,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var resolvedRot = _client.Self.SimRotation;
                 var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
                 var selfWorldMatrix = AvatarWorldMatrix(wp, resolvedRot);
-                _viewport.SetSceneObjectTransform(SceneKey(selfId), selfWorldMatrix);
-                _animationStreamer?.OnFlexiWorldUpdate(selfId, selfWorldMatrix);
+                _viewport.SetSceneObjectTransform(SceneKey(SelfSceneId), selfWorldMatrix);
+                _animationStreamer?.OnFlexiWorldUpdate(SelfSceneId, selfWorldMatrix);
             }
         }
     }
@@ -250,31 +317,32 @@ internal sealed class SceneAvatarStreamer : IDisposable
     {
         if (_disposed) return;
         if (sim != _client.Network.CurrentSim) return;
+        uint id = IdFor(avatar);
 
         var (resolvedPos, resolvedRot) = ResolveAvatarWorldTransform(sim, avatar);
         var avatarPos = _client.Self.SimPosition;
         if (!IsWithinRadius(resolvedPos, avatarPos, _maxStreamRadius))
         {
-            RemoveAvatar(avatar.LocalID);
+            RemoveAvatar(id);
             return;
         }
 
-        if (_rendered.ContainsKey(avatar.LocalID))
+        if (_rendered.ContainsKey(id))
         {
             // Fast-path: update world transform (translation + yaw) without a mesh rebuild.
             var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
             var worldMatrix = AvatarWorldMatrix(wp, resolvedRot);
             _viewport.SetSceneObjectTransform(
-                SceneKey(avatar.LocalID),
+                SceneKey(id),
                 worldMatrix);
             // Also update the flexi attachment animator so its ExternalTransform
             // stays in sync with the avatar's new world position.
-            _animationStreamer?.OnFlexiWorldUpdate(avatar.LocalID, worldMatrix);
+            _animationStreamer?.OnFlexiWorldUpdate(id, worldMatrix);
         }
         else
         {
             // Avatar not yet rendered — update cloud driver position if active.
-            if (_cloudDrivers.TryGetValue(avatar.LocalID, out var cloud))
+            if (_cloudDrivers.TryGetValue(id, out var cloud))
                 cloud.UpdateWorldPos(new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z));
             // Trigger a full build.
             OnAvatarUpdate(sim, avatar);
@@ -288,26 +356,30 @@ internal sealed class SceneAvatarStreamer : IDisposable
     {
         if (_disposed) return;
         if (sim != _client.Network.CurrentSim) return;
+        uint id = IdFor(avatar);
 
         var (resolvedPos, _) = ResolveAvatarWorldTransform(sim, avatar);
         var avatarPos = _client.Self.SimPosition;
         if (!IsWithinRadius(resolvedPos, avatarPos, _maxStreamRadius))
         {
-            RemoveAvatar(avatar.LocalID);
+            RemoveAvatar(id);
             return;
         }
 
         // Skip a full mesh rebuild when the avatar is already rendered and its visual
         // params haven't changed — a pure position/rotation update is handled by
-        // OnTerseAvatarUpdate with a fast matrix-only path.
-        if (_rendered.ContainsKey(avatar.LocalID))
+        // OnTerseAvatarUpdate with a fast matrix-only path. For self crossing into a new sim,
+        // this is also what recognizes "already built" via the now-stable id (SelfSceneId)
+        // instead of looking like a brand-new avatar under the new sim's freshly-assigned
+        // LocalID — see IdFor's doc comment.
+        if (_rendered.ContainsKey(id))
         {
             int hash = ComputeVisualParamHash(avatar.VisualParameters);
-            if (_lastVisualParamHash.TryGetValue(avatar.LocalID, out int prev) && prev == hash)
+            if (_lastVisualParamHash.TryGetValue(id, out int prev) && prev == hash)
                 return;
         }
 
-        EnqueueDirty(avatar.LocalID);
+        EnqueueDirty(id);
     }
 
     /// <summary>
@@ -321,15 +393,32 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // the previous region and leave the avatar visible.  RemoveAvatar is a
         // no-op when the localId isn't tracked.
         //
-        // EXCEPTION for self: LocalIDs are scoped per simulator, not globally unique -- a
-        // neighbor/child sim (this client stays connected to several for region-crossing
-        // lookahead) can send a kill for some unrelated object whose LocalID happens to collide
-        // with whatever the CURRENT sim assigned to the local agent's own avatar. Unlike the
-        // any-sim case above (which exists for OTHER avatars legitimately killed by their origin
-        // sim after a region crossing), self never receives a real kill for itself this way -- so
-        // a foreign-sim kill naming self's LocalID is always a coincidental collision, not a real
-        // event.
-        if (localId == _client.Self.LocalID && sim != _client.Network.CurrentSim) return;
+        // EXCEPTION for self: self is NEVER removed via a kill packet, full stop -- not
+        // filtered by sim/timing, just unconditionally skipped whenever the kill names
+        // whatever LocalID currently means self, or would resolve to SelfSceneId.
+        //
+        // This used to be a same-sim/foreign-sim timing check instead (self's kill only ignored
+        // when the reporting sim wasn't CurrentSim and the LocalID still matched). That covered a
+        // neighbor/child sim's kill for some unrelated object colliding with self's CURRENT
+        // LocalID, but missed the far more common case: the OLD sim's entirely legitimate "you
+        // left my interest list" kill for self's OLD LocalID, arriving (as it normally does)
+        // BEFORE either the region-crossing state machine has flipped CurrentSim to the new sim
+        // OR the new sim's first self ObjectUpdate has flipped Client.Self.LocalID to its new
+        // assignment. In that window both still read as "old", the timing check saw an ordinary
+        // same-sim kill for the LocalID Self.LocalID still held, and called
+        // RemoveAvatar(SelfSceneId) -- cancelling any in-flight self build and wiping _rendered/
+        // _trackedLocalIds -- on what is a routine, expected part of every single crossing. That
+        // reintroduced the exact "self reloads on crossing" symptom (and, combined with
+        // EnqueueBuild's cancel-and-restart-avoidance guard, a build that keeps getting killed
+        // mid-flight this way never fires AvatarBuilt, which looks identical to a permanent
+        // T-pose from the outside).
+        //
+        // Self's actual lifecycle (present for the whole session, gone only on logout/disconnect)
+        // is handled by Clear()/Dispose(), not by per-object kill packets -- a kill packet naming
+        // self is, as the removed check's own reasoning already established, ALWAYS either a
+        // foreign-sim collision or this routine old-identity notification, never a genuine "self
+        // is gone" event. So there is nothing a self-kill should ever act on here.
+        if (localId == _client.Self.LocalID) return;
         RemoveAvatar(localId);
     }
 
@@ -342,7 +431,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (_disposed) return;
         var now = Environment.TickCount64;
         foreach (var localId in _rendered.Keys)
-            _dirty.AddOrUpdate(localId, now, (_, _) => now);
+            _dirty.AddOrUpdate(localId, (now, true), (_, old) => (now, true));
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
@@ -358,7 +447,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (_disposed) return;
         var now = Environment.TickCount64 - DebounceMs; // mark as immediately due
         foreach (var localId in _rendered.Keys)
-            _dirty.AddOrUpdate(localId, now, (_, _) => now);
+            _dirty.AddOrUpdate(localId, (now, true), (_, old) => (now, true));
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(0, Timeout.Infinite); // fire ProcessDirty immediately
     }
@@ -376,35 +465,139 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (_disposed) return;
         var now = Environment.TickCount64;
         foreach (var localId in _trackedLocalIds.Keys)
-            _dirty.AddOrUpdate(localId, now, (_, _) => now);
+            _dirty.AddOrUpdate(localId, (now, true), (_, old) => (now, true));
         if (!_dirty.IsEmpty)
             _debounceTimer.Change(DebounceMs, Timeout.Infinite);
     }
 
     /// <summary>
     /// Called when an attachment prim belonging to a tracked avatar is added or its
-    /// properties change (e.g. an LSL texture/color change). Triggers a debounced rebuild
-    /// of the owning avatar. Cost-cache invalidation is scoped to <paramref name="isNew"/>,
-    /// since only wearing something new changes the avatar's estimated render cost.
+    /// properties change (e.g. an LSL texture/color change). Cost-cache invalidation is scoped
+    /// to <paramref name="isNew"/>, since only wearing something new changes the avatar's
+    /// estimated render cost.
+    /// <para>
+    /// A genuine wear (<paramref name="isNew"/> true) still gets self's instant (0ms) debounce
+    /// full rebuild — appearance changes should feel immediate, and a new attachment's geometry
+    /// genuinely isn't in the combined mesh yet. A property-only update on an attachment that's
+    /// already worn (color/texture/size tweak, <paramref name="isNew"/> false) tries a much
+    /// cheaper path first: <see cref="TryApplyColorOnlyPatch"/> diffs it against the last known
+    /// state and, if every changed face differs ONLY in its RGB tint (alpha unchanged, no
+    /// texture/bump/shiny/etc. change), live-patches just those faces via
+    /// <see cref="ISceneViewport.ScheduleSceneFaceColorUpdate"/> — no rebuild at all. This is
+    /// what actually fixes (not just makes safe) a script that cycles an attachment's color on a
+    /// tight loop: previously every such update triggered a full avatar rebuild (bone recompute,
+    /// full asset refetch, full retessellation) which, at a faster rate than one rebuild could
+    /// complete, meant self never finished a build long enough for the animator to settle out of
+    /// T-pose (see <see cref="EnqueueBuild"/>'s own comment on the cancel-and-restart livelock
+    /// this was on top of). Anything the diff can't confidently classify as color-only — no
+    /// cached baseline yet, a texture/scale/other change, alpha changing (which can move a face
+    /// between render passes, see <see cref="PrimRenderFace.HasAlpha"/>) — falls back to the
+    /// normal debounced rebuild, unchanged from before.
+    /// </para>
     /// </summary>
     public void OnAttachmentObjectUpdate(Simulator sim, Primitive prim, bool isNew)
     {
         if (_disposed || prim.ParentID == 0) return;
         if (!sim.ObjectsAvatars.ContainsKey(prim.ParentID)) return;
-        if (!_trackedLocalIds.ContainsKey(prim.ParentID)) return;
-        _attachmentOwner[prim.LocalID] = prim.ParentID;
+        // prim.ParentID is the owning avatar's real protocol LocalID (attachment prims are
+        // themselves sim-local objects) — translate to self's stable id before touching any
+        // dictionary keyed by it, same as everywhere else in this class (see IdFor).
+        uint ownerId = prim.ParentID == _client.Self.LocalID ? SelfSceneId : prim.ParentID;
+        if (!_trackedLocalIds.ContainsKey(ownerId)) return;
+        _attachmentOwner[prim.LocalID] = ownerId;
+
+        var newTe = prim.Textures;
         if (isNew)
+        {
             _cachedCost.TryRemove(prim.ParentID, out _);
-        EnqueueDirty(prim.ParentID);
+            if (newTe != null)
+                _lastAttachmentState[prim.LocalID] =
+                    new AttachmentDiffState(new Primitive.TextureEntry(newTe), prim.Scale, prim.Position, prim.Rotation);
+            EnqueueDirty(ownerId, allowInstant: true);
+            return;
+        }
+
+        bool patched = newTe != null
+            && _lastAttachmentState.TryGetValue(prim.LocalID, out var old)
+            && old.Scale == prim.Scale && old.Position == prim.Position && old.Rotation == prim.Rotation
+            && TryApplyColorOnlyPatch(ownerId, prim.LocalID, old.Texture, newTe);
+        if (newTe != null)
+            _lastAttachmentState[prim.LocalID] =
+                new AttachmentDiffState(new Primitive.TextureEntry(newTe), prim.Scale, prim.Position, prim.Rotation);
+        if (!patched)
+            EnqueueDirty(ownerId, allowInstant: false);
+    }
+
+    /// <summary>
+    /// Diffs <paramref name="oldTe"/> against <paramref name="newTe"/> face-by-face, using
+    /// <see cref="Primitive.TextureEntry.GetFace"/>'s own DefaultTexture-fallback resolution so
+    /// this naturally covers both an explicit per-face override (<c>llSetColor(c, face)</c>) and
+    /// an ALL_SIDES/DefaultTexture-driven change (<c>llSetColor(c, ALL_SIDES)</c>) without
+    /// re-implementing that resolution here. Returns false (caller must fall back to a full
+    /// rebuild) if either side has no DefaultTexture, or if ANY face that differs at all differs
+    /// by more than just its RGB tint — see <see cref="PrimRenderFace.Color"/>'s own doc comment
+    /// for why an alpha (RGBA.A) change is excluded from the fast path along with everything
+    /// else. On success, live-patches every changed face via
+    /// <see cref="ISceneViewport.ScheduleSceneFaceColorUpdate"/> and returns true; a no-op diff
+    /// (nothing actually changed) also returns true, since there is nothing left for a rebuild
+    /// to do either.
+    /// </summary>
+    private bool TryApplyColorOnlyPatch(uint ownerId, uint attachmentPrimLocalId,
+        Primitive.TextureEntry oldTe, Primitive.TextureEntry newTe)
+    {
+        if (oldTe.DefaultTexture == null || newTe.DefaultTexture == null) return false;
+
+        Span<int> changedFaces = stackalloc int[Primitive.TextureEntry.MAX_FACES];
+        int changedCount = 0;
+
+        for (int i = 0; i < Primitive.TextureEntry.MAX_FACES; i++)
+        {
+            var of = oldTe.GetFace((uint)i);
+            var nf = newTe.GetFace((uint)i);
+            bool colorSame = of.RGBA.R == nf.RGBA.R && of.RGBA.G == nf.RGBA.G
+                           && of.RGBA.B == nf.RGBA.B && of.RGBA.A == nf.RGBA.A;
+            bool otherSame = FaceOtherwiseEqual(of, nf);
+            if (colorSame && otherSame) continue;
+            if (!otherSame || of.RGBA.A != nf.RGBA.A) return false;
+            changedFaces[changedCount++] = i;
+        }
+
+        if (changedCount == 0) return true;
+
+        uint rootId = (uint)SceneKey(ownerId);
+        for (int k = 0; k < changedCount; k++)
+        {
+            int faceIdx = changedFaces[k];
+            var nf = newTe.GetFace((uint)faceIdx);
+            var color = new Vector4(nf.RGBA.R, nf.RGBA.G, nf.RGBA.B, nf.RGBA.A);
+            _viewport.ScheduleSceneFaceColorUpdate(rootId, attachmentPrimLocalId, faceIdx, color);
+        }
+        return true;
+    }
+
+    /// <summary>Compares every <see cref="Primitive.TextureEntry.TextureEntryFace"/> attribute
+    /// EXCEPT RGBA — the complement of the comparison <see cref="TryApplyColorOnlyPatch"/> does
+    /// on RGBA itself.</summary>
+    private static bool FaceOtherwiseEqual(Primitive.TextureEntryFace a, Primitive.TextureEntryFace b)
+    {
+        return a.TextureID == b.TextureID
+            && a.RepeatU.Equals(b.RepeatU) && a.RepeatV.Equals(b.RepeatV)
+            && a.OffsetU.Equals(b.OffsetU) && a.OffsetV.Equals(b.OffsetV)
+            && a.Rotation.Equals(b.Rotation)
+            && a.Glow.Equals(b.Glow)
+            && a.Bump == b.Bump && a.Shiny == b.Shiny && a.Fullbright == b.Fullbright
+            && a.MediaFlags == b.MediaFlags && a.TexMapType == b.TexMapType
+            && a.MaterialID == b.MaterialID && a.RenderMaterialID == b.RenderMaterialID;
     }
 
     /// <summary>Called when a prim is killed, in case it was a tracked avatar's attachment.</summary>
     public void OnAttachmentKilled(uint killedLocalId)
     {
         if (_disposed) return;
+        _lastAttachmentState.TryRemove(killedLocalId, out _);
         if (_attachmentOwner.TryRemove(killedLocalId, out var owner) && _trackedLocalIds.ContainsKey(owner))
         {
-            _cachedCost.TryRemove(owner, out _);
+            _cachedCost.TryRemove(ProtocolId(owner), out _);
             EnqueueDirty(owner);
         }
     }
@@ -423,7 +616,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         foreach (var localId in _rendered.Keys)
         {
-            if (!sim.ObjectsAvatars.TryGetValue(localId, out var av)) continue;
+            if (!sim.ObjectsAvatars.TryGetValue(ProtocolId(localId), out var av)) continue;
             var (resolvedPos, _) = ResolveAvatarWorldTransform(sim, av);
             if (!IsWithinRadius(resolvedPos, avatarPos, _maxStreamRadius))
                 RemoveAvatar(localId);
@@ -443,6 +636,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _trackedLocalIds.Clear();
         _pendingTier.Clear();
         _attachmentOwner.Clear();
+        _lastAttachmentState.Clear();
         _cachedCost.Clear();
         _cachedTier.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
@@ -452,6 +646,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             cts.Dispose();
         }
         _inflight.Clear();
+        _building.Clear();
 
         // Stop all cloud drivers.
         foreach (var kv in _cloudDrivers) kv.Value.Dispose();
@@ -514,18 +709,61 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
     // ── Internals ─────────────────────────────────────────────────────────────────
 
-    private static ulong SceneKey(uint localId) => (ulong)AvatarKeyOffset + localId;
+    // Deliberately NOT prefixed with a sim index the way SceneObjectStreamer's keys are: every
+    // entry point in this class filters to `sim == CurrentSim` (avatars are never tracked across
+    // more than one sim at once today), so a sim-index prefix here would disambiguate nothing --
+    // and worse, since CurrentSim itself flips at the exact moment of a region crossing, a key
+    // derived from it would change out from under an avatar even with an otherwise-stable id,
+    // reintroducing the "looks brand new" bug this scheme exists to close (an earlier version of
+    // this method did include such a prefix for exactly that reason, and was reverted once this
+    // was traced through). Lower bits keep the pre-existing AvatarKeyOffset flag (0x8000_0000 +
+    // id), which is what keeps avatar keys from colliding with this sim's own object keys (whose
+    // lower bits are the raw, much smaller, prim LocalID) -- see IdFor's own comment for why `id`
+    // itself (not raw Avatar.LocalID) is what's passed in here.
+    private ulong SceneKey(uint id) => AvatarKeyOffset + id;
 
-    private void EnqueueDirty(uint localId)
+    /// <summary>
+    /// Translates a live <see cref="Avatar"/> into the id this class tracks it under
+    /// internally. For self, always <see cref="SelfSceneId"/> -- self's protocol
+    /// <see cref="Avatar.LocalID"/> is reassigned by every sim it enters, including on a region
+    /// crossing (see <c>Client.Self.localID = block.ID</c> in LibreMetaverse's avatar
+    /// ObjectUpdate handler), so keying self's tracking state and scene object by it made self
+    /// look like a brand-new avatar -- full mesh rebuild, reset flexi animator, momentary
+    /// placeholder/cloud flash -- on every single crossing. SelfSceneId is a fixed identity that
+    /// survives crossings; other avatars are unaffected (their raw LocalID passes through
+    /// unchanged, matching pre-existing behavior -- they still reload on their own crossing, a
+    /// known, much lower-visibility residual limitation, not fixed by this).
+    /// Use <see cref="ProtocolId"/> to translate back when a live sim lookup is needed.
+    /// </summary>
+    private uint IdFor(Avatar avatar) => avatar.LocalID == _client.Self.LocalID ? SelfSceneId : avatar.LocalID;
+
+    /// <summary>Inverse of <see cref="IdFor"/> -- resolves the id this class uses internally
+    /// back to the real, live, sim-assigned protocol LocalID needed to look an avatar up in
+    /// <c>Simulator.ObjectsAvatars</c>/<c>ObjectsPrimitives</c>. A no-op for other avatars
+    /// (their internal id already IS their protocol id).</summary>
+    private uint ProtocolId(uint id) => id == SelfSceneId ? _client.Self.LocalID : id;
+
+    private void EnqueueDirty(uint localId, bool allowInstant = true)
     {
         var now = Environment.TickCount64;
-        _dirty.AddOrUpdate(localId, now, (_, _) => now);
+        // Last-writer-wins, not sticky-OR: an OR here would let one instant-eligible trigger
+        // (e.g. a genuine wear event) permanently pin this entry as instant-eligible for as
+        // long as it stays pending, since every subsequent EnqueueDirty call (regardless of its
+        // OWN allowInstant) also refreshes Enqueued=now -- a property-only attachment tweak
+        // arriving after that would keep finding the entry "due immediately" in ProcessDirty
+        // rather than being demoted to the normal debounce, defeating the whole point of this
+        // parameter.
+        _dirty.AddOrUpdate(localId, (now, allowInstant), (_, _) => (now, allowInstant));
         // Show the cloud placeholder immediately — not gated by the debounce or the
         // scheduler back-pressure check in ProcessDirty, which only need to protect the
         // expensive real mesh build below. Matches SL's near-instant cloud appearance.
         EnsurePlaceholderVisible(localId);
-        // Self-avatar gets an immediate fire; everyone else waits for debounce.
-        int delay = localId == _client.Self.LocalID ? SelfDebounceMs : DebounceMs;
+        // Self-avatar gets an immediate fire when this entry is instant-eligible; everyone
+        // else (and any non-instant self entry) waits for the normal debounce. The timer fires
+        // ProcessDirty, which re-checks eligibility per entry (see _dirty's own doc comment) --
+        // scheduling it early here for a non-instant entry is harmless, just a slightly earlier
+        // check that will find nothing due yet.
+        int delay = (localId == SelfSceneId && allowInstant) ? SelfDebounceMs : DebounceMs;
         _debounceTimer.Change(delay, Timeout.Infinite);
     }
 
@@ -540,12 +778,17 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _cachedCost.TryRemove(localId, out _);
         _cachedTier.TryRemove(localId, out _);
         foreach (var (attId, owner) in _attachmentOwner)
-            if (owner == localId) _attachmentOwner.TryRemove(attId, out _);
+        {
+            if (owner != localId) continue;
+            _attachmentOwner.TryRemove(attId, out _);
+            _lastAttachmentState.TryRemove(attId, out _);
+        }
         if (_inflight.TryRemove(localId, out var cts))
         {
             cts.Cancel();
             cts.Dispose();
         }
+        _building.TryRemove(localId, out _);
         StopCloudDriver(localId);
         _viewport.RemoveSceneObject(SceneKey(localId));
     }
@@ -573,11 +816,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         var now = Environment.TickCount64;
         var due = new List<(uint Id, long Enqueued)>();
-        foreach (var (id, enqueued) in _dirty)
+        foreach (var (id, entry) in _dirty)
         {
-            int delay = id == _client.Self.LocalID ? SelfDebounceMs : DebounceMs;
-            if (now - enqueued >= delay)
-                due.Add((id, enqueued));
+            int delay = (id == SelfSceneId && entry.AllowInstant) ? SelfDebounceMs : DebounceMs;
+            if (now - entry.Enqueued >= delay)
+                due.Add((id, entry.Enqueued));
         }
 
         // Cap dispatch per tick, mirroring SceneObjectStreamer.MaxBuildsPerTick. Without this, a
@@ -627,9 +870,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
         var sim = _client.Network.CurrentSim;
         if (sim == null) return;
 
-        Avatar? av = localId == _client.Self.LocalID
-            ? (sim.ObjectsAvatars.TryGetValue(localId, out var selfAv) ? selfAv : null)
-              ?? new Avatar { LocalID = localId, Position = _client.Self.SimPosition,
+        Avatar? av = localId == SelfSceneId
+            ? (sim.ObjectsAvatars.TryGetValue(_client.Self.LocalID, out var selfAv) ? selfAv : null)
+              ?? new Avatar { LocalID = _client.Self.LocalID, Position = _client.Self.SimPosition,
                               Rotation = _client.Self.SimRotation }
             : (sim.ObjectsAvatars.TryGetValue(localId, out var otherAv) ? otherAv : null);
         if (av == null) return;
@@ -724,6 +967,12 @@ internal sealed class SceneAvatarStreamer : IDisposable
         var list = new List<(UUID, int, bool)>();
         foreach (var localId in _trackedLocalIds.Keys)
         {
+            // Self's own weight isn't meaningful to report to the region (this feeds the
+            // crowd-sourced "how complex do others see me as" aggregation), and _cachedCost/
+            // _cachedTier are deliberately left raw-protocol-id-keyed (unlike _trackedLocalIds),
+            // so a lookup under SelfSceneId here would always miss anyway — skip explicitly
+            // rather than relying on that as an accidental exclusion mechanism.
+            if (localId == SelfSceneId) continue;
             if (!sim.ObjectsAvatars.TryGetValue(localId, out var av) || av.ID == UUID.Zero) continue;
             if (!_cachedCost.TryGetValue(localId, out _)) continue;
             var tier = _cachedTier.TryGetValue(localId, out var t) ? t : AvatarRenderTier.Full;
@@ -785,9 +1034,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (sim == null) return;
         foreach (var av in sim.ObjectsAvatars.Values)
         {
-            if (av != null && av.ID == agentId && _trackedLocalIds.ContainsKey(av.LocalID))
+            if (av == null || av.ID != agentId) continue;
+            uint id = IdFor(av);
+            if (_trackedLocalIds.ContainsKey(id))
             {
-                EnqueueDirty(av.LocalID);
+                EnqueueDirty(id);
                 return;
             }
         }
@@ -803,7 +1054,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // point of tiering. Full/Silhouette fall through to the normal build pipeline
         // below, with the pre-computed tier stashed for BuildAvatarAsync to pick up.
         var sim = _client.Network.CurrentSim;
-        if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var avForTier))
+        uint protocolId = ProtocolId(localId);
+        if (sim != null && sim.ObjectsAvatars.TryGetValue(protocolId, out var avForTier))
         {
             var tier = DetermineRenderTier(sim, avForTier);
             if (tier == AvatarRenderTier.Cloud)
@@ -819,6 +1071,27 @@ internal sealed class SceneAvatarStreamer : IDisposable
             _pendingTier[localId] = tier;
         }
 
+        // If a build for this avatar is actually running right now, don't cancel and restart it --
+        // defer instead by re-marking it dirty and letting the next debounce tick re-check. A
+        // full avatar build (asset fetch, bone recompute, retessellation, per-face texture
+        // builds) can easily take longer than the interval between triggers from a script that
+        // cycles an attachment's color every second or so; cancel-and-restart on every one of
+        // those triggers meant the build NEVER got an uninterrupted run long enough to finish --
+        // visibly a permanent T-pose, since AvatarBuilt (and so the animator) never fires. Letting
+        // the running build finish, then picking up the latest dirty state in exactly one more
+        // build afterward, is what actually breaks that cycle.
+        //
+        // Treat an entry older than StaleBuildTimeoutMs as abandoned rather than deferring again
+        // -- see _building's own doc comment for why a build can go missing without ever clearing
+        // this (SceneBuildScheduler silently dropping the queued factory), which would otherwise
+        // wedge this avatar in deferral forever.
+        if (_building.TryGetValue(localId, out long buildStartedAt)
+            && Environment.TickCount64 - buildStartedAt < StaleBuildTimeoutMs)
+        {
+            EnqueueDirty(localId, allowInstant: false);
+            return;
+        }
+
         if (_inflight.TryRemove(localId, out var oldCts))
         {
             oldCts.Cancel();
@@ -827,6 +1100,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
         var cts = new CancellationTokenSource();
         _inflight[localId] = cts;
+        _building[localId] = Environment.TickCount64;
 
         // Avatars use AvatarMultiplier so they outrank same-distance prims.
         // Additionally boost priority for avatars that are currently visible (in front of the camera).
@@ -840,7 +1114,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // Resolve avatar world position for frustum test.
         Vector3 avObjPos = default;
         bool hasPosForFrustum = false;
-        if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var avForFrustum))
+        if (sim != null && sim.ObjectsAvatars.TryGetValue(protocolId, out var avForFrustum))
         {
             var (fp, _) = ResolveAvatarWorldTransform(sim, avForFrustum);
             if (fp != OmVector3.Zero)
@@ -871,10 +1145,21 @@ internal sealed class SceneAvatarStreamer : IDisposable
         {
             var sim = _client.Network.CurrentSim;
             if (sim == null) return;
+            bool isSelf = localId == SelfSceneId;
+            // The mesh builder (AvatarMeshBuilder.BuildAsync) needs the REAL, live, sim-assigned
+            // protocol LocalID -- it uses it to look up sim.ObjectsAvatars/ObjectsPrimitives
+            // directly (attachment scans, self-detection against client.Self.LocalID) and stamps
+            // it onto every PrimRenderFace/SceneTexturePatch it emits (see
+            // VkViewportControl._scenePrimLocalIdToSceneKey, which is what lets a texture patch
+            // arriving keyed by this real id still resolve back to the stable SceneKey(localId)
+            // this class submitted the object under). `localId` itself (this method's own
+            // parameter) is the translated/stable id — see IdFor's doc comment — used for every
+            // internal dictionary and viewport scene-key call below.
+            uint protocolId = isSelf ? _client.Self.LocalID : localId;
 
             // Collect visual params for this avatar.
             IReadOnlyDictionary<int, float> visualParams;
-            if (localId == _client.Self.LocalID)
+            if (isSelf)
             {
                 // Ensure all wearable assets are downloaded before reading params.
                 // Without this, GetCurrentParamValues() returns default values for any
@@ -890,9 +1175,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
             }
 
             // Resolve world-space transform early — needed for both LOD distance and submission placement.
-            Avatar? avatarObj = localId == _client.Self.LocalID
-                ? (sim.ObjectsAvatars.TryGetValue(localId, out var selfAv2) ? selfAv2 : null)
-                  ?? new Avatar { LocalID = localId, ParentID = 0, Position = _client.Self.SimPosition, Rotation = _client.Self.SimRotation }
+            Avatar? avatarObj = isSelf
+                ? (sim.ObjectsAvatars.TryGetValue(protocolId, out var selfAv2) ? selfAv2 : null)
+                  ?? new Avatar { LocalID = protocolId, ParentID = 0, Position = _client.Self.SimPosition, Rotation = _client.Self.SimRotation }
                 : (sim.ObjectsAvatars.TryGetValue(localId, out var otherAv2) ? otherAv2 : null)
                   ?? new Avatar { LocalID = localId };
 
@@ -908,9 +1193,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 : null;
 
             var result = await _builder.BuildAsync(
-                localId,
+                protocolId,
                 visualParams,
-                label:        $"av:{localId}",
+                label:        $"av:{protocolId}",
                 progress:     null,
                 ct:           token,
                 lodLevel:     AvatarLodForDistance(
@@ -930,7 +1215,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
                         // stuck waiting behind the rest of the scene's texture-patch backlog
                         // (which can run into the tens of thousands of entries during a busy
                         // scene load) — see SceneTexturePatch.HighPriority.
-                        if (localId == _client.Self.LocalID)
+                        if (isSelf)
                             patch = patch with { HighPriority = true };
                         _viewport.PatchSceneObjectTexture(patch, token);
                     }
@@ -1008,6 +1293,13 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 };
             }
 
+            // Re-check immediately before the write: everything above (bone math, world-matrix
+            // recompute, per-face translation) is synchronous CPU work with no await, so this is
+            // the last point cancellation can be observed before the build lands as "committed" --
+            // narrows the TOCTOU window between the check at the top of this block and the actual
+            // submission from "one full recompute" down to nothing.
+            if (token.IsCancellationRequested) return;
+
             _viewport.SubmitSceneObject(SceneKey(localId), submission);
             _rendered[localId] = 0;
 
@@ -1015,7 +1307,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // If the seat prim arrived during that time, a fresh resolve now returns the
             // correct position.  Issue a fast transform override so the avatar doesn't
             // linger at the fallback sit-offset-as-world-position.
-            if (localId != _client.Self.LocalID &&
+            if (!isSelf &&
                 sim.ObjectsAvatars.TryGetValue(localId, out var postBuildAv) &&
                 postBuildAv.ParentID != 0)
             {
@@ -1039,7 +1331,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             // Record the visual-param hash so OnAvatarUpdate can skip redundant rebuilds
             // when only position/rotation changes (no appearance change).
             _lastVisualParamHash[localId] = ComputeVisualParamHash(
-                localId == _client.Self.LocalID
+                isSelf
                     ? null   // self-avatar always rebuilds on AppearanceSet events, not OnAvatarUpdate
                     : (sim.ObjectsAvatars.TryGetValue(localId, out var builtAv)
                         ? builtAv.VisualParameters : null));
@@ -1060,9 +1352,15 @@ internal sealed class SceneAvatarStreamer : IDisposable
         }
         finally
         {
-            // Same reasoning as SceneObjectStreamer: do not TryRemove here.
+            // Same reasoning as SceneObjectStreamer: do not TryRemove _inflight here.
             // EnqueueBuild may have installed a newer CTS in _inflight[localId];
             // disposing that one would corrupt the newer build's texture delivery.
+            //
+            // _building IS cleared here (unconditionally, cancelled or not) -- it only means "is a
+            // build for this id running right now", and this one no longer is. Clearing it lets
+            // EnqueueBuild's deferral check above admit the next dirty entry, if any settled while
+            // this one ran.
+            _building.TryRemove(localId, out _);
         }
     }
 
@@ -1094,7 +1392,11 @@ internal sealed class SceneAvatarStreamer : IDisposable
         // Subtracted uniformly (self, other, seated) so the avatar stands on the ground instead
         // of floating by roughly its own pelvis-to-head-top distance. 0 (no correction) until this
         // avatar's first mesh build completes and caches its real value.
-        float groundAdj = _groundAdjustment.TryGetValue(avatar.LocalID, out var adj) ? adj : 0f;
+        // _groundAdjustment is written keyed by the translated id (IdFor) in BuildAvatarAsync,
+        // not avatar.LocalID directly — self's real protocol LocalID changes every crossing, so
+        // reading it back must translate the same way or self's cached correction would never be
+        // found again after the first crossing, momentarily floating until the next rebuild.
+        float groundAdj = _groundAdjustment.TryGetValue(IdFor(avatar), out var adj) ? adj : 0f;
 
         if (avatar.LocalID == _client.Self.LocalID)
         {
@@ -1154,6 +1456,9 @@ internal sealed class SceneAvatarStreamer : IDisposable
     }
     private float AvatarDistanceSq(Simulator? sim, uint localId, LibreMetaverse.Vector3 avatarPos)
     {
+        // Self — highest priority, distance 0. Checked first since localId is SelfSceneId for
+        // self, not a real protocol id that could ever be found in sim.ObjectsAvatars below.
+        if (localId == SelfSceneId) return 0f;
         if (sim != null && sim.ObjectsAvatars.TryGetValue(localId, out var av))
         {
             var (pos, _) = ResolveAvatarWorldTransform(sim, av);
@@ -1162,8 +1467,6 @@ internal sealed class SceneAvatarStreamer : IDisposable
             var dz = pos.Z - avatarPos.Z;
             return dx * dx + dy * dy + dz * dz;
         }
-        // Self avatar or unknown — treat as distance 0 (highest priority).
-        if (localId == _client.Self.LocalID) return 0f;
         return float.MaxValue;
     }
 
