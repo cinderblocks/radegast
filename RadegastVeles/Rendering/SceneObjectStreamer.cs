@@ -267,14 +267,10 @@ internal sealed class SceneObjectStreamer : IDisposable
             // cancel/starve a linkset's build purely on placeholder data. Falling through to
             // EnqueueDirty below is safe either way: the real radius gate re-runs once the root
             // is known, in ProcessDirty/EnqueueBuild's own position lookups.
-            // Unconditional (root prims only -- not gated by scale/size): a size filter here
-            // would miss exactly the case this exists to catch, a single-prim mesh house with a
-            // small footprint but a root position that resolves wrong. This branch by
-            // construction only runs when the computed distance exceeds the stream radius, so
-            // the logged distance itself is the signal -- if it's wildly larger than what the
-            // user actually observes standing next to the object, the root position resolution
-            // is the bug, not the radius check. Rate-limited naturally: this only runs once per
-            // incoming full ObjectUpdate packet for the root, not per frame.
+            // Logged unconditionally for root prims regardless of scale, since a small-footprint
+            // single-prim mesh object with a wrongly-resolved root position would be missed by
+            // any size filter here. Rate-limited naturally: this only runs once per incoming full
+            // ObjectUpdate packet for the root, not per frame.
             if (prim.ParentID == 0)
             {
                 var dx = worldPos.X - avatarPos.X;
@@ -849,12 +845,10 @@ internal sealed class SceneObjectStreamer : IDisposable
             var prims = CollectLinkset(sim, rootLocalId);
             if (prims == null || prims.Count == 0)
             {
-                // Previously silent: a root local ID that vanished from sim.ObjectsPrimitives
-                // between being dirtied and this build actually running (object left the scene,
-                // or -- the case worth knowing about -- the root simply never arrived at all)
-                // looked identical in the log to a build that never happened. Logged so a
-                // "this object never renders" report can be told apart from "this object was
-                // never even attempted".
+                // Logs the case where a root local ID isn't in sim.ObjectsPrimitives when this
+                // build actually runs -- either the object left the scene between being dirtied
+                // and now, or its root never arrived at all. Both are worth telling apart from a
+                // build that never ran in the first place.
                 Logger.Log(
                     $"SceneObjectStreamer: BuildObjectAsync found no linkset for sceneKey {sceneKey:x} " +
                     $"(rootLocalId={rootLocalId}), removing", LogLevel.Debug);
@@ -863,15 +857,12 @@ internal sealed class SceneObjectStreamer : IDisposable
             }
 
             var rootPrimForLod = prims.Find(p => p.LocalID == rootLocalId) ?? prims[0];
-            // World-space position (sim-local + region offset for neighbor sims) computed
-            // up-front so dist below is in the SAME frame as the avatar's own position. This
-            // used to compute Distance(rootPrimForLod.Position, Self.SimPosition) directly --
-            // the prim's position is local to ITS OWN sim, while Self.SimPosition is local to
-            // the CURRENT sim, so for any object in a NEIGHBOR sim that silently computed a
-            // distance off by roughly one region size (~256m), which fed directly into
-            // LodForDistance/TextureLodLevelForDistance below: every neighbor-sim object was
-            // built at DetailLevel.Low regardless of true visual proximity, no matter how close
-            // the avatar actually stood to it.
+            // World-space position (sim-local + region offset for neighbor sims), computed
+            // up-front so dist below is in the SAME frame as the avatar's own position -- the
+            // prim's own Position is local to ITS OWN sim, while Self.SimPosition is local to the
+            // CURRENT sim, so for any object in a NEIGHBOR sim these must be reconciled with
+            // RegionOffset before comparing, or the resulting distance (and therefore LOD/texture
+            // LOD selection below) is off by roughly one region size.
             var regionOff = RegionOffset(sim, _client.Network.CurrentSim);
             var worldPos  = new Vector3(
                 rootPrimForLod.Position.X + regionOff.X,
@@ -968,12 +959,10 @@ internal sealed class SceneObjectStreamer : IDisposable
             if (token.IsCancellationRequested) return;
 
             _viewport.SubmitSceneObject(sceneKey, submission);
-            // Gated by distance rather than size (a single-prim mesh house can be prims=1,
-            // faces<=8 -- a size gate misses exactly that shape) so a successful nearby build
-            // still produces log output: previously a successful build was completely silent,
-            // making "never built" and "built fine, silently" indistinguishable from the log
-            // alone -- see BuildObjectAsync's own CollectLinkset-empty branch for the other half
-            // of this same gap.
+            // Gated by distance rather than object size or prim count, since a small single-prim
+            // object close to the avatar is just as worth confirming in the log as a large one --
+            // see BuildObjectAsync's own CollectLinkset-empty branch for the complementary case
+            // (a build that never happens at all).
             if (dist < 30f)
             {
                 Logger.Log(
@@ -1131,6 +1120,16 @@ internal sealed class SceneObjectStreamer : IDisposable
             // real ObjectUpdate, well inside this sweep's own 10 s cadence).
             if (!_neighborIndex.IsTracked(sim.Handle)) continue;
 
+            // A nonzero/climbing count here means this sim's own inbound UDP receive channel is
+            // discarding datagrams because the decode loop can't keep up (see
+            // UDPBase.ReceiveLoopAsync's bounded-channel drop-write) -- the one place packet loss
+            // for this connection would show up, since nothing else surfaces the counter.
+            var dropped = sim.Stats.GetDroppedPackets();
+            if (dropped > 0)
+                Logger.Log(
+                    $"SceneObjectStreamer: sim {sim.Name} has dropped {dropped} inbound UDP packets this session",
+                    LogLevel.Warning);
+
             var objs = sim.ObjectsPrimitives;
             if (objs == null) continue;
 
@@ -1138,22 +1137,18 @@ internal sealed class SceneObjectStreamer : IDisposable
             {
                 if (root.ParentID != 0) continue; // roots only -- CollectLinkset pulls children in
 
-                // A root whose position has never been filled in (still the zero placeholder)
-                // is itself exactly the kind of "reached ObjectsPrimitives without a full
-                // update" case this sweep exists to catch -- confirmed live 2026-08-25: several
-                // large buildings straddling a region border sat in this exact state (root
-                // tracked in the NEIGHBOR sim, Position never populated) while classic Radegast,
-                // using the same LibreMetaverse ObjectManager, rendered them fine -- meaning the
-                // data genuinely becomes available given the right trigger, this streamer's
-                // purely event-driven pipeline just never receives it. There's no real position
-                // to enqueue a build against yet, so instead of waiting for an event that may
-                // never come, actively re-request the object -- the same request
-                // AlwaysRequestObjects would have issued had ObjectUpdateCachedHandler's CRC
-                // check not decided this object didn't need one. A genuine ObjectUpdate response
-                // fills in Position for real and fires the public event this streamer's own
-                // OnObjectUpdate reacts to normally, so no further special-casing is needed once
-                // that lands. Reuses _reconcileAttempts as the same 60 s per-key cooldown so a
-                // still-stuck prim isn't re-requested every single 10 s sweep.
+                // A root whose position has never been filled in (still the zero placeholder) has
+                // reached ObjectsPrimitives without a full update -- possible if
+                // ObjectUpdateCachedHandler's CRC check decided a cached copy didn't need
+                // re-requesting, or if the root arrived via a reference from one of its own
+                // children before its own update packet did. There's no real position to enqueue a
+                // build against yet, so instead of waiting for an event that may never come,
+                // actively re-request the object -- the same request AlwaysRequestObjects would
+                // otherwise have issued. A genuine ObjectUpdate response fills in Position for real
+                // and fires the public event this streamer's own OnObjectUpdate reacts to normally,
+                // so no further special-casing is needed once that lands. Reuses
+                // _reconcileAttempts as the same 60 s per-key cooldown so a still-stuck prim isn't
+                // re-requested every single 10 s sweep.
                 if (root.Position == OmVector3.Zero)
                 {
                     var zeroKey = MakeSceneKey(sim, root.LocalID, currentSim);

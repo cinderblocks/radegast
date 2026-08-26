@@ -355,18 +355,18 @@ internal sealed unsafe class VkContext : IDisposable
                     // (the binding count observed to bind first, over UniformBuffer's larger
                     // per-face allowance).
                     //
-                    // Bumped from an original ~6000-face budget after the lightweight
-                    // region-crossing rework (SceneViewerViewModel.HandleLightweightRegionPromotion)
-                    // started keeping several already-built regions' worth of geometry resident at
-                    // once by design, instead of clearing on every crossing -- a corner with 3-4
-                    // simultaneous tracked neighbors can legitimately exceed the old single-region
-                    // budget (observed: VK_ERROR_OUT_OF_POOL_MEMORY at 7923 live faces). This is
-                    // still a stopgap, not a real fix: nothing currently bounds how many resident
-                    // regions accumulate over a long play session (SimDisconnected only fires when
-                    // the server drops a child sim, not when one is merely "far enough away now"),
-                    // so a long enough session can still exhaust any fixed budget. The real fix is
-                    // per-material descriptor-set dedup (most faces in a real build share texture
-                    // sets) or a resident-region eviction policy -- not attempted here.
+                    // Sized for the lightweight region-crossing path
+                    // (SceneViewerViewModel.HandleLightweightRegionPromotion), which keeps several
+                    // already-built regions' worth of geometry resident at once by design instead
+                    // of clearing on every crossing -- a corner with 3-4 simultaneous tracked
+                    // neighbors can legitimately need more descriptor sets than a single region
+                    // alone would. This is still a stopgap, not a complete fix: nothing currently
+                    // bounds how many resident regions accumulate over a long play session
+                    // (SimDisconnected only fires when the server drops a child sim, not when one
+                    // is merely "far enough away now"), so a long enough session can still exhaust
+                    // any fixed budget. The real fix is per-material descriptor-set dedup (most
+                    // faces in a real build share texture sets) or a resident-region eviction
+                    // policy -- not attempted here.
                     //
                     // These numbers are a documented budget, not a load-bearing hard limit:
                     // VK_ERROR_OUT_OF_POOL_MEMORY detection at the declared per-type counts is
@@ -433,16 +433,12 @@ internal sealed unsafe class VkContext : IDisposable
                     // MaxSets=20480 -- MaxSets is a looser shared ceiling across every descriptor
                     // set kind this pool serves, not this pool's own binding constraint). Each
                     // live scene face rents exactly one slot here (one VkMaterialDescriptorSet =
-                    // one UniformBuffer descriptor), so this pool's own real ceiling was 8192 --
-                    // HALF the ~16000-face budget the poolSizes comment above documents and the
-                    // DescriptorPool itself was actually sized for. That mismatch meant a busy
-                    // scene hit THIS pool's artificially low ceiling (observed live: object
-                    // uploads silently dropped via UploadSceneObjectNoRebuild's catch path at
-                    // ~8186/8192 faces, nowhere near the DescriptorPool's real headroom) long
-                    // before the real budget was exhausted -- and since an object's entire face
-                    // set is dropped together on the first Rent() failure, objects needing many
-                    // faces at once (large mesh buildings) were far likelier victims than small
-                    // few-face objects able to squeeze into whatever handful of slots remained.
+                    // one UniformBuffer descriptor), so this MUST track the DescriptorPool's own
+                    // UniformBuffer count above -- sizing it any lower makes this pool the
+                    // effective face-count ceiling instead of the DescriptorPool, and since an
+                    // object's entire face set is dropped together on the first Rent() failure
+                    // (see UploadSceneObjectNoRebuild's catch path), objects needing many faces at
+                    // once are hit hardest by that kind of undersizing.
                     vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 16384);
                     // success is set only after MaterialUboPool's own allocation succeeds, so
                     // the finally block below still tears down pool/descriptorPool/device if

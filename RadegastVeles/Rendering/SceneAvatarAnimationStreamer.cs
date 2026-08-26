@@ -189,14 +189,12 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         if (e.AvatarID == _client.Self.AgentID)
         {
             // Self's animator is keyed by SceneAvatarStreamer.SelfSceneId, not the raw protocol
-            // LocalID -- OnAvatarBuilt's localId parameter (used to populate _animators at line
-            // 151) already carries that translation, since it comes straight from
-            // SceneAvatarStreamer.AvatarBuilt's own invocation. Using the raw LocalID here meant
-            // this lookup always missed for self: UpdateAnimations was never called, so self's
-            // animator never learned which animation was active and stayed in bind pose
-            // permanently, regardless of region crossings or attachments -- the actual root cause
-            // behind the T-pose reports this session, not the build/dispatch path those reports
-            // were chased through.
+            // LocalID -- OnAvatarBuilt's localId parameter (used to populate _animators) already
+            // carries that translation, since it comes straight from
+            // SceneAvatarStreamer.AvatarBuilt's own invocation. Using the raw LocalID here means
+            // this lookup always misses for self: UpdateAnimations is never called, so self's
+            // animator never learns which animation is active and stays in bind pose permanently,
+            // regardless of region crossings or attachments.
             localId = SceneAvatarStreamer.SelfSceneId;
         }
         else

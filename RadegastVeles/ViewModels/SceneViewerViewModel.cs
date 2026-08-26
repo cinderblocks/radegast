@@ -362,10 +362,16 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     /// simulator into the freshly created streamers.  Called once at the end of
     /// <see cref="SetViewport"/> when we are already connected.
     /// <para>
-    /// Only root prims (ParentID == 0) are fed directly — each streamer collects
-    /// the full linkset itself via CollectLinkset.  Feeding child prims too would
-    /// dirty the same root thousands of extra times and cause a burst of redundant
-    /// build tasks and placeholder GL submissions.
+    /// Feeds BOTH root and child prims through <c>OnObjectUpdate</c>. Root-only would rely on each
+    /// streamer's own <c>CollectLinkset</c> to pull children in, but <c>_childrenByParent</c> (which
+    /// <c>CollectLinkset</c> depends on entirely) is populated ONLY inside
+    /// <c>SceneObjectStreamer.OnObjectUpdate</c> -- so a child prim already resident in
+    /// <c>ObjectsPrimitives</c> at seed time, whose own live <c>ObjectUpdate</c> event fired before
+    /// this panel ever subscribed to it, would never be registered as anyone's child and would stay
+    /// permanently absent from its linkset regardless of session length. Feeding children too is
+    /// safe: <c>EnqueueDirty</c>'s backing store is a dictionary keyed by the LINKSET's (root's)
+    /// scene key, not a queue, so every child of the same root collapses onto one dirty entry
+    /// regardless of how many are fed here -- no per-child build multiplication.
     /// </para>
     /// </summary>
     private void SeedStreamersFromCurrentSim()
@@ -373,10 +379,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         var sim = _instance.Client.Network.CurrentSim;
         if (sim == null) return;
 
-        // Seed only root prims to avoid dirtying the same linkset once per child.
         foreach (var prim in sim.ObjectsPrimitives.Values)
         {
-            if (prim.ParentID != 0) continue;
             _objectStreamer?.OnObjectUpdate(sim, prim, isAttachment: false);
         }
 
@@ -397,6 +401,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     /// Objects cached in neighbor sims before the viewer subscribed to ObjectUpdate never fire
     /// new events, so we feed them through the streamer manually here.
     /// Also kicks off terrain builds for each reachable neighbor.
+    /// <para>
+    /// Feeds every prim, not just roots -- see <see cref="SeedStreamersFromCurrentSim"/>'s doc
+    /// comment for why root-only silently drops any child prim whose own live event fired before
+    /// this panel subscribed.
+    /// </para>
     /// </summary>
     private void SeedNeighborSims()
     {
@@ -414,7 +423,6 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         {
             foreach (var prim in sim.ObjectsPrimitives.Values)
             {
-                if (prim.ParentID != 0) continue;
                 _objectStreamer.OnObjectUpdate(sim, prim, isAttachment: false);
             }
             _ = RefreshNeighborTerrainAsync(sim);
@@ -632,8 +640,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // rebuild (already correct relative to the new current sim), but any OTHER
         // already-tracked neighbor's terrain was baked relative to the OLD current sim and needs
         // the exact same delta objects just got, or it's left offset by one region-width -- a
-        // visible gap at that neighbor's border (reported after the crossing-rework session:
-        // "terrain seams still leave big gaps... maybe positional" -- it was).
+        // visible gap at that neighbor's border.
         if (_viewport != null && _neighborIndex != null && rebaseDelta != Vector3.Zero)
         {
             var otherTerrainKeys = new List<ulong>();

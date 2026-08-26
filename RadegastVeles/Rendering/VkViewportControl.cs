@@ -933,14 +933,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// Genuinely safe to call from any thread, matching every "any thread" contract documented
     /// on <see cref="Submit"/>/<see cref="PatchSubmissionTexture"/>/<see cref="SubmitSceneObject"/>
     /// and the rest of this class's public API: <c>Compositor.RequestCompositionUpdate</c>
-    /// itself calls <c>Dispatcher.VerifyAccess()</c> and throws off the UI thread, so a
-    /// background-thread caller (confirmed live -- <c>AvatarViewerViewModel.LoadAsync</c>'s
-    /// texture-download <c>Progress&lt;T&gt;</c> callback runs on a thread-pool thread, not the
-    /// UI thread, when the download completes off it) crashed the app until this hop was added
-    /// here. <see cref="PatchSceneObjectTexture"/>'s own background continuation already worked
-    /// around this correctly with an explicit <c>Dispatcher.UIThread.Post(RequestRender)</c>
-    /// call; that fix is now redundant (this method does the same check internally) but harmless
-    /// to leave as-is.
+    /// itself calls <c>Dispatcher.VerifyAccess()</c> and throws off the UI thread, so any
+    /// background-thread caller (e.g. <c>AvatarViewerViewModel.LoadAsync</c>'s texture-download
+    /// <c>Progress&lt;T&gt;</c> callback, which runs on a thread-pool thread when the download
+    /// completes off the UI thread) needs this hop to avoid crashing.
+    /// <see cref="PatchSceneObjectTexture"/>'s own background continuation already works around
+    /// this correctly with an explicit <c>Dispatcher.UIThread.Post(RequestRender)</c> call; that
+    /// is redundant with this method's own internal check but harmless to leave as-is.
     /// </para></summary>
     public void RequestRender()
     {
