@@ -102,16 +102,9 @@
         </Border>
 
         <Border DockPanel.Dock="Bottom" BorderThickness="0,1,0,0" Padding="6,2">
-            <StackPanel Orientation="Vertical" Spacing="0">
-                <TextBlock Text="{Binding StatusText}"
-                           VerticalAlignment="Center"
-                           AutomationProperties.Name="Scene viewer status" />
-                <TextBlock Text="{Binding SelectedInfo}"
-                           VerticalAlignment="Center"
-                           FontSize="11"
-                           IsVisible="{Binding SelectedInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                           AutomationProperties.Name="Selected object info" />
-            </StackPanel>
+            <TextBlock Text="{Binding StatusText}"
+                       VerticalAlignment="Center"
+                       AutomationProperties.Name="Scene viewer status" />
         </Border>
 
         <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
@@ -121,26 +114,23 @@
                  mirroring PrimViewerPanel's own Milestone 12 pattern exactly). The Wireframe
                  binding that used to live here is redundant with SceneViewerViewModel.SetViewport/
                  OnWireframeChanged, which already push Wireframe to whichever viewport is
-                 attached, so it was dropped rather than replicated in code-behind. The ContextMenu
-                 and ToolTip, which used to be property-elements on the viewport control itself,
-                 are relocated onto this host instead, since they can't survive the swap to a
-                 dynamically-constructed child control; ViewportHost fills the identical
-                 screen area and stays in the normal XAML-declared logical tree, so bindings and
-                 right-click/hover behavior are unaffected. -->
+                 attached, so it was dropped rather than replicated in code-behind. The ContextMenu,
+                 which used to be a property-element on the viewport control itself, is relocated
+                 onto this host instead, since it can't survive the swap to a dynamically-constructed
+                 child control; ViewportHost fills the identical screen area and stays in the normal
+                 XAML-declared logical tree, so bindings and right-click behavior are unaffected. -->
             <ContentControl x:Name="ViewportHost"
                             Background="Transparent"
                             HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
-                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"
-                            ToolTip.Tip="Alt+drag: orbit | Alt+Ctrl+drag: pan | Alt+Ctrl+Shift+drag: dolly | Scroll: zoom | Click: select/interact | Double-click ground: walk there | M: mouselook | Enter: chat">
+                            HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
                 <ContentControl.ContextMenu>
-                    <ContextMenu>
+                    <ContextMenu x:Name="ObjectContextMenu">
                         <MenuItem Header="{Binding ContextLabel}" IsEnabled="False" FontWeight="SemiBold" />
                         <Separator />
                         <MenuItem Header="Touch" Command="{Binding TouchObjectCommand}" IsVisible="{Binding ContextIsPrim}" />
                         <MenuItem Header="Sit Here" Command="{Binding SitOnCommand}" IsVisible="{Binding ContextIsPrim}" />
                         <MenuItem Header="Inspect" Command="{Binding InspectObjectCommand}" IsVisible="{Binding ContextIsPrim}" />
                         <MenuItem Header="Teleport To" Command="{Binding TeleportToAvatarCommand}" IsVisible="{Binding ContextIsAvatar}" />
-                        <MenuItem Header="Focus Camera" Command="{Binding CameraFocusCommand}" />
                         <Separator />
                         <MenuItem Header="Stand Up" Command="{Binding StandUpCommand}" IsVisible="{Binding ContextIsSitting}" />
                     </ContextMenu>

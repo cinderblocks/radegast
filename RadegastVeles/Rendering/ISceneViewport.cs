@@ -58,6 +58,9 @@ public interface ISceneViewport
     /// <c>InitializeAsync</c> cannot complete before the subscription exists.</summary>
     event Action? SceneReset;
     event Action<uint, int, FaceHitInfo>? FaceClicked;
+    /// <summary>Plain right-click (select-for-menu, no touch) -- see
+    /// <c>VkViewportControl.ObjectRightClicked</c>'s own doc comment.</summary>
+    event Action<uint, int, FaceHitInfo>? ObjectRightClicked;
     event Action<Vector3>? GroundClicked;
     event Action<bool>? MouselookChanged;
 
@@ -161,6 +164,11 @@ public interface ISceneViewport
 
     void SubmitParticles(ulong key, ParticleRenderSubmission? sub);
     void RemoveParticles(ulong key);
+    /// <summary>Sets (or clears, with 0) the PrimLocalId to draw an SL-style selection
+    /// outline around -- see <c>VkOutlinePipeline</c>'s own doc comment for the technique.
+    /// Called on touch/select; replaces whatever was previously selected.</summary>
+    void SetSelectedObject(uint primLocalId);
+
     void RequestRender();
     void UpdateCameraFollow(Vector3 target);
     void SetCameraTarget(Vector3 target, float distance = -1f, float pitch = -1000f);

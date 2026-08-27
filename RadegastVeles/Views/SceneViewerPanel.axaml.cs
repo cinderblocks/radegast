@@ -54,7 +54,19 @@ public partial class SceneViewerPanel : UserControl
         // plain Avalonia routed event with no viewport-specific meaning -- not worth adding
         // to the interface for this.
         control.PointerPressed += (_, _) => Focus();
+        // Grab keyboard/mouse focus the moment the render panel becomes visible -- on first
+        // open AND on every tab-switch back (VkViewportControl.OnAttachedToVisualTree fires
+        // every re-attach, not just the first) -- so WASD/mouse work immediately without
+        // requiring an explicit click first, matching the real SL viewer's own behavior.
+        control.AttachedToVisualTree += (_, _) => Focus();
         ViewportHost.Content = control;
+
+        // The selection outline is menu-scoped, not sticky: real SL's build-highlight is tied
+        // to having something selected via the pie menu, not left lit indefinitely after it
+        // closes. Clearing here (rather than in the VM) covers every dismissal path (click
+        // elsewhere, Escape, a command executing) with one subscription, since Avalonia's
+        // ContextMenu already raises Closed for all of them.
+        ObjectContextMenu.Closed += (_, _) => Viewport.SetSelectedObject(0);
     }
 
     /// <summary>

@@ -267,21 +267,6 @@ internal sealed class SceneObjectStreamer : IDisposable
             // cancel/starve a linkset's build purely on placeholder data. Falling through to
             // EnqueueDirty below is safe either way: the real radius gate re-runs once the root
             // is known, in ProcessDirty/EnqueueBuild's own position lookups.
-            // Logged unconditionally for root prims regardless of scale, since a small-footprint
-            // single-prim mesh object with a wrongly-resolved root position would be missed by
-            // any size filter here. Rate-limited naturally: this only runs once per incoming full
-            // ObjectUpdate packet for the root, not per frame.
-            if (prim.ParentID == 0)
-            {
-                var dx = worldPos.X - avatarPos.X;
-                var dy = worldPos.Y - avatarPos.Y;
-                var dz = worldPos.Z - avatarPos.Z;
-                Logger.Log(
-                    $"SceneObjectStreamer: culled root prim {rootLocalId} " +
-                    $"(scale={prim.Scale}) at dist={MathF.Sqrt(dx * dx + dy * dy + dz * dz):F1}m " +
-                    $"(radius={_maxStreamRadius}m), rootPos={worldPos}, avatarPos=({avatarPos.X:F1},{avatarPos.Y:F1},{avatarPos.Z:F1})",
-                    LogLevel.Debug);
-            }
             CancelAndRemove(sceneKey);
             return;
         }
@@ -959,17 +944,6 @@ internal sealed class SceneObjectStreamer : IDisposable
             if (token.IsCancellationRequested) return;
 
             _viewport.SubmitSceneObject(sceneKey, submission);
-            // Gated by distance rather than object size or prim count, since a small single-prim
-            // object close to the avatar is just as worth confirming in the log as a large one --
-            // see BuildObjectAsync's own CollectLinkset-empty branch for the complementary case
-            // (a build that never happens at all).
-            if (dist < 30f)
-            {
-                Logger.Log(
-                    $"SceneObjectStreamer: built sceneKey {sceneKey:x} (rootLocalId={rootLocalId}, " +
-                    $"prims={prims.Count}, faces={submission.Faces.Length}, dist={dist:F1}m, worldPos={worldPos})",
-                    LogLevel.Debug);
-            }
             _rendered[sceneKey] = 0;
             // Seeds the epsilon-gate baseline here too (not just for later rebuilds) so the very
             // first terse update after initial OnObjectUpdate doesn't immediately re-trigger a

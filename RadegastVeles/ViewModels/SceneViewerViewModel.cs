@@ -275,6 +275,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         };
         _viewport.SceneReset            += OnSceneReset;
         _viewport.FaceClicked           += OnFaceClicked;
+        _viewport.ObjectRightClicked    += OnObjectRightClicked;
         _viewport.GroundClicked         += OnGroundClicked;
         _viewport.MouselookChanged      += OnMouselookChanged;
         _viewport.TerrainHeightProvider = (x, y) =>
@@ -520,7 +521,6 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         {
             SelectedInfo = $"{name}  [{selected.ID}]  face {_selectedFaceIndex}";
             ContextLabel = name;
-            StatusText   = $"Selected: {SelectedInfo}";
         });
     }
 
@@ -723,6 +723,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             NameTags.Clear();
             SelectedLocalId = 0;
             SelectedInfo    = string.Empty;
+            _viewport?.SetSelectedObject(0);
             UpdateStatusBar();
             if (_viewport != null)
                 _viewport.WaterHeight = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;
@@ -960,10 +961,34 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private const uint AvatarKeyOffset = 0x8000_0000u;
 
     /// <summary>
-    /// Called on the UI thread when the user clicks a face in the viewport.
-    /// Updates selection state and, for prims, fires an ObjectClick touch packet.
+    /// Called on the UI thread when a plain left-click picks a face -- real SL's touch
+    /// gesture. Fires the touch packet only; no selection/highlight side effect (that's
+    /// <see cref="OnObjectRightClicked"/>'s job now) and no avatar case, since avatars aren't
+    /// touch-clicked in real SL.
     /// </summary>
     private void OnFaceClicked(uint sceneLocalId, int faceIndex, Radegast.Veles.Rendering.FaceHitInfo hit)
+    {
+        if (_disposed) return;
+        var sim = _instance.Client.Network.CurrentSim;
+        if (sim == null) return;
+        if (sceneLocalId >= AvatarKeyOffset) return;
+
+        // Convert OpenTK vectors to LibreMetaverse vectors for the packet.
+        var uvCoord  = new LibreMetaverse.Vector3(hit.UvCoord.X,  hit.UvCoord.Y,  hit.UvCoord.Z);
+        var stCoord  = new LibreMetaverse.Vector3(hit.StCoord.X,  hit.StCoord.Y,  hit.StCoord.Z);
+        var position = new LibreMetaverse.Vector3(hit.Position.X, hit.Position.Y, hit.Position.Z);
+        var normal   = new LibreMetaverse.Vector3(hit.Normal.X,   hit.Normal.Y,   hit.Normal.Z);
+        var binormal = new LibreMetaverse.Vector3(hit.Binormal.X, hit.Binormal.Y, hit.Binormal.Z);
+        _ = _instance.Client.Objects.ClickObjectAsync(
+                sim, sceneLocalId, uvCoord, stCoord, faceIndex, position, normal, binormal);
+    }
+
+    /// <summary>
+    /// Called on the UI thread when a plain right-click picks a face -- real SL's
+    /// select-for-the-pie-menu gesture: updates selection state (and, for prims, the SL-style
+    /// selection outline) without sending a touch packet.
+    /// </summary>
+    private void OnObjectRightClicked(uint sceneLocalId, int faceIndex, Radegast.Veles.Rendering.FaceHitInfo hit)
     {
         if (_disposed) return;
         var sim = _instance.Client.Network.CurrentSim;
@@ -984,28 +1009,29 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             {
                 var selfName = _instance.Client.Self.Name;
                 SelectedInfo = string.IsNullOrEmpty(selfName) ? "You" : selfName;
-                StatusText   = $"Avatar: {SelectedInfo}";
                 ContextLabel = SelectedInfo;
             }
             else if (sim.ObjectsAvatars.TryGetValue(realId, out var av))
             {
                 SelectedInfo  = $"{av.Name}";
-                StatusText    = $"Avatar: {av.Name}";
                 ContextLabel  = av.Name;
             }
             else
             {
                 SelectedInfo  = $"Avatar #{realId}";
-                StatusText    = SelectedInfo;
                 ContextLabel  = $"Avatar #{realId}";
             }
             ContextIsAvatar  = true;
             ContextIsPrim    = false;
             ContextIsSitting = _instance.Client.Self.SittingOn != 0;
+
+            // SL doesn't build-highlight avatars on click — only prims get the
+            // selection outline, so clear any outline left over from a prior prim pick.
+            _viewport?.SetSelectedObject(0);
         }
         else
         {
-            // Prim hit — show name/UUID and send a touch.
+            // Prim hit — show name/UUID.
             string primName;
             if (sim.ObjectsPrimitives.TryGetValue(realId, out var prim))
             {
@@ -1019,24 +1045,14 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                 SelectedInfo = primName;
                 ContextLabel = primName;
             }
-            StatusText       = $"Touched: {SelectedInfo}";
             ContextIsAvatar  = false;
             ContextIsPrim    = true;
             ContextIsSitting = _instance.Client.Self.SittingOn != 0;
+            _viewport?.SetSelectedObject(realId);
 
             // Request full properties so the name is populated for the context label.
             if (prim?.Properties == null)
                 _instance.Client.Objects.SelectObject(sim, realId);
-
-            // Fire the grab/degrab touch
-            // Convert OpenTK vectors to LibreMetaverse vectors for the packet.
-            var uvCoord  = new LibreMetaverse.Vector3(hit.UvCoord.X,  hit.UvCoord.Y,  hit.UvCoord.Z);
-            var stCoord  = new LibreMetaverse.Vector3(hit.StCoord.X,  hit.StCoord.Y,  hit.StCoord.Z);
-            var position = new LibreMetaverse.Vector3(hit.Position.X, hit.Position.Y, hit.Position.Z);
-            var normal   = new LibreMetaverse.Vector3(hit.Normal.X,   hit.Normal.Y,   hit.Normal.Z);
-            var binormal = new LibreMetaverse.Vector3(hit.Binormal.X, hit.Binormal.Y, hit.Binormal.Z);
-            _ = _instance.Client.Objects.ClickObjectAsync(
-                    sim, realId, uvCoord, stCoord, faceIndex, position, normal, binormal);
         }
     }
 
@@ -1312,29 +1328,6 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Point the orbit camera at the selected object / avatar.
-    /// </summary>
-    [RelayCommand]
-    private void CameraFocus()
-    {
-        if (_disposed || _viewport == null || SelectedLocalId == 0) return;
-        var sim = _instance.Client.Network.CurrentSim;
-        if (sim == null) return;
-
-        bool isAvatar = ContextIsAvatar;
-        OmVector3 pos = OmVector3.Zero;
-
-        if (isAvatar && sim.ObjectsAvatars.TryGetValue(SelectedLocalId, out var av))
-            pos = av.Position;
-        else if (!isAvatar && sim.ObjectsPrimitives.TryGetValue(SelectedLocalId, out var prim))
-            pos = prim.Position;
-
-        if (pos == OmVector3.Zero) return;
-        _viewport.SetCameraTarget(new Vector3(pos.X, pos.Y, pos.Z));
-        _viewport.RequestRender();
-    }
-
-    /// <summary>
     /// Teleport to the selected avatar's current position.
     /// Only available when the context target is an avatar.
     /// </summary>
@@ -1587,6 +1580,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         if (_viewport != null)
         {
             _viewport.FaceClicked      -= OnFaceClicked;
+            _viewport.ObjectRightClicked -= OnObjectRightClicked;
             _viewport.SceneReset       -= OnSceneReset;
             _viewport.GroundClicked    -= OnGroundClicked;
             _viewport.MouselookChanged -= OnMouselookChanged;

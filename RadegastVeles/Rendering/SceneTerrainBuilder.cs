@@ -137,14 +137,6 @@ internal sealed class SceneTerrainBuilder
         bMin += regionOffset;
         bMax += regionOffset;
 
-        // Diagnostic: reports this region's final world-space terrain footprint. Two adjacent
-        // regions' touching edges should read the identical coordinate (e.g. one region's
-        // bMax.X should equal its east neighbor's bMin.X) if the boundary-snap in
-        // BuildTerrainMesh is taking effect and regionOffset is what's expected.
-        LibreMetaverse.Logger.DebugLog(
-            $"[TerrainBounds] sim={sim.Name} handle={sim.Handle} regionOffset={regionOffset} " +
-            $"worldBounds=({bMin.X:F3},{bMin.Y:F3})-({bMax.X:F3},{bMax.Y:F3})");
-
         return new PrimRenderSubmission
         {
             Label     = "terrain",
@@ -244,12 +236,7 @@ internal sealed class SceneTerrainBuilder
         {
             for (int x = 0; x < 256; x++)
                 if (TerrainSeamHelper.TryGetHeight(north, 0, x, out float nh))
-                {
-                    if (x == 128)
-                        LibreMetaverse.Logger.DebugLog(
-                            $"[TerrainSeamSample] sim={sim.Name} edge=North own={hm[255, x]:F3} neighbor={north.Name}:{nh:F3}");
                     hm[255, x] = (hm[255, x] + nh) * 0.5f;
-                }
         }
 
         // South edge (region y=0) <-> neighbor's north edge (region y=255).
@@ -258,12 +245,7 @@ internal sealed class SceneTerrainBuilder
         {
             for (int x = 0; x < 256; x++)
                 if (TerrainSeamHelper.TryGetHeight(south, 255, x, out float sh))
-                {
-                    if (x == 128)
-                        LibreMetaverse.Logger.DebugLog(
-                            $"[TerrainSeamSample] sim={sim.Name} edge=South own={hm[0, x]:F3} neighbor={south.Name}:{sh:F3}");
                     hm[0, x] = (hm[0, x] + sh) * 0.5f;
-                }
         }
 
         // East edge (region x=255) <-> neighbor's west edge (region x=0).
@@ -272,12 +254,7 @@ internal sealed class SceneTerrainBuilder
         {
             for (int y = 0; y < 256; y++)
                 if (TerrainSeamHelper.TryGetHeight(east, y, 0, out float eh))
-                {
-                    if (y == 128)
-                        LibreMetaverse.Logger.DebugLog(
-                            $"[TerrainSeamSample] sim={sim.Name} edge=East own={hm[y, 255]:F3} neighbor={east.Name}:{eh:F3}");
                     hm[y, 255] = (hm[y, 255] + eh) * 0.5f;
-                }
         }
 
         // West edge (region x=0) <-> neighbor's east edge (region x=255).
@@ -286,12 +263,7 @@ internal sealed class SceneTerrainBuilder
         {
             for (int y = 0; y < 256; y++)
                 if (TerrainSeamHelper.TryGetHeight(west, y, 255, out float wh))
-                {
-                    if (y == 128)
-                        LibreMetaverse.Logger.DebugLog(
-                            $"[TerrainSeamSample] sim={sim.Name} edge=West own={hm[y, 0]:F3} neighbor={west.Name}:{wh:F3}");
                     hm[y, 0] = (hm[y, 0] + wh) * 0.5f;
-                }
         }
     }
 

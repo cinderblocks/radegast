@@ -228,7 +228,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private VkPrimDescriptorSets? _frameSets;
     private VkInstanceDrawer? _instanceDrawer;
     private VkWireframePipeline? _wireframe;
+    private VkOutlinePipeline? _outline;
     private VkPickPipeline? _pick;
+
+    /// <summary>PrimLocalId of the currently touch/selected prim to draw an SL-style
+    /// selection outline around this frame, or 0 for none. Set via <see cref="SetSelectedObject"/>.</summary>
+    private uint _selectedOutlineLocalId;
 
     // Best-effort -- created in
     // InitializeAsync inside a try/catch, _skyReady left false on any failure so RenderFrame
@@ -675,13 +680,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private Point _pickPoint;
     // see RequestPick's own doc comment for the exact GL mirror this implements.
     private bool _groundPickRequested;
+    private PickPurpose _pickPurpose = PickPurpose.Touch;
+
+    /// <summary>What a pending <see cref="RequestPick"/> call should DO with its result once
+    /// resolved -- distinguishes SL's three separate click behaviors, which all share the same
+    /// underlying pick machinery. <c>Touch</c> (plain left-click): fires
+    /// <see cref="FaceClicked"/>/<see cref="GroundClicked"/> as before, VM sends the touch
+    /// packet. <c>Select</c> (plain right-click): fires <see cref="ObjectRightClicked"/>
+    /// instead -- selects/highlights the object for the context menu without touching it, real
+    /// SL's right-click behavior. <c>CameraFocus</c> (Alt+click, either button, no drag): never
+    /// reaches the VM at all -- resolved directly against <c>_camera.Target</c> here, since
+    /// that's a pure camera action with no object-interaction side effect in real SL.</summary>
+    private enum PickPurpose { Touch, Select, CameraFocus }
 
     // Pointer-input/camera-drag-gesture state -- see OnPointerPressed/Released/Moved
     // below for the full gesture logic.
     private Point _lastPointer;
     private Point _pressPointer;
     private int _pressClickCount;
-    private bool _dragged;
     private bool _cameraGesture;
     private bool _leftDown;
     private bool _rightDown;
@@ -737,6 +753,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// </summary>
     public event Action<uint, int, FaceHitInfo>? FaceClicked;
 
+    /// <summary>
+    /// Fired (on the UI thread) when a plain right-click (no drag, no Alt) picks a face --
+    /// real SL's "select for the context menu" gesture, distinct from <see cref="FaceClicked"/>
+    /// (left-click touch): selects/highlights the object without sending a touch packet. Same
+    /// payload shape as <see cref="FaceClicked"/> for consistency, though subscribers typically
+    /// only need the id.
+    /// </summary>
+    public event Action<uint, int, FaceHitInfo>? ObjectRightClicked;
+
     public VkViewportControl()
     {
         _updateAction = RenderFrame;
@@ -764,7 +789,6 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _lastPointer = e.GetPosition(this);
         _pressPointer = _lastPointer;
         _pressClickCount = e.ClickCount;
-        _dragged = false;
         _cameraGesture = false;
         var props = e.GetCurrentPoint(this).Properties;
         _leftDown = props.IsLeftButtonPressed;
@@ -773,12 +797,31 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>Fires
-    /// a pick on a plain left-click with no drag and no Alt held (Alt+drag is a camera gesture
-    /// and must not also trigger object interaction), or from the fixed screen-center reticle
-    /// while in mouselook (aims from where the hidden cursor visually isn't, matching GL's own
-    /// reticle convention). <see cref="RequestPick"/>'s own <c>isGroundPickCandidate</c>
-    /// parameter is set from a double-click, matching GL's <c>_groundPickRequested =
-    /// _pressClickCount == 2</c> exactly.</summary>
+    /// a pick on release, or from the fixed screen-center reticle while in mouselook (aims from
+    /// where the hidden cursor visually isn't, matching GL's own reticle convention). Dispatches
+    /// to one of three real-SL click behaviors (see <see cref="PickPurpose"/>'s own doc
+    /// comment): Alt+click (either button, no drag) is <c>CameraFocus</c> and takes priority
+    /// over the button check -- SL's Alt+click focuses the camera regardless of which button,
+    /// and must not ALSO touch/select; a plain left-click is <c>Touch</c>; a plain right-click
+    /// is <c>Select</c>.
+    /// <para>
+    /// Only <c>_cameraGesture</c> gates Touch/Select -- there used to also be a "was this a
+    /// drag" check here (a >4px pointer-movement threshold), removed because it doesn't match
+    /// real SL: SL only treats an ALT-modified drag as a camera gesture, so a plain (non-Alt)
+    /// click that wobbles a few pixels between press and release -- normal hand tremor, not a
+    /// deliberate gesture -- is still a touch/select there, same as a dead-still click. The old
+    /// drag check silently dropped a large fraction of real-world clicks (any click with a few
+    /// px of incidental movement never reached <see cref="RequestPick"/> at all, with no
+    /// visible error -- it just looked like the object ignored the click). This still correctly
+    /// excludes an Alt+drag from being treated as Alt+click-to-focus: whenever Alt is held AND
+    /// the pointer actually moves, <see cref="OnPointerMoved"/> sets <c>_cameraGesture</c> true
+    /// in the same branch that reads Alt, so an Alt+drag is already excluded by the
+    /// <c>!_cameraGesture</c> guard below before the inner <c>alt</c> check ever runs.
+    /// </para>
+    /// <see cref="RequestPick"/>'s own <c>isGroundPickCandidate</c> parameter is set from a
+    /// double-click for <c>Touch</c> (matching GL's <c>_groundPickRequested =
+    /// _pressClickCount == 2</c> exactly), and unconditionally true for <c>CameraFocus</c> --
+    /// real SL's Alt+click focuses on terrain too, not just objects.</summary>
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
         base.OnPointerReleased(e);
@@ -788,9 +831,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (_leftDown)
                 RequestPick(new Point(Bounds.Width / 2, Bounds.Height / 2), isGroundPickCandidate: _pressClickCount == 2);
         }
-        else if (_leftDown && !_dragged && !alt && !_cameraGesture)
+        else if (!_cameraGesture)
         {
-            RequestPick(_pressPointer, isGroundPickCandidate: _pressClickCount == 2);
+            if (alt && (_leftDown || _rightDown))
+                RequestPick(_pressPointer, isGroundPickCandidate: true, purpose: PickPurpose.CameraFocus);
+            else if (_leftDown)
+                RequestPick(_pressPointer, isGroundPickCandidate: _pressClickCount == 2, purpose: PickPurpose.Touch);
+            else if (_rightDown)
+                RequestPick(_pressPointer, isGroundPickCandidate: false, purpose: PickPurpose.Select);
         }
         _leftDown = false;
         _rightDown = false;
@@ -819,10 +867,6 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
 
         if (!_leftDown && !_rightDown) return;
-
-        // Mark as dragged once the pointer moves more than 4 px from the press origin.
-        if (Math.Abs(pos.X - _pressPointer.X) > 4 || Math.Abs(pos.Y - _pressPointer.Y) > 4)
-            _dragged = true;
 
         bool alt = (e.KeyModifiers & KeyModifiers.Alt) != 0;
         bool ctrl = (e.KeyModifiers & KeyModifiers.Control) != 0;
@@ -941,6 +985,16 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// this correctly with an explicit <c>Dispatcher.UIThread.Post(RequestRender)</c> call; that
     /// is redundant with this method's own internal check but harmless to leave as-is.
     /// </para></summary>
+    /// <summary>
+    /// Sets (or clears, with 0) the PrimLocalId to draw an SL-style selection outline
+    /// around, replacing whatever was previously selected. Called by
+    /// <c>SceneViewerViewModel.OnFaceClicked</c> on touch/select. Same threading assumption
+    /// as the <see cref="Wireframe"/> property -- a plain field, set from the UI thread and
+    /// read by <see cref="DrawSelectionOutline"/> on the render thread; a uint write can't
+    /// tear, so no lock is needed for this simple a flag.
+    /// </summary>
+    public void SetSelectedObject(uint primLocalId) => _selectedOutlineLocalId = primLocalId;
+
     public void RequestRender()
     {
         if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
@@ -1188,10 +1242,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// nothing. Defaults false since this method currently has no real pointer-event caller
     /// (a future pointer-input port is what will pass this for real).</param>
     public void RequestPick(Point point, bool isGroundPickCandidate = false)
+        => RequestPick(point, isGroundPickCandidate, PickPurpose.Touch);
+
+    private void RequestPick(Point point, bool isGroundPickCandidate, PickPurpose purpose)
     {
         _pickPoint = point;
         _pickRequested = true;
         _groundPickRequested = isGroundPickCandidate;
+        _pickPurpose = purpose;
         RequestRender();
     }
 
@@ -1562,6 +1620,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
+            _outline = VkOutlinePipeline.Create(vk, _renderPass);
             _pick = VkPickPipeline.Create(vk, _renderPass);
             _placeholders = new VkPlaceholderTextures(vk);
             _frameSets = new VkPrimDescriptorSets(vk, _prim, _placeholders);
@@ -4409,6 +4468,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (Wireframe && _wireframe != null)
                 DrawWireframeOverlay(vk, cmd.InternalHandle, view, proj);
 
+            // Selection outline is independent of the Wireframe toggle -- it's touch/select
+            // feedback, not a debug view, so it draws whenever something is selected.
+            if (_selectedOutlineLocalId != 0 && _outline != null)
+                DrawSelectionOutline(vk, cmd.InternalHandle, view, proj);
+
             // last thing drawn in the main pass, matching GL's own placement
             // (DrawParticles is called immediately before BlitSceneToFb in GlRenderCore).
             DrawParticles(vk, cmd.InternalHandle, view, proj);
@@ -5523,6 +5587,37 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
+    /// <summary>
+    /// Draws the SL-style selection outline (see <see cref="VkOutlinePipeline"/>'s own doc
+    /// comment for the inverted-hull technique) around every currently-submitted face whose
+    /// <see cref="PrimRenderFace.PrimLocalId"/> matches <see cref="_selectedOutlineLocalId"/>.
+    /// Walks the same four draw lists <see cref="DrawWireframeOverlay"/> does, since that's
+    /// every face this frame could possibly need outlining.
+    /// </summary>
+    private unsafe void DrawSelectionOutline(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj)
+    {
+        vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _outline!.Pipeline);
+        DrawSelectionOutlineList(vk, cmd, _opaqueFaces, view, proj);
+        DrawSelectionOutlineList(vk, cmd, _alphaFaces, view, proj);
+        DrawSelectionOutlineList(vk, cmd, _sceneOpaque, view, proj);
+        DrawSelectionOutlineList(vk, cmd, _sceneAlpha, view, proj);
+    }
+
+    private unsafe void DrawSelectionOutlineList(VkContext vk, CommandBuffer cmd,
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> faces, Matrix4x4 view, Matrix4x4 proj)
+    {
+        Span<float> mvp = stackalloc float[16];
+        foreach (var (mesh, _, face) in faces)
+        {
+            if (face.PrimLocalId != _selectedOutlineLocalId) continue;
+            var faceMvp = face.Transform * view * proj;
+            CopyMatrixSpan(faceMvp, mvp);
+            fixed (float* p = mvp)
+                vk.Api.CmdPushConstants(cmd, _outline!.Layout, ShaderStageFlags.VertexBit, 0, 64, p);
+            mesh.Draw(cmd);
+        }
+    }
+
     private static void CopyMatrixSpan(Matrix4x4 m, Span<float> dest)
     {
         dest[0] = m.M11; dest[1] = m.M12; dest[2] = m.M13; dest[3] = m.M14;
@@ -5681,6 +5776,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
         // R+G+B encode a 1-based index into _pickMap (clear alpha=0 / non-zero RGB = a real
         // hit). Ported verbatim from GL's own decode.
+        var purpose = _pickPurpose;
         if (pixel[0] != 0 || pixel[1] != 0 || pixel[2] != 0)
         {
             uint idx = (uint)(pixel[0] | (pixel[1] << 8) | (pixel[2] << 16));
@@ -5688,17 +5784,35 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             {
                 var (primLocalId, faceIndex) = _pickMap[(int)(idx - 1)];
                 var hitInfo = ComputeHitInfo((int)(idx - 1), px, py, pixelSize.Width, pixelSize.Height, view, proj);
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => FaceClicked?.Invoke(primLocalId, faceIndex, hitInfo));
+                if (purpose == PickPurpose.CameraFocus)
+                {
+                    // Real SL: Alt+click is a pure camera action, resolved directly against the
+                    // camera here -- it never reaches the VM/object-interaction layer at all.
+                    var focusPos = hitInfo.Position;
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => { _camera.Target = focusPos; RequestRender(); });
+                }
+                else if (purpose == PickPurpose.Select)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => ObjectRightClicked?.Invoke(primLocalId, faceIndex, hitInfo));
+                }
+                else
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => FaceClicked?.Invoke(primLocalId, faceIndex, hitInfo));
+                }
             }
         }
-        // a double-click that missed every object falls through to the ground-hit
-        // ray march, mirroring GL's own miss-branch exactly: TryGetGroundHit is only attempted
-        // when the object pick found nothing AND the click was a
-        // double-click.
+        // A double-click (Touch) or an Alt+click (CameraFocus, always a ground-pick candidate --
+        // see RequestPick's own doc comment) that missed every object falls through to the
+        // ground-hit ray march, mirroring GL's own miss-branch for the double-click case.
         else if (_groundPickRequested)
         {
             if (TryGetGroundHit(px, py, pixelSize.Width, pixelSize.Height, view, proj, out var groundPos))
-                Avalonia.Threading.Dispatcher.UIThread.Post(() => GroundClicked?.Invoke(groundPos));
+            {
+                if (purpose == PickPurpose.CameraFocus)
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => { _camera.Target = groundPos; RequestRender(); });
+                else
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => GroundClicked?.Invoke(groundPos));
+            }
         }
     }
 
@@ -6265,6 +6379,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _frameSets?.Dispose(); _frameSets = null;
         _placeholders?.Dispose(); _placeholders = null;
         _wireframe?.Dispose(); _wireframe = null;
+        _outline?.Dispose(); _outline = null;
+        _selectedOutlineLocalId = 0;
         _pick?.Dispose(); _pick = null;
         _skySet?.Dispose(); _skySet = null;
         _cloudNoiseTex?.Dispose(); _cloudNoiseTex = null;
