@@ -17,6 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
 
 namespace Radegast.Veles.Rendering;
@@ -49,6 +50,14 @@ namespace Radegast.Veles.Rendering;
 internal sealed class VkFrameReapRing
 {
     private readonly List<VkCommandBufferPool.VkCommandBuffer>[] _slots;
+    // Parallel per-slot list of arbitrary cleanup callbacks (e.g. vkDestroyFramebuffer for a
+    // per-frame framebuffer local like RenderFrame's own -- see MarkPendingDestroy's own doc
+    // comment) that must wait for the SAME "this slot's prior occupant is confirmed done"
+    // guarantee _slots' command buffers already rely on, but aren't VkCommandBuffer objects
+    // themselves so can't just be added to _slots. Kept as a second array (not a tuple/record
+    // added to _slots) so FreeUsed/FreeAll's existing per-buffer Dispose() loop stays untouched
+    // -- this is strictly additive.
+    private readonly List<Action>[] _pendingDestroys;
     private readonly object _lock = new();
     private long _frameIndex = -1;
 
@@ -56,6 +65,8 @@ internal sealed class VkFrameReapRing
     {
         _slots = new List<VkCommandBufferPool.VkCommandBuffer>[VkContext.FramesInFlight];
         for (int i = 0; i < _slots.Length; i++) _slots[i] = new List<VkCommandBufferPool.VkCommandBuffer>();
+        _pendingDestroys = new List<Action>[VkContext.FramesInFlight];
+        for (int i = 0; i < _pendingDestroys.Length; i++) _pendingDestroys[i] = new List<Action>();
     }
 
     // Normalized the same way VkPrimDescriptorSets/VkFrameStatsTracker's own CurrentSlot is --
@@ -80,9 +91,36 @@ internal sealed class VkFrameReapRing
         lock (_lock) _slots[CurrentSlot].Add(buffer);
     }
 
+    /// <summary>
+    /// Registers a cleanup callback (e.g. <c>vkDestroyFramebuffer</c> for a framebuffer built
+    /// fresh this frame, wrapping the swapchain image RenderFrame's own main-pass command buffer
+    /// just submitted) to run at the same time -- and under the same "this slot's prior occupant
+    /// is confirmed done" guarantee -- as the command buffer(s) <see cref="MarkUsed"/> already
+    /// tracks for this same slot. Call once, in the same per-frame window as this frame's own
+    /// <see cref="MarkUsed"/> call (after this frame's <see cref="BeginFrame"/>, before the next
+    /// one).
+    /// <para>
+    /// Exists because a per-frame local like RenderFrame's own framebuffer is NOT a
+    /// <see cref="VkCommandBufferPool.VkCommandBuffer"/> and so can't just be added to
+    /// <see cref="MarkUsed"/>'s own list, but still has the exact same "destroying this before
+    /// the GPU is confirmed done reading it is a real Vulkan spec violation" hazard once the
+    /// unconditional immediately-after-submit destroy this replaces is removed. Destroying it
+    /// unconditionally right after a non-waited <c>Submit()</c> (the bug this method fixes) is a
+    /// real, validation-layer-confirmed hazard, not a theoretical one -- see git history for the
+    /// <c>vkDestroyFramebuffer(): can't be called on VkFramebuffer ... currently in use</c>
+    /// validation error this was added to fix.
+    /// </para></summary>
+    public void MarkPendingDestroy(Action destroy)
+    {
+        lock (_lock) _pendingDestroys[CurrentSlot].Add(destroy);
+    }
+
     /// <summary>Waits on and frees every command buffer marked used into the current slot since
-    /// it was last reaped. Call once per frame (or per out-of-band upload) -- never
-    /// mid-recording.</summary>
+    /// it was last reaped, then runs and clears every pending destroy callback for that same
+    /// slot (see <see cref="MarkPendingDestroy"/>) -- deliberately AFTER the buffer disposals,
+    /// not before/interleaved, so a destroy callback can never run while its own frame's command
+    /// buffer might still be mid-`Dispose()`'s fence wait. Call once per frame (or per
+    /// out-of-band upload) -- never mid-recording.</summary>
     public void FreeUsed()
     {
         lock (_lock)
@@ -90,6 +128,10 @@ internal sealed class VkFrameReapRing
             var slot = _slots[CurrentSlot];
             foreach (var buffer in slot) buffer.Dispose();
             slot.Clear();
+
+            var destroys = _pendingDestroys[CurrentSlot];
+            foreach (var destroy in destroys) destroy();
+            destroys.Clear();
         }
     }
 
@@ -98,7 +140,9 @@ internal sealed class VkFrameReapRing
     /// <c>FramesInFlight - 1</c> slots again once this instance is discarded. A no-op beyond
     /// <see cref="FreeUsed"/> at <c>FramesInFlight=1</c> (there is only the one slot), but real at
     /// N&gt;1: a panel can close mid-flight with a still-pending older slot FreeUsed() alone
-    /// would never reach.</summary>
+    /// would never reach. Also runs every slot's pending destroy callbacks, for the same reason
+    /// -- an unreaped slot's framebuffer would otherwise leak forever once this instance is
+    /// discarded.</summary>
     public void FreeAll()
     {
         lock (_lock)
@@ -107,6 +151,11 @@ internal sealed class VkFrameReapRing
             {
                 foreach (var buffer in slot) buffer.Dispose();
                 slot.Clear();
+            }
+            foreach (var destroys in _pendingDestroys)
+            {
+                foreach (var destroy in destroys) destroy();
+                destroys.Clear();
             }
         }
     }

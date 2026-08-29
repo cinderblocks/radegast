@@ -53,13 +53,14 @@ internal sealed unsafe class VkTexture : IDisposable
     private Image _image;
     private DeviceMemory _memory;
     private ImageView _view;
-    private Sampler _sampler;
     private readonly uint _mipLevels;
     private bool _disposed;
 
     internal Image Image => _image;
     internal ImageView View => _view;
-    internal Sampler Sampler => _sampler;
+    // Shared across every VkTexture in the process -- see VkContext.SharedTextureSampler's own
+    // doc comment. NOT this instance's to destroy; Dispose() below must not touch it.
+    internal Sampler Sampler => _vk.SharedTextureSampler;
 
     /// <summary>
     /// Prepares an <see cref="SKBitmap"/> for Vulkan upload: converts to RGBA8888 AND flips
@@ -154,7 +155,7 @@ internal sealed unsafe class VkTexture : IDisposable
 
         CreateImageAndMemory(Format.R8G8B8A8Unorm, width, height, _mipLevels);
         UploadBaseLevelAndBuildMips(bitmap, width, height, batch);
-        CreateViewAndSampler(Format.R8G8B8A8Unorm);
+        CreateView(Format.R8G8B8A8Unorm);
 
         bitmap.Dispose();
     }
@@ -185,7 +186,7 @@ internal sealed unsafe class VkTexture : IDisposable
 
         CreateImageAndMemory(Format.BC3UnormBlock, (uint)width, (uint)height, _mipLevels);
         UploadPrecomputedMipLevels(bc3Levels, (uint)width, (uint)height, batch);
-        CreateViewAndSampler(Format.BC3UnormBlock);
+        CreateView(Format.BC3UnormBlock);
     }
 
     private void CreateImageAndMemory(Format format, uint width, uint height, uint mipLevels)
@@ -221,7 +222,11 @@ internal sealed unsafe class VkTexture : IDisposable
         api.BindImageMemory(device, _image, _memory, 0).ThrowOnError();
     }
 
-    private void CreateViewAndSampler(Format format)
+    // No longer creates a sampler -- every texture shares VkContext.SharedTextureSampler now
+    // (see its own doc comment for why: this texture's sampler parameters were 100% fixed
+    // except MaxLod, and Vulkan clamps MaxLod against the bound image view's real level count
+    // anyway, so one generously-capped shared sampler is correct for every texture).
+    private void CreateView(Format format)
     {
         var api = _vk.Api;
         var device = _vk.Device;
@@ -237,22 +242,6 @@ internal sealed unsafe class VkTexture : IDisposable
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, _mipLevels, 0, 1)
         };
         api.CreateImageView(device, in viewInfo, null, out _view).ThrowOnError();
-
-        // Matches GlTexture's TexParameter calls: LinearMipmapLinear min, Linear mag, Repeat S/T.
-        var samplerInfo = new SamplerCreateInfo
-        {
-            SType = StructureType.SamplerCreateInfo,
-            MagFilter = Filter.Linear,
-            MinFilter = Filter.Linear,
-            MipmapMode = SamplerMipmapMode.Linear,
-            AddressModeU = SamplerAddressMode.Repeat,
-            AddressModeV = SamplerAddressMode.Repeat,
-            AddressModeW = SamplerAddressMode.Repeat,
-            MinLod = 0,
-            MaxLod = _mipLevels,
-            BorderColor = BorderColor.IntOpaqueBlack,
-        };
-        api.CreateSampler(device, in samplerInfo, null, out _sampler).ThrowOnError();
     }
 
     private void UploadBaseLevelAndBuildMips(SKBitmap bitmap, uint width, uint height, VkStagedUploadBatch? batch)
@@ -522,7 +511,7 @@ internal sealed unsafe class VkTexture : IDisposable
     {
         ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
         ImageView = _view,
-        Sampler = _sampler
+        Sampler = Sampler
     };
 
     public void Dispose()
@@ -531,7 +520,6 @@ internal sealed unsafe class VkTexture : IDisposable
         _disposed = true;
         var api = _vk.Api;
         var device = _vk.Device;
-        api.DestroySampler(device, _sampler, null);
         api.DestroyImageView(device, _view, null);
         api.DestroyImage(device, _image, null);
         api.FreeMemory(device, _memory, null);

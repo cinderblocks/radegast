@@ -2842,13 +2842,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _recentSceneUploadFailures.Remove(rootId);
         if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
 
-        // mesh.Dispose() is ref-counted (see VkMesh._refCount's own field comment) -- correctly
-        // decrements-only when this mesh is still shared with another live scene object, and
-        // only actually frees native resources once this was the last reference.
-        foreach (var (mesh, material, face) in faces)
+        foreach (var (_, _, face) in faces)
         {
-            mesh.Dispose();
-            material.Dispose();
             _sceneFaceTextureSlots.Remove((face.PrimLocalId, face.FaceIndex));
             _scenePrimLocalIdToSceneKey.Remove(face.PrimLocalId);
         }
@@ -2857,14 +2852,32 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _spatialGrid.Remove(rootId);
         _sceneObjectMotion.TryRemove(rootId, out _);
 
-        if (_sceneObjectTextures.Remove(rootId, out var textures))
-            foreach (var tex in textures) tex.Dispose();
+        _sceneObjectTextures.Remove(rootId, out var textures);
+        _sceneSkinGpuDataMap.Remove(rootId, out var skinGpuList);
+        _sceneFlexiGpuDataMap.Remove(rootId, out var flexiGpuList);
 
-        // Dispose this object's GPU skin/flexi compute data, if any was registered.
-        if (_sceneSkinGpuDataMap.Remove(rootId, out var skinGpuList))
-            foreach (var gpu in skinGpuList) gpu.Dispose();
-        if (_sceneFlexiGpuDataMap.Remove(rootId, out var flexiGpuList))
-            foreach (var gpu in flexiGpuList) gpu.Dispose();
+        // Deferred, not disposed here directly: every one of these frees a GPU-visible resource
+        // (mesh VBO/EBO device memory, material descriptor set/UBO slot, textures, skin/flexi
+        // compute SSBOs) that a still-in-flight frame's command buffer (up to FramesInFlight-1
+        // frames back) may still be reading. Bundled into one action -- see
+        // VkFrameReapRing.MarkPendingDestroy's own doc comment. The CPU-side bookkeeping above
+        // (dictionary/spatial-grid removal) runs immediately since a reused rootId shouldn't
+        // see stale state, but nothing GPU-visible depends on removal timing, only on when the
+        // actual native Vulkan destroy calls happen.
+        _reapRing.MarkPendingDestroy(() =>
+        {
+            // mesh.Dispose() is ref-counted (see VkMesh._refCount's own field comment) --
+            // correctly decrements-only when this mesh is still shared with another live scene
+            // object, and only actually frees native resources once this was the last reference.
+            foreach (var (mesh, material, _) in faces)
+            {
+                mesh.Dispose();
+                material.Dispose();
+            }
+            if (textures != null) foreach (var tex in textures) tex.Dispose();
+            if (skinGpuList != null) foreach (var gpu in skinGpuList) gpu.Dispose();
+            if (flexiGpuList != null) foreach (var gpu in flexiGpuList) gpu.Dispose();
+        });
     }
 
     /// <summary>
@@ -3456,7 +3469,25 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         slots[slotIndex] = newTex;
         _textures.Add(newTex);
 
-        material.UpdateTexture((uint)slotIndex, newTex.DescriptorImageInfo);
+        // Deferred, not called directly here: vkUpdateDescriptorSets on a set a still-in-flight
+        // command buffer references is itself a spec violation (independent of whether the old
+        // image behind it gets freed), and destroying oldTex before that rewrite has actually
+        // taken effect would be a use-after-free of whatever that same in-flight command buffer
+        // is still sampling through the current binding. Bundled into one action -- see
+        // VkFrameReapRing.MarkPendingDestroy's own doc comment -- so the rewrite and the old
+        // texture's disposal share the same "no longer possibly in use" guarantee and can never
+        // run out of order relative to each other.
+        var materialForPatch = material;
+        var newTexForPatch = newTex;
+        _reapRing.MarkPendingDestroy(() =>
+        {
+            materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
+            if (oldTex != null)
+            {
+                if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
+                else oldTex.Dispose();
+            }
+        });
         material.Update(BuildMaterialUbo(face,
             slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null));
 
@@ -3483,18 +3514,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
         }
 
-        if (oldTex != null)
-        {
-            _textures.Remove(oldTex);
-            // When batched, defer the actual native Dispose() until after the whole
-            // drain call's shared batch has been submitted and waited on -- oldTex may be a
-            // texture THIS SAME batch already recorded an upload for (e.g. a progressive-preview
-            // patch immediately followed by the full-res patch for the same face/slot within one
-            // drain pass); destroying its image before the batch's pending copy/mip-blit chain
-            // targeting that image has executed would corrupt or crash, not fail cleanly.
-            if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
-            else oldTex.Dispose();
-        }
+        // CPU-side bookkeeping only -- the actual native Dispose() (batched-drain-safe and
+        // frame-in-flight-safe both) is bundled into the MarkPendingDestroy action above.
+        if (oldTex != null) _textures.Remove(oldTex);
         return true;
     }
 
@@ -3672,7 +3694,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _sceneObjectTextures.TryGetValue(lookupKey, out var objectTextureList);
         objectTextureList?.Add(newTex);
 
-        material.UpdateTexture((uint)slotIndex, newTex.DescriptorImageInfo);
+        // Deferred, not called directly here -- same hazard and same fix as
+        // ApplySubmissionPatchIfReady's identical bundle (this file, above): rewriting this
+        // descriptor binding and destroying the texture it used to point to both need the SAME
+        // "no still-in-flight command buffer might still read the old binding" guarantee.
+        var materialForPatch = material;
+        var newTexForPatch = newTex;
+        _reapRing.MarkPendingDestroy(() =>
+        {
+            materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
+            if (oldTex != null)
+            {
+                if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
+                else oldTex.Dispose();
+            }
+        });
         material.Update(BuildMaterialUbo(face,
             slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null));
 
@@ -3688,16 +3724,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _alphaSceneReclassNeeded = true;
         }
 
+        // CPU-side bookkeeping only -- the actual native Dispose() is bundled into the
+        // MarkPendingDestroy action above.
         if (oldTex != null)
         {
             _sceneObjectTextures.TryGetValue(lookupKey, out var owningList);
             owningList?.Remove(oldTex);
-            // Deferred when batched -- see DrainSubmissionTexturePatches'
-            // deferredOldTextures comment for the destroy-before-submit hazard this avoids
-            // (identical here: two patches for the same face/slot within one drain pass, e.g. a
-            // progressive preview followed by its full-res replacement).
-            if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
-            else oldTex.Dispose();
         }
         return true;
     }
@@ -4523,7 +4555,22 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
         finally
         {
-            if (framebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, framebuffer, null);
+            // Deferred, not destroyed here directly: this framebuffer wraps the swapchain image
+            // the main-pass command buffer just (non-waited, see the "no fence wait here
+            // anymore" comment above cmd.Submit()) submitted -- destroying it unconditionally,
+            // synchronously in this finally block gave no guarantee the GPU had actually
+            // finished reading it, a real Vulkan spec violation caught live by
+            // VK_LAYER_KHRONOS_validation ("vkDestroyFramebuffer(): can't be called on
+            // VkFramebuffer ... currently in use by VkCommandBuffer ..."). MarkPendingDestroy
+            // ties this framebuffer's actual destruction to the SAME slot-reap guarantee
+            // _reapRing.MarkUsed(cmd) above already relies on for the command buffer itself --
+            // both wait for confirmation that whatever last used this slot (FramesInFlight
+            // frames ago) is done before either runs again.
+            if (framebuffer.Handle != 0)
+            {
+                var fbToDestroy = framebuffer;
+                _reapRing.MarkPendingDestroy(() => vk.Api.DestroyFramebuffer(vk.Device, fbToDestroy, null));
+            }
         }
     }
 

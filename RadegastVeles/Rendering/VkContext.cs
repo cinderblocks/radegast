@@ -50,12 +50,33 @@ internal sealed unsafe class VkContext : IDisposable
 {
     // The single canonical knob every N-buffered piece of per-panel state (VkFrameStatsTracker's
     // query pools, VkPrimDescriptorSets' per-frame UBO/FrameSet, VkFrameReapRing's slots) is
-    // sized against. Kept at 1: N=2 reproduced driver/GPU-level hangs across multiple distinct
-    // call paths with no single deterministic root cause, pointing at contention from holding
-    // twice the in-flight GPU state rather than a fixable ordering bug in this codebase. The
-    // measured throughput win from real overlap is a few ms/frame at typical scene density --
-    // not worth the stability risk.
-    public const int FramesInFlight = 1;
+    // sized against.
+    //
+    // Attempt #7 at N=2 (2026-08-27), retrying a formally-closed decision: the six attempts on
+    // 2026-08-20/21 (see plan mossy-sleeping-knuth.md) each hung under heavy load at a different,
+    // never-repeating call site, and were closed back to N=1 with an explicit note that a future
+    // attempt should start from a fresh diagnostic pass rather than re-adding the same
+    // now-stripped bracketing (VkCommandBufferPool.WaitForFenceCore's before/after timing,
+    // VkFrameStatsTracker.EndFrame's query-readback bracketing, RenderFrame's four checkpoint
+    // log lines) and retrying blind -- so this flip deliberately does NOT restore any of that.
+    // The new input this time is VK_LAYER_KHRONOS_validation itself (VELES_VK_VALIDATION=1,
+    // gated in TryCreate below), which the plan's own validation-layers section notes was
+    // implemented but never actually exercised live against a real N=2 hang -- core validation
+    // "catches most of steps 4-6's risk surface... for free," so a genuine synchronization
+    // violation should surface as a [VkValidation] log line instead of requiring another round
+    // of manual bisection. Sync validation (VELES_VK_SYNC_VALIDATION=1) is deliberately NOT the
+    // first thing to reach for -- the plan flags it as slow enough to make a populated
+    // SceneViewer region look hung on its own, which would contaminate this exact repro; try
+    // core validation alone against the real heavy-load repro first, and reach for sync
+    // validation only against a smaller PrimViewer/AvatarViewer repro if core validation stays
+    // silent.
+    //
+    // If this hangs again: do not re-instrument blind. Check Veles.log for a [VkValidation]
+    // line first -- if one exists, it names the actual spec violation. If the log is silent and
+    // the render thread is still stuck, that's already new information (rules out anything core
+    // validation can catch), and the next call is the user's on whether to keep chasing this or
+    // revert to 1 again.
+    public const int FramesInFlight = 2;
 
     public required Vk Api { get; init; }
     public required Instance Instance { get; init; }
@@ -94,6 +115,25 @@ internal sealed unsafe class VkContext : IDisposable
     /// alongside the others above. Never null on any <see cref="VkContext"/> a caller can
     /// observe. See <see cref="VkMaterialUboPool"/>'s own header comment for why it exists.</summary>
     public VkMaterialUboPool MaterialUboPool { get; private set; } = null!;
+
+    /// <summary>
+    /// One shared sampler for every <see cref="VkTexture"/> in the process, replacing what used
+    /// to be a fresh <c>vkCreateSampler</c> call per texture instance. Real find, not a
+    /// hypothesis: <c>VK_LAYER_KHRONOS_validation</c> caught <c>vkCreateSampler(): Number of
+    /// currently valid sampler objects (4000) is not less than the maximum allowed (4000)</c>
+    /// live, in a dense region -- <see cref="VkTexture.CreateViewAndSampler"/>'s own sampler
+    /// parameters (linear filter/mipmap, repeat wrap, opaque-black border) are 100% fixed across
+    /// every texture; the only thing that ever varied per-instance was <c>MaxLod</c>, set to
+    /// that texture's own mip count. Vulkan clamps <c>MaxLod</c> against whatever mip count the
+    /// BOUND image view actually has at sample time, so one sampler with a generously large
+    /// <c>MaxLod</c> (comfortably above any real SL texture's mip chain) is correct for every
+    /// texture regardless of its own level count -- this eliminates the whole
+    /// maxSamplerAllocationCount ceiling (thousands of samplers down to 1) rather than just
+    /// raising it. Assigned right after construction in <see cref="TryCreate"/>, same pattern as
+    /// <see cref="MaterialUboPool"/>; owned by this VkContext, destroyed once in
+    /// <see cref="Dispose"/> -- <see cref="VkTexture.Dispose"/> must NOT destroy it.
+    /// </summary>
+    public Sampler SharedTextureSampler { get; private set; }
 
     /// <summary>Non-null only on the Mode B (D3D11 cross-import) path, when Avalonia's
     /// compositor backend doesn't advertise native Vulkan handle sharing and render-target
@@ -440,6 +480,29 @@ internal sealed unsafe class VkContext : IDisposable
                     // (see UploadSceneObjectNoRebuild's catch path), objects needing many faces at
                     // once are hit hardest by that kind of undersizing.
                     vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 16384);
+
+                    // See SharedTextureSampler's own doc comment: one sampler for every
+                    // VkTexture in the process, replacing what used to be a fresh
+                    // vkCreateSampler call per texture instance. Parameters copied verbatim from
+                    // VkTexture.CreateViewAndSampler's own (now-removed) per-instance call --
+                    // MaxLod=16 is a fixed generous ceiling (any real SL texture's mip chain
+                    // tops out around 12-13 levels for the largest supported resolution).
+                    var sharedSamplerInfo = new SamplerCreateInfo
+                    {
+                        SType = StructureType.SamplerCreateInfo,
+                        MagFilter = Silk.NET.Vulkan.Filter.Linear,
+                        MinFilter = Silk.NET.Vulkan.Filter.Linear,
+                        MipmapMode = SamplerMipmapMode.Linear,
+                        AddressModeU = SamplerAddressMode.Repeat,
+                        AddressModeV = SamplerAddressMode.Repeat,
+                        AddressModeW = SamplerAddressMode.Repeat,
+                        MinLod = 0,
+                        MaxLod = 16,
+                        BorderColor = BorderColor.IntOpaqueBlack,
+                    };
+                    api.CreateSampler(device, in sharedSamplerInfo, null, out var sharedSampler).ThrowOnError();
+                    vkContext.SharedTextureSampler = sharedSampler;
+
                     // success is set only after MaterialUboPool's own allocation succeeds, so
                     // the finally block below still tears down pool/descriptorPool/device if
                     // that construction throws instead of leaking them.
@@ -512,6 +575,7 @@ internal sealed unsafe class VkContext : IDisposable
         D3DDevice.Dispose();
         Pool.Dispose();
         MaterialUboPool.Dispose();
+        if (SharedTextureSampler.Handle != default) Api.DestroySampler(Device, SharedTextureSampler, null);
         Api.DestroyDescriptorPool(Device, DescriptorPool, null);
         Api.DestroyDevice(Device, null);
     }
