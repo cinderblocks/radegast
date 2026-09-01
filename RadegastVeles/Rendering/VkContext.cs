@@ -408,6 +408,26 @@ internal sealed unsafe class VkContext : IDisposable
                     // faces in a real build share texture sets) or a resident-region eviction
                     // policy -- not attempted here.
                     //
+                    // TRIED AND REVERTED (2026-08-31): doubling UniformBuffer/CombinedImageSampler/
+                    // MaxSets to 32768/163840/40960 was an attempt to fix a real dense region
+                    // (2026-08-29, ~1850 objects / ~16350 concurrently-live faces) that hit the
+                    // 16384 cap directly, logging "[VkMaterialUboPool] exhausted" 57 times in one
+                    // session versus only 10 maxMemoryAllocationCount hits in the same window --
+                    // i.e. this pool, not the device's raw allocation-count ceiling, was the FIRST
+                    // and most frequent ceiling actually hit there. The fix made things WORSE: on
+                    // retest at the doubled capacity, the same region built ~18554 faces before
+                    // hitting real GPU VRAM exhaustion (ErrorOutOfDeviceMemory) instead, which then
+                    // broke VkInteropSwapchain's own render-target image creation (no fallback
+                    // there -- see VkViewportControl.RenderFrame's call chain) and produced an
+                    // unbounded retry loop (55169 failures in one session) until the panel was
+                    // closed -- a dead viewport, strictly worse than this pool's own graceful
+                    // per-object drop-and-continue behavior at the original cap. The original
+                    // 16384/81920/20480 numbers below are therefore a load-bearing VRAM governor
+                    // for this class of GPU, not merely a conservative placeholder -- do not raise
+                    // them again without either confirming more VRAM headroom on the target
+                    // hardware or fixing the swapchain-OOM retry loop first (a viewport that can't
+                    // allocate its render target should surface a terminal state, not spin).
+                    //
                     // These numbers are a documented budget, not a load-bearing hard limit:
                     // VK_ERROR_OUT_OF_POOL_MEMORY detection at the declared per-type counts is
                     // spec-permitted but not guaranteed in practice. If exhausted again, check the
@@ -478,7 +498,8 @@ internal sealed unsafe class VkContext : IDisposable
                     // effective face-count ceiling instead of the DescriptorPool, and since an
                     // object's entire face set is dropped together on the first Rent() failure
                     // (see UploadSceneObjectNoRebuild's catch path), objects needing many faces at
-                    // once are hit hardest by that kind of undersizing.
+                    // once are hit hardest by that kind of undersizing. See the DescriptorPoolSize
+                    // block above's own "TRIED AND REVERTED" comment before raising this again.
                     vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 16384);
 
                     // See SharedTextureSampler's own doc comment: one sampler for every

@@ -206,6 +206,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private bool _updateQueued;
     private bool _attached;
 
+    // Circuit breaker for RenderFrame's own catch block -- see that block's own comment for
+    // why. A single transient failure resets this counter on the next successful frame (no
+    // change from before); several in a row (most concretely: swapchain image creation hitting
+    // real GPU VRAM exhaustion, which does not self-resolve frame-to-frame the way a one-off
+    // hiccup would) latches _renderDisabledAfterFailure so RenderFrame stops attempting to
+    // render at all -- a real terminal state, not an unbounded retry loop hammering the driver
+    // every frame with the same failing allocation.
+    private const int MaxConsecutiveRenderFailures = 3;
+    private int _consecutiveRenderFailures;
+    private bool _renderDisabledAfterFailure;
+
     private RenderPass _renderPass;
     private VkInteropSwapchain? _swapchain;
     // this panel's own pending-command-buffer list, replacing the old
@@ -1002,7 +1013,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             Avalonia.Threading.Dispatcher.UIThread.Post(RequestRender);
             return;
         }
-        if (_attached && !_updateQueued && _compositor != null)
+        // _renderDisabledAfterFailure: RenderFrame itself already no-ops immediately once this
+        // is set (see its own top-of-method check), so this extra gate isn't needed for
+        // correctness -- it's here so a disabled panel stops generating compositor round-trips
+        // entirely instead of queuing (and instantly no-op'ing) an update every time something
+        // would otherwise have requested a redraw.
+        if (_attached && !_updateQueued && !_renderDisabledAfterFailure && _compositor != null)
         {
             _updateQueued = true;
             _compositor.RequestCompositionUpdate(_updateAction);
@@ -1944,22 +1960,41 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var inheritedSet = new HashSet<VkTexture>(inheritedTex.Values);
         var claimedInherited = new HashSet<VkTexture>();
 
-        foreach (var (mesh, material, _) in _opaqueFaces) { mesh.Dispose(); material.Dispose(); }
-        foreach (var (mesh, material, _) in _alphaFaces) { mesh.Dispose(); material.Dispose(); }
+        // Deferred, not disposed immediately below: this control's single-object viewers
+        // (PrimViewer/AvatarViewer/HudViewer) share the same VkFrameReapRing/FramesInFlight=2
+        // render loop the scene-streaming path does, so a mesh/material/texture/skin-or-flexi-
+        // GPU resource still referenced by an in-flight command buffer up to FramesInFlight-1
+        // frames back is exactly as unsafe to free here as it would be in
+        // RemoveSceneObjectGpuNoRebuild -- see that method's own MarkPendingDestroy comment for
+        // the full reasoning. Snapshotting into local lists BEFORE the live fields are Clear()'d
+        // (and, for _opaqueFaces/_alphaFaces/_faceMeshesByPosition, repopulated by the face loop
+        // below) is required: a closure over the live fields would instead free the NEW
+        // submission's own resources once this frame's slot is reaped.
+        var oldOpaque = new List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)>(_opaqueFaces);
+        var oldAlpha = new List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)>(_alphaFaces);
         _opaqueFaces.Clear();
         _alphaFaces.Clear();
         // Inherited textures' disposal is deferred until after the face loop below (once it's
         // known which ones were actually claimed by the new submission) -- disposing them here
         // unconditionally would destroy a texture InheritIfNeeded is about to hand to a new face.
-        foreach (var tex in _textures) { if (!inheritedSet.Contains(tex)) tex.Dispose(); }
+        var oldTextures = new List<VkTexture>();
+        foreach (var tex in _textures) { if (!inheritedSet.Contains(tex)) oldTextures.Add(tex); }
         _textures.Clear();
         _faceTextureSlots.Clear();
         _faceMeshesByPosition.Clear();
         _facesByPosition.Clear();
-        foreach (var gd in _submissionSkinGpu) gd.Dispose();
+        var oldSkinGpu = new List<VkAvatarSkinGpuData>(_submissionSkinGpu);
         _submissionSkinGpu.Clear();
-        foreach (var gd in _submissionFlexiGpu) gd.Dispose();
+        var oldFlexiGpu = new List<VkFlexiGpuData>(_submissionFlexiGpu);
         _submissionFlexiGpu.Clear();
+        _reapRing.MarkPendingDestroy(() =>
+        {
+            foreach (var (mesh, material, _) in oldOpaque) { mesh.Dispose(); material.Dispose(); }
+            foreach (var (mesh, material, _) in oldAlpha) { mesh.Dispose(); material.Dispose(); }
+            foreach (var tex in oldTextures) tex.Dispose();
+            foreach (var gd in oldSkinGpu) gd.Dispose();
+            foreach (var gd in oldFlexiGpu) gd.Dispose();
+        });
         // Any updates still queued target the OLD _faceMeshesByPosition/_facesByPosition array-
         // position indexing -- meaningless (or worse, silently wrong: applying to an unrelated
         // face at the same position) against the NEW lists about to be built.
@@ -2065,9 +2100,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
         // Claimed inherited textures are re-added to _textures so a future ApplyPendingSubmission's
         // disposal sweep accounts for them. Whatever's left in inheritedSet was NOT claimed (its
-        // face no longer exists in this submission) -- dispose it now rather than leaking it.
+        // face no longer exists in this submission) -- deferred disposal, not immediate, for the
+        // same in-flight-command-buffer reason as this method's own earlier MarkPendingDestroy
+        // (the new submission's faces built just above may already be live in a command buffer
+        // this same frame by the time this slot's reap actually runs).
         foreach (var tex in claimedInherited) _textures.Add(tex);
-        foreach (var tex in inheritedSet) { if (!claimedInherited.Contains(tex)) tex.Dispose(); }
+        var unclaimedInherited = new List<VkTexture>();
+        foreach (var tex in inheritedSet) { if (!claimedInherited.Contains(tex)) unclaimedInherited.Add(tex); }
+        if (unclaimedInherited.Count > 0)
+            _reapRing.MarkPendingDestroy(() => { foreach (var tex in unclaimedInherited) tex.Dispose(); });
 
         // Register avatar skin GPU resources for compute LBS. Runs after the face loop above
         // (not interleaved into it) since a skinned face's FaceIndex can reference any position
@@ -3813,6 +3854,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private unsafe void RenderFrame()
     {
         _updateQueued = false;
+        // Latched by this method's own catch block below after MaxConsecutiveRenderFailures in
+        // a row -- see _renderDisabledAfterFailure's own field comment. Nothing currently clears
+        // this short of reopening the panel (a fresh VkViewportControl instance): the observed
+        // failure (real GPU VRAM exhaustion) does not self-resolve just because rendering stops,
+        // it resolves when the SCENE's own resource usage drops, which this control has no
+        // signal for.
+        if (_renderDisabledAfterFailure) return;
         if (!_attached || _swapchain == null || _prim == null || _frameSets == null
             || _placeholders == null || _instanceDrawer == null)
             return;
@@ -4543,6 +4591,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 int py = Math.Clamp((int)(_pickPoint.Y * source.RenderScaling), 0, pixelSize.Height - 1);
                 RunPickPass(vk, pixelSize, view, proj, px, py);
             }
+
+            // Reached only if nothing above threw -- a real completed frame, not just "got past
+            // the early-out guards above." See _consecutiveRenderFailures's own field comment.
+            _consecutiveRenderFailures = 0;
         }
         catch (Exception e)
         {
@@ -4551,6 +4603,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // init failure is surfaced, rather than let it propagate uncaught or swallow it
             // silently. Root-causing render failures (vs. init failures) is out of scope for
             // this pilot; both funnel through the same event for now.
+            //
+            // Circuit breaker: MaxConsecutiveRenderFailures in a row (not just one) latches
+            // _renderDisabledAfterFailure and stops this method from attempting to render again
+            // at all. A single failure alone does NOT latch -- a one-off hiccup should still get
+            // to retry next frame exactly as before. What prompted this: swapchain image
+            // creation hitting real GPU VRAM exhaustion (ErrorOutOfDeviceMemory) does not
+            // self-resolve frame-to-frame, so without this it retried the SAME failing
+            // allocation every single frame (55169 failures logged in one ~6s session) instead
+            // of failing once, visibly, and stopping.
+            _consecutiveRenderFailures++;
+            if (_consecutiveRenderFailures >= MaxConsecutiveRenderFailures && !_renderDisabledAfterFailure)
+            {
+                _renderDisabledAfterFailure = true;
+                InitFailed?.Invoke(
+                    $"RenderFrame failed {_consecutiveRenderFailures} times in a row, rendering "
+                    + $"disabled for this panel (close and reopen to retry): {e}");
+                return;
+            }
             InitFailed?.Invoke($"RenderFrame failed: {e}");
         }
         finally
