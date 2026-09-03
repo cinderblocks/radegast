@@ -217,6 +217,39 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private int _consecutiveRenderFailures;
     private bool _renderDisabledAfterFailure;
 
+    // Separate backoff track for swapchain image creation (VkInteropSwapchain.BeginDraw ->
+    // VkInteropImage's ctor) hitting real GPU VRAM exhaustion specifically
+    // (ErrorOutOfDeviceMemory/ErrorOutOfHostMemory). Unlike a generic render failure, this one
+    // is NOT "something is broken" -- the VRAM pressure comes from the shared main-scene
+    // VkMaterialUboPool/texture usage competing for the same device memory, and that pressure is
+    // transient: it eases as the pool evicts objects, textures finish streaming, or the user
+    // pans away from a dense region. Routing it through MaxConsecutiveRenderFailures (a few
+    // failing frames, i.e. tens of milliseconds at 60fps) meant opening this panel while the
+    // main scene was already VRAM-starved killed it permanently before the scene had any chance
+    // to free anything up -- observed 2026-09-03: AvatarViewer hit 3 straight OOM failures in
+    // ~2s and stayed dead until manually reopened, even though the main SceneViewer's own
+    // ErrorOutOfDeviceMemory occurrences around it were transient (pool free-slot count kept
+    // recovering). Backed off instead: an OOM-class BeginDraw failure skips doing any GPU work
+    // until an exponentially growing cooldown elapses (same shape as this file's own
+    // scene-object-upload backoff, see UploadSceneObjectNoRebuild), rather than either hammering
+    // the driver every frame or giving up for good after 3 frames. RenderFrame is still invoked
+    // every frame the compositor schedules one (ongoing scene activity keeps calling
+    // RequestRender) -- during backoff it just returns immediately without touching the
+    // swapchain, which is cheap. Only escalates to the permanent _renderDisabledAfterFailure
+    // latch after MaxSwapchainOomBackoffAttempts straight OOM failures despite backing off -- by
+    // then the pressure has had roughly a minute to ease and it really is a dead end, not
+    // transient contention.
+    private const int SwapchainOomBaseBackoffMs = 500;
+    private const int MaxSwapchainOomBackoffShift = 4; // 500ms * 2^4 = 8s cap per retry
+    private const int MaxSwapchainOomBackoffAttempts = 10; // ~55s of escalating retries total
+    private long _swapchainOomBackoffUntilTicks;
+    private int _swapchainOomConsecutiveFailures;
+
+    private static bool IsDeviceMemoryExhaustion(Exception e) =>
+        e is InvalidOperationException
+        && (e.Message.Contains("ErrorOutOfDeviceMemory", StringComparison.Ordinal)
+            || e.Message.Contains("ErrorOutOfHostMemory", StringComparison.Ordinal));
+
     private RenderPass _renderPass;
     private VkInteropSwapchain? _swapchain;
     // this panel's own pending-command-buffer list, replacing the old
@@ -2485,8 +2518,48 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // repeatedly, each attempt burning render-thread time on a guaranteed-to-fail alloc before
     // catching the exception. Cooldown is enforced here, self-contained, rather than plumbing a
     // failure callback back through ISceneViewport to two different streamer classes.
-    private const int SceneUploadFailureCooldownMs = 5000;
-    private readonly Dictionary<ulong, long> _recentSceneUploadFailures = new();
+    //
+    // Exponential, not fixed (2026-08-31 field data: a genuinely saturated VkMaterialUboPool can
+    // stay pinned near-capacity for a whole session -- one dense-region log showed 10198 failed-
+    // upload log lines from only 668 DISTINCT objects, i.e. each retried ~15x on average, up to
+    // 39x, with a flat 5s cooldown doing nothing to stop it since the pool never actually
+    // recovered enough headroom in that window). A flat cooldown gives every object, including
+    // ones that have already failed dozens of times, equal standing to compete for the same
+    // handful of slots that free up each cycle -- exactly the mechanism starving out genuinely
+    // new content (and, per the report that motivated this, the self avatar) in a saturated
+    // region. Backoff pushes a chronically-failing object further back each time instead,
+    // without ever giving up on it outright (ConsecutiveFailures resets to 0 -- entry removed
+    // entirely -- on the next successful upload, see the Remove() call sites below).
+    private const int SceneUploadFailureBaseCooldownMs = 5000;
+    // 5000 * 2^4 = 80000ms (80s) cap -- deliberately a bit above ReconcileUntrackedPrims' own
+    // 60s cooldown (SceneObjectStreamer.ReconcileRetryCooldownMs) so a chronically-failing
+    // object's own backoff window is never the SHORTER of the two ceilings on how often it gets
+    // re-attempted.
+    private const int MaxSceneUploadFailureBackoffShift = 4;
+    private readonly Dictionary<ulong, (long FailedAt, int ConsecutiveFailures)> _recentSceneUploadFailures = new();
+
+    // Same convention as SceneAvatarStreamer.AvatarKeyOffset / SceneViewerViewModel.AvatarKeyOffset
+    // (duplicated there too, not reusable across these classes) -- SceneAvatarStreamer.SceneKey
+    // computes an avatar/attachment-owner's rootId as AvatarKeyOffset + localId, so any rootId at
+    // or above this offset reached UploadSceneObjectNoRebuild via that path, not a regular prim's
+    // MakeSceneKey (which OR's a sim index into the upper 32 bits -- nonzero for every sim except
+    // whichever one happened to register first as index 0, where it degenerates to the bare
+    // localId too; real SL local IDs never get remotely close to 2^31 in practice, so this
+    // boundary check is unambiguous for real content either way).
+    private const ulong AvatarUploadSceneKeyOffset = 0x8000_0000UL;
+
+    // Avatar/attachment keys are EXEMPT from the escalation below (always treated as failure #1,
+    // i.e. capped at the base cooldown) even though their own ConsecutiveFailures is still
+    // tracked and stored normally. Without this, the exact fix meant to stop chronically-failing
+    // PRIMS from crowding out the self avatar would also push the avatar's OWN retry further
+    // back every time its own upload lost the same pool-contention race -- one object (the
+    // avatar) competing against however many hundred prims are also mid-backoff, punished the
+    // same way they are for having already failed, when what actually helps it is exactly the
+    // opposite: keep trying it often, since freeing it a slot is the whole point of this change.
+    private static long SceneUploadFailureCooldownMs(ulong rootId, int consecutiveFailures) =>
+        SceneUploadFailureBaseCooldownMs *
+        (1L << Math.Min(Math.Max(rootId >= AvatarUploadSceneKeyOffset ? 1 : consecutiveFailures, 1) - 1,
+            MaxSceneUploadFailureBackoffShift));
 
     // Hoisted to a field (rather than a Dictionary local to each UploadSceneObjectNoRebuild
     // call) so identical geometry is shared across every scene object that ever needs it, not
@@ -2515,8 +2588,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="SceneObjectUploadFailed"/>).</summary>
     private bool UploadSceneObjectNoRebuild(VkContext vk, ulong rootId, PrimRenderSubmission sub)
     {
-        if (_recentSceneUploadFailures.TryGetValue(rootId, out var failedAt)
-            && Environment.TickCount64 - failedAt < SceneUploadFailureCooldownMs)
+        // Captured BEFORE RemoveSceneObjectGpuNoRebuild below, which unconditionally clears
+        // _recentSceneUploadFailures[rootId] as part of ITS OWN, legitimate "object actually
+        // left the scene" cleanup -- but this rebuild-in-place call site invokes it on every
+        // retry attempt too, success or failure. Without capturing this first, every retry
+        // would see an empty dictionary entry (its own immediately-prior failure just wiped by
+        // the very call chain about to fail again) and record itself as failure #1 forever,
+        // silently defeating the whole backoff below -- confirmed live: a 2026-09-01 dense-
+        // region session logged 942 consecutive drops that ALL reported "consecutive failures:
+        // 1", never escalating.
+        int priorConsecutiveFailures = _recentSceneUploadFailures.TryGetValue(rootId, out var priorFailureForCount)
+            ? priorFailureForCount.ConsecutiveFailures
+            : 0;
+
+        if (_recentSceneUploadFailures.TryGetValue(rootId, out var recentFailure)
+            && Environment.TickCount64 - recentFailure.FailedAt < SceneUploadFailureCooldownMs(rootId, recentFailure.ConsecutiveFailures))
         {
             // Re-park rather than drop outright: this submission didn't fail, a PRIOR one for
             // this key did, and we're just still inside that failure's cooldown window. Simply
@@ -2835,11 +2921,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // field here is scene-wide aggregate, useless for confirming whether THIS report's
             // object was even among the drops versus failing via some earlier, unrelated path
             // (e.g. never completing its CPU-side build at all, so it never reached here).
+            // Uses the count captured at method entry, NOT a fresh lookup -- see that capture's
+            // own comment for why a fresh lookup here would always see 0 (RemoveSceneObjectGpuNoRebuild,
+            // above, already cleared this key's entry earlier in this same call).
+            int consecutiveFailures = priorConsecutiveFailures + 1;
             LibreMetaverse.Logger.Warn($"[VkViewportControl] Scene object {rootId} (\"{sub.Label}\", "
                 + $"{sub.Faces.Length} faces requested) upload failed, dropping it "
                 + $"(live: {SceneFaceCount} faces / {_sceneObjects.Count} objects, "
-                + $"pool free slots: {vk.MaterialUboPool.FreeSlots}/{vk.MaterialUboPool.Capacity}): {e.Message}");
-            _recentSceneUploadFailures[rootId] = Environment.TickCount64;
+                + $"pool free slots: {vk.MaterialUboPool.FreeSlots}/{vk.MaterialUboPool.Capacity}, "
+                + $"consecutive failures: {consecutiveFailures}, next retry in "
+                + $"{SceneUploadFailureCooldownMs(rootId, consecutiveFailures) / 1000}s): {e.Message}");
+            _recentSceneUploadFailures[rootId] = (Environment.TickCount64, consecutiveFailures);
             // Without this, the drop is permanent: the caller that queued this submission
             // (SceneObjectStreamer.BuildObjectAsync) already recorded the object as rendered
             // before this method ever ran (it has no other way to learn upload outcome -- see
@@ -3861,6 +3953,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // it resolves when the SCENE's own resource usage drops, which this control has no
         // signal for.
         if (_renderDisabledAfterFailure) return;
+        // See _swapchainOomBackoffUntilTicks's own field comment -- a cheap early-out while an
+        // OOM-class BeginDraw failure is backing off, distinct from the permanent latch above.
+        if (_swapchainOomConsecutiveFailures > 0 && Environment.TickCount64 < _swapchainOomBackoffUntilTicks)
+            return;
         if (!_attached || _swapchain == null || _prim == null || _frameSets == null
             || _placeholders == null || _instanceDrawer == null)
             return;
@@ -4595,6 +4691,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // Reached only if nothing above threw -- a real completed frame, not just "got past
             // the early-out guards above." See _consecutiveRenderFailures's own field comment.
             _consecutiveRenderFailures = 0;
+            _swapchainOomConsecutiveFailures = 0;
         }
         catch (Exception e)
         {
@@ -4604,6 +4701,33 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // silently. Root-causing render failures (vs. init failures) is out of scope for
             // this pilot; both funnel through the same event for now.
             //
+            // OOM-class failures (swapchain image creation hitting real GPU VRAM exhaustion) get
+            // their own backoff-then-give-up track instead of the generic circuit breaker below
+            // -- see _swapchainOomBackoffUntilTicks's own field comment for why. Checked first
+            // and returns either way, so an OOM failure never also increments
+            // _consecutiveRenderFailures.
+            if (IsDeviceMemoryExhaustion(e))
+            {
+                _swapchainOomConsecutiveFailures++;
+                if (_swapchainOomConsecutiveFailures >= MaxSwapchainOomBackoffAttempts)
+                {
+                    _renderDisabledAfterFailure = true;
+                    InitFailed?.Invoke(
+                        $"RenderFrame hit GPU out-of-memory {_swapchainOomConsecutiveFailures} times "
+                        + "in a row despite backing off, rendering disabled for this panel (close "
+                        + $"and reopen to retry): {e}");
+                    return;
+                }
+                long backoffMs = SwapchainOomBaseBackoffMs *
+                    (1L << Math.Min(_swapchainOomConsecutiveFailures - 1, MaxSwapchainOomBackoffShift));
+                _swapchainOomBackoffUntilTicks = Environment.TickCount64 + backoffMs;
+                InitFailed?.Invoke(
+                    "RenderFrame failed (GPU out of memory -- likely transient VRAM pressure from "
+                    + $"the main scene), retrying in {backoffMs}ms (attempt "
+                    + $"{_swapchainOomConsecutiveFailures}/{MaxSwapchainOomBackoffAttempts}): {e.Message}");
+                return;
+            }
+
             // Circuit breaker: MaxConsecutiveRenderFailures in a row (not just one) latches
             // _renderDisabledAfterFailure and stops this method from attempting to render again
             // at all. A single failure alone does NOT latch -- a one-off hiccup should still get
@@ -4611,7 +4735,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // creation hitting real GPU VRAM exhaustion (ErrorOutOfDeviceMemory) does not
             // self-resolve frame-to-frame, so without this it retried the SAME failing
             // allocation every single frame (55169 failures logged in one ~6s session) instead
-            // of failing once, visibly, and stopping.
+            // of failing once, visibly, and stopping. That specific OOM case is now handled by
+            // the backoff track above instead -- this path is for every OTHER kind of render
+            // failure, which really does warrant giving up quickly.
             _consecutiveRenderFailures++;
             if (_consecutiveRenderFailures >= MaxConsecutiveRenderFailures && !_renderDisabledAfterFailure)
             {
