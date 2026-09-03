@@ -1794,6 +1794,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     throw new InvalidOperationException("Failed to decode an embedded water texture asset.");
 
                 CreateWaterReflectionTarget(vk);
+                // Must happen only now that _waterReflRenderPass actually exists -- see
+                // VkPrimPipeline.ReflOpaque's own doc comment for why building it back at
+                // _prim's construction time (against _renderPass) was a real render-pass-
+                // compatibility bug, not just a style choice.
+                _prim!.CreateReflVariant(_waterReflRenderPass);
                 _waterPipeline = VkWaterPipeline.Create(vk, _renderPass, _prim!.PerFrameLayout);
                 var reflTexInfo = new DescriptorImageInfo
                 {

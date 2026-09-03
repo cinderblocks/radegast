@@ -33,21 +33,34 @@ internal sealed class VkPrimPipeline : IDisposable
     public PipelineLayout Layout { get; }
     public Pipeline Opaque { get; }
     public Pipeline Alpha { get; }
-    public Pipeline ReflOpaque { get; }
+
+    /// <summary>
+    /// Not created by <see cref="Create"/> -- <see cref="VkViewportControl"/> creates the
+    /// water reflection render pass itself much later during init (inside the best-effort,
+    /// separately-failable water-init block), well after this pipeline object already exists.
+    /// Building this variant against <c>_renderPass</c> (the only render pass in scope at
+    /// <see cref="Create"/> time) like the other two variants used to do is what produced a
+    /// real, validation-layer-confirmed render-pass-compatibility violation every time the
+    /// reflection pass drew with it (dependencyCount mismatch: the reflection render pass has
+    /// 2 subpass dependencies, the main scene pass this used to be built against has 1). Stays
+    /// <c>default</c> (Handle == 0) until <see cref="CreateReflVariant"/> is called with the
+    /// real reflection render pass; <see cref="Dispose"/> only destroys it if that happened.
+    /// </summary>
+    public Pipeline ReflOpaque { get; private set; }
+
     public DescriptorSetLayout PerFrameLayout { get; }
     public DescriptorSetLayout PerPassSamplersLayout { get; }
     public DescriptorSetLayout PerMaterialLayout { get; }
 
     private readonly VkContext _vk;
 
-    private VkPrimPipeline(VkContext vk, PipelineLayout layout, Pipeline opaque, Pipeline alpha, Pipeline reflOpaque,
+    private VkPrimPipeline(VkContext vk, PipelineLayout layout, Pipeline opaque, Pipeline alpha,
         DescriptorSetLayout perFrameLayout, DescriptorSetLayout perPassSamplersLayout, DescriptorSetLayout perMaterialLayout)
     {
         _vk = vk;
         Layout = layout;
         Opaque = opaque;
         Alpha = alpha;
-        ReflOpaque = reflOpaque;
         PerFrameLayout = perFrameLayout;
         PerPassSamplersLayout = perPassSamplersLayout;
         PerMaterialLayout = perMaterialLayout;
@@ -69,19 +82,18 @@ internal sealed class VkPrimPipeline : IDisposable
         var perMaterialLayout = VkDescriptorSetLayouts.CreatePerMaterialLayout(vk);
 
         PipelineLayout layout = default;
-        Pipeline opaque = default, alpha = default, reflOpaque = default;
+        Pipeline opaque = default, alpha = default;
         try
         {
             CreatePipelineInternal(vk, renderPass, perFrameLayout, perPassSamplersLayout, perMaterialLayout,
-                out layout, out opaque, out alpha, out reflOpaque);
-            return new VkPrimPipeline(vk, layout, opaque, alpha, reflOpaque, perFrameLayout, perPassSamplersLayout, perMaterialLayout);
+                out layout, out opaque, out alpha);
+            return new VkPrimPipeline(vk, layout, opaque, alpha, perFrameLayout, perPassSamplersLayout, perMaterialLayout);
         }
         catch
         {
             var api = vk.Api;
             if (opaque.Handle != 0) api.DestroyPipeline(vk.Device, opaque, null);
             if (alpha.Handle != 0) api.DestroyPipeline(vk.Device, alpha, null);
-            if (reflOpaque.Handle != 0) api.DestroyPipeline(vk.Device, reflOpaque, null);
             if (layout.Handle != 0) api.DestroyPipelineLayout(vk.Device, layout, null);
             api.DestroyDescriptorSetLayout(vk.Device, perFrameLayout, null);
             api.DestroyDescriptorSetLayout(vk.Device, perPassSamplersLayout, null);
@@ -92,7 +104,7 @@ internal sealed class VkPrimPipeline : IDisposable
 
     private static unsafe void CreatePipelineInternal(VkContext vk, RenderPass renderPass,
         DescriptorSetLayout perFrameLayout, DescriptorSetLayout perPassSamplersLayout, DescriptorSetLayout perMaterialLayout,
-        out PipelineLayout layout, out Pipeline opaque, out Pipeline alpha, out Pipeline reflOpaque)
+        out PipelineLayout layout, out Pipeline opaque, out Pipeline alpha)
     {
         var setLayouts = stackalloc DescriptorSetLayout[3] { perFrameLayout, perPassSamplersLayout, perMaterialLayout };
         // No push-constant range: prim.vert/prim.frag read everything through descriptor
@@ -181,23 +193,6 @@ internal sealed class VkPrimPipeline : IDisposable
             CullMode = CullModeFlags.BackBit,
             FrontFace = FrontFace.Clockwise,
             LineWidth = 1f
-        };
-
-        // Water reflection pass: the SAME state as rasterizationState above except FrontFace
-        // flipped -- GL's DrawWaterReflection flips FrontFace from GL_CCW to GL_CW to
-        // compensate the reflection matrix's Z-mirror (confirmed by reading DrawWaterReflection
-        // directly), which is a winding-parity flip regardless of which
-        // convention is "the unflipped one" -- so this variant is simply "whatever
-        // rasterizationState's own FrontFace is, flipped," derived FROM that field rather than
-        // hardcoded, so the two can never drift out of sync if the main convention ever changes
-        // again. Same empirical standard as rasterizationState's own FrontFace above: a mirrored
-        // reflection that reads hollow/inside-out (visible backfaces, missing frontfaces) is the
-        // tell that this flip guessed wrong, not a re-derivation on paper.
-        var reflRasterizationState = rasterizationState with
-        {
-            FrontFace = rasterizationState.FrontFace == FrontFace.CounterClockwise
-                ? FrontFace.Clockwise
-                : FrontFace.CounterClockwise
         };
 
         var multisampleState = new PipelineMultisampleStateCreateInfo
@@ -292,36 +287,150 @@ internal sealed class VkPrimPipeline : IDisposable
             };
             vk.Api.CreateGraphicsPipelines(vk.Device, default, 1, &createInfo, null, out alpha).ThrowOnError();
         }
+    }
+
+    /// <summary>
+    /// Builds the <see cref="ReflOpaque"/> variant against the real water-reflection render
+    /// pass, once it exists (see <see cref="ReflOpaque"/>'s own doc comment for why this can't
+    /// happen inside <see cref="Create"/>). Reloads the same prim.vert/prim.frag modules and
+    /// re-derives the same vertex-input/multisample/depth-stencil/blend/dynamic state
+    /// <see cref="CreatePipelineInternal"/> builds for Opaque -- ReflOpaque uses that exact
+    /// state, just against a different render pass and a mirrored FrontFace (see
+    /// <c>reflRasterizationState</c> below) -- rather than threading extra out-parameters back
+    /// out of that method for a variant it may never need to build. Caller (the water-init
+    /// block) already wraps this in its own best-effort try/catch: if this throws, water and
+    /// its reflection are disabled for the panel, matching every other failure in that block.
+    /// </summary>
+    public unsafe void CreateReflVariant(RenderPass reflRenderPass)
+    {
+        var vk = _vk;
+        using var vert = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/prim.vert.spv");
+        using var frag = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/prim.frag.spv");
+        using var entryPoint = new VkByteString("main");
+        var stages = stackalloc PipelineShaderStageCreateInfo[2]
         {
-            // ReflOpaque: same depth/blend state as Opaque (GL's DrawWaterReflection draws
-            // through its normal opaque path, just with a mirrored view matrix and flipped
-            // FrontFace -- confirmed by reading the call site, not a new draw mode) --
-            // only rasterizationState differs (reflRasterizationState, defined above).
-            var reflColorBlendState = new PipelineColorBlendStateCreateInfo
+            new PipelineShaderStageCreateInfo
             {
-                SType = StructureType.PipelineColorBlendStateCreateInfo,
-                AttachmentCount = 1,
-                PAttachments = &opaqueBlendAttachment
-            };
-            var createInfo = new GraphicsPipelineCreateInfo
+                SType = StructureType.PipelineShaderStageCreateInfo,
+                Stage = ShaderStageFlags.VertexBit,
+                Module = vert.Handle,
+                PName = entryPoint
+            },
+            new PipelineShaderStageCreateInfo
             {
-                SType = StructureType.GraphicsPipelineCreateInfo,
-                StageCount = 2,
-                PStages = stages,
-                PVertexInputState = &vertexInputState,
-                PInputAssemblyState = &inputAssemblyState,
-                PViewportState = &viewportState,
-                PRasterizationState = &reflRasterizationState,
-                PMultisampleState = &multisampleState,
-                PDepthStencilState = &opaqueDepthStencilState,
-                PColorBlendState = &reflColorBlendState,
-                PDynamicState = &dynamicState,
-                Layout = layout,
-                RenderPass = renderPass,
-                Subpass = 0
-            };
-            vk.Api.CreateGraphicsPipelines(vk.Device, default, 1, &createInfo, null, out reflOpaque).ThrowOnError();
-        }
+                SType = StructureType.PipelineShaderStageCreateInfo,
+                Stage = ShaderStageFlags.FragmentBit,
+                Module = frag.Handle,
+                PName = entryPoint
+            }
+        };
+
+        var meshBinding = VkMesh.VertexInputBindingDescription;
+        var instBinding = VkInstanceDrawer.VertexInputBindingDescription;
+        var bindings = stackalloc VertexInputBindingDescription[2] { meshBinding, instBinding };
+
+        var meshAttrs = VkMesh.VertexInputAttributeDescriptions;
+        var instAttrs = VkInstanceDrawer.VertexInputAttributeDescriptions;
+        var attrCount = meshAttrs.Length + instAttrs.Length;
+        var attrs = stackalloc VertexInputAttributeDescription[attrCount];
+        for (var i = 0; i < meshAttrs.Length; i++) attrs[i] = meshAttrs[i];
+        for (var i = 0; i < instAttrs.Length; i++) attrs[meshAttrs.Length + i] = instAttrs[i];
+
+        var vertexInputState = new PipelineVertexInputStateCreateInfo
+        {
+            SType = StructureType.PipelineVertexInputStateCreateInfo,
+            VertexBindingDescriptionCount = 2,
+            PVertexBindingDescriptions = bindings,
+            VertexAttributeDescriptionCount = (uint)attrCount,
+            PVertexAttributeDescriptions = attrs
+        };
+
+        var inputAssemblyState = new PipelineInputAssemblyStateCreateInfo
+        {
+            SType = StructureType.PipelineInputAssemblyStateCreateInfo,
+            Topology = PrimitiveTopology.TriangleList
+        };
+
+        var viewportState = new PipelineViewportStateCreateInfo
+        {
+            SType = StructureType.PipelineViewportStateCreateInfo,
+            ViewportCount = 1,
+            ScissorCount = 1
+        };
+
+        // Hardcoded to the FLIP of CreatePipelineInternal's own rasterizationState.FrontFace
+        // (Clockwise there, so CounterClockwise here) -- NOT re-derived from that method's local
+        // variable, since this now runs standalone, potentially never (water init is optional).
+        // If that FrontFace value ever changes, this one must be updated by hand to match.
+        // GL's DrawWaterReflection flips FrontFace from GL_CCW to GL_CW to compensate the
+        // reflection matrix's Z-mirror (confirmed by reading DrawWaterReflection directly), a
+        // winding-parity flip regardless of which convention is "the unflipped one." A mirrored
+        // reflection that reads hollow/inside-out (visible backfaces, missing frontfaces) is the
+        // tell this flip guessed wrong, not a re-derivation on paper.
+        var reflRasterizationState = new PipelineRasterizationStateCreateInfo
+        {
+            SType = StructureType.PipelineRasterizationStateCreateInfo,
+            PolygonMode = PolygonMode.Fill,
+            CullMode = CullModeFlags.BackBit,
+            FrontFace = FrontFace.CounterClockwise,
+            LineWidth = 1f
+        };
+
+        var multisampleState = new PipelineMultisampleStateCreateInfo
+        {
+            SType = StructureType.PipelineMultisampleStateCreateInfo,
+            RasterizationSamples = SampleCountFlags.Count1Bit
+        };
+
+        // Same depth/blend state as Opaque (GL's DrawWaterReflection draws through its normal
+        // opaque path, just with a mirrored view matrix and flipped FrontFace -- confirmed by
+        // reading the call site, not a new draw mode).
+        var opaqueDepthStencilState = new PipelineDepthStencilStateCreateInfo
+        {
+            SType = StructureType.PipelineDepthStencilStateCreateInfo,
+            DepthTestEnable = true,
+            DepthWriteEnable = true,
+            DepthCompareOp = CompareOp.Less
+        };
+        var opaqueBlendAttachment = new PipelineColorBlendAttachmentState
+        {
+            BlendEnable = false,
+            ColorWriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit
+        };
+        var reflColorBlendState = new PipelineColorBlendStateCreateInfo
+        {
+            SType = StructureType.PipelineColorBlendStateCreateInfo,
+            AttachmentCount = 1,
+            PAttachments = &opaqueBlendAttachment
+        };
+
+        var dynamicStates = stackalloc DynamicState[2] { DynamicState.Viewport, DynamicState.Scissor };
+        var dynamicState = new PipelineDynamicStateCreateInfo
+        {
+            SType = StructureType.PipelineDynamicStateCreateInfo,
+            DynamicStateCount = 2,
+            PDynamicStates = dynamicStates
+        };
+
+        var createInfo = new GraphicsPipelineCreateInfo
+        {
+            SType = StructureType.GraphicsPipelineCreateInfo,
+            StageCount = 2,
+            PStages = stages,
+            PVertexInputState = &vertexInputState,
+            PInputAssemblyState = &inputAssemblyState,
+            PViewportState = &viewportState,
+            PRasterizationState = &reflRasterizationState,
+            PMultisampleState = &multisampleState,
+            PDepthStencilState = &opaqueDepthStencilState,
+            PColorBlendState = &reflColorBlendState,
+            PDynamicState = &dynamicState,
+            Layout = Layout,
+            RenderPass = reflRenderPass,
+            Subpass = 0
+        };
+        vk.Api.CreateGraphicsPipelines(vk.Device, default, 1, &createInfo, null, out var reflOpaque).ThrowOnError();
+        ReflOpaque = reflOpaque;
     }
 
     public unsafe void Dispose()
@@ -329,7 +438,7 @@ internal sealed class VkPrimPipeline : IDisposable
         var api = _vk.Api;
         api.DestroyPipeline(_vk.Device, Opaque, null);
         api.DestroyPipeline(_vk.Device, Alpha, null);
-        api.DestroyPipeline(_vk.Device, ReflOpaque, null);
+        if (ReflOpaque.Handle != 0) api.DestroyPipeline(_vk.Device, ReflOpaque, null);
         api.DestroyPipelineLayout(_vk.Device, Layout, null);
         api.DestroyDescriptorSetLayout(_vk.Device, PerFrameLayout, null);
         api.DestroyDescriptorSetLayout(_vk.Device, PerPassSamplersLayout, null);
