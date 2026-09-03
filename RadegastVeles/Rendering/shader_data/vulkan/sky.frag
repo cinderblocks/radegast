@@ -151,7 +151,18 @@ float sampleCloudLayer(int i, vec3 dir, out float planeDist, out float sunShade)
                                        // motion and parallax-from-camera-movement read
                                        // at a consistent visual speed.
 
-    float t        = (baseAlt[i] - uCameraPos.z) / max(dir.z, 0.05);
+    // Capped independently of dir.z's own 0.05 floor: without this, that floor alone still
+    // lets t reach ~7600m for the highest layer as dir.z -> 0. The per-pixel noise-UV
+    // footprint at that point has grown anisotropically -- fast along the ray's radial
+    // (view) direction, slow tangentially -- and isotropic mip LOD (the only kind available
+    // here, see the lod comment below) cannot band-limit that mismatch correctly. That's
+    // exactly what reads as clouds smeared into horizontal streaks at the horizon rather than
+    // clean noise. Capping t and fading density out as it nears the cap (distFade, at the
+    // bottom of this function) turns the stretch into clouds simply receding into haze before
+    // the artifact becomes visible -- which is also the physically-expected look: real cloud
+    // detail is lost to atmospheric haze well before the geometric horizon.
+    const float kMaxPlaneDist = 3200.0;
+    float t        = min((baseAlt[i] - uCameraPos.z) / max(dir.z, 0.05), kMaxPlaneDist);
     planeDist      = t;
     vec2  worldXY  = uCameraPos.xy + dir.xy * t
                     + uCloudScrollRate * uTime * scrollMul[i] / kPosScale;
@@ -190,7 +201,11 @@ float sampleCloudLayer(int i, vec3 dir, out float planeDist, out float sunShade)
     // near zenith, where "toward the sun" has no horizontal direction.
     vec2  sunAz  = uSunDirection.xy / max(length(uSunDirection.xy), 1e-4);
     float n1s    = textureLod(uCloudNoise, uv1 + sunAz * 0.02, lod).r;
-    float emboss = clamp(1.0 - (n1s - n1) * 2.2, 0.55, 1.35);
+    // Widened from the original (2.2, [0.55,1.35]) -- a subtler emboss read as a flat grey
+    // stain more than a lit volume; this range still fades to 1.0 (no effect) at low sun
+    // elevation via the mix below, so it can't blow out a low-sun sky, only add contrast when
+    // there's a clear "toward the sun" direction to model against.
+    float emboss = clamp(1.0 - (n1s - n1) * 2.8, 0.40, 1.55);
     sunShade     = mix(1.0, emboss, clamp(length(uSunDirection.xy) * 3.0, 0.0, 1.0));
 
     // Higher coverage -> more cloud, so it maps to a LOWER threshold (more of the
@@ -201,7 +216,13 @@ float sampleCloudLayer(int i, vec3 dir, out float planeDist, out float sunShade)
     float coverage  = mix(uCloudPosDensity1.w, uCloudPosDensity2.w, 0.5);
     float threshold = clamp(1.0 - coverage, 0.35, 0.85);
     float d = smoothstep(threshold, threshold + 0.16, density);
-    return d * d * (3.0 - 2.0 * d); // extra smoothing -> fluffier edge falloff
+    d = d * d * (3.0 - 2.0 * d); // extra smoothing -> fluffier edge falloff
+
+    // Smooth fade as t nears kMaxPlaneDist -- see that constant's own comment. Starts at 65%
+    // of the cap so the fade has room to complete before density would otherwise start
+    // re-tiling/streaking.
+    float distFade = 1.0 - smoothstep(kMaxPlaneDist * 0.65, kMaxPlaneDist, t);
+    return d * distFade;
 }
 
 void main()
@@ -281,7 +302,14 @@ void main()
             // bright forward-scattered rim.
             float silver = pow(max(cosA, 0.0), 12.0) * (1.0 - density) * 0.6;
 
-            vec3 col = uCloudColor * (uSunlightColor * (shade + silver)
+            // Lit-edge bloom: real cumulus reads as puffy largely because thin/translucent
+            // edges transmit more light than opaque cores do -- a bell curve peaking at
+            // partial coverage (density's OWN falloff peaks at density==1, the opaque core,
+            // which is the opposite cue) fakes that translucency cheaply, with no extra
+            // texture sample -- reuses the density this layer already computed.
+            float edgeGlow = 4.0 * density * (1.0 - density);
+
+            vec3 col = uCloudColor * (uSunlightColor * (shade + silver + edgeGlow * 0.35)
                                       + uAmbient * 0.35);
 
             // Aerial perspective: distant cloud melts toward the horizon haze,

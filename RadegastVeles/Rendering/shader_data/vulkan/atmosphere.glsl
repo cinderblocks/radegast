@@ -60,11 +60,13 @@ vec3 atmSkyGradient(vec3 dir)
 
     // Three-stop gradient, every stop lit by the combined illumination.
     // blue_density deepens/darkens the zenith toward its dominant hue; the
-    // per-channel factor is FLOORED at 0.35 so an extreme region density can
-    // only deepen the zenith, never zero channels out into a flat primary.
+    // per-channel factor is FLOORED at 0.28 (was 0.35 -- raised the ceiling on how deep the
+    // zenith can go, since a shallower floor read as a washed-out, flat overhead sky on
+    // regions with strong blue_density) so an extreme region density can only deepen the
+    // zenith, never zero channels out into a flat primary.
     vec3 zenith = uBlueHorizon
                 * clamp(vec3(0.95) - uBlueDensity * vec3(1.10, 0.55, 0.15),
-                        vec3(0.35), vec3(1.0))
+                        vec3(0.28), vec3(1.0))
                 * light;
     vec3 midSky  = uBlueHorizon * 1.28 * light;
     vec3 horizon = atmHazeColor();
