@@ -28,6 +28,7 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using LibreMetaverse;
 using LibreMetaverse.Rendering;
+using Microsoft.Extensions.Logging;
 using Radegast.Veles.Core;
 using SkiaSharp;
 // Alias System.IO.Path to avoid clash with LibreMetaverse.Rendering.Path.
@@ -986,7 +987,20 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                 meshDef.FileName);
 
             if (!File.Exists(path))
+            {
+                // Was previously silent -- a body mesh missing its LOD-0 file here means this
+                // mesh contributes ZERO faces, and if every selected mesh hits this branch (a
+                // misconfigured/inaccessible RESOURCE_DIR would do exactly that), the whole
+                // avatar build silently returns 0 faces with no error anywhere (see the
+                // faceData.Count == 0 early-return below) -- exactly the "Ready — 0 faces" field
+                // reports with no other diagnostic trace. Logged, not just reported via
+                // progress, since progress is UI-only and this needs to survive in Veles.log for
+                // a report that arrives after the fact.
+                Logger.Log(
+                    $"[AvatarMeshBuilder] Body mesh file not found for type '{meshDef.Type}': {path}",
+                    LogLevel.Warning);
                 return (idx, meshDef, lm: (LindenMesh?)null);
+            }
 
             var m = new LindenMesh(meshDef.Type);
             m.LoadMesh(path);
@@ -1005,7 +1019,22 @@ internal sealed class AvatarMeshBuilder(GridClient client)
         catch (OperationCanceledException) { throw; }
         catch
         {
-            // Individual failures surface per-entry below.
+            // Was previously silent for the faulted-task case too: a task's own exception
+            // (LindenMesh.LoadMesh parse/IO failure, an ApplyBodyMeshMorphs throw, etc.) is
+            // available on Task.Exception right here but was being discarded entirely -- the
+            // comment claiming "individual failures surface per-entry below" was true only for
+            // exceptions thrown in the EXTRACTION loop below (see that loop's own catch), never
+            // for a LOAD failure, which just silently became a null lm (skipped with no log at
+            // all, same silent-0-faces risk as the missing-file case above). Logged once per
+            // faulted task, not per sweep -- this runs once per BuildAsync call, not on a timer.
+            for (int i = 0; i < loadTasks.Count; i++)
+            {
+                if (loadTasks[i].IsFaulted)
+                    Logger.Log(
+                        $"[AvatarMeshBuilder] Body mesh load task failed for type "
+                        + $"'{selectedDefs[i].Type}': {loadTasks[i].Exception?.InnerException?.Message ?? loadTasks[i].Exception?.Message}",
+                        LogLevel.Warning);
+            }
             loadResults = loadTasks.Select(t => t.IsCompletedSuccessfully
                 ? t.Result
                 : default).ToArray();
@@ -1065,12 +1094,31 @@ internal sealed class AvatarMeshBuilder(GridClient client)
             }
             catch (Exception ex)
             {
+                // progress is UI-only (posts to AvatarViewerViewModel.StatusText) and never
+                // reaches Veles.log -- an extraction-stage failure here would have looked
+                // identical to the two silent paths above in every log capture to date.
                 progress?.Report($"Mesh load error ({meshDef.Type}): {ex.Message}");
+                Logger.Log(
+                    $"[AvatarMeshBuilder] Body mesh extraction failed for type "
+                    + $"'{meshDef.Type}': {ex}",
+                    LogLevel.Warning);
             }
         }
 
         if (faceData.Count == 0)
+        {
+            // The choke point for the "Ready — 0 faces" field report: whatever combination of
+            // the two silent paths above (missing file / faulted load task) or an extraction
+            // exception (logged individually just above, per meshDef.Type) caused it, this is
+            // the one place that confirms the WHOLE build came up empty, with the input count
+            // for scale -- grep this line first the next time "0 faces" recurs; the specific
+            // cause should now be logged just above it in the same BuildAsync call.
+            Logger.Log(
+                $"[AvatarMeshBuilder] Body mesh build produced 0 faces from {selectedDefs.Count} "
+                + "selected mesh definition(s) -- see any warnings just above for which one(s) failed and why.",
+                LogLevel.Warning);
             return ([], [], ImmutableArray<AvatarFaceMorphData>.Empty, bMin, bMax);
+        }
 
         // Phase 1.5: fire geometry-ready callback with untextured (grey) faces so the
         // caller can display a placeholder while textures are still downloading.
