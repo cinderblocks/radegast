@@ -20,6 +20,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -2703,11 +2704,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // sharing is within one object or across several.
     //
     // Lookup checks IsDisposed and treats a hit on an already-fully-released mesh as a miss
-    // (silently rebuilds) rather than proactively removing dead entries when a mesh's last
-    // reference is released -- simpler, and the cost of a stale dictionary entry is a few dozen
-    // bytes of managed memory (the disposed VkMesh's own now-empty shell), not a GPU resource;
-    // only actually freed native handles matter for the allocation-count ceiling this exists to
-    // relieve. Cleared wholesale in FreeSceneObjectResources.
+    // (silently rebuilds). A mesh whose hash recurs later self-heals this way (the miss branch
+    // overwrites the stale entry), but one that never recurs -- a genuinely one-off geometry --
+    // would otherwise sit here forever: confirmed live in a long dense-region session, where this
+    // dictionary's Count climbed monotonically while the scene's own live face count stayed flat,
+    // i.e. pure accumulation of dead entries, not real growth. RemoveSceneObjectGpuNoRebuild's
+    // deferred dispose now proactively evicts a mesh's entry the moment IsDisposed confirms this
+    // was its last reference (see that method's own comment), so this dictionary's Count tracks
+    // live pooled meshes again. Cleared wholesale in FreeSceneObjectResources.
     private readonly Dictionary<ulong, VkMesh> _sharedMeshPool = new();
 
     /// <summary>Returns true if this object actually landed in <see cref="_sceneObjects"/> (a
@@ -3053,10 +3057,19 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // own comment for why a fresh lookup here would always see 0 (RemoveSceneObjectGpuNoRebuild,
             // above, already cleared this key's entry earlier in this same call).
             int consecutiveFailures = priorConsecutiveFailures + 1;
+            // live textures / shared meshes added to discriminate maxMemoryAllocationCount hits
+            // (see VkContext's own Device-limits log line): VkTexture and VkMesh vbo/ebo/lebo are
+            // the two things that scale with scene content and are NOT pooled the way material
+            // UBOs are (VkMaterialUboPool.FreeSlots/Capacity below) -- when this warning's cause
+            // is device allocation-count exhaustion rather than pool exhaustion, these two counts
+            // are what tells us whether textures or meshes are the dominant consumer of the
+            // device's 4096-ish ceiling, without needing a dedicated allocation counter.
+            int liveSceneTextures = _sceneObjectTextures.Values.Sum(l => l.Count);
             LibreMetaverse.Logger.Warn($"[VkViewportControl] Scene object {rootId} (\"{sub.Label}\", "
                 + $"{sub.Faces.Length} faces requested) upload failed, dropping it "
                 + $"(live: {SceneFaceCount} faces / {_sceneObjects.Count} objects, "
                 + $"pool free slots: {vk.MaterialUboPool.FreeSlots}/{vk.MaterialUboPool.Capacity}, "
+                + $"live textures: {liveSceneTextures}, shared meshes: {_sharedMeshPool.Count}, "
                 + $"consecutive failures: {consecutiveFailures}, next retry in "
                 + $"{SceneUploadFailureCooldownMs(rootId, consecutiveFailures) / 1000}s): {e.Message}");
             _recentSceneUploadFailures[rootId] = (Environment.TickCount64, consecutiveFailures);
@@ -3130,10 +3143,29 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // mesh.Dispose() is ref-counted (see VkMesh._refCount's own field comment) --
             // correctly decrements-only when this mesh is still shared with another live scene
             // object, and only actually frees native resources once this was the last reference.
-            foreach (var (mesh, material, _) in faces)
+            foreach (var (mesh, material, face) in faces)
             {
                 mesh.Dispose();
                 material.Dispose();
+                // _sharedMeshPool's own field comment documents that a stale (fully-released)
+                // entry is normally left in place rather than proactively removed -- fine for an
+                // occasional one-off, but a long session that keeps building genuinely unique
+                // (never-reused) geometry accumulates dead entries forever, since nothing ever
+                // looks that exact hash up again to trigger the pool's own overwrite-on-miss path.
+                // Recompute the same hash used at pool-insertion time and remove the entry here,
+                // now that we know for certain (mesh.IsDisposed) this was the mesh's last live
+                // reference -- safe to attempt even for a non-pooled (flexi/animated) mesh, since
+                // ReferenceEquals guards against evicting an unrelated live pooled mesh on a hash
+                // collision; !face.IsFlexi just skips the wasted hash computation for the common
+                // non-pooled case (animated-but-not-flexi still pays for a hash that never hits,
+                // which is harmless, just not worth extra plumbing to avoid).
+                if (mesh.IsDisposed && !face.IsFlexi && face.Vertices != null)
+                {
+                    int vLen = face.VerticesLength > 0 ? face.VerticesLength : face.Vertices.Length;
+                    ulong h = VertexHash(face.Vertices, vLen, face.Indices);
+                    if (_sharedMeshPool.TryGetValue(h, out var pooledMesh) && ReferenceEquals(pooledMesh, mesh))
+                        _sharedMeshPool.Remove(h);
+                }
             }
             if (textures != null) foreach (var tex in textures) tex.Dispose();
             if (skinGpuList != null) foreach (var gpu in skinGpuList) gpu.Dispose();
