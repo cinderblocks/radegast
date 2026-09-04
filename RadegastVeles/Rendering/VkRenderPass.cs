@@ -29,12 +29,31 @@ namespace Radegast.Veles.Rendering;
 internal static class VkRenderPass
 {
     /// <summary>
-    /// Creates the main scene render pass: one color attachment (matching the
-    /// interop-exported render-target image format, <c>R8G8B8A8_UNORM</c>) plus one depth
-    /// attachment. Used by the prim/wireframe/picking/particle/navmesh-overlay/water/sky
-    /// pipelines -- all rendering into the same target, differing only in pipeline state, not
-    /// attachments, so they share one render-pass-compatible object (viewport/scissor are
-    /// dynamic state, so the render pass itself doesn't need to vary for that).
+    /// Creates the main scene render pass: one color attachment plus one depth attachment. Used
+    /// by the prim/wireframe/picking/particle/navmesh-overlay/water/sky pipelines -- all
+    /// rendering into the same target, differing only in pipeline state, not attachments, so
+    /// they share one render-pass-compatible object (viewport/scissor are dynamic state, so the
+    /// render pass itself doesn't need to vary for that).
+    /// <para>
+    /// ONLY used on <see cref="VkGraphicsTier.Medium"/>/<see cref="VkGraphicsTier.High"/> --
+    /// see <see cref="CreateMainScenePassDirect"/> for the <see cref="VkGraphicsTier.Low"/>
+    /// counterpart this render pass has no role in. The color attachment here targets a
+    /// PERSISTENT offscreen HDR buffer (<c>B10G11R11_UFLOAT_PACK32</c>,
+    /// <c>VkViewportControl._hdrColorImage</c>), not the swapchain image directly -- the
+    /// interop-exported swapchain image is hard-locked to <c>R8G8B8A8_UNORM</c> by Avalonia's
+    /// GPU-interop layer (see <c>VkInteropSwapchain</c>'s own image-creation call), which cannot
+    /// hold the over-1.0 values bloom needs to threshold against or the highlight rolloff the
+    /// tonemap pass provides. <c>FinalLayout = ShaderReadOnlyOptimal</c> (not
+    /// <c>ColorAttachmentOptimal</c>, which is what this used to be before the HDR buffer existed
+    /// and this render pass wrote the swapchain image directly): this pass's output is now ALWAYS
+    /// sampled next -- either by the underwater pass's copy-out (if underwater is active) or
+    /// directly by the tonemap/bloom chain's first stage (VkBloomExtractPipeline) -- never
+    /// presented, so it needs the same "reused across frames AND read by a later pass this frame"
+    /// two-dependency shape <see cref="CreateGBufferPass"/> already documents, not the simpler
+    /// single-dependency shape a truly-terminal, presented-every-frame target needs (see
+    /// <see cref="CreateTonemapOutputPass"/>, which now owns that role for the real swapchain
+    /// image instead).
+    /// </para>
     /// </summary>
     public static unsafe RenderPass CreateMainScenePass(VkContext vk, Format colorFormat, Format depthFormat)
     {
@@ -47,14 +66,244 @@ internal static class VkRenderPass
             StencilLoadOp = AttachmentLoadOp.DontCare,
             StencilStoreOp = AttachmentStoreOp.DontCare,
             InitialLayout = ImageLayout.Undefined,
-            // FinalLayout = ColorAttachmentOptimal, matching subpass state, NOT
-            // TransferSrcOptimal: a SEPARATE explicit vkCmdPipelineBarrier transitions to
-            // TransferSrcOptimal after CmdEndRenderPass, right before the blit to the interop
-            // swapchain image. Setting
-            // FinalLayout=TransferSrcOptimal directly here would need a matching Transfer-stage
-            // subpass dependency this render pass doesn't declare -- a real synchronization
-            // gap, not just a style difference. The render loop code owns the post-render-pass
-            // transition; this render pass does not attempt it implicitly.
+            FinalLayout = ImageLayout.ShaderReadOnlyOptimal
+        };
+
+        var depthAttachment = new AttachmentDescription
+        {
+            Format = depthFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.DontCare,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var depthRef = new AttachmentReference { Attachment = 1, Layout = ImageLayout.DepthStencilAttachmentOptimal };
+
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef,
+            PDepthStencilAttachment = &depthRef
+        };
+
+        // Two dependencies, same reasoning as CreateGBufferPass's own (see that method's doc
+        // comment) -- the color attachment is a persistent, cross-frame-reused image that's also
+        // read later THIS frame, unlike a plain presented target. Depth is write-only (never
+        // sampled by anything, matching _depthImage's own existing "write-only" note elsewhere),
+        // so only the color half of the exit dependency needs a fragment-shader read stage.
+        var dependencies = stackalloc SubpassDependency[2]
+        {
+            new SubpassDependency
+            {
+                SrcSubpass = Vk.SubpassExternal,
+                DstSubpass = 0,
+                SrcStageMask = PipelineStageFlags.FragmentShaderBit,
+                SrcAccessMask = AccessFlags.ShaderReadBit,
+                DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+                DstAccessMask = AccessFlags.ColorAttachmentWriteBit | AccessFlags.DepthStencilAttachmentWriteBit
+            },
+            new SubpassDependency
+            {
+                SrcSubpass = 0,
+                DstSubpass = Vk.SubpassExternal,
+                SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+                SrcAccessMask = AccessFlags.ColorAttachmentWriteBit,
+                DstStageMask = PipelineStageFlags.FragmentShaderBit,
+                DstAccessMask = AccessFlags.ShaderReadBit
+            }
+        };
+
+        var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 2,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 2,
+            PDependencies = dependencies
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
+    /// <see cref="VkGraphicsTier.Low"/>'s main scene render pass: writes the REAL swapchain
+    /// image directly, exactly like <see cref="CreateMainScenePass"/> itself did before the HDR-
+    /// buffer/tonemap work existed (see that method's own doc comment) -- restores that exact
+    /// zero-added-VRAM contract for hardware <see cref="VkContext.DetectGraphicsTier"/>
+    /// classifies too VRAM-constrained to afford the offscreen HDR buffer at all, not a smaller
+    /// version of it. Same shape as <see cref="CreatePickPass"/> (color+depth,
+    /// <c>FinalLayout=ColorAttachmentOptimal</c>, single entry-only dependency guarding the
+    /// swapchain image pool's cross-frame reuse) for the same reason: this output is presented,
+    /// never sampled by a later pass the same frame -- there IS no later pass on this tier, the
+    /// tonemap/bloom chain is skipped entirely, and underwater (if active) reads/writes this same
+    /// swapchain image directly afterward exactly as it always has.
+    /// </summary>
+    public static unsafe RenderPass CreateMainScenePassDirect(VkContext vk, Format colorFormat, Format depthFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.ColorAttachmentOptimal
+        };
+
+        var depthAttachment = new AttachmentDescription
+        {
+            Format = depthFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.DontCare,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var depthRef = new AttachmentReference { Attachment = 1, Layout = ImageLayout.DepthStencilAttachmentOptimal };
+
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef,
+            PDepthStencilAttachment = &depthRef
+        };
+
+        var dependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+            SrcAccessMask = 0,
+            DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+            DstAccessMask = AccessFlags.ColorAttachmentWriteBit | AccessFlags.DepthStencilAttachmentWriteBit
+        };
+
+        var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 2,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 1,
+            PDependencies = &dependency
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
+    /// Creates the tonemap/bloom composite pass's render pass: one color attachment, no depth,
+    /// targeting the REAL swapchain image -- this pass, not <see cref="CreateMainScenePass"/>
+    /// (whose output now lands in an offscreen HDR buffer instead, see that method's own doc
+    /// comment), is the thing that now writes what the compositor actually presents. Takes over
+    /// the exact contract <see cref="CreateMainScenePass"/> used to have when IT wrote the
+    /// swapchain image directly: <c>LoadOp = DontCare</c> (the full-screen quad this pass draws
+    /// writes every pixel unconditionally, so there's nothing to preserve), single entry
+    /// dependency only (this output is truly terminal -- presented, never sampled by a later pass
+    /// the same frame, matching <see cref="CreateUnderwaterPass"/>'s own single-dependency
+    /// reasoning), <c>FinalLayout = ColorAttachmentOptimal</c> (matching
+    /// <c>VkInteropSwapchainImage.Present()</c>'s own expectation, and what
+    /// <see cref="CreateUnderwaterPass"/>'s <c>InitialLayout</c> still assumes when underwater is
+    /// active and runs after this pass).
+    /// </summary>
+    public static unsafe RenderPass CreateTonemapOutputPass(VkContext vk, Format colorFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.DontCare,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.ColorAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef
+        };
+
+        var dependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+            SrcAccessMask = 0,
+            DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+            DstAccessMask = AccessFlags.ColorAttachmentWriteBit
+        };
+
+        var attachments = stackalloc AttachmentDescription[1] { colorAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 1,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 1,
+            PDependencies = &dependency
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
+    /// The pick pass's own render pass: one color attachment (a flat-shaded, unique-per-face ID
+    /// colour, read back via <c>vkCmdCopyImageToBuffer</c>) plus one depth attachment, targeting
+    /// <c>VkViewportControl._pickColorImage</c>/<c>_pickDepthImage</c> -- its own dedicated
+    /// R8G8B8A8Unorm target, NOT <see cref="CreateMainScenePass"/>'s (which is B10G11R11UfloatPack32
+    /// since the HDR-buffer/tonemap work, a real format the pick shader's exact-byte ID encoding
+    /// cannot survive; sharing that render pass object here was an actual regression caught before
+    /// it shipped, not a hypothetical). This is otherwise IDENTICAL to what
+    /// <see cref="CreateMainScenePass"/> itself used to be before that work: one subpass
+    /// dependency (EXTERNAL -> 0 only), <c>FinalLayout = ColorAttachmentOptimal</c> on color --
+    /// <c>RunPickPass</c> transitions it to <c>TransferSrcOptimal</c> itself via an explicit
+    /// <c>CmdPipelineBarrier</c> right after <c>CmdEndRenderPass</c>, exactly like the swapchain
+    /// image used to be handled (see that call site's own comment). No SECOND (exit) dependency
+    /// is needed despite this target being reused across separate pick calls (unlike a true
+    /// one-shot target): every <c>RunPickPass</c> call ends in <c>cmd.SubmitAndWait()</c>, a full
+    /// CPU-GPU synchronous wait, before the method returns -- by the time a LATER pick call reuses
+    /// this same image, the GPU has unconditionally finished with it already, so there is no
+    /// write-after-read hazard for a subpass dependency to guard against in the first place.
+    /// </summary>
+    public static unsafe RenderPass CreatePickPass(VkContext vk, Format colorFormat, Format depthFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
             FinalLayout = ImageLayout.ColorAttachmentOptimal
         };
 
@@ -109,26 +358,31 @@ internal static class VkRenderPass
 
     /// <summary>
     /// Underwater post-process pass: one color attachment, no depth, targeting the SAME
-    /// swapchain image the main scene pass just wrote (not a separate offscreen target).
-    /// <c>LoadOp = Load</c> (not <c>Clear</c>/<c>DontCare</c> like every other pass here) --
-    /// this pass composites a full-screen tint/distortion effect ON TOP of the already-rendered
-    /// frame, it must not discard it. <c>InitialLayout = ColorAttachmentOptimal</c>, matching the
-    /// actual layout the caller's own explicit <c>CmdPipelineBarrier</c> transitions the
-    /// swapchain image back to (from <c>TransferSrcOptimal</c>, after copying it out to sample as
-    /// the pass's input) immediately before <c>CmdBeginRenderPass</c> -- <c>LoadOp = Load</c>
+    /// swapchain image the tonemap composite pass (<see cref="CreateTonemapOutputPass"/>) just
+    /// wrote -- underwater runs AFTER tonemap now, as a plain LDR post-effect on the already-
+    /// tonemapped frame, not a separate offscreen target of its own; this pass and its call site
+    /// (<c>VkViewportControl.RenderUnderwaterPass</c>) are otherwise unchanged by the HDR-buffer/
+    /// tonemap work -- see <see cref="CreateMainScenePass"/>'s own doc comment for why THAT pass
+    /// stopped writing the swapchain image directly, and why this one didn't need to follow it
+    /// offscreen too. <c>LoadOp = Load</c> (not <c>Clear</c>/<c>DontCare</c> like every other pass
+    /// here) -- this pass composites a full-screen tint/distortion effect ON TOP of the already-
+    /// rendered frame, it must not discard it. <c>InitialLayout = ColorAttachmentOptimal</c>,
+    /// matching the actual layout the caller's own explicit <c>CmdPipelineBarrier</c> transitions
+    /// the swapchain image back to (from <c>TransferSrcOptimal</c>, after copying it out to sample
+    /// as the pass's input) immediately before <c>CmdBeginRenderPass</c> -- <c>LoadOp = Load</c>
     /// requires an accurate InitialLayout; <c>Undefined</c> would make the load's result
     /// undefined. <c>FinalLayout = ColorAttachmentOptimal</c> restores the same contract
-    /// <see cref="CreateMainScenePass"/>'s output already has: <c>VkInteropSwapchainImage.
+    /// <see cref="CreateTonemapOutputPass"/>'s output already has: <c>VkInteropSwapchainImage.
     /// Present()</c> expects to find the image in that layout.
     /// <para>
-    /// Only one subpass dependency, mirroring <see cref="CreateMainScenePass"/>'s (not
+    /// Only one subpass dependency, mirroring <see cref="CreateTonemapOutputPass"/>'s (not
     /// <see cref="CreateGBufferPass"/>'s two): this pass's output is presented, never sampled by
     /// a later pass in the same frame, so no exit dependency is needed. The entry dependency
     /// guards against the swapchain image pool's cross-FRAME reuse (same rationale as
-    /// <see cref="CreateMainScenePass"/>'s own dependency) -- ordering against the main pass's
-    /// write earlier in THIS frame is already fully handled by the caller's explicit barrier
-    /// sequence (copy-out, then the transition back to ColorAttachmentOptimal) immediately
-    /// preceding <c>CmdBeginRenderPass</c>.
+    /// <see cref="CreateTonemapOutputPass"/>'s own dependency) -- ordering against the tonemap
+    /// pass's write earlier in THIS frame is already fully handled by the caller's explicit
+    /// barrier sequence (copy-out, then the transition back to ColorAttachmentOptimal)
+    /// immediately preceding <c>CmdBeginRenderPass</c>.
     /// </para>
     /// </summary>
     public static unsafe RenderPass CreateUnderwaterPass(VkContext vk, Format colorFormat)
@@ -183,9 +437,11 @@ internal static class VkRenderPass
     /// G-buffer normal pre-pass (pipeline table row 6: prim.vert +
     /// gnorm.frag): one color attachment (packed view-space normal) + one depth attachment,
     /// both left in <c>ShaderReadOnlyOptimal</c> so the following SSAO pass can sample them as
-    /// textures. Unlike <see cref="CreateMainScenePass"/>, this render pass -- and the SSAO/blur
-    /// ones below -- are read by ANOTHER pass within the SAME frame's command buffer, not just
-    /// presented, so they need TWO subpass dependencies, not one:
+    /// textures. Unlike <see cref="CreateTonemapOutputPass"/> (whose output really is only ever
+    /// presented), this render pass -- and the SSAO/blur ones below, and (since the HDR-buffer/
+    /// tonemap work) <see cref="CreateMainScenePass"/> too -- are read by ANOTHER pass within the
+    /// SAME frame's command buffer, not just presented, so they need TWO subpass dependencies,
+    /// not one:
     ///
     /// - Entry (EXTERNAL -> 0): the target images are reused across frames (like
     ///   <c>VkViewportControl</c>'s own depth target, not recreated per frame), so this

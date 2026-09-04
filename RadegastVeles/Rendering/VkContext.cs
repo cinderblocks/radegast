@@ -109,6 +109,37 @@ internal sealed unsafe class VkContext : IDisposable
     /// </summary>
     public required bool SupportsBc3 { get; init; }
 
+    /// <summary>Below this many total DEVICE_LOCAL bytes, <see cref="DetectGraphicsTier"/>
+    /// classifies the device <see cref="VkGraphicsTier.Low"/>. 3GB: comfortably above a GTX
+    /// 760's 2GB SKU, comfortably below its 4GB SKU and every card newer than it -- chosen to
+    /// catch the specific card this tier was written for (see <see cref="VkGraphicsTier"/>'s
+    /// own doc comment) without catching mainstream modern hardware, not derived from any
+    /// deeper VRAM-budgeting model.</summary>
+    public const ulong LowTierVramCeilingBytes = 3UL * 1024 * 1024 * 1024;
+
+    /// <summary>Below this many total DEVICE_LOCAL bytes (and at or above
+    /// <see cref="LowTierVramCeilingBytes"/>), <see cref="DetectGraphicsTier"/> classifies the
+    /// device <see cref="VkGraphicsTier.Medium"/>; at or above it, <see cref="VkGraphicsTier.
+    /// High"/>. 6GB: comfortably covers older 4GB midrange cards in Medium while putting
+    /// anything with real headroom (6GB+, the norm on anything from the last several years) in
+    /// High.</summary>
+    public const ulong MediumTierVramCeilingBytes = 6UL * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Coarse, one-time GPU capability classification -- see <see cref="VkGraphicsTier"/>'s own
+    /// doc comment for what this gates and why it exists. Computed once here, at device
+    /// selection, from the sum of every DEVICE_LOCAL memory heap's reported size -- a static
+    /// hardware-category signal, not a live memory-pressure one. A true live signal
+    /// (VK_EXT_memory_budget's PhysicalDeviceMemoryBudgetPropertiesEXT, giving actual
+    /// current heap budget/usage, re-queryable per-frame) would adapt to a scene that's ALREADY
+    /// dense on capable hardware too, which this cannot -- deliberately not attempted here to
+    /// keep this fix bounded to the specific, demonstrated regression (a card whose TOTAL VRAM
+    /// is the real ceiling, not a capable card under transient scene-specific pressure); revisit
+    /// if a capable-hardware/dense-scene case shows the same symptom this static check can't
+    /// catch.
+    /// </summary>
+    public required VkGraphicsTier GraphicsTier { get; init; }
+
     /// <summary>Assigned right after construction in <see cref="TryCreate"/>, not via object
     /// initializer -- its constructor needs a fully-built <see cref="VkContext"/> to pass to
     /// <see cref="VkBufferHelper"/>, so it can't be a <c>required init</c> property set inline
@@ -473,6 +504,8 @@ internal sealed unsafe class VkContext : IDisposable
                     api.GetPhysicalDeviceFormatProperties(physicalDevice, Format.BC3UnormBlock, out var bc3Props);
                     bool supportsBc3 = bc3Props.OptimalTilingFeatures.HasFlag(FormatFeatureFlags.SampledImageBit);
 
+                    var graphicsTier = DetectGraphicsTier(api, physicalDevice);
+
                     var vkContext = new VkContext
                     {
                         Api = api,
@@ -484,6 +517,7 @@ internal sealed unsafe class VkContext : IDisposable
                         Pool = pool,
                         DescriptorPool = descriptorPool,
                         SupportsBc3 = supportsBc3,
+                        GraphicsTier = graphicsTier,
                         D3DDevice = d3dDevice
                     };
                     vkContext._debugUtils = debugUtils;
@@ -547,6 +581,30 @@ internal sealed unsafe class VkContext : IDisposable
                 if (device.Handle != default) api.DestroyDevice(device, null);
             }
         }
+    }
+
+    /// <summary>See <see cref="GraphicsTier"/>'s own doc comment for what this computes and why.
+    /// Sums every DEVICE_LOCAL memory heap's reported size (a discrete GPU typically reports
+    /// exactly one; an integrated/UMA part may report its whole shared system-RAM allocation as
+    /// DEVICE_LOCAL, which this doesn't special-case -- classifying a UMA laptop part
+    /// conservatively into a lower tier than a discrete GPU with the "same" reported size is an
+    /// acceptable, arguably correct outcome, not a bug).</summary>
+    private static unsafe VkGraphicsTier DetectGraphicsTier(Vk api, PhysicalDevice physicalDevice)
+    {
+        api.GetPhysicalDeviceMemoryProperties(physicalDevice, out var memProps);
+        ulong deviceLocalBytes = 0;
+        for (var i = 0; i < memProps.MemoryHeapCount; i++)
+        {
+            var heap = memProps.MemoryHeaps[i];
+            if (heap.Flags.HasFlag(MemoryHeapFlags.DeviceLocalBit))
+                deviceLocalBytes += heap.Size;
+        }
+        var tier = deviceLocalBytes < LowTierVramCeilingBytes ? VkGraphicsTier.Low
+            : deviceLocalBytes < MediumTierVramCeilingBytes ? VkGraphicsTier.Medium
+            : VkGraphicsTier.High;
+        LibreMetaverse.Logger.Info(
+            $"[VkContext] Device-local VRAM: {deviceLocalBytes / (1024.0 * 1024.0):F0} MB -> GraphicsTier={tier}");
+        return tier;
     }
 
     private static bool IsInstanceLayerAvailable(Vk api, string layerName)

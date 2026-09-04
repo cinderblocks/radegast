@@ -274,6 +274,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private VkWireframePipeline? _wireframe;
     private VkOutlinePipeline? _outline;
     private VkPickPipeline? _pick;
+    // Own dedicated render pass, NOT _renderPass -- see VkRenderPass.CreatePickPass's own doc
+    // comment for why sharing _renderPass (B10G11R11UfloatPack32 since the HDR-buffer/tonemap work)
+    // would corrupt the pick target's exact-byte R8G8B8A8Unorm ID encoding.
+    private RenderPass _pickRenderPass;
 
     /// <summary>PrimLocalId of the currently touch/selected prim to draw an SL-style
     /// selection outline around this frame, or 0 for none. Set via <see cref="SetSelectedObject"/>.</summary>
@@ -704,6 +708,69 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private Image _depthImage;
     private DeviceMemory _depthMemory;
     private ImageView _depthView;
+
+    // Persistent full-resolution HDR scene-colour buffer (B10G11R11UfloatPack32) -- what the main
+    // scene pass (_renderPass) now actually renders into, instead of the swapchain image
+    // directly. See VkRenderPass.CreateMainScenePass's own doc comment for why: the swapchain
+    // interop image is hard-locked to R8G8B8A8Unorm and can't hold the over-1.0 values bloom/
+    // tonemap need. Mirrors _depthImage/EnsureDepthTarget's own lazy-per-size pattern exactly,
+    // just with SampledBit added (this one IS read back, by the tonemap chain below, unlike
+    // _depthImage which never is).
+    private PixelSize _hdrColorSize;
+    private Image _hdrColorImage;
+    private DeviceMemory _hdrColorMemory;
+    private ImageView _hdrColorView;
+
+    // Bloom ping-pong targets -- half resolution (_bloomSize, tracked separately from
+    // _hdrColorSize/pixelSize), B10G11R11UfloatPack32. See VkTonemapPipeline's own doc comment for
+    // the 4-stage chain these feed: extract writes Ping, blur-H reads Ping/writes Pong, blur-V
+    // reads Pong/writes BACK to Ping (so the final blurred bloom always ends up in Ping -- see
+    // VkPostProcessDescriptorSet.UpdateBloomTargets' own note on why TonemapSet's bloom binding
+    // points at Ping, not Pong).
+    private PixelSize _bloomSize;
+    private Image _bloomPingImage, _bloomPongImage;
+    private DeviceMemory _bloomPingMemory, _bloomPongMemory;
+    private ImageView _bloomPingView, _bloomPongView;
+    // Persistent, like _ssaoFramebuffer/_ssaoBlurFramebuffer -- these targets are reused across
+    // frames (not per-frame like the main pass's own swapchain-wrapping framebuffer), so their
+    // framebuffers are created once per resize alongside the images, not rebuilt every frame.
+    private Framebuffer _bloomPingFramebuffer, _bloomPongFramebuffer;
+
+    // Snapshotted once from vk.GraphicsTier at init (a per-hardware constant, not something that
+    // changes mid-session) -- see VkGraphicsTier's own doc comment for what each tier gates.
+    // Consulted at two kinds of site: (1) the tonemap/bloom chain below, where Low skips the
+    // whole chain (every field in that block stays default/null, and _renderPass targets the
+    // swapchain image directly via VkRenderPass.CreateMainScenePassDirect instead of
+    // _hdrColorImage -- restoring the exact zero-added-VRAM contract this control had before
+    // that work existed) and Medium runs tonemap without bloom (RenderTonemapChain's own tier
+    // check); and (2) as a hard ceiling on top of SsaoEnabled/ShadowsEnabled/
+    // WaterReflectionsEnabled's own user-facing toggles (doSsao/doShadow/doWaterReflThisFrame in
+    // RenderFrame) -- Low forces all three off regardless of what the user/settings requested,
+    // the same "protect hardware that can't afford it, don't just offer a smaller version"
+    // posture the tonemap/bloom gate already established, without touching the toggles'
+    // OWN values (a user's explicit "on" survives once they're on hardware that can afford it,
+    // rather than this control silently overwriting a persisted setting it can't tell apart
+    // from an untouched default -- see the SetViewport call sites that push those settings in
+    // for why that distinction isn't something this control can make safely on its own).
+    private VkGraphicsTier _graphicsTier;
+
+    // Tonemap/bloom post-process chain -- when created at all (see _graphicsTier above),
+    // it's mandatory the same way _prim/_renderPass are, unlike SSAO/shadows/water/underwater
+    // below (all best-effort, individually toggleable, each behind its own try/catch): on any
+    // tier where CreateMainScenePass (not CreateMainScenePassDirect) is used, this chain is the
+    // ONLY remaining path that gets pixels into the swapchain image, so a creation failure here
+    // is as fatal as a _prim/_renderPass failure already is -- deliberately NOT wrapped in a
+    // try/catch, same posture as those two, on the tiers where it's created at all.
+    private RenderPass _bloomOffscreenRenderPass; // shared shape for extract + blur-H + blur-V
+    private RenderPass _tonemapRenderPass;        // writes the real swapchain image
+    private VkBloomExtractPipeline? _bloomExtractPipeline;
+    private VkBloomBlurPipeline? _bloomBlurPipeline;
+    private VkTonemapPipeline? _tonemapPipeline;
+    private VkPostProcessDescriptorSet? _postProcessDescSet;
+    // Dedicated linear-clamp sampler for the whole chain -- NOT _ssaoLinearSampler/
+    // _underwaterLinearSampler, both of which live inside best-effort try/catch blocks and can
+    // be torn down independently of this mandatory chain.
+    private Sampler _postProcessLinearSampler;
 
     // Pick render target -- mirrors _depthImage/_depthView's EnsureDepthTarget pattern (a
     // second, resizable, per-panel offscreen target), not a new class: this plays the exact
@@ -1665,15 +1732,71 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // already swallows its own failures internally (falls back to a CPU-only-timing
             // tracker rather than throwing).
             _stats.Initialize(vk);
-            _renderPass = VkRenderPass.CreateMainScenePass(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat);
+            _graphicsTier = vk.GraphicsTier;
+            // Low: exactly the pre-tonemap contract (writes the swapchain image directly, no
+            // HDR buffer, zero added VRAM). Medium/High: B10G11R11UfloatPack32 offscreen HDR
+            // buffer -- see _hdrColorImage's own field comment for why that format. Either way
+            // every OTHER pipeline built against _renderPass below (_prim/_wireframe/_outline/
+            // sky/water/particles) is unaffected: a Vulkan render pass is just a compatibility
+            // contract these compile against, not something they read layout/format details out
+            // of themselves.
+            _renderPass = _graphicsTier == VkGraphicsTier.Low
+                ? VkRenderPass.CreateMainScenePassDirect(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat)
+                : VkRenderPass.CreateMainScenePass(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
             _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
             _outline = VkOutlinePipeline.Create(vk, _renderPass);
-            _pick = VkPickPipeline.Create(vk, _renderPass);
+            _pickRenderPass = VkRenderPass.CreatePickPass(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat);
+            _pick = VkPickPipeline.Create(vk, _pickRenderPass);
             _placeholders = new VkPlaceholderTextures(vk);
             _frameSets = new VkPrimDescriptorSets(vk, _prim, _placeholders);
             _instanceDrawer = new VkInstanceDrawer(vk);
+
+            // Tonemap/bloom post-process chain -- skipped ENTIRELY on VkGraphicsTier.Low (see
+            // _graphicsTier's own field comment); every field this block sets stays
+            // default/null in that case, and every later call site that would use them is
+            // itself gated on _graphicsTier, not a null-check on these -- treat a null
+            // here on Medium/High as the same kind of fatal, not-try/caught failure a null
+            // _prim would be, not as "this optional feature quietly disabled itself".
+            if (_graphicsTier != VkGraphicsTier.Low)
+            {
+                // The offscreen HDR/bloom targets themselves are created lazily per-size in
+                // RenderFrame (EnsureHdrColorTarget/EnsureBloomTargets), same split as
+                // _depthImage/EnsureDepthTarget: only the size-independent pipeline/render-pass/
+                // descriptor-set objects are created here.
+                _bloomOffscreenRenderPass = VkRenderPass.CreateOffscreenColorPass(vk, Format.B10G11R11UfloatPack32);
+                _tonemapRenderPass = VkRenderPass.CreateTonemapOutputPass(vk, Format.R8G8B8A8Unorm);
+                _bloomExtractPipeline = VkBloomExtractPipeline.Create(vk, _bloomOffscreenRenderPass);
+                _bloomBlurPipeline = VkBloomBlurPipeline.Create(vk, _bloomOffscreenRenderPass);
+                _tonemapPipeline = VkTonemapPipeline.Create(vk, _tonemapRenderPass);
+                _postProcessDescSet = new VkPostProcessDescriptorSet(vk, _bloomExtractPipeline, _bloomBlurPipeline, _tonemapPipeline);
+                var postProcessSamplerInfo = new SamplerCreateInfo
+                {
+                    SType = StructureType.SamplerCreateInfo,
+                    MagFilter = Filter.Linear,
+                    MinFilter = Filter.Linear,
+                    MipmapMode = SamplerMipmapMode.Linear,
+                    AddressModeU = SamplerAddressMode.ClampToEdge,
+                    AddressModeV = SamplerAddressMode.ClampToEdge,
+                    AddressModeW = SamplerAddressMode.ClampToEdge,
+                    MinLod = 0,
+                    MaxLod = 0
+                };
+                unsafe { vk.Api.CreateSampler(vk.Device, in postProcessSamplerInfo, null, out _postProcessLinearSampler).ThrowOnError(); }
+
+                // Medium tier never calls EnsureBloomTargets (that's High-only, see
+                // RenderTonemapChain's own tier check), so TonemapSet's binding 1 (uBloomTex)
+                // would otherwise stay permanently unwritten -- an unbound combined-image-sampler
+                // descriptor a validation layer would immediately flag the moment tonemap.frag's
+                // draw tries to read it. Bind the same shared black placeholder every OTHER
+                // "optional texture input" in this codebase falls back to (_placeholders.Black)
+                // instead: tonemap.frag's `bloom * kBloomIntensity` term reads (0,0,0), the exact
+                // same math result as a genuinely-computed, fully-dark bloom pass would produce,
+                // just without ever running the extract/blur draws or allocating their targets.
+                if (_graphicsTier == VkGraphicsTier.Medium)
+                    _postProcessDescSet.BindNoBloomPlaceholder(_placeholders.Black);
+            }
 
             // Best-effort: a sky-pipeline/cloud-texture
             // creation failure shouldn't take down the whole panel, just leave the sky dome
@@ -4206,6 +4329,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _stats.EndFrame(vk);
 
             EnsureDepthTarget(vk, pixelSize);
+            // Low: neither target exists at all (see _graphicsTier's own field comment).
+            // Medium: HDR only, bloom stays unallocated (RenderTonemapChain's own tier check).
+            if (_graphicsTier != VkGraphicsTier.Low)
+            {
+                EnsureHdrColorTarget(vk, pixelSize);
+                if (_graphicsTier == VkGraphicsTier.High)
+                    EnsureBloomTargets(vk, pixelSize);
+            }
 
             var view = _camera.GetViewMatrix();
             var proj = _camera.GetProjectionMatrix((float)pixelSize.Width / pixelSize.Height);
@@ -4214,11 +4345,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
             // computed early (before frameUbo, since HasSsao must land in the
             // SAME UpdatePerFrame call below), using a
-            // three-way gate (SsaoEnabled && pipeline ready && face-count budget).
+            // four-way gate (SsaoEnabled && pipeline ready && face-count budget && hardware can
+            // afford it -- see _graphicsTier's own field comment for why Low is a hard ceiling
+            // here, not a smaller version of the pass).
             int opaqueCount = _opaqueFaces.Count;
             int sceneOpaqueCount = _sceneOpaque.Count;
             int opaqueFaceCount = opaqueCount + sceneOpaqueCount;
-            bool doSsao = SsaoEnabled && _ssaoReady && opaqueFaceCount > 0 && opaqueFaceCount <= SsaoMaxOpaqueFaces;
+            bool doSsao = SsaoEnabled && _ssaoReady && opaqueFaceCount > 0 && opaqueFaceCount <= SsaoMaxOpaqueFaces
+                && _graphicsTier != VkGraphicsTier.Low;
 
             // Main-pass frustum culling. FrustumCullingEnabled gates ONLY this pass
             // (shadow/reflection below always cull via their own independent frustum,
@@ -4248,8 +4382,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // directional shadow gate + light-VP computation. Mirrors GL's
             // RenderShadowPasses/RenderDirectionalShadow gating exactly -- ShadowsEnabled &&
             // ready && face-count budget first, then a separate NaN-guarded computation that
-            // can still bail per-frame (EEP transitions, degenerate camera state).
-            bool doShadow = ShadowsEnabled && _shadowReady && opaqueFaceCount > 0 && opaqueFaceCount <= ShadowsMaxOpaqueFaces;
+            // can still bail per-frame (EEP transitions, degenerate camera state). Same Low-tier
+            // hard ceiling as doSsao above -- see _graphicsTier's own field comment.
+            bool doShadow = ShadowsEnabled && _shadowReady && opaqueFaceCount > 0 && opaqueFaceCount <= ShadowsMaxOpaqueFaces
+                && _graphicsTier != VkGraphicsTier.Low;
             Matrix4x4 shadowLightView = default, shadowLightProj = default;
             if (doShadow) doShadow = TryComputeShadowLightVp(out shadowLightView, out shadowLightProj);
 
@@ -4285,9 +4421,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             long nowTick = Environment.TickCount64;
             // Reflections stay above-water only: the reflection FBO's own camera setup mirrors
             // about the water plane assuming the real camera is above it, and nothing underwater
-            // should show a reflection of itself through the surface from below anyway.
+            // should show a reflection of itself through the surface from below anyway. Same
+            // Low-tier hard ceiling as doSsao/doShadow above -- see _graphicsTier's own field
+            // comment.
             bool doWaterReflThisFrame = doWater && !underwater && WaterReflectionsEnabled && _waterReflReady
-                                        && (nowTick - _reflLastTick >= kReflIntervalMs);
+                                        && (nowTick - _reflLastTick >= kReflIntervalMs)
+                                        && _graphicsTier != VkGraphicsTier.Low;
             Matrix4x4 reflView = default, reflViewProj = default;
             int reflOpaqueCount = 0, reflSceneOpaqueCount = 0;
             if (doWaterReflThisFrame)
@@ -4508,7 +4647,16 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _instanceDrawer!.UploadInstanceBatch(instanceData, totalCount);
             }
 
-            var attachments = stackalloc ImageView[2] { new ImageView(image.ViewHandle), _depthView };
+            // _hdrColorView on Medium/High -- see VkRenderPass.CreateMainScenePass's own doc
+            // comment for why the main pass targets an offscreen buffer there instead of the
+            // swapchain image directly. Low uses image.ViewHandle directly, same as every panel
+            // did before that work existed (CreateMainScenePassDirect, chosen for _renderPass
+            // above, expects exactly this).
+            var attachments = stackalloc ImageView[2]
+            {
+                _graphicsTier == VkGraphicsTier.Low ? new ImageView(image.ViewHandle) : _hdrColorView,
+                _depthView
+            };
             var fbInfo = new FramebufferCreateInfo
             {
                 SType = StructureType.FramebufferCreateInfo,
@@ -4662,10 +4810,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _stats.WriteEndTimestamp(vk, cmd.InternalHandle);
             MainPassRecordMs = _renderStopwatch.Elapsed.TotalMilliseconds;
 
-            // Underwater post-process, recorded into this SAME command buffer immediately after
-            // the main pass ends and before submission -- see RenderUnderwaterPass's own doc
-            // comment for why (copy-out + re-entry as a color attachment, both needed because
-            // Vulkan can't sample and write the same image within one render pass).
+            // Tonemap/bloom composite, recorded into this SAME command buffer immediately after
+            // the main pass ends -- this is what now actually writes the real swapchain image on
+            // Medium/High (the main pass's own output, _hdrColorView, is offscreen there -- see
+            // VkRenderPass.CreateMainScenePass's own doc comment for why). Skipped entirely on
+            // Low: the main pass just wrote the swapchain image directly already, exactly as it
+            // did before this chain existed -- see _graphicsTier's own field comment.
+            if (_graphicsTier != VkGraphicsTier.Low)
+                RenderTonemapChain(vk, cmd.InternalHandle, pixelSize, image);
+
+            // Underwater post-process, recorded right after tonemap (or, on Low, right after the
+            // main pass -- there is no tonemap stage to follow) and before submission -- runs on
+            // the swapchain image at LDR, unchanged from before the HDR-buffer/tonemap work
+            // existed (see VkRenderPass.CreateUnderwaterPass's own doc comment for why running it
+            // after tonemap, rather than also retargeting it at the HDR buffer, was the lower-risk
+            // choice on the tiers where tonemap runs at all). See RenderUnderwaterPass's own doc
+            // comment for
+            // why it needs a copy-out + re-entry rather than reading and writing the same image
+            // within one render pass.
             if (underwater && _underwaterReady)
                 RenderUnderwaterPass(vk, cmd.InternalHandle, pixelSize, image, waterHeightVal);
 
@@ -4906,6 +5068,134 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         vk.Api.CmdPushConstants(cmd, _ssaoBlurPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &texelSize);
         vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
         vk.Api.CmdEndRenderPass(cmd);
+    }
+
+    /// <summary>
+    /// The 4-stage tonemap/bloom composite chain -- see <see cref="VkTonemapPipeline"/>'s own
+    /// doc comment for the stage overview. Recorded into the SAME command buffer as the main
+    /// pass, immediately after it ends (<c>vk.Api.CmdEndRenderPass</c> for <see cref="_renderPass"/>
+    /// already ran by the time this is called) and BEFORE underwater, which now runs after this
+    /// method instead of directly after the main pass -- see <c>RenderFrame</c>'s own call site
+    /// comment for why. <paramref name="image"/> is the real swapchain interop image; every
+    /// earlier stage in this method targets the persistent, full/half-res offscreen targets
+    /// (<see cref="_hdrColorView"/>/<see cref="_bloomPingView"/>/<see cref="_bloomPongView"/>)
+    /// instead, only the FINAL (tonemap) stage writes into <paramref name="image"/>.
+    /// </summary>
+    private unsafe void RenderTonemapChain(VkContext vk, CommandBuffer cmd, PixelSize pixelSize, VkInteropImage image)
+    {
+        // Stages 1-3 (bloom) are VkGraphicsTier.High only -- see _graphicsTier's own field
+        // comment. On Medium, TonemapSet's bloom binding was already pointed at a shared black
+        // placeholder once, at init (VkPostProcessDescriptorSet.BindNoBloomPlaceholder), so stage
+        // 4 below is correct either way without needing to know which tier it's running under.
+        if (_graphicsTier == VkGraphicsTier.High)
+        {
+            // Bloom's targets are half the panel's resolution -- the viewport/scissor RenderFrame
+            // set for the main pass (full pixelSize) is still bound as dynamic state at this
+            // point in the command buffer, so it must be narrowed here and restored below before
+            // the tonemap stage, which writes at full resolution. Same "own fixed viewport,
+            // restored before returning" convention RenderShadowPass/RenderWaterReflectionPass
+            // already use for their own non-pixelSize offscreen targets.
+            var bloomViewport = new Viewport { X = 0, Y = 0, Width = _bloomSize.Width, Height = _bloomSize.Height, MinDepth = 0, MaxDepth = 1 };
+            vk.Api.CmdSetViewport(cmd, 0, 1, in bloomViewport);
+            var bloomScissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D((uint)_bloomSize.Width, (uint)_bloomSize.Height) };
+            vk.Api.CmdSetScissor(cmd, 0, 1, &bloomScissor);
+
+            // ── Stage 1: bright-pass extract, full-res HDR -> half-res Ping ──────────────
+            var extractBegin = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                RenderPass = _bloomOffscreenRenderPass,
+                Framebuffer = _bloomPingFramebuffer,
+                RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)_bloomSize.Width, (uint)_bloomSize.Height)),
+                ClearValueCount = 0
+            };
+            vk.Api.CmdBeginRenderPass(cmd, in extractBegin, SubpassContents.Inline);
+            vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _bloomExtractPipeline!.Pipeline);
+            var extractSet = _postProcessDescSet!.ExtractSet;
+            vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _bloomExtractPipeline.Layout, 0, 1, &extractSet, 0, null);
+            var srcTexelSize = new Vector2(1.0f / pixelSize.Width, 1.0f / pixelSize.Height);
+            vk.Api.CmdPushConstants(cmd, _bloomExtractPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &srcTexelSize);
+            vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+            vk.Api.CmdEndRenderPass(cmd);
+
+            // ── Stage 2: separable blur, horizontal, Ping -> Pong ─────────────────────────
+            var blurBeginH = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                RenderPass = _bloomOffscreenRenderPass,
+                Framebuffer = _bloomPongFramebuffer,
+                RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)_bloomSize.Width, (uint)_bloomSize.Height)),
+                ClearValueCount = 0
+            };
+            vk.Api.CmdBeginRenderPass(cmd, in blurBeginH, SubpassContents.Inline);
+            vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _bloomBlurPipeline!.Pipeline);
+            var blurHSet = _postProcessDescSet.BlurHSet;
+            vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _bloomBlurPipeline.Layout, 0, 1, &blurHSet, 0, null);
+            var dirH = new Vector2(1.0f / _bloomSize.Width, 0f);
+            vk.Api.CmdPushConstants(cmd, _bloomBlurPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &dirH);
+            vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+            vk.Api.CmdEndRenderPass(cmd);
+
+            // ── Stage 3: separable blur, vertical, Pong -> Ping (final blurred bloom) ─────
+            var blurBeginV = new RenderPassBeginInfo
+            {
+                SType = StructureType.RenderPassBeginInfo,
+                RenderPass = _bloomOffscreenRenderPass,
+                Framebuffer = _bloomPingFramebuffer,
+                RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)_bloomSize.Width, (uint)_bloomSize.Height)),
+                ClearValueCount = 0
+            };
+            vk.Api.CmdBeginRenderPass(cmd, in blurBeginV, SubpassContents.Inline);
+            vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _bloomBlurPipeline.Pipeline);
+            var blurVSet = _postProcessDescSet.BlurVSet;
+            vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _bloomBlurPipeline.Layout, 0, 1, &blurVSet, 0, null);
+            var dirV = new Vector2(0f, 1.0f / _bloomSize.Height);
+            vk.Api.CmdPushConstants(cmd, _bloomBlurPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &dirV);
+            vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+            vk.Api.CmdEndRenderPass(cmd);
+        }
+
+        // ── Stage 4: tonemap composite, full-res HDR + blurred bloom -> the REAL swapchain image ──
+        var tonemapViewport = new Viewport { X = 0, Y = 0, Width = pixelSize.Width, Height = pixelSize.Height, MinDepth = 0, MaxDepth = 1 };
+        vk.Api.CmdSetViewport(cmd, 0, 1, in tonemapViewport);
+        var tonemapScissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height) };
+        vk.Api.CmdSetScissor(cmd, 0, 1, &tonemapScissor);
+
+        // Fresh per-frame framebuffer (image.ViewHandle changes identity frame to frame, cycling
+        // through the interop swapchain's own small pool) -- same shape as the main pass's own
+        // per-frame framebuffer, including the same deferred-destroy requirement (see this
+        // method's own MarkPendingDestroy call below and RenderFrame's finally block's matching
+        // comment on the main pass's framebuffer for why a synchronous destroy here would be a
+        // real Vulkan validation violation, not just untidy).
+        var tonemapAttachment = new ImageView(image.ViewHandle);
+        var tonemapFbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _tonemapRenderPass,
+            AttachmentCount = 1,
+            PAttachments = &tonemapAttachment,
+            Width = (uint)pixelSize.Width,
+            Height = (uint)pixelSize.Height,
+            Layers = 1
+        };
+        vk.Api.CreateFramebuffer(vk.Device, in tonemapFbInfo, null, out var tonemapFramebuffer).ThrowOnError();
+
+        var tonemapBegin = new RenderPassBeginInfo
+        {
+            SType = StructureType.RenderPassBeginInfo,
+            RenderPass = _tonemapRenderPass,
+            Framebuffer = tonemapFramebuffer,
+            RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
+            ClearValueCount = 0
+        };
+        vk.Api.CmdBeginRenderPass(cmd, in tonemapBegin, SubpassContents.Inline);
+        vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _tonemapPipeline!.Pipeline);
+        var tonemapSet = _postProcessDescSet!.TonemapSet;
+        vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _tonemapPipeline.Layout, 0, 1, &tonemapSet, 0, null);
+        vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+        vk.Api.CmdEndRenderPass(cmd);
+
+        _reapRing.MarkPendingDestroy(() => vk.Api.DestroyFramebuffer(vk.Device, tonemapFramebuffer, null));
     }
 
     /// <summary>Draws every face in <paramref name="faces"/> through <see cref="_gnorm"/> --
@@ -5677,8 +5967,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // Forced off underwater regardless of WaterReflectionsEnabled -- no reflection pass runs
         // for an underwater frame (see doWaterReflThisFrame's own !underwater gate), so
         // sampling uReflectionTex here would show a stale reflection from the last above-water
-        // frame rather than anything real.
-        waterUbo.HasReflection = (!underwater && _waterReflReady && WaterReflectionsEnabled) ? 1 : 0;
+        // frame rather than anything real. Also forced off on VkGraphicsTier.Low, for a
+        // stronger reason than "stale": doWaterReflThisFrame's own tier gate (see
+        // _graphicsTier's own field comment) means the reflection pass NEVER runs at all on
+        // that tier, not even once -- _waterReflColorImage's own layout never leaves whatever
+        // CreateWaterReflectionTarget's initial transition left it in, so sampling it here would
+        // be a real, validation-catchable layout-mismatch read, not merely a stale one.
+        waterUbo.HasReflection = (!underwater && _waterReflReady && WaterReflectionsEnabled
+            && _graphicsTier != VkGraphicsTier.Low) ? 1 : 0;
         _waterDescSet!.UpdateWater(waterUbo);
 
         vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _waterPipeline!.Pipeline);
@@ -5933,7 +6229,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var fbInfo = new FramebufferCreateInfo
             {
                 SType = StructureType.FramebufferCreateInfo,
-                RenderPass = _renderPass,
+                RenderPass = _pickRenderPass,
                 AttachmentCount = 2,
                 PAttachments = attachments,
                 Width = (uint)pixelSize.Width,
@@ -5957,7 +6253,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var beginInfo = new RenderPassBeginInfo
             {
                 SType = StructureType.RenderPassBeginInfo,
-                RenderPass = _renderPass,
+                RenderPass = _pickRenderPass,
                 Framebuffer = framebuffer,
                 RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
                 ClearValueCount = 2,
@@ -6543,6 +6839,185 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _depthMemory = default;
     }
 
+    /// <summary>Lazily (re)creates <see cref="_hdrColorImage"/> at the panel's full pixel size --
+    /// mirrors <see cref="EnsureDepthTarget"/>'s own pattern exactly (this is the OTHER
+    /// attachment of the same main-pass framebuffer, so it needs the same per-size lifecycle).
+    /// Rewrites the tonemap chain's HDR-input bindings on (re)creation, matching
+    /// <see cref="EnsureGBufferTarget"/>'s own "rewrite descriptors only here, never per-frame"
+    /// contract.</summary>
+    private unsafe void EnsureHdrColorTarget(VkContext vk, PixelSize size)
+    {
+        if (_hdrColorSize == size && _hdrColorView.Handle != 0) return;
+        DestroyHdrColorTarget(vk);
+
+        // B10G11R11UfloatPack32, not R16G16B16A16Sfloat: 4 bytes/pixel instead of 8, halving this
+        // buffer's VRAM cost. No alpha channel, but nothing downstream needs one -- every
+        // post-process shader that samples this only ever reads .rgb (tonemap.frag/
+        // bloom_extract.frag), and the main pass's own alpha-blended geometry still blends
+        // correctly with no stored destination alpha (the blend equation only needs the
+        // fragment shader's OWN alpha output, not a stored one). Chosen deliberately, not by
+        // default -- see this field's own comment for why the VRAM budget here isn't free money.
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined
+        };
+        vk.Api.CreateImage(vk.Device, in imageInfo, null, out _hdrColorImage).ThrowOnError();
+        vk.Api.GetImageMemoryRequirements(vk.Device, _hdrColorImage, out var memReq);
+        var allocInfo = new MemoryAllocateInfo
+        {
+            SType = StructureType.MemoryAllocateInfo,
+            AllocationSize = memReq.Size,
+            MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(vk.Api, vk.PhysicalDevice, memReq.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+        };
+        vk.Api.AllocateMemory(vk.Device, in allocInfo, null, out _hdrColorMemory).ThrowOnError();
+        vk.Api.BindImageMemory(vk.Device, _hdrColorImage, _hdrColorMemory, 0).ThrowOnError();
+
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = _hdrColorImage,
+            ViewType = ImageViewType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
+        };
+        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _hdrColorView).ThrowOnError();
+
+        _hdrColorSize = size;
+
+        var hdrImageInfo = new DescriptorImageInfo
+        {
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+            ImageView = _hdrColorView,
+            Sampler = _postProcessLinearSampler
+        };
+        _postProcessDescSet!.UpdateHdrInput(hdrImageInfo);
+    }
+
+    private unsafe void DestroyHdrColorTarget(VkContext vk)
+    {
+        if (_hdrColorView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _hdrColorView, null);
+        if (_hdrColorImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _hdrColorImage, null);
+        if (_hdrColorMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _hdrColorMemory, null);
+        _hdrColorView = default;
+        _hdrColorImage = default;
+        _hdrColorMemory = default;
+        _hdrColorSize = default;
+    }
+
+    /// <summary>Lazily (re)creates the half-resolution bloom ping/pong targets. Half of
+    /// <paramref name="fullSize"/>, floored at 1x1 so a degenerate (0-sized, e.g. a not-yet-
+    /// laid-out panel) full size can't produce a zero-extent image -- mirrors
+    /// <see cref="EnsureSsaoTargets"/>'s own size-independent-of-full-res-zero-guard posture.
+    /// Rewrites the bloom-blur/tonemap chain's bindings on (re)creation, same "never per-frame"
+    /// contract as <see cref="EnsureHdrColorTarget"/>.</summary>
+    private unsafe void EnsureBloomTargets(VkContext vk, PixelSize fullSize)
+    {
+        var size = new PixelSize(Math.Max(1, fullSize.Width / 2), Math.Max(1, fullSize.Height / 2));
+        if (_bloomSize == size && _bloomPingView.Handle != 0) return;
+        DestroyBloomTargets(vk);
+
+        CreateBloomTarget(vk, size, out _bloomPingImage, out _bloomPingMemory, out _bloomPingView);
+        CreateBloomTarget(vk, size, out _bloomPongImage, out _bloomPongMemory, out _bloomPongView);
+
+        var pingViewLocal = _bloomPingView;
+        var pingFbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _bloomOffscreenRenderPass,
+            AttachmentCount = 1,
+            PAttachments = &pingViewLocal,
+            Width = (uint)size.Width,
+            Height = (uint)size.Height,
+            Layers = 1
+        };
+        vk.Api.CreateFramebuffer(vk.Device, in pingFbInfo, null, out _bloomPingFramebuffer).ThrowOnError();
+
+        var pongViewLocal = _bloomPongView;
+        var pongFbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _bloomOffscreenRenderPass,
+            AttachmentCount = 1,
+            PAttachments = &pongViewLocal,
+            Width = (uint)size.Width,
+            Height = (uint)size.Height,
+            Layers = 1
+        };
+        vk.Api.CreateFramebuffer(vk.Device, in pongFbInfo, null, out _bloomPongFramebuffer).ThrowOnError();
+
+        _bloomSize = size;
+
+        var pingInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _bloomPingView, Sampler = _postProcessLinearSampler };
+        var pongInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _bloomPongView, Sampler = _postProcessLinearSampler };
+        _postProcessDescSet!.UpdateBloomTargets(pingInfo, pongInfo);
+    }
+
+    private static unsafe void CreateBloomTarget(VkContext vk, PixelSize size, out Image image, out DeviceMemory memory, out ImageView view)
+    {
+        // Matches _hdrColorImage's own format choice -- see that image's own comment for why
+        // B10G11R11UfloatPack32 (4 bytes/pixel), not R16G16B16A16Sfloat (8 bytes/pixel).
+        var imageInfo = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined
+        };
+        vk.Api.CreateImage(vk.Device, in imageInfo, null, out image).ThrowOnError();
+        vk.Api.GetImageMemoryRequirements(vk.Device, image, out var memReq);
+        var allocInfo = new MemoryAllocateInfo
+        {
+            SType = StructureType.MemoryAllocateInfo,
+            AllocationSize = memReq.Size,
+            MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(vk.Api, vk.PhysicalDevice, memReq.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+        };
+        vk.Api.AllocateMemory(vk.Device, in allocInfo, null, out memory).ThrowOnError();
+        vk.Api.BindImageMemory(vk.Device, image, memory, 0).ThrowOnError();
+
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = image,
+            ViewType = ImageViewType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
+        };
+        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out view).ThrowOnError();
+    }
+
+    private unsafe void DestroyBloomTargets(VkContext vk)
+    {
+        if (_bloomPingFramebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _bloomPingFramebuffer, null);
+        if (_bloomPongFramebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _bloomPongFramebuffer, null);
+        if (_bloomPingView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _bloomPingView, null);
+        if (_bloomPingImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _bloomPingImage, null);
+        if (_bloomPingMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _bloomPingMemory, null);
+        if (_bloomPongView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _bloomPongView, null);
+        if (_bloomPongImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _bloomPongImage, null);
+        if (_bloomPongMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _bloomPongMemory, null);
+        _bloomPingFramebuffer = default; _bloomPongFramebuffer = default;
+        _bloomPingView = default; _bloomPingImage = default; _bloomPingMemory = default;
+        _bloomPongView = default; _bloomPongImage = default; _bloomPongMemory = default;
+        _bloomSize = default;
+    }
+
     private void FreePanelResources()
     {
         if (!VkApi.IsInitialized) return;
@@ -6630,6 +7105,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _outline?.Dispose(); _outline = null;
         _selectedOutlineLocalId = 0;
         _pick?.Dispose(); _pick = null;
+        if (_pickRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _pickRenderPass, null); } }
+        _pickRenderPass = default;
         _skySet?.Dispose(); _skySet = null;
         _cloudNoiseTex?.Dispose(); _cloudNoiseTex = null;
         _skyPipeline?.Dispose(); _skyPipeline = null;
@@ -6713,6 +7190,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _particleMap.Clear();
         _particleBuf?.Dispose(); _particleBuf = null;
         _particlePipeline?.Dispose(); _particlePipeline = null;
+        // Tonemap/bloom chain -- targets first (they reference the pipeline objects' render
+        // passes), then the descriptor set/pipeline objects, then the render passes, then the
+        // dedicated sampler -- same unwind-order convention SSAO's own teardown above uses.
+        unsafe
+        {
+            DestroyHdrColorTarget(vk);
+            DestroyBloomTargets(vk);
+        }
+        _postProcessDescSet?.Dispose(); _postProcessDescSet = null;
+        _tonemapPipeline?.Dispose(); _tonemapPipeline = null;
+        _bloomBlurPipeline?.Dispose(); _bloomBlurPipeline = null;
+        _bloomExtractPipeline?.Dispose(); _bloomExtractPipeline = null;
+        if (_tonemapRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _tonemapRenderPass, null); } }
+        _tonemapRenderPass = default;
+        if (_bloomOffscreenRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _bloomOffscreenRenderPass, null); } }
+        _bloomOffscreenRenderPass = default;
+        if (_postProcessLinearSampler.Handle != 0) { unsafe { vk.Api.DestroySampler(vk.Device, _postProcessLinearSampler, null); } }
+        _postProcessLinearSampler = default;
         _prim?.Dispose(); _prim = null;
         _swapchain?.DisposeAsync(); _swapchain = null;
         if (_renderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _renderPass, null); } }

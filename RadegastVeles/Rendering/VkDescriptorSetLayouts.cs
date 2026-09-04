@@ -226,6 +226,40 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
+    /// <summary>Set 0 of the tonemap composite pass (tonemap.frag): binding 0 = the full-res HDR
+    /// scene colour, binding 1 = the blurred bloom target. Two bindings, unlike
+    /// <see cref="CreateBlurSamplerLayout"/>'s one -- this is the only post-process pass that
+    /// needs to sample two different images at once (every other stage in that chain is a single-
+    /// input full-screen pass, see VkBloomExtractPipeline/VkBloomBlurPipeline).</summary>
+    public static unsafe DescriptorSetLayout CreateTonemapSamplerLayout(VkContext vk)
+    {
+        var bindings = stackalloc DescriptorSetLayoutBinding[2]
+        {
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 0,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            },
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 1,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            }
+        };
+        var createInfo = new DescriptorSetLayoutCreateInfo
+        {
+            SType = StructureType.DescriptorSetLayoutCreateInfo,
+            BindingCount = 2,
+            PBindings = bindings
+        };
+        vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();
+        return layout;
+    }
+
     /// <summary>Set 1 of the water pipeline -- NOT
     /// shared with the prim pipeline family's own set 1: the water pipeline's set 0 reuses
     /// <see cref="VkPrimPipeline.PerFrameLayout"/> directly (same pattern as the sky pipeline's
