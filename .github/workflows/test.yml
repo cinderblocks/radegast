@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build (${{ matrix.platform }})
+    name: Build (${{ matrix.configuration }}, ${{ matrix.platform }})
     runs-on: windows-2022
     strategy:
       matrix:
