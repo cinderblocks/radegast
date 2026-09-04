@@ -188,7 +188,20 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // arrays whose .GpuData fields were set.
     private readonly Dictionary<ulong, List<VkAvatarSkinGpuData>> _sceneSkinGpuDataMap = new();
     private readonly Dictionary<ulong, List<VkFlexiGpuData>> _sceneFlexiGpuDataMap = new();
-    private bool _alphaSceneReclassNeeded;
+    // Renamed from _alphaSceneReclassNeeded: originally set only for the alpha-auto
+    // reclassification case, now also set whenever TryApplyScenePatch's material copy-on-write
+    // detaches a face into a different VkMaterialDescriptorSet instance. Both cases share the same
+    // underlying need -- _sceneOpaque/_sceneAlpha are snapshot COPIES of _sceneObjects' tuples
+    // (RebuildSceneFlatLists copies entry by value), not live views, so a change to which face
+    // belongs in which list, or which material INSTANCE a face's tuple now points to, needs a
+    // fresh rebuild to reach them. Before the material pool existed, ordinary texture-patch
+    // mutations never needed this: they always mutated the SAME instance in place, so a stale flat
+    // -list copy of the tuple still transparently saw the update. A material detach breaks that --
+    // the flat lists would otherwise keep referencing the pre-detach instance until its deferred
+    // free (via _reapRing, a few frames later) actually runs, a real use-after-free window. Both
+    // triggers are checked/reset in the same place (DrainScenePendingTexturePatches' tail, once
+    // per frame), which runs well before that deferred free.
+    private bool _sceneFlatListsRebuildNeeded;
 
     private const int MaxLocalLightsLit = 4;
     private const float LocalLightRange = 32f; // metres
@@ -2151,8 +2164,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _submissionFlexiGpu.Clear();
         _reapRing.MarkPendingDestroy(() =>
         {
-            foreach (var (mesh, material, _) in oldOpaque) { mesh.Dispose(); material.Dispose(); }
-            foreach (var (mesh, material, _) in oldAlpha) { mesh.Dispose(); material.Dispose(); }
+            foreach (var (mesh, material, _) in oldOpaque) { mesh.Dispose(); DisposeMaterial(material); }
+            foreach (var (mesh, material, _) in oldAlpha) { mesh.Dispose(); DisposeMaterial(material); }
             foreach (var tex in oldTextures) tex.Dispose();
             foreach (var gd in oldSkinGpu) gd.Dispose();
             foreach (var gd in oldFlexiGpu) gd.Dispose();
@@ -2242,7 +2255,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var metallicRoughness = InheritIfNeeded(TryUpload(face.MetallicRoughnessTexture), 3);
             var emissive = InheritIfNeeded(TryUpload(face.EmissiveTexture), 4);
 
-            var material = new VkMaterialDescriptorSet(vk, _prim!,
+            var material = RentOrCreateMaterial(vk,
                 albedo?.DescriptorImageInfo ?? _placeholders!.White,
                 normal?.DescriptorImageInfo ?? _placeholders!.FlatNormal,
                 specular?.DescriptorImageInfo ?? _placeholders!.White,
@@ -2714,6 +2727,119 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // live pooled meshes again. Cleared wholesale in FreeSceneObjectResources.
     private readonly Dictionary<ulong, VkMesh> _sharedMeshPool = new();
 
+    // Cross-object material pool, same shape and same motivation as _sharedMeshPool just above:
+    // faces with byte-identical material content (all 5 texture bindings + the full UBO -- see
+    // MaterialHash) share one VkMaterialDescriptorSet instead of each claiming its own descriptor
+    // set + VkMaterialUboPool slot, directly relieving the pool-exhaustion ceiling documented in
+    // VkMaterialUboPool.cs's own header comment ("most faces in a real build share texture sets").
+    //
+    // UNLIKE meshes, material content is NOT immutable after creation: texture patches
+    // (DrainSubmissionTexturePatches/DrainScenePendingTexturePatches, an async decode landing) and
+    // material-UBO updates (UV-scroll, runtime property changes) both rewrite an existing
+    // instance's bindings in place, and every real-textured face goes through at least one such
+    // patch (built with placeholders first, patched once its texture decodes). A naive port of
+    // _sharedMeshPool's pattern would be actively wrong here: hashing at creation time would fire
+    // constantly (every placeholder-backed material looks identical), and mutating a shared
+    // instance in place would silently repaint every OTHER face still sharing it.
+    //
+    // RentOrCreateMaterial/DetachOrAdoptForMutation below implement copy-on-write instead: sharing
+    // is attempted both at creation and after every mutation (so genuine convergence is still
+    // caught), but a shared instance (RefCount > 1) is NEVER mutated in place -- the mutating
+    // caller detaches into a fresh private instance first (or adopts an existing match for the
+    // POST-mutation content, if one already exists), and only ever mutates a private
+    // (RefCount == 1) instance directly. See VkMaterialDescriptorSet's own header comment for the
+    // contract this pool depends on. Stale-entry eviction on last-ref-released mirrors
+    // _sharedMeshPool's fix (DisposeMaterial below) for the same reason: without it, Count would
+    // accumulate dead entries for every material that never recurs. Cleared wholesale in
+    // FreeSceneObjectResources.
+    private readonly Dictionary<ulong, VkMaterialDescriptorSet> _sharedMaterialPool = new();
+
+    /// <summary>FNV-1a over a material's 5 texture bindings + full UBO content -- companion to
+    /// <see cref="VertexHash"/>, same algorithm, used by <see cref="_sharedMaterialPool"/>.</summary>
+    private static ulong MaterialHash(ReadOnlySpan<DescriptorImageInfo> images, in VkMaterialUbo ubo)
+    {
+        ulong hash = 0xCBF29CE484222325UL;
+        hash = HashBytes(hash, System.Runtime.InteropServices.MemoryMarshal.AsBytes(images));
+        hash = HashBytes(hash, System.Runtime.InteropServices.MemoryMarshal.AsBytes(
+            System.Runtime.InteropServices.MemoryMarshal.CreateReadOnlySpan(in ubo, 1)));
+        return hash;
+    }
+
+    /// <summary>Creation-time half of the material pool's copy-on-write contract (see
+    /// <see cref="_sharedMaterialPool"/>'s own field comment): returns an AddRef'd existing
+    /// instance if one with byte-identical content is already live, otherwise constructs and
+    /// registers a new one. Safe to call unconditionally -- a face whose content never matches
+    /// anything else just gets its own private (RefCount == 1) instance, identical to pre-dedup
+    /// behavior.</summary>
+    private VkMaterialDescriptorSet RentOrCreateMaterial(VkContext vk,
+        DescriptorImageInfo albedo, DescriptorImageInfo normal, DescriptorImageInfo specular,
+        DescriptorImageInfo metallicRoughness, DescriptorImageInfo emissive, in VkMaterialUbo ubo)
+    {
+        Span<DescriptorImageInfo> images = stackalloc DescriptorImageInfo[5]
+            { albedo, normal, specular, metallicRoughness, emissive };
+        ulong h = MaterialHash(images, in ubo);
+        if (_sharedMaterialPool.TryGetValue(h, out var shared) && !shared.IsDisposed)
+        {
+            shared.AddRef();
+            return shared;
+        }
+        var mat = new VkMaterialDescriptorSet(vk, _prim!, albedo, normal, specular, metallicRoughness, emissive, in ubo);
+        _sharedMaterialPool[h] = mat;
+        return mat;
+    }
+
+    /// <summary>Mutation-time half of the material pool's copy-on-write contract: call this
+    /// BEFORE applying any change (a texture patch, a UBO update) to a face's material, passing
+    /// the FULL post-change content (all 5 bindings + UBO, not just what's changing). If
+    /// <paramref name="current"/> is still private (RefCount == 1), returns it unchanged -- caller
+    /// mutates it directly via Update/UpdateTexture as before, no different from pre-dedup
+    /// behavior. If it's shared (RefCount &gt; 1), the shared instance must not be touched in
+    /// place, so this returns a DIFFERENT instance (an AddRef'd existing match for the new content,
+    /// or a freshly constructed private one already holding it) that already reflects the
+    /// requested change -- the caller must NOT call Update/UpdateTexture again in that case.
+    ///
+    /// Deliberately does NOT dispose <paramref name="current"/> itself, even when it returns a
+    /// different instance: releasing this face's reference to a shared material can, in the rare
+    /// case this face happened to be its last other owner too, actually free that instance's
+    /// descriptor set -- exactly the same in-flight-command-buffer hazard the caller already
+    /// defers <c>oldTex.Dispose()</c> for (see <see cref="ApplySubmissionPatchIfReady"/>'s own
+    /// comment). The caller is responsible for deferring <see cref="DisposeMaterial"/> on
+    /// <paramref name="current"/>, in the same <c>_reapRing.MarkPendingDestroy</c> closure,
+    /// whenever the returned instance differs from it.</summary>
+    private VkMaterialDescriptorSet DetachOrAdoptForMutation(VkContext vk, VkMaterialDescriptorSet current,
+        DescriptorImageInfo albedo, DescriptorImageInfo normal, DescriptorImageInfo specular,
+        DescriptorImageInfo metallicRoughness, DescriptorImageInfo emissive, in VkMaterialUbo ubo)
+    {
+        if (current.RefCount <= 1) return current;
+
+        Span<DescriptorImageInfo> images = stackalloc DescriptorImageInfo[5]
+            { albedo, normal, specular, metallicRoughness, emissive };
+        ulong h = MaterialHash(images, in ubo);
+        if (_sharedMaterialPool.TryGetValue(h, out var existing) && !existing.IsDisposed && !ReferenceEquals(existing, current))
+        {
+            existing.AddRef();
+            return existing;
+        }
+        var result = new VkMaterialDescriptorSet(vk, _prim!, albedo, normal, specular, metallicRoughness, emissive, in ubo);
+        _sharedMaterialPool[h] = result;
+        return result;
+    }
+
+    /// <summary>Disposes a material reference and, if that was the shared pool's own last live
+    /// reference to it (mirrors <see cref="RemoveSceneObjectGpuNoRebuild"/>'s equivalent mesh-pool
+    /// eviction), removes its now-stale entry from <see cref="_sharedMaterialPool"/> too -- without
+    /// this, a material that never recurs would sit in the dictionary forever (same bug fixed for
+    /// _sharedMeshPool). Use this everywhere a face's material is torn down instead of calling
+    /// material.Dispose() directly.</summary>
+    private void DisposeMaterial(VkMaterialDescriptorSet material)
+    {
+        material.Dispose();
+        if (!material.IsDisposed) return;
+        ulong h = MaterialHash(material.Images, in material.Ubo);
+        if (_sharedMaterialPool.TryGetValue(h, out var pooled) && ReferenceEquals(pooled, material))
+            _sharedMaterialPool.Remove(h);
+    }
+
     /// <summary>Returns true if this object actually landed in <see cref="_sceneObjects"/> (a
     /// real change the caller must fold into <see cref="RebuildSceneFlatLists"/>), false if the
     /// submission was parked for a later retry (cooldown) or dropped (genuine failure -- see
@@ -2915,7 +3041,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 var metallicRoughness = TryUpload(face.MetallicRoughnessTexture);
                 var emissive = TryUpload(face.EmissiveTexture);
 
-                var material = new VkMaterialDescriptorSet(vk, _prim!,
+                var material = RentOrCreateMaterial(vk,
                     albedo?.DescriptorImageInfo ?? _placeholders!.White,
                     normal?.DescriptorImageInfo ?? _placeholders!.FlatNormal,
                     specular?.DescriptorImageInfo ?? _placeholders!.White,
@@ -3042,7 +3168,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // balances those refs, so a shared mesh another live object still references is
             // safely decremented rather than freed, while a mesh this failed object solely
             // created still gets torn down. No unreachable leftovers either way.
-            foreach (var (mesh, material, _) in faces) { mesh.Dispose(); material.Dispose(); }
+            foreach (var (mesh, material, _) in faces) { mesh.Dispose(); DisposeMaterial(material); }
             foreach (var tex in objectTextures) tex.Dispose();
             // SceneFaceCount/_sceneObjects.Count logged alongside every drop so a pool-exhaustion
             // report carries the actual live counts, not just "it happened" --
@@ -3146,7 +3272,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             foreach (var (mesh, material, face) in faces)
             {
                 mesh.Dispose();
-                material.Dispose();
+                DisposeMaterial(material); // evicts _sharedMaterialPool's entry too if this was the last reference
                 // _sharedMeshPool's own field comment documents that a stale (fully-released)
                 // entry is normally left in place rather than proactively removed -- fine for an
                 // occasional one-off, but a long session that keeps building genuinely unique
@@ -3762,6 +3888,28 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         slots[slotIndex] = newTex;
         _textures.Add(newTex);
 
+        var newUbo = BuildMaterialUbo(face,
+            slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null);
+
+        // Copy-on-write: material.RefCount > 1 means this material is shared with other faces
+        // and must not be mutated in place (see VkMaterialDescriptorSet's own header comment).
+        // Build the full post-patch binding set from the material's OWN current content (already
+        // reflects whatever's bound in every other slot, placeholder or real) with just
+        // slotIndex swapped to the new texture, so DetachOrAdoptForMutation can hash/compare the
+        // exact resulting content.
+        var oldMaterial = material;
+        Span<DescriptorImageInfo> newImages = stackalloc DescriptorImageInfo[5];
+        oldMaterial.Images.CopyTo(newImages);
+        newImages[slotIndex] = newTex.DescriptorImageInfo;
+        material = DetachOrAdoptForMutation(vk, oldMaterial,
+            newImages[0], newImages[1], newImages[2], newImages[3], newImages[4], in newUbo);
+        bool detached = !ReferenceEquals(material, oldMaterial);
+        // Keep the live draw list pointing at whichever instance now owns this face's material --
+        // done unconditionally (a no-op write when not detached) so the alpha-auto reclassification
+        // block below can freely move the tuple between lists without needing its own branch on this.
+        if (foundInOpaque) _opaqueFaces[foundIndex] = (mesh, material, face);
+        else _alphaFaces[foundIndex] = (mesh, material, face);
+
         // Deferred, not called directly here: vkUpdateDescriptorSets on a set a still-in-flight
         // command buffer references is itself a spec violation (independent of whether the old
         // image behind it gets freed), and destroying oldTex before that rewrite has actually
@@ -3769,20 +3917,27 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // is still sampling through the current binding. Bundled into one action -- see
         // VkFrameReapRing.MarkPendingDestroy's own doc comment -- so the rewrite and the old
         // texture's disposal share the same "no longer possibly in use" guarantee and can never
-        // run out of order relative to each other.
+        // run out of order relative to each other. The detached case has the exact same hazard
+        // for a different reason: releasing oldMaterial's reference could free ITS descriptor set
+        // (if this face happened to be its last other owner too), which an in-flight command
+        // buffer may still be reading via the OLD binding -- see DetachOrAdoptForMutation's own
+        // comment on why it doesn't dispose oldMaterial itself.
         var materialForPatch = material;
         var newTexForPatch = newTex;
         _reapRing.MarkPendingDestroy(() =>
         {
-            materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
+            if (detached) DisposeMaterial(oldMaterial);
+            else materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
             if (oldTex != null)
             {
                 if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
                 else oldTex.Dispose();
             }
         });
-        material.Update(BuildMaterialUbo(face,
-            slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null));
+        // Detached/adopted instances already hold the new UBO content (built fresh above) -- only
+        // the still-private fast path needs this direct, immediate write (no descriptor-set
+        // rewrite is involved in a UBO write, so no in-flight hazard, unchanged from before).
+        if (!detached) material.Update(newUbo);
 
         // SL's "Alpha Mode: Auto" material setting means alpha genuinely can't be known until the
         // real texture is decoded, which happens asynchronously via exactly this patch path
@@ -3907,9 +4062,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             || !_highPriorityScenePatches.IsEmpty || _deferredHighPriorityScenePatches.Count > 0)
             RequestRender();
 
-        if (_alphaSceneReclassNeeded)
+        if (_sceneFlatListsRebuildNeeded)
         {
-            _alphaSceneReclassNeeded = false;
+            _sceneFlatListsRebuildNeeded = false;
             RebuildSceneFlatLists();
         }
     }
@@ -3959,16 +4114,19 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
         VkMaterialDescriptorSet? material = null;
         PrimRenderFace? face = null;
-        foreach (var entry in faceTuples)
+        VkMesh? mesh = null;
+        int entryIndex = -1;
+        for (int i = 0; i < faceTuples.Count; i++)
         {
+            var entry = faceTuples[i];
             if (entry.Face.PrimLocalId == patch.RootLocalId && entry.Face.FaceIndex == patch.FaceIndex)
-            { material = entry.Material; face = entry.Face; break; }
+            { material = entry.Material; face = entry.Face; mesh = entry.Mesh; entryIndex = i; break; }
         }
         // _sceneFaceTextureSlots and _sceneObjects are populated together in
         // UploadSceneObjectNoRebuild, so finding a slots entry but no matching face tuple would
         // mean the two tables desynced -- fail closed (defer, like a not-yet-ready face) rather
         // than dereference a null material below.
-        if (material == null || face == null) return false;
+        if (material == null || face == null || mesh == null) return false;
 
         VkTexture newTex;
         try
@@ -3987,23 +4145,49 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _sceneObjectTextures.TryGetValue(lookupKey, out var objectTextureList);
         objectTextureList?.Add(newTex);
 
+        var newUbo = BuildMaterialUbo(face,
+            slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null);
+
+        // Copy-on-write: see ApplySubmissionPatchIfReady's identical bundle (this file, above)
+        // for the full rationale -- a shared material (RefCount > 1) must never be mutated in
+        // place, so build the full post-patch binding set from its own current content and let
+        // DetachOrAdoptForMutation decide whether to mutate in place, adopt an existing match, or
+        // construct a fresh private instance.
+        var oldMaterial = material;
+        Span<DescriptorImageInfo> newImages = stackalloc DescriptorImageInfo[5];
+        oldMaterial.Images.CopyTo(newImages);
+        newImages[slotIndex] = newTex.DescriptorImageInfo;
+        material = DetachOrAdoptForMutation(vk, oldMaterial,
+            newImages[0], newImages[1], newImages[2], newImages[3], newImages[4], in newUbo);
+        bool detached = !ReferenceEquals(material, oldMaterial);
+        faceTuples[entryIndex] = (mesh, material, face);
+        // _sceneOpaque/_sceneAlpha (the actual draw lists) hold a separate snapshot copy of this
+        // same tuple -- see _sceneFlatListsRebuildNeeded's own field comment for why a detach,
+        // unlike an ordinary in-place mutation, needs those refreshed before oldMaterial's
+        // deferred free below actually runs.
+        if (detached) _sceneFlatListsRebuildNeeded = true;
+
         // Deferred, not called directly here -- same hazard and same fix as
         // ApplySubmissionPatchIfReady's identical bundle (this file, above): rewriting this
         // descriptor binding and destroying the texture it used to point to both need the SAME
-        // "no still-in-flight command buffer might still read the old binding" guarantee.
+        // "no still-in-flight command buffer might still read the old binding" guarantee -- and so
+        // does releasing oldMaterial's reference on the detached path (see
+        // DetachOrAdoptForMutation's own comment on why it doesn't dispose oldMaterial itself).
         var materialForPatch = material;
         var newTexForPatch = newTex;
         _reapRing.MarkPendingDestroy(() =>
         {
-            materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
+            if (detached) DisposeMaterial(oldMaterial);
+            else materialForPatch.UpdateTexture((uint)slotIndex, newTexForPatch.DescriptorImageInfo);
             if (oldTex != null)
             {
                 if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
                 else oldTex.Dispose();
             }
         });
-        material.Update(BuildMaterialUbo(face,
-            slots[0] != null, slots[1] != null, slots[2] != null, slots[3] != null, slots[4] != null));
+        // Detached/adopted instances already hold the new UBO content -- only the still-private
+        // fast path needs this direct, immediate write (no in-flight hazard for a plain UBO write).
+        if (!detached) material.Update(newUbo);
 
         // Mirrors GL's AlphaAuto reclassification exactly --
         // unlike the single-submission path (which has no rebuild hook and documents this as a
@@ -4014,7 +4198,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             face.AlphaMode = FaceAlphaMode.Blend;
             face.HasAlpha = true;
-            _alphaSceneReclassNeeded = true;
+            _sceneFlatListsRebuildNeeded = true;
         }
 
         // CPU-side bookkeeping only -- the actual native Dispose() is bundled into the
@@ -7064,6 +7248,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _reapRing.FreeAll();
         DestroyDepthTarget(vk);
         DestroyPickTarget(vk);
+        // Raw Dispose (not DisposeMaterial) for both loops below: this whole method wholesale-
+        // clears _sharedMaterialPool further down once every material reference (single-submission
+        // AND scene) has been released, so per-entry eviction here would be wasted work.
         foreach (var (mesh, material, _) in _opaqueFaces) { mesh.Dispose(); material.Dispose(); }
         foreach (var (mesh, material, _) in _alphaFaces) { mesh.Dispose(); material.Dispose(); }
         _opaqueFaces.Clear();
@@ -7104,6 +7291,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             foreach (var (mesh, material, _) in faces) { mesh.Dispose(); material.Dispose(); }
         _sceneObjects.Clear();
         _sharedMeshPool.Clear(); // every ref released above; see FreeSceneObjectResources's own comment
+        _sharedMaterialPool.Clear(); // every ref released above too -- same wholesale-teardown shortcut, no need for DisposeMaterial's per-entry eviction here
         _sceneOpaque.Clear();
         _sceneAlpha.Clear();
         _mergedAlpha.Clear();

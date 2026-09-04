@@ -36,6 +36,38 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
     private readonly VkContext _vk;
     private readonly int _uboSlot;
     private bool _disposed;
+    // Lets the shared material pool (VkViewportControl._sharedMaterialPool) detect a stale
+    // dictionary entry (its last reference already released via some other face's removal) and
+    // treat it as a miss instead of AddRef-ing an already-freed instance -- same contract as
+    // VkMesh.IsDisposed.
+    internal bool IsDisposed => _disposed;
+
+    // Current binding contents, mirrored here so a caller (VkViewportControl's material dedup
+    // pool) can read back "what does this set currently look like" without a GPU round trip --
+    // needed both to hash a just-created set for pool registration and, on the copy-on-write path
+    // below, to seed a detached private clone's initial content before applying whatever change
+    // triggered the detach. Kept in sync by the constructor and by every Update/UpdateTexture call.
+    private readonly DescriptorImageInfo[] _images = new DescriptorImageInfo[5];
+    private VkMaterialUbo _ubo;
+    internal ReadOnlySpan<DescriptorImageInfo> Images => _images;
+    internal ref readonly VkMaterialUbo Ubo => ref _ubo;
+
+    // Supports VkViewportControl's cross-object scene material pool (_sharedMaterialPool) --
+    // faces with byte-identical material content (all 5 texture bindings + the full UBO) share
+    // one instance instead of each claiming its own descriptor set + VkMaterialUboPool slot.
+    // Ref-counted exactly like VkMesh._refCount/AddRef (see that field's own comment) for the
+    // same reason: a set shared by faces in two different scene objects must not be freed when
+    // only one of them is removed. UNLIKE VkMesh's pooled buffers, this content is NOT immutable
+    // -- texture patches and UV-scroll/material-property updates arrive asynchronously per face
+    // (see Update/UpdateTexture below) -- so a shared instance must never be mutated in place
+    // while _refCount > 1; the caller is responsible for detaching (copy-on-write: build a fresh
+    // private VkMaterialDescriptorSet with the new content, release this one) before calling
+    // Update/UpdateTexture on anything still shared. This class has no way to enforce that itself
+    // (it doesn't know whether a mutation call is "safe" without the caller's context), so
+    // RefCount is exposed for the caller to check first.
+    private int _refCount = 1;
+    internal int RefCount => _refCount;
+    internal void AddRef() => _refCount++;
 
     /// <summary>
     /// Allocates the descriptor set and writes all 6 bindings in one call: 5 samplers
@@ -48,6 +80,10 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
         DescriptorImageInfo metallicRoughness, DescriptorImageInfo emissive, in VkMaterialUbo data)
     {
         _vk = vk;
+
+        _images[0] = albedo; _images[1] = normal; _images[2] = specular;
+        _images[3] = metallicRoughness; _images[4] = emissive;
+        _ubo = data;
 
         _uboSlot = vk.MaterialUboPool.Rent(data);
 
@@ -119,9 +155,12 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
 
     /// <summary>Overwrites this material's UBO contents in place (e.g. a UV-scroll animation
     /// or a runtime material-property change) -- no descriptor rewrite needed, same pattern as
-    /// <see cref="VkPrimDescriptorSets.UpdatePerFrame"/>.</summary>
+    /// <see cref="VkPrimDescriptorSets.UpdatePerFrame"/>. Caller must not call this while
+    /// <see cref="RefCount"/> is above 1 -- see this class's own header comment on the
+    /// copy-on-write contract shared instances require.</summary>
     public void Update(in VkMaterialUbo data)
     {
+        _ubo = data;
         _vk.MaterialUboPool.Write(_uboSlot, in data);
     }
 
@@ -131,9 +170,12 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
     /// the whole descriptor set. Caller is responsible for keeping <see cref="Update"/>'s
     /// <c>HasX</c> flags in sync if this changes whether a slot is populated at all -- this call
     /// only rewrites the image binding itself. Only safe when no in-flight command buffer is
-    /// still reading this set (see the call site's own frame-in-flight/fence-wait note).</summary>
+    /// still reading this set (see the call site's own frame-in-flight/fence-wait note). Caller
+    /// must not call this while <see cref="RefCount"/> is above 1 -- see this class's own header
+    /// comment on the copy-on-write contract shared instances require.</summary>
     public void UpdateTexture(uint binding, DescriptorImageInfo imageInfo)
     {
+        _images[(int)binding] = imageInfo;
         var write = new WriteDescriptorSet
         {
             SType = StructureType.WriteDescriptorSet,
@@ -146,9 +188,15 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
         _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
+    /// <summary>Ref-counted like <see cref="VkMesh"/>'s own Dispose (see that class's _refCount
+    /// field comment) -- decrements-only while another owner still shares this instance, and only
+    /// actually frees the descriptor set + UBO slot once this was the last reference. Safe to
+    /// call unconditionally: a never-shared instance behaves exactly as before (one Dispose call,
+    /// immediate free), since RefCount never leaves 1 until AddRef is called.</summary>
     public void Dispose()
     {
         if (_disposed) return;
+        if (--_refCount > 0) return;
         _disposed = true;
         var set = Set;
         _vk.Api.FreeDescriptorSets(_vk.Device, _vk.DescriptorPool, 1, &set);
