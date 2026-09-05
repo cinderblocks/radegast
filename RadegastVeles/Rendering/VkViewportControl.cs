@@ -2166,7 +2166,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             foreach (var (mesh, material, _) in oldOpaque) { mesh.Dispose(); DisposeMaterial(material); }
             foreach (var (mesh, material, _) in oldAlpha) { mesh.Dispose(); DisposeMaterial(material); }
-            foreach (var tex in oldTextures) tex.Dispose();
+            foreach (var tex in oldTextures) DisposeTexture(tex);
             foreach (var gd in oldSkinGpu) gd.Dispose();
             foreach (var gd in oldFlexiGpu) gd.Dispose();
         });
@@ -2283,7 +2283,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var unclaimedInherited = new List<VkTexture>();
         foreach (var tex in inheritedSet) { if (!claimedInherited.Contains(tex)) unclaimedInherited.Add(tex); }
         if (unclaimedInherited.Count > 0)
-            _reapRing.MarkPendingDestroy(() => { foreach (var tex in unclaimedInherited) tex.Dispose(); });
+            _reapRing.MarkPendingDestroy(() => { foreach (var tex in unclaimedInherited) DisposeTexture(tex); });
 
         // Register avatar skin GPU resources for compute LBS. Runs after the face loop above
         // (not interleaved into it) since a skinned face's FaceIndex can reference any position
@@ -2840,6 +2840,71 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _sharedMaterialPool.Remove(h);
     }
 
+    // Cross-object texture pool, keyed by asset UUID rather than a content hash -- unlike meshes
+    // and materials, a texture patch already carries its source asset's real identity
+    // (SceneTexturePatch.TextureId, populated end-to-end from PrimMeshBuilder's own texture
+    // registration for ordinary prim/object faces -- see that field's own doc comment for which
+    // patches leave it zero: avatar bakes and previews, neither of which benefit from cross-
+    // object sharing anyway since a bake's UUID is unique to that avatar's current appearance).
+    // Real SL regions reuse a small set of common textures across many unrelated objects (wood,
+    // metal, stucco, skybox tiles); without this, every one of those objects decodes and uploads
+    // its own independent copy of the identical pixel data.
+    //
+    // Deliberately scoped to the PATCH path only (RentOrBuildTextureForPatch below), not
+    // ApplyPendingSubmission/UploadSceneObjectNoRebuild's initial TryUpload -- PrimRenderFace
+    // carries no UUID for its initial Texture/NormalMapTexture/etc. bitmaps, only
+    // SceneTexturePatch does, and per that same investigation nearly every real-textured face is
+    // built with a placeholder first and patched once its texture decodes (confirmed: the
+    // material pool's own dedup story above), so the patch path already captures the
+    // overwhelming majority of real content.
+    //
+    // No copy-on-write needed here -- see VkTexture.SharedPoolKey's own field comment for why a
+    // texture's content is immutable once built, unlike a material's. Stale-entry eviction
+    // (DisposeTexture below) mirrors _sharedMeshPool/_sharedMaterialPool for the same reason:
+    // without it, a texture that never recurs would sit in the dictionary forever. Cleared
+    // wholesale in FreePanelResources.
+    private readonly Dictionary<LibreMetaverse.UUID, VkTexture> _sharedTexturePool = new();
+
+    /// <summary>Creation-time dedup for a texture patch: returns an AddRef'd existing instance if
+    /// <paramref name="patch"/>'s asset UUID is already live in <see cref="_sharedTexturePool"/>,
+    /// otherwise builds one via <see cref="BuildTextureForPatch"/> and registers it (when the UUID
+    /// is known -- see <see cref="_sharedTexturePool"/>'s own field comment on which patches leave
+    /// it zero). On a pool hit, <paramref name="patch"/>'s bitmap is disposed here directly since
+    /// no <see cref="VkTexture"/> construction runs to consume it on that path.</summary>
+    private VkTexture RentOrBuildTextureForPatch(VkContext vk, SceneTexturePatch patch, VkStagedUploadBatch? batch)
+    {
+        if (patch.TextureId != LibreMetaverse.UUID.Zero
+            && _sharedTexturePool.TryGetValue(patch.TextureId, out var shared) && !shared.IsDisposed)
+        {
+            shared.AddRef();
+            patch.Bitmap!.Dispose();
+            return shared;
+        }
+        var tex = BuildTextureForPatch(vk, patch, batch);
+        if (patch.TextureId != LibreMetaverse.UUID.Zero)
+        {
+            tex.SharedPoolKey = patch.TextureId;
+            _sharedTexturePool[patch.TextureId] = tex;
+        }
+        return tex;
+    }
+
+    /// <summary>Disposes a texture reference and, if that was the shared pool's own last live
+    /// reference to it (via <see cref="VkTexture.SharedPoolKey"/>), removes its now-stale entry
+    /// from <see cref="_sharedTexturePool"/> too -- same eviction shape as
+    /// <see cref="DisposeMaterial"/>. A no-op eviction (nothing to remove) for any texture that
+    /// was never pooled (SharedPoolKey null). Use this everywhere a face's texture is torn down
+    /// instead of calling tex.Dispose() directly, EXCEPT a full wholesale teardown that already
+    /// clears _sharedTexturePool itself right after (per-entry eviction there is wasted work --
+    /// see FreePanelResources).</summary>
+    private void DisposeTexture(VkTexture tex)
+    {
+        tex.Dispose();
+        if (!tex.IsDisposed || tex.SharedPoolKey is not { } key) return;
+        if (_sharedTexturePool.TryGetValue(key, out var pooled) && ReferenceEquals(pooled, tex))
+            _sharedTexturePool.Remove(key);
+    }
+
     /// <summary>Returns true if this object actually landed in <see cref="_sceneObjects"/> (a
     /// real change the caller must fold into <see cref="RebuildSceneFlatLists"/>), false if the
     /// submission was parked for a later retry (cooldown) or dropped (genuine failure -- see
@@ -3169,7 +3234,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // safely decremented rather than freed, while a mesh this failed object solely
             // created still gets torn down. No unreachable leftovers either way.
             foreach (var (mesh, material, _) in faces) { mesh.Dispose(); DisposeMaterial(material); }
-            foreach (var tex in objectTextures) tex.Dispose();
+            foreach (var tex in objectTextures) DisposeTexture(tex);
             // SceneFaceCount/_sceneObjects.Count logged alongside every drop so a pool-exhaustion
             // report carries the actual live counts, not just "it happened" --
             // see VkContext's own DescriptorPool sizing comment for what ceiling each number
@@ -3293,7 +3358,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                         _sharedMeshPool.Remove(h);
                 }
             }
-            if (textures != null) foreach (var tex in textures) tex.Dispose();
+            if (textures != null) foreach (var tex in textures) DisposeTexture(tex);
             if (skinGpuList != null) foreach (var gpu in skinGpuList) gpu.Dispose();
             if (flexiGpuList != null) foreach (var gpu in flexiGpuList) gpu.Dispose();
         });
@@ -3871,7 +3936,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         VkTexture newTex;
         try
         {
-            newTex = BuildTextureForPatch(vk, patch, batch);
+            newTex = RentOrBuildTextureForPatch(vk, patch, batch);
         }
         catch
         {
@@ -3931,7 +3996,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (oldTex != null)
             {
                 if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
-                else oldTex.Dispose();
+                else DisposeTexture(oldTex);
             }
         });
         // Detached/adopted instances already hold the new UBO content (built fresh above) -- only
@@ -4131,7 +4196,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         VkTexture newTex;
         try
         {
-            newTex = BuildTextureForPatch(vk, patch, batch);
+            newTex = RentOrBuildTextureForPatch(vk, patch, batch);
         }
         catch
         {
@@ -4182,7 +4247,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (oldTex != null)
             {
                 if (deferredOldTextures != null) deferredOldTextures.Add(oldTex);
-                else oldTex.Dispose();
+                else DisposeTexture(oldTex);
             }
         });
         // Detached/adopted instances already hold the new UBO content -- only the still-private
@@ -7298,6 +7363,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         foreach (var textures in _sceneObjectTextures.Values)
             foreach (var tex in textures) tex.Dispose();
         _sceneObjectTextures.Clear();
+        _sharedTexturePool.Clear(); // every ref released above (both this loop and _textures' own, earlier) -- same wholesale-teardown shortcut as _sharedMaterialPool
         _sceneObjectTransformOverrides.Clear();
         while (_pendingTransformOverrides.TryDequeue(out _)) { }
         foreach (var key in _pendingSceneObjects.Keys)

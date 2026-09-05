@@ -55,6 +55,23 @@ internal sealed unsafe class VkTexture : IDisposable
     private ImageView _view;
     private readonly uint _mipLevels;
     private bool _disposed;
+    internal bool IsDisposed => _disposed;
+
+    // Supports VkViewportControl's cross-object shared texture pool (_sharedTexturePool) -- a
+    // texture built for a patch with a known asset UUID (SceneTexturePatch.TextureId != Zero) is
+    // shared by every OTHER patch that resolves to the same UUID instead of each decoding and
+    // uploading its own copy. Unlike VkMaterialDescriptorSet, a VkTexture's own content is never
+    // mutated in place once constructed (no Update-style method exists on this class at all --
+    // a texture PATCH replaces WHICH VkTexture a material slot points to, never rewrites an
+    // existing one's pixels), so no copy-on-write machinery is needed here: ref-counted sharing
+    // is safe the same simple way VkMesh's pool is. SharedPoolKey is null for every texture NOT
+    // registered in that pool (avatar bakes, particle emitters, placeholders, initial-submission
+    // uploads with no known UUID at that point) -- DisposeTexture uses it to find and evict this
+    // instance's pool entry on last-ref-release; a null key just means "nothing to evict."
+    internal LibreMetaverse.UUID? SharedPoolKey { get; set; }
+    private int _refCount = 1;
+    internal int RefCount => _refCount;
+    internal void AddRef() => _refCount++;
 
     internal Image Image => _image;
     internal ImageView View => _view;
@@ -514,9 +531,15 @@ internal sealed unsafe class VkTexture : IDisposable
         Sampler = Sampler
     };
 
+    /// <summary>Ref-counted like <see cref="VkMesh"/>'s own Dispose (see that class's _refCount
+    /// field comment) -- decrements-only while another owner still shares this instance, and only
+    /// actually frees the image/view/memory once this was the last reference. Safe to call
+    /// unconditionally: a never-shared instance behaves exactly as before (one Dispose call,
+    /// immediate free), since RefCount never leaves 1 until AddRef is called.</summary>
     public void Dispose()
     {
         if (_disposed) return;
+        if (--_refCount > 0) return;
         _disposed = true;
         var api = _vk.Api;
         var device = _vk.Device;
