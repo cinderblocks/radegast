@@ -95,6 +95,21 @@ internal sealed class SceneObjectStreamer : IDisposable
     // Used to detect when an object moved close enough to deserve a texture quality upgrade.
     private readonly ConcurrentDictionary<ulong, int> _textureLodLevel = new();
 
+    // Optimistic "already asked for this" tracker, separate from _textureLodLevel (which only
+    // updates once a texture patch actually LANDS -- a real asset fetch+decode, not instant).
+    // Both OnTerseObjectUpdate's per-update check and CheckTextureLodUpgrades' periodic scan
+    // compare the CURRENT distance's desired LOD against _textureLodLevel alone; while an object
+    // sits inside the full-quality (dist < 20m) band, every single terse update (and every
+    // periodic scan tick) re-observed "-1 wanted, still 2 landed" and re-enqueued a rebuild for
+    // it, since nothing recorded that a request for -1 was already in flight -- confirmed live
+    // (2026-09-05 field report): one object logged the identical "reason=texture-lod" rebuild
+    // trigger 30+ times in under 30 seconds, spaced roughly as fast as terse updates arrived. Set
+    // the moment a request is made (optimistic, before the fetch completes); read alongside
+    // _textureLodLevel via the higher of the two, so once the real fetch lands and updates
+    // _textureLodLevel, this stops mattering on its own (no explicit sync needed) -- only cleared
+    // on object removal, mirroring _textureLodLevel's own cleanup sites.
+    private readonly ConcurrentDictionary<ulong, int> _requestedTexLod = new();
+
     // Reverse parent index: rootSceneKey → set of child scene keys.
     private readonly ConcurrentDictionary<ulong, ConcurrentDictionary<ulong, byte>> _childrenByParent = new();
 
@@ -105,6 +120,14 @@ internal sealed class SceneObjectStreamer : IDisposable
     // triggered later fails (e.g. the viewport drops the GPU upload under OOM pressure), which
     // would wrongly suppress a later, genuinely-needed retry at that same pose.
     private readonly ConcurrentDictionary<ulong, (Vector3 Position, Quaternion Rotation, Vector3 Scale)> _lastRebuiltPose = new();
+
+    // Whether the last completed build for this multi-prim linkset had any flexi prims -- see
+    // OnTerseObjectUpdate's own epsilon-gate comment for why this gates the rebuild-on-pose-change
+    // decision. Seeded alongside _lastRebuiltPose, same "record on completion, not on decision"
+    // reasoning. A key absent from this map (no build has completed yet, or it was cleared on
+    // removal/upload-failure) is treated as "might have flexi" by the read site -- rebuilding is
+    // the safe default when this streamer doesn't yet know.
+    private readonly ConcurrentDictionary<ulong, bool> _lastBuildHadFlexi = new();
 
     // EnqueueBuild defers (rather than cancels) a dirty re-trigger when a build for the key is
     // still running, re-marking the key dirty so ProcessDirty retries it once the running
@@ -210,7 +233,9 @@ internal sealed class SceneObjectStreamer : IDisposable
         if (!_rendered.ContainsKey(sceneKey)) return;
         _rendered.TryRemove(sceneKey, out _);
         _lastRebuiltPose.TryRemove(sceneKey, out _);
+        _lastBuildHadFlexi.TryRemove(sceneKey, out _);
         _textureLodLevel.TryRemove(sceneKey, out _);
+        _requestedTexLod.TryRemove(sceneKey, out _);
         EnqueueDirty(sceneKey);
     }
 
@@ -328,25 +353,46 @@ internal sealed class SceneObjectStreamer : IDisposable
                 // stationary but still sending terse updates (a texture-anim object, a rotating
                 // sign holding a keyframe, a physics object jittering at rest) was paying for a
                 // full mesh/texture/material rebuild on every single packet for no visual benefit.
-                // The original reason this rebuild exists at all -- child-face positions need
-                // recalculating at the new root location -- is preserved for a REAL pose change;
-                // this only skips the redundant rebuild when nothing actually moved. Scale
-                // included alongside position/rotation since a resize should still trigger a
-                // rebuild.
+                //
+                // Position/rotation alone no longer trigger a rebuild here either, for a linkset
+                // confirmed flexi-free: SetSceneObjectMotion above already applies a full
+                // Scale*Rotation*Translation rigid transform to every (non-flexi) face via
+                // SetSceneObjectTransform/ApplyTransformToFaces, with no mesh/texture/material
+                // work at all, so a rebuild for pure rigid motion was pure overhead -- and, worse,
+                // visible overhead: each one is a real destroy-then-recreate of every GPU resource
+                // the object owns (see RemoveSceneObjectGpuNoRebuild/UploadSceneObjectNoRebuild),
+                // so a continuously-moving multi-prim object (a vehicle) rebuilt on every ~1cm of
+                // travel, producing a visible flicker on every single terse update while it moved
+                // (2026-09-05 field report). Flexi content is the one real exception:
+                // ApplyTransformToFaces deliberately skips flexi faces (they simulate their own
+                // world-space vertices instead), and BuildObjectAsync is the only place that
+                // refreshes FlexiPrimInfo.ExternalTransform from the current root pose -- so a
+                // flexi-bearing linkset still needs the real rebuild to track its own motion
+                // correctly, exactly as before. Scale is left unconditionally rebuild-triggering
+                // regardless of flexi -- unlike position/rotation, it's not yet confirmed whether
+                // the transform-only path's uniform CreateScale is equivalent to a real resize for
+                // every case (e.g. UV tiling baked into cut-face vertex data), so that half of the
+                // original behavior is intentionally untouched here.
                 bool isSinglePrim = !_childrenByParent.TryGetValue(sceneKey, out var ch) || ch.IsEmpty;
                 if (!isSinglePrim)
                 {
                     const float posEpsilon = 0.01f;   // 1cm
                     const float scaleEpsilon = 0.01f;
                     const float rotDotEpsilon = 1e-4f;
-                    bool poseChanged = true;
+                    bool positionOrRotationChanged = true;
+                    bool scaleChanged = true;
                     if (_lastRebuiltPose.TryGetValue(sceneKey, out var last))
                     {
-                        poseChanged =
+                        positionOrRotationChanged =
                             Vector3.DistanceSquared(last.Position, position) > posEpsilon * posEpsilon ||
-                            Vector3.DistanceSquared(last.Scale, scale) > scaleEpsilon * scaleEpsilon ||
                             MathF.Abs(1f - MathF.Abs(Quaternion.Dot(last.Rotation, rotation))) > rotDotEpsilon;
+                        scaleChanged = Vector3.DistanceSquared(last.Scale, scale) > scaleEpsilon * scaleEpsilon;
                     }
+                    // Unknown (no completed build yet) defaults to "assume flexi" -- rebuilding is
+                    // the safe fallback when this streamer doesn't yet know, matching poseChanged's
+                    // own "no baseline yet" default of true above.
+                    bool hasFlexi = !_lastBuildHadFlexi.TryGetValue(sceneKey, out var hadFlexi) || hadFlexi;
+                    bool poseChanged = scaleChanged || (positionOrRotationChanged && hasFlexi);
                     if (poseChanged)
                     {
                         // Not recorded here: BuildObjectAsync seeds _lastRebuiltPose itself once
@@ -366,8 +412,21 @@ internal sealed class SceneObjectStreamer : IDisposable
                 if (_textureLodLevel.TryGetValue(sceneKey, out int curTexLod))
                 {
                     int desiredTexLod = TextureLodLevelForDistance(dist);
-                    if (IsTextureLodHigherQuality(desiredTexLod, curTexLod))
+                    // Effective baseline is the BETTER of what's actually landed (_textureLodLevel)
+                    // and what's already been asked for but hasn't landed yet (_requestedTexLod) --
+                    // see that field's own comment for why: without this, an object sitting inside
+                    // the full-quality band re-requested the same upgrade on every single terse
+                    // update while the real fetch was still in flight (confirmed live: 30+ identical
+                    // triggers in under 30 seconds for one object, 2026-09-05).
+                    int effectiveCurrent = curTexLod;
+                    if (_requestedTexLod.TryGetValue(sceneKey, out int requested)
+                        && IsTextureLodHigherQuality(requested, effectiveCurrent))
+                        effectiveCurrent = requested;
+                    if (IsTextureLodHigherQuality(desiredTexLod, effectiveCurrent))
+                    {
+                        _requestedTexLod[sceneKey] = desiredTexLod;
                         EnqueueDirty(sceneKey);
+                    }
                 }
             }
         }
@@ -502,6 +561,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _dirty.Clear();
         _rendered.Clear();
         _textureLodLevel.Clear();
+        _requestedTexLod.Clear();
         _childrenByParent.Clear();
         _neighborIndex.Clear();
         _reconcileAttempts.Clear();
@@ -589,7 +649,9 @@ internal sealed class SceneObjectStreamer : IDisposable
         _dirty.TryRemove(sceneKey, out _);
         _rendered.TryRemove(sceneKey, out _);
         _textureLodLevel.TryRemove(sceneKey, out _);
+        _requestedTexLod.TryRemove(sceneKey, out _);
         _lastRebuiltPose.TryRemove(sceneKey, out _);
+        _lastBuildHadFlexi.TryRemove(sceneKey, out _);
         _viewport.RemoveSceneObject(sceneKey);
     }
 
@@ -956,6 +1018,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             var scaleV = new Vector3(rootPrim.Scale.X, rootPrim.Scale.Y, rootPrim.Scale.Z);
             var rotQ   = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
             _lastRebuiltPose[sceneKey] = (worldPos, rotQ, scaleV);
+            _lastBuildHadFlexi[sceneKey] = submission.FlexiPrims.Length > 0;
             ObjectBuilt?.Invoke(rootLocalId, submission);
         }
         catch (OperationCanceledException) { }
@@ -963,8 +1026,11 @@ internal sealed class SceneObjectStreamer : IDisposable
         {
             // Swallow per-object failures — the scene viewer continues working. Logged (not
             // silent) so a stuck-invisible large object is diagnosable instead of indistinguishable
-            // from one that's simply out of range or hasn't been dirtied yet.
-            Logger.Log($"SceneObjectStreamer: build failed for sceneKey {sceneKey:x}: {ex.Message}", LogLevel.Warning);
+            // from one that's simply out of range or hasn't been dirtied yet. Full exception (not
+            // just ex.Message) so a recurring failure's actual throw site/stack is diagnosable --
+            // ex.Message alone was not enough to pin down a real, repeating "does not accept
+            // floating point Not-a-Number values" failure (2026-09-05 field report).
+            Logger.Log($"SceneObjectStreamer: build failed for sceneKey {sceneKey:x}", LogLevel.Warning, ex);
         }
         finally
         {
@@ -1031,12 +1097,21 @@ internal sealed class SceneObjectStreamer : IDisposable
             if (!_textureLodLevel.TryGetValue(sceneKey, out int curLod)) continue;
             if (curLod == -1) continue; // already at full quality
 
+            // See _requestedTexLod's own field comment: without this, this periodic scan
+            // re-requests the same in-flight upgrade every tick until the real fetch lands.
+            int effectiveCurLod = curLod;
+            if (_requestedTexLod.TryGetValue(sceneKey, out int requestedLod)
+                && IsTextureLodHigherQuality(requestedLod, effectiveCurLod))
+                effectiveCurLod = requestedLod;
+            if (effectiveCurLod == -1) continue; // already requested full quality, just not landed yet
+
             float distSq  = DistanceSq(sceneKey, avatarPos);
             float dist    = MathF.Sqrt(distSq);
             int   desired = TextureLodLevelForDistance(dist);
 
-            if (IsTextureLodHigherQuality(desired, curLod))
+            if (IsTextureLodHigherQuality(desired, effectiveCurLod))
             {
+                _requestedTexLod[sceneKey] = desired;
                 EnqueueDirty(sceneKey);
                 upgraded++;
             }
