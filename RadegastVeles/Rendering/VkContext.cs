@@ -147,6 +147,26 @@ internal sealed unsafe class VkContext : IDisposable
     /// observe. See <see cref="VkMaterialUboPool"/>'s own header comment for why it exists.</summary>
     public VkMaterialUboPool MaterialUboPool { get; private set; } = null!;
 
+    /// <summary>Backs VkMesh's per-face vbo/ebo device-local memory (ebo unconditionally, vbo
+    /// only when dynamic: false -- see VkMesh's own comment). Assigned the same way as
+    /// <see cref="MaterialUboPool"/>, for the same "needs a fully-built VkContext" reason.
+    /// <para>
+    /// Exists for the SAME device ceiling MaterialUboPool relieves for materials
+    /// (VkPhysicalDeviceLimits.maxMemoryAllocationCount), confirmed hit historically for exactly
+    /// this reason: a 2026-08-27..09-01 dense-region session logged
+    /// "vkAllocateMemory(): The number of currently valid memory objects (4096) is not less than
+    /// maxMemoryAllocationCount (4096)" repeatedly, at a face count where the (then-unpooled)
+    /// material descriptor sets had ALREADY been fixed -- meaning mesh vbo/ebo allocations alone
+    /// (2 vkAllocateMemory calls per face, unpooled until this) were enough to exhaust the
+    /// device's raw allocation-count budget on their own. Unlike MaterialUboPool's fixed-stride
+    /// slot design, this is a general byte-range suballocator (<see cref="VkBufferSubAllocator"/>)
+    /// since mesh buffer sizes vary per face -- see that class's own header comment for the design
+    /// and for why VkMesh's own Draw()/DrawLines() and every other caller need no changes at all
+    /// (each mesh keeps its own individually-owned VkBuffer; only which VkDeviceMemory backs it,
+    /// and at what offset, is shared).
+    /// </para></summary>
+    public VkBufferSubAllocator MeshBufferPool { get; private set; } = null!;
+
     /// <summary>
     /// One shared sampler for every <see cref="VkTexture"/> in the process, replacing what used
     /// to be a fresh <c>vkCreateSampler</c> call per texture instance. Real find, not a
@@ -535,6 +555,7 @@ internal sealed unsafe class VkContext : IDisposable
                     // once are hit hardest by that kind of undersizing. See the DescriptorPoolSize
                     // block above's own "TRIED AND REVERTED" comment before raising this again.
                     vkContext.MaterialUboPool = new VkMaterialUboPool(vkContext, capacity: 16384);
+                    vkContext.MeshBufferPool = new VkBufferSubAllocator(vkContext, MemoryPropertyFlags.DeviceLocalBit);
 
                     // See SharedTextureSampler's own doc comment: one sampler for every
                     // VkTexture in the process, replacing what used to be a fresh
@@ -654,6 +675,7 @@ internal sealed unsafe class VkContext : IDisposable
         D3DDevice.Dispose();
         Pool.Dispose();
         MaterialUboPool.Dispose();
+        MeshBufferPool.Dispose();
         if (SharedTextureSampler.Handle != default) Api.DestroySampler(Device, SharedTextureSampler, null);
         Api.DestroyDescriptorPool(Device, DescriptorPool, null);
         Api.DestroyDevice(Device, null);

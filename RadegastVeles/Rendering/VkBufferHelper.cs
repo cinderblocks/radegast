@@ -185,6 +185,106 @@ internal static unsafe class VkBufferHelper
         batch.StagingBuffers.Clear();
     }
 
+    /// <summary>
+    /// Same shape and result as <see cref="AllocateDeviceLocal{T}"/> (device-local destination
+    /// buffer, filled via a staging buffer + <c>CmdCopyBuffer</c>, synchronous submit+wait), but
+    /// the destination buffer's memory comes from <paramref name="pool"/> instead of its own
+    /// dedicated vkAllocateMemory call -- see <see cref="VkBufferSubAllocator"/>'s own header
+    /// comment for why (the device's maxMemoryAllocationCount ceiling). <paramref name="buffer"/>
+    /// is still this call's own individually-created <c>VkBuffer</c> object (cheap, not what the
+    /// pool is relieving) -- only ITS memory binding is shared. Caller must eventually call
+    /// <see cref="DestroySuballocated"/> (not raw DestroyBuffer+FreeMemory) to return
+    /// <paramref name="allocation"/> to the pool instead of freeing memory out from under
+    /// whatever else the block hosts.
+    /// </summary>
+    public static void AllocateDeviceLocalSuballocated<T>(VkContext vk, VkBufferSubAllocator pool,
+        BufferUsageFlags usage, out Buffer buffer, out VkBufferSubAllocator.Allocation allocation,
+        ReadOnlySpan<T> initialData) where T : unmanaged
+    {
+        var size = (ulong)(Unsafe.SizeOf<T>() * initialData.Length);
+
+        CreateBufferSuballocated(vk, pool, size, usage | BufferUsageFlags.TransferDstBit,
+            out buffer, out allocation);
+
+        CreateBuffer(vk, size, BufferUsageFlags.TransferSrcBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+            out var stagingBuffer, out var stagingMemory);
+        try
+        {
+            UpdateHostVisible(vk, stagingMemory, initialData);
+
+            var cmd = vk.Pool.CreateCommandBuffer("VkBufferHelper.AllocateDeviceLocalSuballocated");
+            cmd.BeginRecording();
+            var copyRegion = new BufferCopy { SrcOffset = 0, DstOffset = 0, Size = size };
+            vk.Api.CmdCopyBuffer(cmd.InternalHandle, stagingBuffer, buffer, 1, in copyRegion);
+            cmd.SubmitAndWait();
+        }
+        finally
+        {
+            vk.Api.DestroyBuffer(vk.Device, stagingBuffer, null);
+            vk.Api.FreeMemory(vk.Device, stagingMemory, null);
+        }
+    }
+
+    /// <summary>Suballocated counterpart to <see cref="RecordDeviceLocalCopy{T}"/> -- same batched-
+    /// upload shape (records into <paramref name="batch"/>'s already-open command buffer instead
+    /// of submitting its own), but draws the destination buffer's memory from <paramref name="pool"/>.
+    /// See <see cref="AllocateDeviceLocalSuballocated{T}"/>'s own doc comment for the rest of the
+    /// contract (DestroySuballocated on teardown, VkBuffer still individually owned).</summary>
+    public static void RecordDeviceLocalCopySuballocated<T>(VkContext vk, VkStagedUploadBatch batch,
+        VkBufferSubAllocator pool, BufferUsageFlags usage, out Buffer buffer,
+        out VkBufferSubAllocator.Allocation allocation, ReadOnlySpan<T> initialData) where T : unmanaged
+    {
+        var size = (ulong)(Unsafe.SizeOf<T>() * initialData.Length);
+
+        CreateBufferSuballocated(vk, pool, size, usage | BufferUsageFlags.TransferDstBit,
+            out buffer, out allocation);
+
+        CreateBuffer(vk, size, BufferUsageFlags.TransferSrcBit,
+            MemoryPropertyFlags.HostVisibleBit | MemoryPropertyFlags.HostCoherentBit,
+            out var stagingBuffer, out var stagingMemory);
+        UpdateHostVisible(vk, stagingMemory, initialData);
+
+        var copyRegion = new BufferCopy { SrcOffset = 0, DstOffset = 0, Size = size };
+        vk.Api.CmdCopyBuffer(batch.Cmd.InternalHandle, stagingBuffer, buffer, 1, in copyRegion);
+
+        batch.StagingBuffers.Add((stagingBuffer, stagingMemory));
+    }
+
+    /// <summary>Tears down a buffer created via <see cref="AllocateDeviceLocalSuballocated{T}"/>/
+    /// <see cref="RecordDeviceLocalCopySuballocated{T}"/>: destroys the individually-owned
+    /// <c>VkBuffer</c> (unchanged from the non-suballocated path) but returns
+    /// <paramref name="allocation"/> to <paramref name="pool"/> instead of calling FreeMemory --
+    /// the memory it occupied belongs to the pool's shared block and may still be backing OTHER
+    /// live buffers.</summary>
+    public static void DestroySuballocated(VkContext vk, VkBufferSubAllocator pool, Buffer buffer,
+        in VkBufferSubAllocator.Allocation allocation)
+    {
+        vk.Api.DestroyBuffer(vk.Device, buffer, null);
+        pool.Return(in allocation);
+    }
+
+    private static void CreateBufferSuballocated(VkContext vk, VkBufferSubAllocator pool, ulong size,
+        BufferUsageFlags usage, out Buffer buffer, out VkBufferSubAllocator.Allocation allocation)
+    {
+        var api = vk.Api;
+        var device = vk.Device;
+
+        var bufferInfo = new BufferCreateInfo
+        {
+            SType = StructureType.BufferCreateInfo,
+            Size = size,
+            Usage = usage,
+            SharingMode = SharingMode.Exclusive
+        };
+        api.CreateBuffer(device, in bufferInfo, null, out buffer).ThrowOnError();
+
+        api.GetBufferMemoryRequirements(device, buffer, out var memoryRequirements);
+        allocation = pool.Rent(memoryRequirements.Size, memoryRequirements.Alignment,
+            memoryRequirements.MemoryTypeBits, out var memory);
+        api.BindBufferMemory(device, buffer, memory, allocation.Offset).ThrowOnError();
+    }
+
     private static void CreateBuffer(VkContext vk, ulong size, BufferUsageFlags usage, MemoryPropertyFlags properties,
         out Buffer buffer, out DeviceMemory memory)
     {

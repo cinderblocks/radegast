@@ -28,6 +28,12 @@
 //     (VkBufferHelper.AllocateDeviceLocal/AllocateHostVisible -- the staging
 //     design). The index buffer and line-index buffer are always device-local, matching the
 //     GL original's unconditional StaticDraw for both.
+//   - Every device-local buffer here (ebo/lebo unconditionally, vbo when dynamic: false) is
+//     suballocated from VkContext.MeshBufferPool rather than individually vkAllocateMemory'd --
+//     see that pool's own field comment for why (the device's maxMemoryAllocationCount ceiling).
+//     Each mesh still owns its own individual VkBuffer object exactly as before; only which
+//     VkDeviceMemory backs it, and at what offset, is shared, so this is transparent to
+//     Draw()/DrawLines() and every other caller -- see VkBufferSubAllocator's own header comment.
 
 using System;
 using System.Collections.Generic;
@@ -42,7 +48,15 @@ internal sealed unsafe class VkMesh : IDisposable
     private readonly VkContext _vk;
     private readonly bool _dynamic;
     private Buffer _vbo, _ebo, _lebo;
-    private DeviceMemory _vboMemory, _eboMemory, _leboMemory;
+    // _vboMemory backs the vbo ONLY when _dynamic (host-visible direct-map -- UpdateHostVisible
+    // needs a raw DeviceMemory to map). ebo is always device-local, and vbo is device-local too
+    // when !_dynamic, so both of those instead come from VkContext.MeshBufferPool -- see its own
+    // field comment for why (the device's maxMemoryAllocationCount ceiling) -- tracked via
+    // _vboAllocation/_eboAllocation/_leboAllocation, each meaningless (default) whenever the
+    // corresponding buffer wasn't sourced from that pool (_vboAllocation when _dynamic; every
+    // Allocation before BuildLineEbo() has ever run, since lebo is built lazily).
+    private DeviceMemory _vboMemory;
+    private VkBufferSubAllocator.Allocation _vboAllocation, _eboAllocation, _leboAllocation;
     private int _indexCount;
     private int _lineCount;
     private bool _disposed;
@@ -113,16 +127,18 @@ internal sealed unsafe class VkMesh : IDisposable
         if (dynamic)
             VkBufferHelper.AllocateHostVisible(vk, vboUsage, out _vbo, out _vboMemory, vertSpan);
         else if (batch is { } vboBatch)
-            VkBufferHelper.RecordDeviceLocalCopy(vk, vboBatch, vboUsage, out _vbo, out _vboMemory, vertSpan);
+            VkBufferHelper.RecordDeviceLocalCopySuballocated(vk, vboBatch, vk.MeshBufferPool, vboUsage,
+                out _vbo, out _vboAllocation, vertSpan);
         else
-            VkBufferHelper.AllocateDeviceLocal(vk, vboUsage, out _vbo, out _vboMemory, vertSpan);
+            VkBufferHelper.AllocateDeviceLocalSuballocated(vk, vk.MeshBufferPool, vboUsage,
+                out _vbo, out _vboAllocation, vertSpan);
 
         if (!dynamic && batch is { } eboBatch)
-            VkBufferHelper.RecordDeviceLocalCopy(vk, eboBatch, BufferUsageFlags.IndexBufferBit, out _ebo, out _eboMemory,
-                (ReadOnlySpan<ushort>)indices);
+            VkBufferHelper.RecordDeviceLocalCopySuballocated(vk, eboBatch, vk.MeshBufferPool, BufferUsageFlags.IndexBufferBit,
+                out _ebo, out _eboAllocation, (ReadOnlySpan<ushort>)indices);
         else
-            VkBufferHelper.AllocateDeviceLocal(vk, BufferUsageFlags.IndexBufferBit, out _ebo, out _eboMemory,
-                (ReadOnlySpan<ushort>)indices);
+            VkBufferHelper.AllocateDeviceLocalSuballocated(vk, vk.MeshBufferPool, BufferUsageFlags.IndexBufferBit,
+                out _ebo, out _eboAllocation, (ReadOnlySpan<ushort>)indices);
     }
 
     /// <summary>Records a bind + indexed draw of the triangle-list index buffer. Caller owns
@@ -155,9 +171,15 @@ internal sealed unsafe class VkMesh : IDisposable
             // data size is assumed unchanged (same array length every call, matching the GL
             // original's BufferSubData-in-place contract) but this keeps the code path
             // identical to construction rather than adding a second, subtly-different copy path.
-            _vk.Api.DestroyBuffer(_vk.Device, _vbo, null);
-            _vk.Api.FreeMemory(_vk.Device, _vboMemory, null);
-            VkBufferHelper.AllocateDeviceLocal(_vk, BufferUsageFlags.VertexBufferBit, out _vbo, out _vboMemory, span);
+            // Confirmed dead in practice as of this writing (every caller of UpdateVertices only
+            // ever targets a dynamic: true mesh -- see VkViewportControl's own construction sites,
+            // dynamic: face.IsFlexi || subAnimated, exactly the flag this branch's condition
+            // excludes), but kept suballocation-correct rather than left as a landmine: destroying
+            // _vbo without returning _vboAllocation to VkContext.MeshBufferPool would silently
+            // leak that range forever if this branch were ever actually exercised.
+            VkBufferHelper.DestroySuballocated(_vk, _vk.MeshBufferPool, _vbo, in _vboAllocation);
+            VkBufferHelper.AllocateDeviceLocalSuballocated(_vk, _vk.MeshBufferPool, BufferUsageFlags.VertexBufferBit,
+                out _vbo, out _vboAllocation, span);
         }
     }
 
@@ -190,8 +212,8 @@ internal sealed unsafe class VkMesh : IDisposable
         }
 
         _lineCount = lineList.Count;
-        VkBufferHelper.AllocateDeviceLocal(_vk, BufferUsageFlags.IndexBufferBit, out _lebo, out _leboMemory,
-            (ReadOnlySpan<ushort>)CollectionsMarshal.AsSpan(lineList));
+        VkBufferHelper.AllocateDeviceLocalSuballocated(_vk, _vk.MeshBufferPool, BufferUsageFlags.IndexBufferBit,
+            out _lebo, out _leboAllocation, (ReadOnlySpan<ushort>)CollectionsMarshal.AsSpan(lineList));
     }
 
     private static void AddEdge(HashSet<(ushort, ushort)> edges, List<ushort> list, ushort a, ushort b)
@@ -222,14 +244,17 @@ internal sealed unsafe class VkMesh : IDisposable
         _disposed = true;
         var api = _vk.Api;
         var device = _vk.Device;
-        api.DestroyBuffer(device, _vbo, null);
-        api.FreeMemory(device, _vboMemory, null);
-        api.DestroyBuffer(device, _ebo, null);
-        api.FreeMemory(device, _eboMemory, null);
-        if (_lebo.Handle != 0)
+        if (_dynamic)
         {
-            api.DestroyBuffer(device, _lebo, null);
-            api.FreeMemory(device, _leboMemory, null);
+            api.DestroyBuffer(device, _vbo, null);
+            api.FreeMemory(device, _vboMemory, null);
         }
+        else
+        {
+            VkBufferHelper.DestroySuballocated(_vk, _vk.MeshBufferPool, _vbo, in _vboAllocation);
+        }
+        VkBufferHelper.DestroySuballocated(_vk, _vk.MeshBufferPool, _ebo, in _eboAllocation);
+        if (_lebo.Handle != 0)
+            VkBufferHelper.DestroySuballocated(_vk, _vk.MeshBufferPool, _lebo, in _leboAllocation);
     }
 }
