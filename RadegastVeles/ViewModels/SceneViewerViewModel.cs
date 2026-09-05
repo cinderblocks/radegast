@@ -508,14 +508,43 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     {
         if (_disposed) return;
         // Only update labels if this is the currently selected object.
-        if (SelectedLocalId == 0) return;
+        // Diagnostic logging (2026-09-05) on every bail-out below, kept -- see InspectObject's
+        // own comment for why.
+        if (SelectedLocalId == 0)
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] OnObjectProperties: discarded, nothing selected (reply objectId={e.Properties.ObjectID})");
+            return;
+        }
         var sim = _instance.Client.Network.CurrentSim;
-        if (sim == null || e.Simulator != sim) return;
-        if (!sim.ObjectsPrimitives.TryGetValue(SelectedLocalId, out var selected)) return;
-        if (selected.ID != e.Properties.ObjectID) return;
+        if (sim == null || e.Simulator != sim)
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] OnObjectProperties: discarded, wrong/no sim (reply from {e.Simulator?.Name ?? "null"}, current sim {sim?.Name ?? "null"})");
+            return;
+        }
+        if (!sim.ObjectsPrimitives.TryGetValue(SelectedLocalId, out var selected))
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] OnObjectProperties: discarded, SelectedLocalId={SelectedLocalId} not in sim.ObjectsPrimitives "
+                + $"(reply objectId={e.Properties.ObjectID}, name=\"{e.Properties.Name}\")");
+            return;
+        }
+        if (selected.ID != e.Properties.ObjectID)
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] OnObjectProperties: discarded, reply is for a different object "
+                + $"(selected localId={SelectedLocalId} has UUID {selected.ID}, reply UUID={e.Properties.ObjectID}, name=\"{e.Properties.Name}\")");
+            return;
+        }
 
         var name = e.Properties.Name;
-        if (string.IsNullOrEmpty(name)) return;
+        if (string.IsNullOrEmpty(name))
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] OnObjectProperties: discarded, reply for {selected.ID} carried an empty name");
+            return;
+        }
 
         Dispatcher.UIThread.Post(() =>
         {
@@ -1349,10 +1378,35 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(ContextIsPrim))]
     private void InspectObject()
     {
-        if (_disposed) return;
+        // Diagnostic logging added 2026-09-05 (kept, not removed): OnObjectProperties below
+        // silently discards a reply that doesn't resolve or match, with zero visible feedback
+        // either way, so a future "Inspect does nothing" report has nothing to go on without
+        // this. Logging both ends (request sent vs. bailed here, reply matched vs. discarded
+        // there) is what found the real bug this same investigation fixed (this method was
+        // calling RequestObject, which never prompts a reply at all -- see below) and separately
+        // showed a specific object's server-side properties reply never arriving even with the
+        // correct request, which is likely unfixable from this side.
+        if (_disposed)
+        {
+            LibreMetaverse.Logger.Debug("[SceneViewerViewModel] InspectObject: no-op, disposed");
+            return;
+        }
         var sim = _instance.Client.Network.CurrentSim;
-        if (sim == null || SelectedLocalId == 0) return;
-        _instance.Client.Objects.RequestObject(sim, SelectedLocalId);
+        if (sim == null || SelectedLocalId == 0)
+        {
+            LibreMetaverse.Logger.Debug(
+                $"[SceneViewerViewModel] InspectObject: no-op, sim={(sim == null ? "null" : "ok")}, SelectedLocalId={SelectedLocalId}");
+            return;
+        }
+        // RequestObject (RequestMultipleObjectsPacket) is for streaming an object's geometry/data
+        // into view, NOT its properties -- it never prompts an ObjectProperties reply. SelectObject
+        // (ObjectSelectPacket) is what the server actually replies to; OnFaceClicked already uses
+        // it for exactly the same reason ("Request full properties so the name is populated"), a
+        // few hundred lines up in this same file. This was the real bug behind "Inspect does
+        // nothing": the request this command sent could never have gotten a reply, for ANY object,
+        // regardless of whether that object's own data was otherwise fine.
+        LibreMetaverse.Logger.Debug($"[SceneViewerViewModel] InspectObject: requesting properties for localId={SelectedLocalId}");
+        _instance.Client.Objects.SelectObject(sim, SelectedLocalId);
     }
 
     // ── Avatar movement ───────────────────────────────────────────────────────────
