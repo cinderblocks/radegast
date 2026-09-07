@@ -267,7 +267,7 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          npx --yes create-dmg "$UNIVERSAL_APP" dist
+          npx --yes create-dmg --no-code-sign "$UNIVERSAL_APP" dist
 
       # Skipped entirely for manual test builds (workflow_dispatch): a test build must never
       # create a tag or a release. gh release create with a tag_name that doesn't exist yet
@@ -290,7 +290,11 @@ jobs:
       - name: Upload universal DMG to GitHub Release
         if: github.event_name != 'workflow_dispatch'
         run: |
-          DMG=$(ls dist/*.dmg | head -n 1)
+          DMG=$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          if [ -z "$DMG" ]; then
+            echo "No universal DMG found in dist/"
+            exit 1
+          fi
           gh release upload "$TAG_NAME" "$DMG" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
