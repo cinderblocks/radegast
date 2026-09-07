@@ -170,6 +170,20 @@ internal sealed class SceneSpatialGrid
         }
     }
 
+    /// <summary>Looks up the persistent world-space AABB most recently registered for
+    /// <paramref name="sceneKey"/> via <see cref="Upsert"/>. Returns false if the key isn't
+    /// currently registered (removed, or never inserted) -- callers (occlusion-query candidate
+    /// selection) must treat a false return as "no occlusion information available," i.e. skip
+    /// the query, never as "this object is occluded."</summary>
+    public bool TryGetBounds(ulong sceneKey, out Vector3 min, out Vector3 max)
+    {
+        if (_objects.TryGetValue(sceneKey, out var entry))
+        {
+            min = entry.Min; max = entry.Max; return true;
+        }
+        min = default; max = default; return false;
+    }
+
     private static (int x, int y, int z) CellOf(Vector3 p) => (
         (int)System.MathF.Floor(p.X / CellSize),
         (int)System.MathF.Floor(p.Y / CellSize),

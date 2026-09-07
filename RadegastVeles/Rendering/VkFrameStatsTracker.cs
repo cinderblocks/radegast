@@ -81,6 +81,14 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
     private readonly int[] _facesSubmittedBuf = new int[VkContext.FramesInFlight];
     private readonly int[] _facesCulledBuf = new int[VkContext.FramesInFlight];
 
+    // Occlusion-culling stat: unlike the buffers above (snapshotted by EndCpuWork against the
+    // frame that recorded them, read back FramesInFlight frames later by EndFrame), this one is
+    // written directly by RecordOcclusionCycle at the point VkViewportControl.ReadOcclusionResults
+    // actually runs (right after _stats.EndFrame in the SAME RenderFrame call), which is already
+    // "the current frame" from this tracker's perspective -- no frame-shifted pairing needed, it
+    // just needs to be live for THIS EndFrame call to read.
+    private int _objectsOcclusionCulled;
+
     // Frame-interval variance (plan Step 3): wall-clock gap between consecutive BeginFrame
     // calls, over a rolling window -- the metric that actually answers "is it choppy" (CPU/GPU
     // ms alone can drop once Step 6's pipelining lands whether or not real frame pacing
@@ -161,6 +169,7 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
         _triangles = 0;
         _facesSubmitted = 0;
         _facesCulled = 0;
+        _objectsOcclusionCulled = 0;
         _cpu.Restart();
     }
 
@@ -254,7 +263,8 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
             FacesSubmitted: _facesSubmittedBuf[slot],
             FacesCulled: _facesCulledBuf[slot],
             IntervalMaxMs: intervalMaxMs,
-            IntervalP99Ms: intervalP99Ms);
+            IntervalP99Ms: intervalP99Ms,
+            ObjectsOcclusionCulled: _objectsOcclusionCulled);
         Last = stats;
         FrameCompleted?.Invoke(stats);
     }
@@ -276,6 +286,13 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
 
     /// <summary>Increment the face-culled counter when a face is rejected by the frustum test.</summary>
     public void RecordFaceCulled() => _facesCulled++;
+
+    /// <summary>Records this frame's occlusion-query readback outcome (called from
+    /// <c>VkViewportControl.ReadOcclusionResults</c>, before <see cref="EndFrame"/> runs -- see
+    /// that call site's own comment for why the ordering matters). Not a running total: the
+    /// durable running state is <c>_occludedSceneKeys</c> itself in <c>VkViewportControl</c>; this
+    /// just reports how many objects newly became occluded in this specific readback cycle.</summary>
+    public void RecordOcclusionCycle(int newlyOccluded) => _objectsOcclusionCulled = newlyOccluded;
 
     internal void Dispose(VkContext vk)
     {

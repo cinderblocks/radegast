@@ -477,6 +477,11 @@
                                   AutomationProperties.Name="Enable frustum culling" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Skip CPU draw calls for faces outside the camera frustum. Disable temporarily to rule out culling artefacts." />
+                        <CheckBox Content="Occlusion culling"
+                                  IsChecked="{Binding OcclusionCullingEnabled}"
+                                  AutomationProperties.Name="Enable GPU occlusion culling" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Skips drawing scene objects fully hidden behind other geometry (e.g. behind walls), using the GPU to test visibility. Only runs on Medium/High-tier graphics hardware, and requires frustum culling also enabled. Takes effect the next time a viewer window is opened." />
                         <CheckBox Content="Enable water reflections"
                                   IsChecked="{Binding WaterReflectionsEnabled}"
                                   AutomationProperties.Name="Enable water reflections" />

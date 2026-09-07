@@ -28,6 +28,10 @@ namespace Radegast.Veles.Rendering;
 /// <param name="IntervalP99Ms">99th-percentile frame interval over the same window -- less
 /// sensitive to a single one-off spike than <see cref="IntervalMaxMs"/>, so a sustained
 /// choppiness regression shows up here even when the max is dominated by one rare outlier.</param>
+/// <param name="ObjectsOcclusionCulled">Count of scene objects newly marked occluded by the most
+/// recent occlusion-query readback cycle (see <c>VkViewportControl.ReadOcclusionResults</c>) --
+/// not a running total (the durable running state is <c>_occludedSceneKeys</c> itself), just this
+/// cycle's outcome. Always 0 on Low tier or with occlusion culling disabled.</param>
 public readonly record struct FrameStats(
     double CpuTimeMs,
     double GpuTimeMs,
@@ -36,7 +40,8 @@ public readonly record struct FrameStats(
     int    FacesSubmitted,
     int    FacesCulled,
     double IntervalMaxMs,
-    double IntervalP99Ms);
+    double IntervalP99Ms,
+    int    ObjectsOcclusionCulled = 0);
 
 public interface IFrameStatsTracker
 {

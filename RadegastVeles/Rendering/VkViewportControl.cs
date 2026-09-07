@@ -81,6 +81,23 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <c>RenderDirectionalShadow</c> reads it.</summary>
     public bool FrustumCullingEnabled { get; set; } = true;
 
+    /// <summary>Default <c>true</c>. Hardware occlusion-query culling for scene objects fully
+    /// hidden behind other geometry (e.g. inside a closed room). Only actually runs on Medium/High
+    /// tier (see <see cref="_occlusionPoolReady"/>) and has no effect when
+    /// <see cref="FrustumCullingEnabled"/> is false (occlusion culling is additional work layered
+    /// on top of frustum culling's own <c>mainVisibleSceneKeys</c>, not an independent gate --
+    /// matches <c>FilterVisible</c>'s own "null frustum -&gt; no per-object test at all"
+    /// contract). Custom setter, not a plain auto-property: toggling off must clear
+    /// <see cref="_occludedSceneKeys"/> so every previously-hidden object reappears on the very
+    /// next frame, rather than staying hidden until each one happens to get a fresh "visible"
+    /// query result.</summary>
+    public bool OcclusionCullingEnabled
+    {
+        get => _occlusionCullingEnabled;
+        set { _occlusionCullingEnabled = value; if (!value) _occludedSceneKeys.Clear(); }
+    }
+    private bool _occlusionCullingEnabled = true;
+
     /// <summary>Gates two things: the
     /// visible sky-dome draw call (see <see cref="DrawSky"/>) and <c>fogDensity</c> in the main
     /// per-face lighting block (also gated on <see cref="AtmosphericsEnabled"/>, see
@@ -625,6 +642,35 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _shadowSceneOpaqueVisible = new();
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _reflOpaqueVisible = new();
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _reflSceneOpaqueVisible = new();
+
+    // Occlusion culling (hardware occlusion queries, Medium/High tier only -- see
+    // VkOcclusionQueryPipeline's own doc comment). _occludedSceneKeys is durable state (absence
+    // means visible -- the required safety default for an object with no query result yet), NOT
+    // cleared per-frame the way _visibleSceneKeys is; it's only ever mutated by
+    // ReadOcclusionResults (a query said zero samples passed / said some samples passed) or the
+    // OcclusionCullingEnabled setter (clear-on-disable, see that property's own doc comment).
+    private VkOcclusionQueryPipeline? _occlusionQuery;
+    private VkMesh? _occlusionProxyMesh;
+    private QueryPool _occlusionPool;
+    private bool _occlusionPoolReady;
+    // Mirrors VkSkinDeformer.MaxJobsPerFrame's convention/magnitude, not profiled for this
+    // specific draw shape -- a starting budget, not a measured optimum.
+    private const int MaxOcclusionQueriesPerFrame = 256;
+    private long _occlusionFrameIndex = -1;
+    private uint CurrentOcclusionSlot => (uint)(_occlusionFrameIndex % VkContext.FramesInFlight);
+    private readonly ulong[] _occlusionSlotSceneKey = new ulong[VkContext.FramesInFlight * MaxOcclusionQueriesPerFrame];
+    // Queries ACTUALLY issued into each slot the last time it was used -- NOT the same as
+    // MaxOcclusionQueriesPerFrame every frame (candidate count can be smaller, or the opaque-draw
+    // block this frame's queries live inside can be skipped entirely on an empty-scene frame).
+    // Read range for GetQueryPoolResults is always exactly this count, so a reset-but-never-
+    // rewritten query (Vulkan's "unavailable query in range" case, undefined result) is never
+    // includable by construction.
+    private readonly int[] _occlusionSlotCount = new int[VkContext.FramesInFlight];
+    private readonly Vector3[] _occlusionSlotCameraPos = new Vector3[VkContext.FramesInFlight];
+    private readonly Vector3[] _occlusionSlotCameraFwd = new Vector3[VkContext.FramesInFlight];
+    private readonly HashSet<ulong> _occludedSceneKeys = new();
+    private readonly List<ulong> _occlusionCandidateScratch = new();
+    private int _occlusionRoundRobinCursor;
 
     // Dead-reckoning motion tracking
     // (pure System.Numerics math, no GL dependency) -- ConcurrentDictionary since
@@ -1844,6 +1890,35 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _prim = VkPrimPipeline.Create(vk, _renderPass);
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
             _outline = VkOutlinePipeline.Create(vk, _renderPass);
+            // Occlusion-query culling -- Medium/High only, same posture as the water-refraction
+            // split pair above (created unconditionally on those tiers; USE is separately gated
+            // per-frame by OcclusionCullingEnabled). Best-effort, same try/catch posture as sky/
+            // SSAO/shadow/water below: on any failure the feature silently never runs rather than
+            // crashing the panel.
+            if (_graphicsTier != VkGraphicsTier.Low)
+            {
+                try
+                {
+                    _occlusionQuery = VkOcclusionQueryPipeline.Create(vk, _renderPass);
+                    _occlusionProxyMesh = BuildOcclusionProxyMesh(vk);
+                    var occPoolInfo = new QueryPoolCreateInfo
+                    {
+                        SType = StructureType.QueryPoolCreateInfo,
+                        QueryType = QueryType.Occlusion,
+                        QueryCount = (uint)(VkContext.FramesInFlight * MaxOcclusionQueriesPerFrame)
+                    };
+                    unsafe { vk.Api.CreateQueryPool(vk.Device, in occPoolInfo, null, out _occlusionPool).ThrowOnError(); }
+                    _occlusionPoolReady = true;
+                }
+                catch
+                {
+                    _occlusionQuery?.Dispose(); _occlusionQuery = null;
+                    _occlusionProxyMesh?.Dispose(); _occlusionProxyMesh = null;
+                    if (_occlusionPool.Handle != 0) { unsafe { vk.Api.DestroyQueryPool(vk.Device, _occlusionPool, null); } }
+                    _occlusionPool = default;
+                    _occlusionPoolReady = false;
+                }
+            }
             _pickRenderPass = VkRenderPass.CreatePickPass(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat);
             _pick = VkPickPipeline.Create(vk, _pickRenderPass);
             _placeholders = new VkPlaceholderTextures(vk);
@@ -3418,6 +3493,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _sceneObjects.Remove(rootId);
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
         _spatialGrid.Remove(rootId);
+        // So a destroyed/derezzed object's occluded flag can never linger in the set -- without
+        // this, a permanently-occluded object that's later deleted would sit in
+        // _occludedSceneKeys forever (nothing would ever naturally re-query it to clear itself).
+        _occludedSceneKeys.Remove(rootId);
         _sceneObjectMotion.TryRemove(rootId, out _);
         _windSwayObjects.TryRemove(rootId, out _);
 
@@ -4538,6 +4617,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // Must run before any MarkUsed/FreeUsed call this frame -- see VkFrameReapRing's own doc
         // comment for why "this frame's slot" and "the slot due for reaping" are the same index.
         _reapRing.BeginFrame();
+        // Unconditional zero-init of this slot's issued-count, before anything else can
+        // early-return this frame -- guarantees ReadOcclusionResults (run FramesInFlight frames
+        // later against this same slot index) never reads a STALE count from a prior cycle
+        // against a freshly-reset-but-never-rewritten slot (Vulkan's "unavailable query in range"
+        // case: undefined contents for the whole read range, not just the unwritten entries).
+        // RecordOcclusionQueries overwrites this with the real issued count later in the same
+        // frame if it runs at all; if it doesn't (the opaque-draw block it lives inside was
+        // skipped -- an effectively empty scene), the zero stands and ReadOcclusionResults
+        // correctly no-ops without ever calling vkGetQueryPoolResults.
+        _occlusionFrameIndex++;
+        if (_occlusionPoolReady) _occlusionSlotCount[(int)CurrentOcclusionSlot] = 0;
 
         // MUST run before anything below that disposes or rewrites a live GPU
         // resource (ApplyPendingSubmission's mesh/material/texture/skin-GPU/flexi-GPU disposal,
@@ -4772,6 +4862,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // anything (see the Submit block below). See VkFrameStatsTracker.EndFrame's own doc
             // comment for what "this frame's slot" means under real overlap (an older frame's
             // data, not this one's).
+            //
+            // ReadOcclusionResults runs BEFORE _stats.EndFrame(vk), not after: it relies on the
+            // exact same "this slot's GPU work is fence-confirmed done" guarantee _stats.EndFrame
+            // itself relies on (established by BeginDraw's FreeUsed() call above, not by EndFrame
+            // doing anything special), and calling it first lets RecordOcclusionCycle populate
+            // this frame's occlusion stat in time to be included in EndFrame's own FrameStats
+            // construction/publish below -- otherwise the HUD would always show last frame's
+            // occlusion count instead of this one's.
+            ReadOcclusionResults(vk);
             _stats.EndFrame(vk);
 
             EnsureDepthTarget(vk, pixelSize);
@@ -4817,9 +4916,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 ? FrustumCuller.ExtractPlanes(view * proj)
                 : (Frustum?)null;
             HashSet<ulong>? mainVisibleSceneKeys = null;
+            // Occlusion culling has no effect when frustum culling is off -- see
+            // OcclusionCullingEnabled's own doc comment for why that's intentional.
+            bool doOcclusion = OcclusionCullingEnabled && _occlusionPoolReady && mainFrustum.HasValue;
+            _occlusionCandidateScratch.Clear();
             if (mainFrustum.HasValue)
             {
                 _spatialGrid.QueryVisible(mainFrustum.Value, _visibleSceneKeys);
+                if (doOcclusion)
+                {
+                    // Candidates = the FULL frustum-visible set, BEFORE subtracting occluded keys
+                    // -- load-bearing: if candidates were drawn from the post-subtraction set
+                    // instead, an object that ever tests occluded would never be a candidate again
+                    // (it's no longer in _visibleSceneKeys once subtracted below), so it could
+                    // never be RE-tested and would stay hidden forever once the camera moves away
+                    // and it should become visible again.
+                    _occlusionCandidateScratch.AddRange(_visibleSceneKeys);
+                    _visibleSceneKeys.ExceptWith(_occludedSceneKeys);
+                }
                 mainVisibleSceneKeys = _visibleSceneKeys;
             }
             FilterVisible(_opaqueFaces, _mainOpaqueVisible, mainFrustum, null);
@@ -5165,6 +5279,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var cmd = vk.Pool.CreateCommandBuffer("VkViewportControl.RenderFrame.MainPass");
             cmd.BeginRecording();
             _stats.WriteStartTimestamp(vk, cmd.InternalHandle);
+            // vkCmdResetQueryPool must run outside an active render-pass instance -- this is the
+            // exact spot _stats' own timestamp-pool reset already proves is legal. Resets the FULL
+            // fixed stride (MaxOcclusionQueriesPerFrame) for the slot about to be reused,
+            // unconditionally whenever the pool exists -- not just the count actually issued last
+            // time -- keeping "every query in this slot's range was reset before any
+            // vkCmdBeginQuery could target it" a simple always-true invariant.
+            if (_occlusionPoolReady)
+                vk.Api.CmdResetQueryPool(cmd.InternalHandle, _occlusionPool,
+                    CurrentOcclusionSlot * MaxOcclusionQueriesPerFrame, MaxOcclusionQueriesPerFrame);
 
             var viewport = new Viewport { X = 0, Y = 0, Width = pixelSize.Width, Height = pixelSize.Height, MinDepth = 0, MaxDepth = 1 };
             vk.Api.CmdSetViewport(cmd.InternalHandle, 0, 1, in viewport);
@@ -5255,6 +5378,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                         if (mainSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainSceneOpaqueVisible, baseIndex: mainOpaqueCount);
                     }
 
+                    // Occlusion-query proxies -- still inside this subpass, right after the real
+                    // opaque geometry that just wrote the depth these queries test against (no
+                    // barrier needed: within one subpass, a later draw's fragments are tested
+                    // against an earlier draw's depth writes as ordinary rasterization order).
+                    RecordOcclusionQueries(vk, cmd.InternalHandle, view, proj);
+
                     // water surface, drawn after opaque geometry (correct depth test
                     // against real terrain/objects) but before the alpha pass (transparent objects
                     // above water render in front of it).
@@ -5343,6 +5472,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     if (mainOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainOpaqueVisible, baseIndex: 0);
                     if (mainSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainSceneOpaqueVisible, baseIndex: mainOpaqueCount);
                 }
+
+                // Occlusion-query proxies -- still inside _mainScenePassOpaque's own subpass,
+                // right after the real opaque geometry that just wrote the depth these queries
+                // test against. Must run before CmdEndRenderPass below.
+                RecordOcclusionQueries(vk, cmd.InternalHandle, view, proj);
 
                 vk.Api.CmdEndRenderPass(cmd.InternalHandle);
 
@@ -7572,6 +7706,172 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
+    /// <summary>±0.5 unit cube for occlusion-query proxy boxes -- only position (floats 0-2 of
+    /// each 12-float/48-byte VkMesh vertex) is meaningful, since VkOcclusionQueryPipeline declares
+    /// only vertex attribute location 0; normal/uv/tangent are left zero. Winding doesn't matter
+    /// (CullMode.None). Built once, static/device-local (dynamic: false) -- this proxy is reused
+    /// every frame, transformed per-object via the push-constant MVP in RecordOcclusionQueries,
+    /// never its own vertex data updated.</summary>
+    private static VkMesh BuildOcclusionProxyMesh(VkContext vk)
+    {
+        Vector3[] c =
+        [
+            new(-0.5f, -0.5f, -0.5f), new(0.5f, -0.5f, -0.5f), new(0.5f, 0.5f, -0.5f), new(-0.5f, 0.5f, -0.5f),
+            new(-0.5f, -0.5f, 0.5f), new(0.5f, -0.5f, 0.5f), new(0.5f, 0.5f, 0.5f), new(-0.5f, 0.5f, 0.5f)
+        ];
+        var verts = new float[8 * 12];
+        for (int i = 0; i < 8; i++) { verts[i * 12] = c[i].X; verts[i * 12 + 1] = c[i].Y; verts[i * 12 + 2] = c[i].Z; }
+        ushort[] indices =
+        [
+            0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6, 0, 4, 5, 0, 5, 1,
+            3, 2, 6, 3, 6, 7, 0, 3, 7, 0, 7, 4, 1, 5, 6, 1, 6, 2
+        ];
+        return new VkMesh(vk, verts, indices, dynamic: false);
+    }
+
+    /// <summary>True when <paramref name="camPos"/> is inside or immediately adjacent to the box
+    /// [<paramref name="min"/>,<paramref name="max"/>], expanded by <paramref name="margin"/> on
+    /// every axis. Used to skip the occlusion query entirely for an object the camera is standing
+    /// inside or right next to: a proxy box the camera is inside rasterizes zero fragments from
+    /// its own viewpoint (every face is behind or straddling the near plane), which
+    /// vkCmdEndQuery can't distinguish from "fully occluded" -- querying it would wrongly cull the
+    /// very object the player just walked up to. A CPU-side early-out, not something the
+    /// rasterizer state can be made to handle.</summary>
+    private static bool IsOcclusionForceVisible(Vector3 camPos, Vector3 min, Vector3 max, float margin)
+    {
+        return camPos.X >= min.X - margin && camPos.X <= max.X + margin
+            && camPos.Y >= min.Y - margin && camPos.Y <= max.Y + margin
+            && camPos.Z >= min.Z - margin && camPos.Z <= max.Z + margin;
+    }
+
+    /// <summary>Draws an occlusion-query proxy box for up to <see cref="MaxOcclusionQueriesPerFrame"/>
+    /// candidates from <see cref="_occlusionCandidateScratch"/> (the full frustum-visible scene-key
+    /// set, built by the caller just before <c>FilterVisible</c> runs), starting from a persistent
+    /// round-robin cursor so every candidate gets re-tested at least once every
+    /// <c>ceil(candidateCount / MaxOcclusionQueriesPerFrame)</c> frames. Must be called while
+    /// <paramref name="cmd"/>'s current subpass has the just-drawn opaque depth bound as its depth
+    /// attachment (see both call sites in <see cref="RenderFrame"/> for why no barrier is needed
+    /// there). No-op if the feature is disabled/not ready/there are no candidates -- the slot's
+    /// issued count is left at the 0 that <see cref="RenderFrame"/>'s top-of-frame block already
+    /// set, which is exactly what an early-out needs (see that block's own comment).</summary>
+    private unsafe void RecordOcclusionQueries(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj)
+    {
+        if (!_occlusionPoolReady || !OcclusionCullingEnabled || _occlusionQuery == null || _occlusionProxyMesh == null)
+            return;
+
+        int n = _occlusionCandidateScratch.Count;
+        if (n == 0) return;
+
+        uint slot = CurrentOcclusionSlot;
+        uint slotBase = slot * MaxOcclusionQueriesPerFrame;
+        var viewProj = view * proj;
+        Vector3 camPos = _camera.EyePosition;
+        Vector3 camFwd = _camera.ForwardDirection;
+        float margin = MathF.Max(_camera.Near * 2f, 0.1f);
+
+        bool pipelineBound = false;
+        int issued = 0, examined = 0;
+        int startIdx = _occlusionRoundRobinCursor % n;
+
+        while (issued < MaxOcclusionQueriesPerFrame && examined < n)
+        {
+            ulong key = _occlusionCandidateScratch[(startIdx + examined) % n];
+            examined++;
+
+            if (!_spatialGrid.TryGetBounds(key, out var min, out var max))
+                continue; // stale candidate (removed mid-frame) -- no query spent, no state change
+
+            if (IsOcclusionForceVisible(camPos, min, max, margin))
+            {
+                _occludedSceneKeys.Remove(key); // certain to be visible; don't spend a query slot
+                continue;
+            }
+
+            if (!pipelineBound)
+            {
+                vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _occlusionQuery.Pipeline);
+                pipelineBound = true;
+            }
+
+            // Epsilon-expanded box: cheap insurance against a proxy face landing exactly on a
+            // thin/flat prim's own depth (CompareOp.LessOrEqual already covers most of this; this
+            // covers the rest without needing per-axis reasoning about which face is "the" test
+            // face).
+            var expand = Vector3.Max((max - min) * 0.02f, new Vector3(0.02f));
+            var eMin = min - expand;
+            var eMax = max + expand;
+            var model = Matrix4x4.CreateScale(eMax - eMin) * Matrix4x4.CreateTranslation((eMin + eMax) * 0.5f);
+            var mvp = model * viewProj;
+            vk.Api.CmdPushConstants(cmd, _occlusionQuery.Layout, ShaderStageFlags.VertexBit, 0, 64, &mvp);
+
+            uint slotIndex = slotBase + (uint)issued;
+            // Occlusion queries can't nest -- strictly sequential begin -> draw -> end per object,
+            // which is why this is VkMesh.Draw directly, not VkInstanceDrawer's batched-instance
+            // draw (that mechanism exists to coalesce SEVERAL objects into one draw call, the
+            // opposite of what a per-object query needs).
+            vk.Api.CmdBeginQuery(cmd, _occlusionPool, slotIndex, 0);
+            _occlusionProxyMesh.Draw(cmd);
+            vk.Api.CmdEndQuery(cmd, _occlusionPool, slotIndex);
+
+            _occlusionSlotSceneKey[slotIndex] = key;
+            issued++;
+        }
+
+        _occlusionSlotCount[(int)slot] = issued;
+        _occlusionSlotCameraPos[slot] = camPos;
+        _occlusionSlotCameraFwd[slot] = camFwd;
+        _occlusionRoundRobinCursor = (startIdx + examined) % n;
+    }
+
+    /// <summary>Reads back the occlusion-query slot that was populated <see cref="VkContext.FramesInFlight"/>
+    /// frames ago (safe to do synchronously/non-blockingly here -- this call site sits right after
+    /// <c>_stats.EndFrame(vk)</c>, which already relies on this exact same slot's GPU work being
+    /// fence-confirmed done by this point in the frame; see that method's own doc comment). Folds
+    /// results into the durable <see cref="_occludedSceneKeys"/> set -- absence from that set means
+    /// visible, the required safety default for any object with no result yet.</summary>
+    private unsafe void ReadOcclusionResults(VkContext vk)
+    {
+        if (!_occlusionPoolReady) return;
+        uint slot = CurrentOcclusionSlot;
+        int count = _occlusionSlotCount[(int)slot];
+        if (count <= 0) return; // nothing was issued into this slot the last time it was used
+
+        uint slotBase = slot * MaxOcclusionQueriesPerFrame;
+        var raw = stackalloc ulong[MaxOcclusionQueriesPerFrame];
+        var result = vk.Api.GetQueryPoolResults(vk.Device, _occlusionPool, slotBase, (uint)count,
+            (nuint)(sizeof(ulong) * count), raw, sizeof(ulong), QueryResultFlags.Result64Bit);
+        // Success only -- NOT WaitBit (this must never block) and NOT PartialBit (a partial
+        // occlusion-query result is meaningless for a boolean any-samples-passed test, and it's
+        // unnecessary here anyway: _occlusionSlotCount already guarantees the read range never
+        // includes a query that wasn't actually begun/ended, so there's no "unavailable query in
+        // range" case to partially tolerate). Anything but Success means "no information this
+        // cycle" -- leave _occludedSceneKeys untouched, the required safety default.
+        if (result != Result.Success) return;
+
+        // Camera-motion staleness guard: these queries were issued FramesInFlight frames ago
+        // against THAT frame's camera pose. Under fast rotation/movement, an object genuinely
+        // occluded then can be genuinely visible now -- applying a stale "occluded" verdict would
+        // produce a visible pop-out. Discarding the whole cycle when the camera has moved/turned
+        // past a threshold always resolves to "still visible" (no _occludedSceneKeys mutation),
+        // staying on the safe side of the never-cull-on-stale-data requirement. Thresholds are a
+        // starting guess, not measured -- may need tuning.
+        const float maxDistSq = 4f * 4f; // 4 metres
+        const float minDot = 0.98f;      // ~11 degrees
+        var dPos = _camera.EyePosition - _occlusionSlotCameraPos[slot];
+        bool stable = dPos.LengthSquared() <= maxDistSq
+            && Vector3.Dot(Vector3.Normalize(_camera.ForwardDirection), Vector3.Normalize(_occlusionSlotCameraFwd[slot])) >= minDot;
+        if (!stable) return;
+
+        int becameOccluded = 0;
+        for (int i = 0; i < count; i++)
+        {
+            ulong key = _occlusionSlotSceneKey[slotBase + i];
+            if (raw[i] > 0) _occludedSceneKeys.Remove(key);
+            else if (_occludedSceneKeys.Add(key)) becameOccluded++;
+        }
+        _stats.RecordOcclusionCycle(becameOccluded);
+    }
+
     private static void CopyMatrix(Matrix4x4 m, float[] dest, int offset)
     {
         dest[offset + 0] = m.M11; dest[offset + 1] = m.M12; dest[offset + 2] = m.M13; dest[offset + 3] = m.M14;
@@ -7971,6 +8271,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _wireframe?.Dispose(); _wireframe = null;
         _outline?.Dispose(); _outline = null;
         _selectedOutlineLocalId = 0;
+        _occlusionQuery?.Dispose(); _occlusionQuery = null;
+        _occlusionProxyMesh?.Dispose(); _occlusionProxyMesh = null;
+        if (_occlusionPool.Handle != 0) { unsafe { vk.Api.DestroyQueryPool(vk.Device, _occlusionPool, null); } }
+        _occlusionPool = default;
+        _occlusionPoolReady = false;
+        _occludedSceneKeys.Clear();
+        _occlusionCandidateScratch.Clear();
+        _occlusionRoundRobinCursor = 0;
+        _occlusionFrameIndex = -1;
         _pick?.Dispose(); _pick = null;
         if (_pickRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _pickRenderPass, null); } }
         _pickRenderPass = default;

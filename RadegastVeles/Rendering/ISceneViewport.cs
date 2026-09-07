@@ -39,6 +39,11 @@ public interface ISceneViewport
     /// stages for the full gate.</summary>
     bool GodRaysEnabled { get; set; }
     bool FrustumCullingEnabled { get; set; }
+    /// <summary>Hardware occlusion-query culling for scene objects fully hidden behind other
+    /// geometry (e.g. inside a closed room). Medium/High-tier-only and has no effect when
+    /// <see cref="FrustumCullingEnabled"/> is false -- see
+    /// <c>VkViewportControl.OcclusionCullingEnabled</c>'s own doc comment for the full gate.</summary>
+    bool OcclusionCullingEnabled { get; set; }
     bool ShowPerfOverlay { get; set; }
 
     /// <summary>Typed <see cref="IFrameStatsTracker"/>, not the concrete tracker type -- see

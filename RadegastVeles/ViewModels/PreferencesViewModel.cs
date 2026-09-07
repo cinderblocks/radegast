@@ -295,6 +295,13 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _frustumCullingEnabled = true;
 
+    /// <summary>GPU hardware occlusion-query occlusion culling for scene objects fully hidden
+    /// behind other geometry (e.g. inside a closed room). Default true, but only actually runs on
+    /// Medium/High-tier hardware and requires FrustumCullingEnabled too -- see
+    /// ISceneViewport.OcclusionCullingEnabled's own doc comment.</summary>
+    [ObservableProperty]
+    private bool _occlusionCullingEnabled = true;
+
     /// <summary>Enable planar water reflections in scene viewers. Default false (costs a full scene pre-pass).</summary>
     [ObservableProperty]
     private bool _waterReflectionsEnabled = false;
@@ -710,6 +717,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["ssao_enabled"].AsBoolean() : true;
         FrustumCullingEnabled = s["frustum_culling_enabled"].Type != OSDType.Unknown
             ? s["frustum_culling_enabled"].AsBoolean() : true;
+        OcclusionCullingEnabled = s["occlusion_culling_enabled"].Type != OSDType.Unknown
+            ? s["occlusion_culling_enabled"].AsBoolean() : true;
         WaterReflectionsEnabled = s["water_reflections_enabled"].Type != OSDType.Unknown
             ? s["water_reflections_enabled"].AsBoolean() : false;
         AtmosphericsEnabled = s["atmospherics_enabled"].Type != OSDType.Unknown
@@ -896,6 +905,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Graphics
         s["ssao_enabled"] = OSD.FromBoolean(SsaoEnabled);
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
+        s["occlusion_culling_enabled"] = OSD.FromBoolean(OcclusionCullingEnabled);
         s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
         s["atmospherics_enabled"] = OSD.FromBoolean(AtmosphericsEnabled);
         s["god_rays_enabled"] = OSD.FromBoolean(GodRaysEnabled);
