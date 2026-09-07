@@ -12,11 +12,19 @@ on:
         type: string
 
 env:
-  REPO_NAME: ${{ github.event.repository.name }}
+  # Fixed, not derived from github.event.repository.name: the GitHub repo itself is named all
+  # lowercase ("radegast"), which produced a lowercase "radegast.app" bundle, CFBundleName, etc.
+  # Match the Windows workflow's own convention (hardcoded "RadegastVeles" throughout) instead.
+  REPO_NAME: RadegastVeles
   TAG_NAME: ${{ github.ref_name }}
   PUBLISH_DIR: publish
   VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
   DOTNET_VERSION: '10.0.x'
+  # Pinned release from https://github.com/KhronosGroup/MoltenVK/releases -- macOS has no
+  # system Vulkan driver at all, so the renderer needs this bundled or it can't init Vulkan
+  # on any Mac. Downloaded fresh each run rather than vendored in-repo (it's ~11MB and has its
+  # own upstream release cadence); bump this to pick up a MoltenVK update.
+  MOLTENVK_VERSION: 'v1.4.2'
 
 jobs:
   build-macos:
@@ -99,6 +107,31 @@ jobs:
             echo "Veles project not found; doing generic dotnet publish"
             dotnet publish -c Release -r $RID --self-contained true -o $PUBLISH_DIR/$RID
           fi
+
+      # macOS has no native Vulkan driver -- RadegastVeles's Vulkan renderer (Silk.NET.Vulkan)
+      # needs a Vulkan implementation bundled in the app itself or it can't initialize at all.
+      # MoltenVK is a Vulkan-on-Metal translation layer; its dylib can be linked/loaded directly
+      # as a complete Vulkan implementation (Khronos's own documented "direct linking" mode --
+      # confirmed here by checking libMoltenVK.dylib actually exports vkCreateInstance etc.),
+      # skipping the separate Vulkan Loader + ICD-manifest-JSON setup entirely. Silk.NET's own
+      # default native-library search only tries vulkan-derived names (verified by inspecting
+      # Silk.NET.Vulkan.dll/Silk.NET.Core.dll directly -- "MoltenVK" appears nowhere in either),
+      # so the real file is symlinked under those names too; placed in $PUBLISH_DIR/$RID (before
+      # the app-wrapper step's rsync) so it flows into Contents/MacOS/ and gets code-signed like
+      # every other bundled dylib.
+      - name: Bundle MoltenVK (Vulkan)
+        run: |
+          set -e
+          RID=osx-${{ matrix.arch }}
+          PUB_DIR=$PUBLISH_DIR/$RID
+          curl -sL -o moltenvk.tar "https://github.com/KhronosGroup/MoltenVK/releases/download/${MOLTENVK_VERSION}/MoltenVK-macos.tar"
+          tar -xf moltenvk.tar "MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" "MoltenVK/LICENSE"
+          cp "MoltenVK/MoltenVK/dynamic/dylib/macOS/libMoltenVK.dylib" "$PUB_DIR/libMoltenVK.dylib"
+          ln -sf libMoltenVK.dylib "$PUB_DIR/libvulkan.dylib"
+          ln -sf libMoltenVK.dylib "$PUB_DIR/libvulkan.1.dylib"
+          mkdir -p "$PUB_DIR/licenses"
+          cp "MoltenVK/LICENSE" "$PUB_DIR/licenses/MoltenVK-LICENSE.txt"
+          rm -rf moltenvk.tar MoltenVK
 
       - name: Create minimal .app wrapper if none exists
         run: |

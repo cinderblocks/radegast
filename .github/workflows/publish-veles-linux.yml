@@ -14,7 +14,9 @@ on:
 env:
   APP_ID: life.radegast.RadegastVeles
   TAG_NAME: ${{ github.ref_name }}
-  REPO_NAME: ${{ github.event.repository.name }}
+  # Fixed, not derived from github.event.repository.name: see publish-veles-macos.yml's
+  # identically-named env var for why (the GitHub repo itself is now all lowercase).
+  REPO_NAME: RadegastVeles
   VELES_PROJECT: RadegastVeles/RadegastVeles.csproj
   DOTNET_VERSION: '10.0.x'
 

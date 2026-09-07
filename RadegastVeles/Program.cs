@@ -45,6 +45,15 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        // Legacy Radegast (Radegast/Program.cs) does the same for the same reason: several
+        // pieces of shared code (LibreMetaverse.LslTools' LslSyntax, shader_data lookups, etc.)
+        // resolve their own asset paths relative to the current working directory rather than
+        // AppContext.BaseDirectory. On Windows that's usually a no-op since double-clicking an
+        // exe already sets CWD to its own folder, but macOS/Linux launches (Terminal, LaunchServices,
+        // launchd) make no such guarantee -- without this, those lookups silently fail whenever
+        // the app isn't launched from inside its own install directory.
+        Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
         // Initialize native libraries (FMOD) before anything else
         NativeMethods.Init();
 

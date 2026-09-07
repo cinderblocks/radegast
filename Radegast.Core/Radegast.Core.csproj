@@ -52,4 +52,23 @@
     <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\x86&quot; &quot;$(OutDir)dll\x86&quot; /E/I" />
     <Exec Command="xcopy /y &quot;$(ProjectDir)assemblies\arm64&quot; &quot;$(OutDir)dll\arm64&quot; /E/I" />
   </Target>
+  <!-- macOS/Linux equivalent of the PostBuild target above. That one only fires when the MSBuild
+       host itself is Windows ('$(OS)'=='Windows_NT'), which is never true on the macOS/Linux CI
+       runners that publish those platforms, so fmod's native library never made it into
+       those publish outputs at all. WindowsLibraryLoader (NativeMethods.cs) only loads on
+       Windows too, so on macOS/Linux this relies on the .NET runtime's own default P/Invoke
+       probing for a bare [DllImport("fmod")], which finds "lib" + name + ".dylib"/".so"
+       automatically as long as the file sits next to the assembly, no custom loader needed,
+       just get it copied there. Conditioned on RuntimeIdentifier (set by `dotnet publish -r`),
+       not host OS, since these targets cross-build from any host. -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <None Include="assemblies\libfmod.dylib" CopyToOutputDirectory="PreserveNewest" Link="libfmod.dylib" />
+  </ItemGroup>
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux'))">
+    <!-- assemblies\libfmod.so / libfmod.so.12 are supposed to be symlinks to this real file,
+         chained the way the upstream FMOD SDK ships them (SONAME-versioned .so), but git on
+         Windows checked them in as empty regular files instead of preserving the symlinks.
+         Ship the real file directly under the plain name instead of relying on that chain. -->
+    <None Include="assemblies\libfmod.so.12.10" CopyToOutputDirectory="PreserveNewest" Link="libfmod.so" />
+  </ItemGroup>
 </Project>
