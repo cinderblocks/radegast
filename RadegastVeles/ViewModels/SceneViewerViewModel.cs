@@ -860,7 +860,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
             {
                 _viewport?.Submit(submission);
-                CenterCameraOnAvatar();
+                if (centerCamera) CenterCameraOnAvatar();
                 UpdateStatusBar();
             });
         }
