@@ -106,7 +106,7 @@ jobs:
           APP_NAME="${REPO_NAME}.app"
           APP_DIR="$PUB_DIR/$APP_NAME"
           if [ -d "$PUB_DIR" ]; then
-            if ls "$PUB_DIR"/*.app 1> /dev/null 2>&1; then
+            if find "$PUB_DIR" -maxdepth 1 -type d -name '*.app' -print -quit | grep -q .; then
               echo ".app bundle already present for $RID"
             else
               echo "Creating minimal .app wrapper: $APP_DIR"
@@ -135,7 +135,7 @@ jobs:
         run: |
           set -e
           RID=osx-${{ matrix.arch }}
-          APP=$(ls $PUBLISH_DIR/$RID/*.app 2>/dev/null | head -n 1)
+          APP=$(find "$PUBLISH_DIR/$RID" -maxdepth 1 -type d -name '*.app' -print -quit)
           # No Apple Developer ID certificate is available, so this is an ad-hoc signature
           # (identity "-": no certificate, no notarization). It's still required for arm64
           # builds to launch at all under macOS's kernel-level code-signing enforcement.
@@ -154,7 +154,7 @@ jobs:
         run: |
           set -e
           RID=osx-${{ matrix.arch }}
-          SRC_APP=$(ls $PUBLISH_DIR/$RID/*.app 2>/dev/null | head -n 1 || true)
+          SRC_APP=$(find "$PUBLISH_DIR/$RID" -maxdepth 1 -type d -name '*.app' -print -quit)
           if [ -z "$SRC_APP" ]; then
             SRC_APP="$PUBLISH_DIR/$RID"
           fi
@@ -217,8 +217,8 @@ jobs:
       - name: Create universal .app
         run: |
           set -e
-          X64_APP=$(ls publish-x64/*.app 2>/dev/null | head -n 1 || true)
-          ARM_APP=$(ls publish-arm64/*.app 2>/dev/null | head -n 1 || true)
+          X64_APP=$(find publish-x64 -maxdepth 1 -type d -name '*.app' -print -quit)
+          ARM_APP=$(find publish-arm64 -maxdepth 1 -type d -name '*.app' -print -quit)
           WORK=universal
           mkdir -p $WORK
           if [ -n "$X64_APP" ] && [ -n "$ARM_APP" ]; then
