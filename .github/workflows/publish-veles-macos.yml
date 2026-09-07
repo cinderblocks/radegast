@@ -150,7 +150,7 @@ jobs:
           name: radegast-veles-macos-${{ matrix.arch }}-publish
           path: ${{ env.PUBLISH_DIR }}/osx-${{ matrix.arch }}
 
-      - name: Create per-arch DMG (optional)
+      - name: Create per-arch DMG and tarball
         run: |
           set -e
           RID=osx-${{ matrix.arch }}
@@ -163,11 +163,18 @@ jobs:
           if npx --yes create-dmg "$SRC_APP" "$DIST_DIR"; then
             echo "DMG created for $RID"
           else
-            echo "create-dmg failed for $RID; creating fallback tar.gz"
-            tar -czf "$DIST_DIR/${REPO_NAME}-${TAG_NAME#Veles/}-$RID.tar.gz" -C "$PUBLISH_DIR/$RID" .
+            echo "create-dmg failed for $RID; DMG will be missing, tarball still produced below"
           fi
+          # Always produced, not just a create-dmg fallback: a DMG downloaded via a browser
+          # picks up macOS's com.apple.quarantine attribute, and Gatekeeper refuses to launch a
+          # quarantined, ad-hoc-only-signed app at all (no Developer ID/notarization available
+          # here) -- it just closes immediately from Finder, or "Permission denied" from a
+          # shell. Extracting a .tbz with command-line `tar` does not propagate quarantine to
+          # the extracted contents the way Archive Utility's .dmg/.zip handling does, so this is
+          # the one format that actually runs for testers.
+          tar -cjf "$DIST_DIR/${REPO_NAME}-${TAG_NAME#Veles/}-$RID.tbz" -C "$(dirname "$SRC_APP")" "$(basename "$SRC_APP")"
 
-      - name: Upload per-arch DMG artifact
+      - name: Upload per-arch DMG/tarball artifact
         uses: actions/upload-artifact@v4
         with:
           name: radegast-veles-macos-${{ matrix.arch }}-${{ env.VERSION }}
@@ -258,7 +265,7 @@ jobs:
           codesign --force --deep --sign - "$UNIVERSAL_APP"
           codesign --verify --verbose "$UNIVERSAL_APP"
 
-      - name: Create universal DMG
+      - name: Create universal DMG and tarball
         run: |
           set -e
           UNIVERSAL_APP="universal/${REPO_NAME}.app"
@@ -267,7 +274,15 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          npx --yes create-dmg --no-code-sign "$UNIVERSAL_APP" dist
+          if npx --yes create-dmg --no-code-sign "$UNIVERSAL_APP" dist; then
+            echo "Universal DMG created"
+          else
+            echo "create-dmg failed for universal app; DMG will be missing, tarball still produced below"
+          fi
+          # See build-macos's identically-named step for why this always runs, not just as a
+          # create-dmg fallback: it's the only distribution format that survives a browser
+          # download without inheriting Gatekeeper's quarantine block on an ad-hoc signature.
+          tar -cjf "dist/${REPO_NAME}-${TAG_NAME#Veles/}-universal.tbz" -C universal "${REPO_NAME}.app"
 
       # Skipped entirely for manual test builds (workflow_dispatch): a test build must never
       # create a tag or a release. gh release create with a tag_name that doesn't exist yet
@@ -287,15 +302,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload universal DMG to GitHub Release
+      - name: Upload universal packages to GitHub Release
         if: github.event_name != 'workflow_dispatch'
         run: |
-          DMG=$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)
-          if [ -z "$DMG" ]; then
-            echo "No universal DMG found in dist/"
+          shopt -s nullglob
+          ASSETS=(dist/*.dmg dist/*.tbz)
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "No universal packages found in dist/"
             exit 1
           fi
-          gh release upload "$TAG_NAME" "$DMG" --clobber
+          gh release upload "$TAG_NAME" "${ASSETS[@]}" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
