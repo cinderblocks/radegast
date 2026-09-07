@@ -212,12 +212,15 @@ internal static class VkRenderPass
     }
 
     /// <summary>
-    /// First half of the main scene pass, split in two ONLY on frames where water is visible and
-    /// refraction needs a pre-water snapshot of the opaque scene colour (<c>vkCmdCopyImage</c>
-    /// isn't legal inside an active render pass -- see <see cref="CreateMainScenePassContinuation"/>'s
-    /// own doc comment for the full two-pass picture). Draws sky + opaque geometry only, then ends
-    /// -- the caller copies <c>_hdrColorImage</c> out, transitions it back, and begins the
-    /// continuation pass for water/alpha/overlays.
+    /// First half of the main scene pass, split in two on frames where EITHER water refraction OR
+    /// SSR needs a snapshot of the finished opaque scene colour (<c>vkCmdCopyImage</c> isn't
+    /// legal inside an active render pass -- see <see cref="CreateMainScenePassContinuation"/>'s
+    /// own doc comment for the full two-pass picture). Originally built for water refraction
+    /// alone; SSR reuses the exact same snapshot rather than taking a second one -- see
+    /// <c>VkViewportControl.RenderFrame</c>'s own <c>doOpaqueSnapshot</c> gate (now
+    /// <c>doWater || doSsr</c>). Draws sky + opaque geometry only, then ends -- the caller copies
+    /// <c>_hdrColorImage</c> out, transitions it back, and begins the continuation pass for
+    /// SSR/water/alpha/overlays.
     /// <para>
     /// Same attachment shape as <see cref="CreateMainScenePass"/> (this is still the frame's FIRST
     /// write -- same entry dependency, guarding the persistent, cross-frame-reused <c>_hdrColorImage</c>/
@@ -301,8 +304,9 @@ internal static class VkRenderPass
     /// Second half of the main scene pass split (see <see cref="CreateMainScenePassOpaque"/>'s own
     /// doc comment for why this split exists and the full sequence around it): continues into the
     /// SAME <c>_hdrColorImage</c>/depth attachments <see cref="CreateMainScenePassOpaque"/> just
-    /// wrote (<c>LoadOp = Load</c> on both -- no clear, nothing is discarded), draws water + alpha
-    /// + wireframe/selection-outline/particle overlays, then ends. This pass, not the opaque half,
+    /// wrote (<c>LoadOp = Load</c> on both -- no clear, nothing is discarded), draws the SSR
+    /// redraw (a roughness-filtered subset of opaque geometry, sampling the just-taken snapshot)
+    /// + water + alpha + wireframe/selection-outline/particle overlays, then ends. This pass, not the opaque half,
     /// now owns the <c>FinalLayout = ShaderReadOnlyOptimal</c> transition <see cref="CreateMainScenePass"/>
     /// used to own directly -- it's the frame's actual last write to <c>_hdrColorImage</c>, so the
     /// same two-dependency "cross-frame-reused AND read later this frame" shape moves here.

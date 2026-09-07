@@ -51,14 +51,20 @@ internal static class VkDescriptorSetLayouts
     }
 
     /// <summary>Set 1: per-pass samplers -- uSsaoMap (binding 0, prim.frag), uShadowMap/
-    /// uPointShadowMap0/uPointShadowMap1 (bindings 1-3, shadow.glsl). Fragment-only; bound
-    /// once per pass alongside set 0 but kept as a separate set since a pass might rebind
-    /// samplers (e.g. between main and water-reflection pre-pass) without touching the
-    /// per-frame UBO.</summary>
+    /// uPointShadowMap0/uPointShadowMap1 (bindings 1-3, shadow.glsl), uSsrSceneColor/uSsrDepth/
+    /// uSsrNormal (bindings 4-6, prim.frag). Fragment-only; bound once per pass alongside set 0
+    /// but kept as a separate set since a pass might rebind samplers (e.g. between main and
+    /// water-reflection pre-pass) without touching the per-frame UBO.</summary>
     public static unsafe DescriptorSetLayout CreatePerPassSamplersLayout(VkContext vk)
     {
-        var bindings = stackalloc DescriptorSetLayoutBinding[4];
-        for (uint i = 0; i < 4; i++)
+        // 0=uSsaoMap, 1=uShadowMap, 2=uPointShadowMap0, 3=uPointShadowMap1 (all prim.frag/
+        // shadow.glsl, pre-existing), 4=uSsrSceneColor, 5=uSsrDepth, 6=uSsrNormal (new, SSR --
+        // see VkPrimDescriptorSets.UpdateSsrSceneColor/UpdateSsrGBuffer). Extending this set
+        // rather than adding a new one costs zero changes to any of the 5+ existing
+        // CmdBindDescriptorSets call sites that already bind {FrameSet, PassSet} together.
+        const uint bindingCount = 7;
+        var bindings = stackalloc DescriptorSetLayoutBinding[(int)bindingCount];
+        for (uint i = 0; i < bindingCount; i++)
         {
             bindings[i] = new DescriptorSetLayoutBinding
             {
@@ -71,7 +77,7 @@ internal static class VkDescriptorSetLayouts
         var createInfo = new DescriptorSetLayoutCreateInfo
         {
             SType = StructureType.DescriptorSetLayoutCreateInfo,
-            BindingCount = 4,
+            BindingCount = bindingCount,
             PBindings = bindings
         };
         vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();

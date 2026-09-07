@@ -44,6 +44,15 @@ public interface ISceneViewport
     /// <see cref="FrustumCullingEnabled"/> is false -- see
     /// <c>VkViewportControl.OcclusionCullingEnabled</c>'s own doc comment for the full gate.</summary>
     bool OcclusionCullingEnabled { get; set; }
+    /// <summary>Screen-space reflections on low-roughness PBR surfaces (metal floors, glossy/wet
+    /// materials) -- ray-marches the just-shaded opaque scene's own G-buffer depth to add a real
+    /// reflection term on top of prim.frag's existing flat ambient-Fresnel specular. Default
+    /// false: unlike SSAO/occlusion culling (which degrade gracefully), a wrong SSR
+    /// implementation produces visually obvious ray-march artefacts, so this defaults off pending
+    /// real-world visual validation. Medium/High-tier only (requires the split main pass's
+    /// shared opaque snapshot -- see <c>VkViewportControl.RenderFrame</c>'s own
+    /// <c>doOpaqueSnapshot</c> gate).</summary>
+    bool SsrEnabled { get; set; }
     bool ShowPerfOverlay { get; set; }
 
     /// <summary>Typed <see cref="IFrameStatsTracker"/>, not the concrete tracker type -- see

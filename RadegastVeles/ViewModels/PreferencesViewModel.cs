@@ -302,6 +302,15 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _occlusionCullingEnabled = true;
 
+    /// <summary>Screen-space reflections on low-roughness PBR surfaces (metal floors, glossy/wet
+    /// materials). Default FALSE, unlike this session's other Vulkan features -- the first
+    /// genuinely per-pixel-scaling cost added this session and the first use of GLSL
+    /// specialization constants in this codebase, both real novelty worth explicit opt-in
+    /// pending real-world visual validation. Only actually runs on Medium/High-tier hardware --
+    /// see ISceneViewport.SsrEnabled's own doc comment.</summary>
+    [ObservableProperty]
+    private bool _ssrEnabled = false;
+
     /// <summary>Enable planar water reflections in scene viewers. Default false (costs a full scene pre-pass).</summary>
     [ObservableProperty]
     private bool _waterReflectionsEnabled = false;
@@ -719,6 +728,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["frustum_culling_enabled"].AsBoolean() : true;
         OcclusionCullingEnabled = s["occlusion_culling_enabled"].Type != OSDType.Unknown
             ? s["occlusion_culling_enabled"].AsBoolean() : true;
+        SsrEnabled = s["ssr_enabled"].Type != OSDType.Unknown
+            ? s["ssr_enabled"].AsBoolean() : false;
         WaterReflectionsEnabled = s["water_reflections_enabled"].Type != OSDType.Unknown
             ? s["water_reflections_enabled"].AsBoolean() : false;
         AtmosphericsEnabled = s["atmospherics_enabled"].Type != OSDType.Unknown
@@ -906,6 +917,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["ssao_enabled"] = OSD.FromBoolean(SsaoEnabled);
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
         s["occlusion_culling_enabled"] = OSD.FromBoolean(OcclusionCullingEnabled);
+        s["ssr_enabled"] = OSD.FromBoolean(SsrEnabled);
         s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
         s["atmospherics_enabled"] = OSD.FromBoolean(AtmosphericsEnabled);
         s["god_rays_enabled"] = OSD.FromBoolean(GodRaysEnabled);

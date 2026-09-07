@@ -175,6 +175,55 @@ internal sealed unsafe class VkPrimDescriptorSets : IDisposable
         _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
+    /// <summary>Rewrites PassSet binding 4 (uSsrSceneColor) to point at the shared opaque-scene
+    /// snapshot -- the SAME image water refraction samples (see
+    /// VkViewportControl.EnsureOpaqueSnapshotTarget's own doc comment for why one snapshot
+    /// serves both features). Same rewrite-on-(re)creation-only discipline as
+    /// <see cref="UpdateSsaoMap"/>: call ONLY when that target is (re)created, never per-frame.</summary>
+    public void UpdateSsrSceneColor(DescriptorImageInfo sceneColorInfo)
+    {
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = PassSet,
+            DstBinding = 4,
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+            PImageInfo = &sceneColorInfo
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
+    }
+
+    /// <summary>Rewrites PassSet bindings 5/6 (uSsrDepth/uSsrNormal) to point at the G-buffer
+    /// depth/normal targets SSR ray-marches against. Call ONLY when
+    /// <c>VkViewportControl.EnsureGBufferTarget</c> (re)creates them (panel resize) -- same
+    /// discipline as <see cref="UpdateSsaoMap"/>.</summary>
+    public void UpdateSsrGBuffer(DescriptorImageInfo depthInfo, DescriptorImageInfo normalInfo)
+    {
+        var writes = stackalloc WriteDescriptorSet[2]
+        {
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = PassSet,
+                DstBinding = 5,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &depthInfo
+            },
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = PassSet,
+                DstBinding = 6,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &normalInfo
+            }
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 2, writes, 0, null);
+    }
+
     private static DescriptorSet AllocateSet(VkContext vk, DescriptorSetLayout layout)
     {
         var setLayout = layout;
@@ -213,16 +262,28 @@ internal sealed unsafe class VkPrimDescriptorSets : IDisposable
     {
         // Binding order must match shadow.glsl/prim.frag exactly -- a wrong binding index here
         // is a silent wrong-texture bug, not a build error: 0 = uSsaoMap (prim.frag),
-        // 1 = uShadowMap, 2 = uPointShadowMap0, 3 = uPointShadowMap1 (shadow.glsl).
-        var infos = stackalloc DescriptorImageInfo[4]
+        // 1 = uShadowMap, 2 = uPointShadowMap0, 3 = uPointShadowMap1 (shadow.glsl), 4 =
+        // uSsrSceneColor, 5 = uSsrDepth, 6 = uSsrNormal (prim.frag, SSR). The 3 new SSR slots
+        // are placeholder-bound (White) here for the same reason every other "optional texture
+        // not available yet" binding in this class is: UpdateSsrSceneColor/UpdateSsrGBuffer
+        // rewrite them once the real targets exist (EnsureOpaqueSnapshotTarget/
+        // EnsureGBufferTarget respectively) -- harmless in the meantime since Opaque/Alpha/
+        // ReflOpaque never statically read them at all (kIsSsrPass defaults false, dead-code-
+        // eliminating the read), and the SSR pipeline variant itself is never bound before its
+        // own init has run.
+        const uint bindingCount = 7;
+        var infos = stackalloc DescriptorImageInfo[(int)bindingCount]
         {
             placeholders.White,
             placeholders.ShadowMap2D,
             placeholders.ShadowMapCube,
-            placeholders.ShadowMapCube
+            placeholders.ShadowMapCube,
+            placeholders.White,
+            placeholders.White,
+            placeholders.White
         };
-        var writes = stackalloc WriteDescriptorSet[4];
-        for (uint i = 0; i < 4; i++)
+        var writes = stackalloc WriteDescriptorSet[(int)bindingCount];
+        for (uint i = 0; i < bindingCount; i++)
         {
             writes[i] = new WriteDescriptorSet
             {
@@ -234,7 +295,7 @@ internal sealed unsafe class VkPrimDescriptorSets : IDisposable
                 PImageInfo = &infos[i]
             };
         }
-        _vk.Api.UpdateDescriptorSets(_vk.Device, 4, writes, 0, null);
+        _vk.Api.UpdateDescriptorSets(_vk.Device, bindingCount, writes, 0, null);
     }
 
     public void Dispose()

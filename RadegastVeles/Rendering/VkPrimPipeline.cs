@@ -48,6 +48,13 @@ internal sealed class VkPrimPipeline : IDisposable
     /// </summary>
     public Pipeline ReflOpaque { get; private set; }
 
+    /// <summary>
+    /// Not created by <see cref="Create"/>, for the same reason <see cref="ReflOpaque"/> isn't:
+    /// see <see cref="CreateSsrVariant"/>'s own doc comment. Stays <c>default</c> (Handle == 0)
+    /// until that's called; <see cref="Dispose"/> only destroys it if that happened.
+    /// </summary>
+    public Pipeline Ssr { get; private set; }
+
     public DescriptorSetLayout PerFrameLayout { get; }
     public DescriptorSetLayout PerPassSamplersLayout { get; }
     public DescriptorSetLayout PerMaterialLayout { get; }
@@ -433,12 +440,188 @@ internal sealed class VkPrimPipeline : IDisposable
         ReflOpaque = reflOpaque;
     }
 
+    /// <summary>
+    /// Builds the SSR redraw variant against the split-main-pass continuation render pass
+    /// (<c>_mainScenePassContinuation</c>) -- same reasoning <see cref="CreateReflVariant"/>
+    /// documents for why this can't happen inside <see cref="Create"/>: that render pass doesn't
+    /// exist yet at that point. Unlike <see cref="ReflOpaque"/>, this draws from the REAL camera
+    /// (not mirrored) using the exact same mesh/instance-MVP as pass 1's own Opaque draw for
+    /// these faces -- it redraws them a second time, adding an SSR reflection term on top.
+    /// <para>
+    /// Depth-equal-OR-CLOSER, no depth WRITE: this must never corrupt what water/alpha/particles
+    /// (drawn after it) test against, hence <c>DepthWriteEnable=false</c> -- same reasoning
+    /// VkOcclusionQueryPipeline/VkOutlinePipeline already established for their own overlay
+    /// passes this session. <c>DepthCompareOp=LessOrEqual</c>, not <c>Equal</c>: this is the SAME
+    /// mesh/instance-MVP as pass 1's own draw, so <c>gl_Position</c> SHOULD come out
+    /// bit-identical, but Equal has no safety margin if a driver ever produces even one ULP of
+    /// difference between two distinct <c>Pipeline</c> objects built from the same source --
+    /// LessOrEqual matches this codebase's own "redraw on top of what's already there" precedent
+    /// rather than assuming bit-exact reproducibility across separate pipeline compilations.
+    /// </para>
+    /// <para>
+    /// Blend: standard alpha-over. The SSR contribution's own alpha (computed in prim.frag's
+    /// <c>ssrTrace</c>) carries the hit-confidence/edge-fade term -- a miss or a fully-faded-out
+    /// ray writes alpha=0, leaving pass 1's own shading completely undisturbed underneath,
+    /// mirroring how sampleDirShadow/samplePointShadowCube fall back to "fully lit" rather than a
+    /// hard cutoff.
+    /// </para>
+    /// <para>
+    /// Uses a GLSL specialization constant (<c>kIsSsrPass</c>, prim.frag) to select the SSR
+    /// ray-march branch at PIPELINE-CREATION time, not a push constant or per-draw uniform --
+    /// see this session's plan for the full reasoning (Layout has zero push-constant ranges, and
+    /// a mid-frame second UpdatePerFrame write would corrupt already-recorded draws). This is
+    /// the first use of specialization constants anywhere in this codebase.
+    /// </para>
+    /// </summary>
+    public unsafe void CreateSsrVariant(RenderPass continuationRenderPass)
+    {
+        var vk = _vk;
+        using var vert = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/prim.vert.spv");
+        using var frag = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/prim.frag.spv");
+        using var entryPoint = new VkByteString("main");
+
+        uint kIsSsrPassValue = 1;
+        var specMapEntry = new SpecializationMapEntry { ConstantID = 0, Offset = 0, Size = (nuint)sizeof(uint) };
+        var specInfo = new SpecializationInfo
+        {
+            MapEntryCount = 1,
+            PMapEntries = &specMapEntry,
+            DataSize = (nuint)sizeof(uint),
+            PData = &kIsSsrPassValue
+        };
+
+        var stages = stackalloc PipelineShaderStageCreateInfo[2]
+        {
+            new PipelineShaderStageCreateInfo
+            {
+                SType = StructureType.PipelineShaderStageCreateInfo,
+                Stage = ShaderStageFlags.VertexBit,
+                Module = vert.Handle,
+                PName = entryPoint
+            },
+            new PipelineShaderStageCreateInfo
+            {
+                SType = StructureType.PipelineShaderStageCreateInfo,
+                Stage = ShaderStageFlags.FragmentBit,
+                Module = frag.Handle,
+                PName = entryPoint,
+                // Only the fragment stage reads kIsSsrPass -- prim.vert never does.
+                PSpecializationInfo = &specInfo
+            }
+        };
+
+        var meshBinding = VkMesh.VertexInputBindingDescription;
+        var instBinding = VkInstanceDrawer.VertexInputBindingDescription;
+        var bindings = stackalloc VertexInputBindingDescription[2] { meshBinding, instBinding };
+
+        var meshAttrs = VkMesh.VertexInputAttributeDescriptions;
+        var instAttrs = VkInstanceDrawer.VertexInputAttributeDescriptions;
+        var attrCount = meshAttrs.Length + instAttrs.Length;
+        var attrs = stackalloc VertexInputAttributeDescription[attrCount];
+        for (var i = 0; i < meshAttrs.Length; i++) attrs[i] = meshAttrs[i];
+        for (var i = 0; i < instAttrs.Length; i++) attrs[meshAttrs.Length + i] = instAttrs[i];
+
+        var vertexInputState = new PipelineVertexInputStateCreateInfo
+        {
+            SType = StructureType.PipelineVertexInputStateCreateInfo,
+            VertexBindingDescriptionCount = 2,
+            PVertexBindingDescriptions = bindings,
+            VertexAttributeDescriptionCount = (uint)attrCount,
+            PVertexAttributeDescriptions = attrs
+        };
+
+        var inputAssemblyState = new PipelineInputAssemblyStateCreateInfo
+        {
+            SType = StructureType.PipelineInputAssemblyStateCreateInfo,
+            Topology = PrimitiveTopology.TriangleList
+        };
+
+        var viewportState = new PipelineViewportStateCreateInfo
+        {
+            SType = StructureType.PipelineViewportStateCreateInfo,
+            ViewportCount = 1,
+            ScissorCount = 1
+        };
+
+        // Same winding as Opaque (CullMode.BackBit, FrontFace.Clockwise) -- NOT mirrored like
+        // ReflOpaque, since this draws from the real camera, not a reflected one.
+        var rasterizationState = new PipelineRasterizationStateCreateInfo
+        {
+            SType = StructureType.PipelineRasterizationStateCreateInfo,
+            PolygonMode = PolygonMode.Fill,
+            CullMode = CullModeFlags.BackBit,
+            FrontFace = FrontFace.Clockwise,
+            LineWidth = 1f
+        };
+
+        var multisampleState = new PipelineMultisampleStateCreateInfo
+        {
+            SType = StructureType.PipelineMultisampleStateCreateInfo,
+            RasterizationSamples = SampleCountFlags.Count1Bit
+        };
+
+        var depthStencilState = new PipelineDepthStencilStateCreateInfo
+        {
+            SType = StructureType.PipelineDepthStencilStateCreateInfo,
+            DepthTestEnable = true,
+            DepthWriteEnable = false,
+            DepthCompareOp = CompareOp.LessOrEqual
+        };
+
+        var blendAttachment = new PipelineColorBlendAttachmentState
+        {
+            BlendEnable = true,
+            SrcColorBlendFactor = BlendFactor.SrcAlpha,
+            DstColorBlendFactor = BlendFactor.OneMinusSrcAlpha,
+            ColorBlendOp = BlendOp.Add,
+            SrcAlphaBlendFactor = BlendFactor.One,
+            DstAlphaBlendFactor = BlendFactor.OneMinusSrcAlpha,
+            AlphaBlendOp = BlendOp.Add,
+            ColorWriteMask = ColorComponentFlags.RBit | ColorComponentFlags.GBit | ColorComponentFlags.BBit | ColorComponentFlags.ABit
+        };
+        var colorBlendState = new PipelineColorBlendStateCreateInfo
+        {
+            SType = StructureType.PipelineColorBlendStateCreateInfo,
+            AttachmentCount = 1,
+            PAttachments = &blendAttachment
+        };
+
+        var dynamicStates = stackalloc DynamicState[2] { DynamicState.Viewport, DynamicState.Scissor };
+        var dynamicState = new PipelineDynamicStateCreateInfo
+        {
+            SType = StructureType.PipelineDynamicStateCreateInfo,
+            DynamicStateCount = 2,
+            PDynamicStates = dynamicStates
+        };
+
+        var createInfo = new GraphicsPipelineCreateInfo
+        {
+            SType = StructureType.GraphicsPipelineCreateInfo,
+            StageCount = 2,
+            PStages = stages,
+            PVertexInputState = &vertexInputState,
+            PInputAssemblyState = &inputAssemblyState,
+            PViewportState = &viewportState,
+            PRasterizationState = &rasterizationState,
+            PMultisampleState = &multisampleState,
+            PDepthStencilState = &depthStencilState,
+            PColorBlendState = &colorBlendState,
+            PDynamicState = &dynamicState,
+            Layout = Layout,
+            RenderPass = continuationRenderPass,
+            Subpass = 0
+        };
+        vk.Api.CreateGraphicsPipelines(vk.Device, default, 1, &createInfo, null, out var ssr).ThrowOnError();
+        Ssr = ssr;
+    }
+
     public unsafe void Dispose()
     {
         var api = _vk.Api;
         api.DestroyPipeline(_vk.Device, Opaque, null);
         api.DestroyPipeline(_vk.Device, Alpha, null);
         if (ReflOpaque.Handle != 0) api.DestroyPipeline(_vk.Device, ReflOpaque, null);
+        if (Ssr.Handle != 0) api.DestroyPipeline(_vk.Device, Ssr, null);
         api.DestroyPipelineLayout(_vk.Device, Layout, null);
         api.DestroyDescriptorSetLayout(_vk.Device, PerFrameLayout, null);
         api.DestroyDescriptorSetLayout(_vk.Device, PerPassSamplersLayout, null);

@@ -78,6 +78,24 @@ layout(set = 0, binding = 0) uniform PerFrame
 // bindings 1-3 when included below; SSAO's map lives here too since it's also bound once
 // per pass, not per material).
 layout(set = 1, binding = 0) uniform sampler2D uSsaoMap;
+// SSR (bindings 4-6): uSsrSceneColor is the shared opaque-scene snapshot (the SAME image water
+// refraction samples -- see VkViewportControl.EnsureOpaqueSnapshotTarget's own doc comment).
+// uSsrDepth/uSsrNormal are the G-buffer targets the SSAO pre-pass already populates every frame
+// SSR (or SSAO) is active -- point-sampled (see VkViewportControl.EnsureGBufferTarget's own
+// sampler comment: filtering across a depth/normal discontinuity produces nonsense).
+layout(set = 1, binding = 4) uniform sampler2D uSsrSceneColor;
+layout(set = 1, binding = 5) uniform sampler2D uSsrDepth;
+layout(set = 1, binding = 6) uniform sampler2D uSsrNormal;
+
+// Baked per-PIPELINE-OBJECT at creation time, not per-draw or per-frame -- true only for
+// VkPrimPipeline.Ssr (the SSR redraw variant), false (and dead-code-eliminated by the driver)
+// for Opaque/Alpha/ReflOpaque. First use of a GLSL specialization constant in this codebase --
+// see VkPrimPipeline.CreateSsrVariant's own doc comment for why this was chosen over a push
+// constant or a second per-frame UBO write.
+layout(constant_id = 0) const bool kIsSsrPass = false;
+// Mirror VkViewportControl.SsrRoughnessThreshold exactly -- no shared source of truth between
+// C# and GLSL for this constant, keep both in sync by hand.
+const float kSsrRoughnessThreshold = 0.35;
 
 // Set 2: per-material -- samplers as individual opaque bindings (can't live inside a
 // uniform block, GL or Vulkan), everything else folded into one Material UBO at binding 5.
@@ -354,6 +372,83 @@ vec3 pointLightsPBR(vec3 albedo, float metallic, float roughness, vec3 F0,
 
 // ── PBR lighting path ────────────────────────────────────────────────────────
 
+// Reconstruct view-space position from a uSsrDepth sample -- copied verbatim from ssao.frag's
+// own viewPosFromDepth (same Vulkan-native-[0,1]-NDC-z reasoning; frame.uProj is already bound
+// at set 0 here, so no new uniform is needed to duplicate this).
+vec3 viewPosFromDepth(vec2 uv, float depth)
+{
+    float ndcZ = depth;
+    float ndcX = uv.x * 2.0 - 1.0;
+    float ndcY = uv.y * 2.0 - 1.0;
+    float projA = frame.uProj[2][2];
+    float projB = frame.uProj[3][2];
+    float viewZ = -projB / (ndcZ + projA);
+    float viewX = -viewZ * ndcX / frame.uProj[0][0];
+    float viewY = -viewZ * ndcY / frame.uProj[1][1];
+    return vec3(viewX, viewY, viewZ);
+}
+
+// Linear view-space ray march against the pre-shaded opaque scene's own G-buffer depth,
+// producing a screen-space UV to sample uSsrSceneColor at, or a zero-confidence miss. Single
+// sharp sample, no roughness blur/multi-tap -- a mirror-ish reflection only, same posture as
+// water's own single-sample reflection FBO. Explicitly out of scope for v1 to blur this by
+// roughness (see this session's plan risk notes).
+//
+// Marches in VIEW space (not screen space) so step size is a real physical distance, independent
+// of perspective foreshortening -- reprojecting to screen UV only at each step's END, mirroring
+// how ssao.frag's own sample loop projects view-space sample positions to UV per-iteration
+// rather than marching in UV space directly. Camera is at the origin looking down -Z (confirmed
+// by viewPosFromDepth's own sign convention above) -- visible geometry has NEGATIVE view-space
+// z, so a productive ray continues in that same direction.
+vec4 ssrTrace(vec3 viewPos, vec3 viewNormal)
+{
+    vec3 viewDir = normalize(viewPos);
+    vec3 rayDir  = reflect(viewDir, viewNormal);
+    // Reflecting back toward/behind the camera's own side -- never a valid forward march
+    // target (a genuine miss, not a fixup case the way water.frag's own reflDir.z abs() dodge
+    // is for its very different planar-reflection setup).
+    if (rayDir.z >= 0.0) return vec4(0.0);
+
+    const int   kSteps     = 24;
+    const float kStepSize  = 0.35;  // metres per step in view space
+    const float kThickness = 0.25;  // metres -- how far behind the sampled depth still counts as a hit
+    const float kMaxDist   = float(kSteps) * kStepSize;
+
+    vec3 rayPos = viewPos + viewNormal * 0.02; // small self-intersection bias along the normal
+    for (int i = 0; i < kSteps; i++)
+    {
+        rayPos += rayDir * kStepSize;
+
+        vec4 clip = frame.uProj * vec4(rayPos, 1.0);
+        if (clip.w <= 0.0001) break;
+        vec2 ndc = clip.xy / clip.w;
+        if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) break; // marched off-screen
+        vec2 uv = ndc * 0.5 + 0.5;
+
+        float sampledDepth = texture(uSsrDepth, uv).r;
+        if (sampledDepth >= 0.9999) continue; // background -- nothing to hit here, keep marching
+        vec3 sampledViewPos = viewPosFromDepth(uv, sampledDepth);
+
+        // Hit test: the marched ray point is BEHIND the sampled surface (deeper, i.e. more
+        // negative view-space z) by less than kThickness -- it passed through the surface
+        // between this step and the last. Same sign convention ssao.frag's own occlusion test
+        // already uses (camera looks down -Z, so "closer to camera" = larger/less-negative z).
+        float depthDelta = sampledViewPos.z - rayPos.z;
+        if (depthDelta > 0.0 && depthDelta < kThickness)
+        {
+            // Screen-edge fade (avoid a hard-edged cutoff near the viewport border) and
+            // march-distance fade (avoid a hard pop at kMaxDist) both feed the returned alpha as
+            // a confidence/strength term, mirroring how sampleDirShadow falls back smoothly
+            // rather than a hard cutoff.
+            float edgeFade = smoothstep(0.0, 0.08, min(uv.x, 1.0 - uv.x))
+                            * smoothstep(0.0, 0.08, min(uv.y, 1.0 - uv.y));
+            float distFade = 1.0 - smoothstep(kMaxDist * 0.7, kMaxDist, length(rayPos - viewPos));
+            return vec4(texture(uSsrSceneColor, uv).rgb, edgeFade * distFade);
+        }
+    }
+    return vec4(0.0); // miss -- alpha 0, caller falls back to the existing flat ambient term untouched
+}
+
 void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
                  vec3 emissive, vec3 n, vec3 nGeo, vec3 v, float alpha, out vec4 result)
 {
@@ -440,6 +535,19 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     float specScale  = mix(0.04, 0.50, 1.0 - roughness * roughness);
     float ambientShadow = mix(0.35, 1.0, sunShadow);
     vec3 ambient     = uAmbientColor * (kD_amb * albedo + F_amb * specScale) * occlusion * ssao * ambientShadow;
+
+    // SSR: augments, never hard-replaces, the flat ambient term above -- gated by kIsSsrPass
+    // (dead-code-eliminated to nothing on Opaque/Alpha/ReflOpaque) and the same roughness
+    // threshold the CPU-side candidate filter already used to decide whether this face got
+    // redrawn through the SSR pass at all (this check is a safety net, not redundant busywork --
+    // see FilterSsrCandidates' own comment on why both sides read the same threshold). `n` here
+    // is the PERTURBED shading normal (post normal-map), not nGeo, so the reflection lines up
+    // with the sharp specular highlight computed against the same normal just above.
+    if (kIsSsrPass && roughness < kSsrRoughnessThreshold)
+    {
+        vec4 ssr = ssrTrace(vViewPos, n);
+        ambient = mix(ambient, ssr.rgb * F_amb * (specScale * 2.0), ssr.a);
+    }
 
     vec3 col = ambient + Lo + emissive;
 

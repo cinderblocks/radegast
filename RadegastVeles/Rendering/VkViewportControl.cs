@@ -74,6 +74,20 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// exceeded).</summary>
     public bool SsaoEnabled { get; set; } = true;
 
+    /// <summary>Default <c>false</c> -- unlike this session's other Vulkan features (which
+    /// degrade gracefully and default on), this is the first genuinely per-pixel-scaling cost
+    /// added this session (a large reflective surface's ray-march cost scales with its own
+    /// screen-space footprint, not object/query count the way occlusion culling/point shadows/
+    /// god rays do) and the first use of GLSL specialization constants in this codebase -- both
+    /// real novelty worth explicit opt-in pending real-world visual validation, not a smaller
+    /// version of an otherwise-safe feature. Screen-space reflections on low-roughness PBR
+    /// surfaces (metal floors, glossy/wet materials): ray-marches the just-shaded opaque scene's
+    /// own G-buffer depth to add a real reflection term on top of <c>pbrLighting</c>'s existing
+    /// flat ambient-Fresnel specular. Medium/High-tier only (requires the split main pass's
+    /// shared opaque snapshot -- see <see cref="RenderFrame"/>'s own <c>doOpaqueSnapshot</c>
+    /// gate).</summary>
+    public bool SsrEnabled { get; set; } = false;
+
     /// <summary>Default <c>true</c>. Gates ONLY the main camera pass's culling (both the <see cref="SceneSpatialGrid"/> coarse
     /// pre-filter and the exact per-face AABB test share this one flag). The shadow and
     /// water-reflection passes always cull via their own independently-computed frustum/grid
@@ -284,7 +298,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
     private RenderPass _renderPass;
     // Split-main-pass pair, used ONLY on frames where water is visible on Medium/High tier (see
-    // RenderFrame's own splitForRefraction gate) -- render-pass-COMPATIBLE with _renderPass (same
+    // RenderFrame's own doOpaqueSnapshot gate) -- render-pass-COMPATIBLE with _renderPass (same
     // attachment formats/sample counts, just different load/store ops and layouts), so every
     // pipeline already created against _renderPass (_prim.Opaque/Alpha, _waterPipeline,
     // _wireframe, _outline, the particle pipeline) can record draws into either of these directly
@@ -311,6 +325,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // accepted trade-off.
     private VkCommandBufferPool.VkCommandBuffer? _previousMainPassCmd;
     private VkPrimPipeline? _prim;
+    // True once _prim.Ssr (VkPrimPipeline.CreateSsrVariant) exists -- independent of _ssaoReady/
+    // doSsr's own gating, since this is purely "did the pipeline object build successfully."
+    private bool _ssrPipelineReady;
     private VkPlaceholderTextures? _placeholders;
     private VkPrimDescriptorSets? _frameSets;
     private VkInstanceDrawer? _instanceDrawer;
@@ -372,6 +389,20 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// face a second time.</summary>
     public int SsaoMaxOpaqueFaces { get; set; } = 1500;
 
+    /// <summary>Above this opaque face count SSR is skipped for the frame, independent of
+    /// <see cref="SsaoMaxOpaqueFaces"/> -- see <c>doSsr</c>'s own comment in
+    /// <see cref="RenderFrame"/> for why the two budgets are deliberately unrelated.</summary>
+    public int SsrMaxOpaqueFaces { get; set; } = 4000;
+
+    /// <summary>Roughness ceiling for SSR eligibility -- a face's <c>RoughnessFactor</c> must be
+    /// strictly below this for it to be redrawn through the SSR pass at all (CPU-side filter,
+    /// see <c>FilterSsrCandidates</c>) or to receive an SSR contribution in the shader (mirrored
+    /// as a GLSL <c>const float kSsrRoughnessThreshold</c> in prim.frag -- keep both in sync by
+    /// hand, there is no shared source of truth between C# and GLSL for this constant). Roughness
+    /// alone gates eligibility, not metallic -- matches <c>pbrLighting</c>'s own existing
+    /// <c>specScale</c> term, which is already roughness-only sensitive.</summary>
+    public const float SsrRoughnessThreshold = 0.35f;
+
     // ── Underwater post-process ─────────────────────────────────────────────────────────────
     // Same best-effort init posture as SSAO above: a creation failure leaves _underwaterReady
     // false and RenderFrame's `underwater` gate simply never fires the pass, rather than taking
@@ -403,7 +434,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // dedicated rather than reused from VkPlaceholderTextures.
     private Sampler _underwaterLinearSampler;
 
-    // ── Water refraction snapshot ───────────────────────────────────────────────────────────
+    // ── Shared opaque-scene snapshot (water refraction + SSR) ──────────────────────────────
+    // Originally built for water refraction alone; SSR reuses the exact same image rather than
+    // taking a second copy -- both features need precisely the same thing: a complete,
+    // sampleable copy of the fully-shaded opaque scene, taken after all opaque geometry has
+    // drawn but before anything layered on top of it (water, SSR-reflective surfaces
+    // themselves, alpha) draws. See RenderFrame's doOpaqueSnapshot gate (now (doWater ||
+    // doSsr), not doWater alone) and EnsureOpaqueSnapshotTarget's own doc comment.
     // Mirrors _underwaterSourceImage/_underwaterTargetSize/_underwaterSourceLayout/Access's own
     // shape exactly (see those fields' doc comments) -- same "plain Image, hand-tracked
     // layout/access, CmdCopyImage destination + sampled texture, never a render-pass attachment
@@ -412,16 +449,16 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // _hdrColorImage's own HDR format -- must NOT be _underwaterSourceImage's R8G8B8A8Unorm,
     // since this copies pre-tonemap HDR data water.frag's existing HDR-space math depends on).
     // Created lazily, only on frames where the main-pass split actually runs (RenderFrame's own
-    // splitForRefraction gate) -- reuses _postProcessLinearSampler rather than a dedicated
+    // doOpaqueSnapshot gate) -- reuses _postProcessLinearSampler rather than a dedicated
     // sampler, since that's already a plain linear-clamp sampler with no lifetime coupling to
     // anything this feature doesn't already depend on (it's created alongside the mandatory
     // tonemap chain on the same Medium/High tiers this feature is scoped to).
-    private PixelSize _waterRefractionTargetSize;
-    private Image _waterRefractionSourceImage;
-    private DeviceMemory _waterRefractionSourceMemory;
-    private ImageView _waterRefractionSourceView;
-    private ImageLayout _waterRefractionSourceLayout = ImageLayout.Undefined;
-    private AccessFlags _waterRefractionSourceAccess = AccessFlags.None;
+    private PixelSize _opaqueSnapshotSize;
+    private Image _opaqueSnapshotImage;
+    private DeviceMemory _opaqueSnapshotMemory;
+    private ImageView _opaqueSnapshotView;
+    private ImageLayout _opaqueSnapshotLayout = ImageLayout.Undefined;
+    private AccessFlags _opaqueSnapshotAccess = AccessFlags.None;
 
     // ── Directional shadows ─────────────────────────────────────────────────────────────────
     // Point-light (local-light) cube shadows share this same toggle -- see
@@ -731,6 +768,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _shadowSceneOpaqueVisible = new();
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _reflOpaqueVisible = new();
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _reflSceneOpaqueVisible = new();
+    // SSR candidates -- filtered FROM the already-frustum-culled _mainOpaqueVisible/
+    // _mainSceneOpaqueVisible (see FilterSsrCandidates), not a fresh spatial-grid query: SSR
+    // draws from the exact same real camera as the main pass, unlike shadow/reflection/point-
+    // shadow (each a different camera), so there's nothing a second culling pass would filter
+    // out that the main pass's own culling hasn't already.
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _ssrOpaqueVisible = new();
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _ssrSceneOpaqueVisible = new();
 
     // Occlusion culling (hardware occlusion queries, Medium/High tier only -- see
     // VkOcclusionQueryPipeline's own doc comment). _occludedSceneKeys is durable state (absence
@@ -1977,6 +2021,23 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             }
             _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
+            // SSR pipeline variant -- only depends on _mainScenePassContinuation (already created
+            // unconditionally above, alongside _mainScenePassOpaque), not on water's own init
+            // block, so this can build right here rather than waiting. Best-effort/independent
+            // readiness flag: a failure here must not take down _prim itself (already
+            // constructed) or anything else in this method.
+            if (_mainScenePassContinuation.Handle != 0)
+            {
+                try
+                {
+                    _prim.CreateSsrVariant(_mainScenePassContinuation);
+                    _ssrPipelineReady = true;
+                }
+                catch
+                {
+                    _ssrPipelineReady = false;
+                }
+            }
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
             _outline = VkOutlinePipeline.Create(vk, _renderPass);
             // Occlusion-query culling -- Medium/High only, same posture as the water-refraction
@@ -2225,9 +2286,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 };
                 // Refraction's own target doesn't exist yet at this point (lazy, only created on
                 // frames where water is actually visible on Medium/High tier -- see
-                // EnsureWaterRefractionTarget) -- bind the shared placeholder here, same as every
+                // EnsureOpaqueSnapshotTarget) -- bind the shared placeholder here, same as every
                 // other "optional texture not available yet" binding in this codebase, and let
-                // EnsureWaterRefractionTarget's own VkWaterDescriptorSet.UpdateRefractionInput
+                // EnsureOpaqueSnapshotTarget's own VkWaterDescriptorSet.UpdateRefractionInput
                 // call rewrite it once the real target exists.
                 _waterDescSet = new VkWaterDescriptorSet(vk, _waterPipeline,
                     reflTexInfo, _waterNormalTex.DescriptorImageInfo, _waterDudvTex.DescriptorImageInfo,
@@ -4117,6 +4178,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         }
     }
 
+    /// <summary>Filters an already-frustum-culled face list down to the subset eligible for an
+    /// SSR redraw: real PBR material, roughness strictly below <see cref="SsrRoughnessThreshold"/>
+    /// (see that constant's own doc comment for why roughness alone, not metallic, is the gate).
+    /// Runs AFTER frustum culling has already reduced the candidate set -- this is a plain
+    /// predicate scan, not a frustum test, so it deliberately does NOT share
+    /// <see cref="FilterVisible"/>'s signature.</summary>
+    private static void FilterSsrCandidates(
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> source,
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> dest)
+    {
+        foreach (var item in source)
+            if (item.Face.IsPBR && item.Face.RoughnessFactor < SsrRoughnessThreshold)
+                dest.Add(item);
+    }
+
     /// <summary>Pure
     /// math, no GL dependency -- FNV-1a over a face's vertex+index bytes, used by
     /// <see cref="UploadSceneObjectNoRebuild"/>'s per-object mesh pool to detect identical
@@ -4796,7 +4872,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var vk = VkApi.Context;
         Framebuffer framebuffer = default;
         // Only ever created (and needs destroying) on the water-refraction split path -- see
-        // RenderFrame's own splitForRefraction branch. Declared here, not locally in that branch,
+        // RenderFrame's own doOpaqueSnapshot branch. Declared here, not locally in that branch,
         // so the deferred-destroy in this method's own finally block below can see it.
         Framebuffer framebuffer2 = default;
         try
@@ -5050,6 +5126,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             bool doSsao = SsaoEnabled && _ssaoReady && opaqueFaceCount > 0 && opaqueFaceCount <= SsaoMaxOpaqueFaces
                 && _graphicsTier != VkGraphicsTier.Low;
 
+            // SSR budget is independent of SsaoMaxOpaqueFaces -- that budget exists because
+            // SSAO's own G-buffer re-render cost scales with opaque face count; SSR's per-face
+            // cost is a cheap CPU-side filter plus a full second draw+ray-march for only the
+            // small reflective subset, so it shouldn't inherit or be capped by SSAO's budget.
+            // Gated on _ssaoReady (not a separate readiness flag): SSR depends on the SAME
+            // G-buffer normal/depth pre-pass SSAO's own init already best-effort creates -- see
+            // RenderSsaoPasses' own generalized ssaoOutputNeeded split below for why SSR rides
+            // on that pre-pass without needing SSAO's compute/blur stages to also run.
+            bool doSsr = SsrEnabled && _ssaoReady && opaqueFaceCount > 0 && opaqueFaceCount <= SsrMaxOpaqueFaces
+                && _graphicsTier != VkGraphicsTier.Low;
+
             // Main-pass frustum culling. FrustumCullingEnabled gates ONLY this pass
             // (shadow/reflection below always cull via their own independent frustum,
             // regardless of this flag -- see the property's own doc comment). Filtered
@@ -5089,6 +5176,19 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             int mainOpaqueCount = _mainOpaqueVisible.Count;
             int mainSceneOpaqueCount = _mainSceneOpaqueVisible.Count;
             int mainOpaqueFaceCount = mainOpaqueCount + mainSceneOpaqueCount;
+
+            // SSR candidates -- filtered from the lists just above, not a fresh cull (see
+            // _ssrOpaqueVisible's own field comment for why no new frustum/grid query is needed).
+            _ssrOpaqueVisible.Clear();
+            _ssrSceneOpaqueVisible.Clear();
+            int ssrOpaqueCount = 0, ssrSceneOpaqueCount = 0;
+            if (doSsr)
+            {
+                FilterSsrCandidates(_mainOpaqueVisible, _ssrOpaqueVisible);
+                FilterSsrCandidates(_mainSceneOpaqueVisible, _ssrSceneOpaqueVisible);
+                ssrOpaqueCount = _ssrOpaqueVisible.Count;
+                ssrSceneOpaqueCount = _ssrSceneOpaqueVisible.Count;
+            }
 
             // directional shadow gate + light-VP computation. Mirrors GL's
             // RenderShadowPasses/RenderDirectionalShadow gating exactly -- ShadowsEnabled &&
@@ -5372,8 +5472,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // is simply omitted, so reflBase must never be a fixed offset assuming both regions
             // are always present -- that would silently read another pass's matrices.
             int shadowBase = 0, shadowSceneBase = 0, reflBase = 0, reflSceneBase = 0;
+            int ssrBase = 0, ssrSceneBase = 0;
             bool needInstanceBuffer = mainOpaqueFaceCount > 0 || _alphaFaces.Count > 0 || _sceneAlpha.Count > 0
-                                       || doShadow || doWaterReflThisFrame || doPointShadows;
+                                       || doShadow || doWaterReflThisFrame || doPointShadows || doSsr;
             if (needInstanceBuffer)
             {
                 // Merge the single-submission path's own alpha faces with
@@ -5420,6 +5521,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                         totalCount += _pointShadowOpaqueCount[idx] + _pointShadowSceneOpaqueCount[idx];
                     }
                 }
+                if (doSsr)
+                {
+                    ssrBase = totalCount;
+                    ssrSceneBase = ssrBase + ssrOpaqueCount;
+                    totalCount += ssrOpaqueCount + ssrSceneOpaqueCount;
+                }
 
                 // a reused, grow-on-demand field, not a fresh `new float[]` every
                 // frame -- at PrimViewer/AvatarViewer's own small face counts a per-frame
@@ -5456,6 +5563,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                             _pointShadowFaceView[idx], _pointShadowFaceProj[idx]);
                     }
                 }
+                if (doSsr)
+                {
+                    // Same view/proj as the main pass (real camera, not a different one like
+                    // shadow/reflection/point-shadow) -- this identical MVP is what makes the SSR
+                    // pipeline's DepthCompareOp.LessOrEqual valid against pass 1's own depth for
+                    // these exact same faces (see VkPrimPipeline.CreateSsrVariant's own comment).
+                    WriteInstanceData(instanceData, ssrBase, _ssrOpaqueVisible, view, proj);
+                    WriteInstanceData(instanceData, ssrSceneBase, _ssrSceneOpaqueVisible, view, proj);
+                }
                 _instanceDrawer!.UploadInstanceBatch(instanceData, totalCount);
             }
 
@@ -5479,12 +5595,20 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // included -- there's no cheap per-frame "is the water plane actually on screen" signal
             // in this codebase to gate on instead (DrawWater itself draws unconditionally whenever
             // doWater is true, with no frustum/occlusion check of its own). If profiling shows this
-            // costs real frame time in non-water scenes, tighten this gate rather than assuming
-            // it's free. Low tier has no HDR buffer to split (CreateMainScenePassDirect writes the
-            // swapchain directly), so it's excluded regardless of doWater.
-            bool splitForRefraction = doWater && _graphicsTier != VkGraphicsTier.Low;
+            // costs real frame time in non-water/non-SSR scenes, tighten this gate rather than
+            // assuming it's free. Low tier has no HDR buffer to split (CreateMainScenePassDirect
+            // writes the swapchain directly), so it's excluded regardless of doWater/doSsr.
+            //
+            // Generalized to (doWater || doSsr): SSR needs the exact same "complete, sampleable
+            // copy of the fully-shaded opaque scene" snapshot water refraction already takes --
+            // see the shared _opaqueSnapshotImage's own field comment for why one snapshot serves
+            // both. This means the split now runs on SSR-only frames with NO water present too --
+            // the `if (doWater) DrawWater(...)` guard a few lines below this branch's body is the
+            // load-bearing correctness fix that generalization requires (previously safe to omit,
+            // since doOpaqueSnapshot literally equaled doWater).
+            bool doOpaqueSnapshot = (doWater || doSsr) && _graphicsTier != VkGraphicsTier.Low;
 
-            if (!splitForRefraction)
+            if (!doOpaqueSnapshot)
             {
                 var fbInfo = new FramebufferCreateInfo
                 {
@@ -5549,8 +5673,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // ordering (relative to the instance-data upload above) is load-bearing, not
             // incidental. Viewport/scissor set above already match every offscreen target's own
             // full-viewport resolution, so no separate set/restore is needed around this call.
-            if (doSsao)
-                RenderSsaoPasses(vk, cmd.InternalHandle, pixelSize, proj, mainOpaqueCount, mainSceneOpaqueCount);
+            if (doSsao || doSsr)
+                RenderSsaoPasses(vk, cmd.InternalHandle, pixelSize, proj, mainOpaqueCount, mainSceneOpaqueCount, ssaoOutputNeeded: doSsao);
 
             // water reflection pre-pass, after SSAO and before the main pass --
             // matches GL's own ordering exactly (GlRenderCore: shadow -> SSAO -> water
@@ -5584,7 +5708,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             };
             SubPassMs = _renderStopwatch.Elapsed.TotalMilliseconds;
 
-            if (!splitForRefraction)
+            if (!doOpaqueSnapshot)
             {
                 var beginInfo = new RenderPassBeginInfo
                 {
@@ -5658,7 +5782,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     // "nothing else to draw" case. No extra descriptor-set bind needed here: DrawWater
                     // binds its own sets 0+1 through _waterPipeline.Layout unconditionally, regardless
                     // of whether the opaque block ran first. hasRefraction is always false here too:
-                    // this whole branch only runs when splitForRefraction is false (Low tier, given
+                    // this whole branch only runs when doOpaqueSnapshot is false (Low tier, given
                     // doWater is true or this else-if wouldn't have been reached).
                     DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: false);
                 }
@@ -5726,12 +5850,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
                 // ── Snapshot the opaque scene colour for refraction (mirrors RenderUnderwaterPass's
                 // own copy sequence exactly, just a different source/dest pair and timing) ────────
-                EnsureWaterRefractionTarget(vk, pixelSize);
+                EnsureOpaqueSnapshotTarget(vk, pixelSize);
                 VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _hdrColorImage,
                     ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit,
                     ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit, 1);
-                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _waterRefractionSourceImage,
-                    _waterRefractionSourceLayout, _waterRefractionSourceAccess,
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _opaqueSnapshotImage,
+                    _opaqueSnapshotLayout, _opaqueSnapshotAccess,
                     ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, 1);
 
                 var refractionCopyRegion = new ImageCopy
@@ -5743,13 +5867,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     Extent = new Extent3D((uint)pixelSize.Width, (uint)pixelSize.Height, 1)
                 };
                 vk.Api.CmdCopyImage(cmd.InternalHandle, _hdrColorImage, ImageLayout.TransferSrcOptimal,
-                    _waterRefractionSourceImage, ImageLayout.TransferDstOptimal, 1, in refractionCopyRegion);
+                    _opaqueSnapshotImage, ImageLayout.TransferDstOptimal, 1, in refractionCopyRegion);
 
-                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _waterRefractionSourceImage,
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _opaqueSnapshotImage,
                     ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit,
                     ImageLayout.ShaderReadOnlyOptimal, AccessFlags.ShaderReadBit, 1);
-                _waterRefractionSourceLayout = ImageLayout.ShaderReadOnlyOptimal;
-                _waterRefractionSourceAccess = AccessFlags.ShaderReadBit;
+                _opaqueSnapshotLayout = ImageLayout.ShaderReadOnlyOptimal;
+                _opaqueSnapshotAccess = AccessFlags.ShaderReadBit;
 
                 VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _hdrColorImage,
                     ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit,
@@ -5779,9 +5903,29 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 };
                 vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo2, SubpassContents.Inline);
 
-                // doWater is unconditionally true on this path (splitForRefraction's own
-                // definition) -- no guard needed, unlike the single-pass branch above.
-                DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: true);
+                // SSR redraw -- before water, so nothing later ever composites over water
+                // incorrectly, and because this uses _prim.Layout's own set 1 (same as Opaque),
+                // so it doesn't interact with the "rebind sets 0/1 before alpha" logic below
+                // (which already accounts for water's own separate pipeline layout). Redraws the
+                // EXACT SAME faces pass 1's own Opaque draw already fully shaded, adding an SSR
+                // reflection term on top -- see VkPrimPipeline.CreateSsrVariant's own doc comment
+                // for the depth-equal-or-closer, no-depth-write, alpha-blended state this needs.
+                if (doSsr && _ssrPipelineReady && (ssrOpaqueCount > 0 || ssrSceneOpaqueCount > 0))
+                {
+                    var frameAndPassSetsSsr = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
+                    vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSetsSsr, 0, null);
+                    vk.Api.CmdBindPipeline(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Ssr);
+                    if (ssrOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _ssrOpaqueVisible, baseIndex: ssrBase);
+                    if (ssrSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _ssrSceneOpaqueVisible, baseIndex: ssrSceneBase);
+                }
+
+                // doWater is NO LONGER unconditionally true on this path -- doOpaqueSnapshot's
+                // trigger generalized to (doWater || doSsr), so an SSR-only region with no water
+                // (WaterHeight NaN) can reach this branch with doWater false. This guard is the
+                // load-bearing correctness fix that generalization requires; omitting it would
+                // call DrawWater with an invalid height on such a frame.
+                if (doWater)
+                    DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: true);
 
                 if (alphaCount > 0)
                 {
@@ -5976,9 +6120,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Records the G-buffer-normal, SSAO, and blur passes -- three separate render-pass
-    /// instances, all recorded into <paramref name="cmd"/> BEFORE the main render pass begins
-    ///. Caller has already uploaded this frame's shared instance buffer
+    /// Records the G-buffer-normal pass unconditionally, plus the SSAO and blur passes when
+    /// <paramref name="ssaoOutputNeeded"/> -- up to three separate render-pass instances, all
+    /// recorded into <paramref name="cmd"/> BEFORE the main render pass begins. Caller has
+    /// already uploaded this frame's shared instance buffer
     /// (<see cref="_instanceDrawer"/>'s <c>UploadInstanceBatch</c>) covering
     /// <paramref name="opaqueCount"/>+<paramref name="sceneOpaqueCount"/> opaque faces at the
     /// SAME index ranges the main pass will read later -- required, not a convenience: Vulkan's
@@ -5987,14 +6132,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// main pass reads, at the identical offsets (see <see cref="VkGNormPipeline"/>'s own doc
     /// comment) -- computing a SEPARATE opaque-only packing here would clobber the instance
     /// buffer across passes.
+    /// <para>
+    /// <paramref name="ssaoOutputNeeded"/> exists because SSR (see <c>doSsr</c> in
+    /// <see cref="RenderFrame"/>) depends ONLY on the G-buffer normal/depth this method's first
+    /// sub-pass produces, not on the SSAO texture itself -- calling this whenever
+    /// <c>doSsao || doSsr</c> but skipping the SSAO/blur sub-passes when SSAO alone isn't needed
+    /// avoids silently starving SSR of fresh depth/normal (disabling SSAO would otherwise leave
+    /// SSR ray-marching against a stale prior frame's G-buffer, with no crash and no obvious
+    /// visual tell). <see cref="VkPerFrameUbo.HasSsao"/> must still be gated on the real
+    /// <c>doSsao</c> value by the caller, not this parameter -- the SSAO texture is genuinely
+    /// unpopulated on an SSR-only frame.
+    /// </para>
     /// </summary>
     private unsafe void RenderSsaoPasses(VkContext vk, CommandBuffer cmd, PixelSize pixelSize,
-        Matrix4x4 proj, int opaqueCount, int sceneOpaqueCount)
+        Matrix4x4 proj, int opaqueCount, int sceneOpaqueCount, bool ssaoOutputNeeded)
     {
         EnsureGBufferTarget(vk, pixelSize);
-        EnsureSsaoTargets(vk, pixelSize);
 
-        // ── G-buffer normal pass ────────────────────────────────────────────────
+        // ── G-buffer normal pass -- unconditional, SSR's own dependency ────────────────────
         var gbufClear = stackalloc ClearValue[2]
         {
             new ClearValue { Color = new ClearColorValue { Float32_0 = 0f, Float32_1 = 0f, Float32_2 = 0f, Float32_3 = 0f } },
@@ -6020,6 +6175,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (opaqueCount > 0) DrawFacesGNorm(vk, cmd, _mainOpaqueVisible, baseIndex: 0);
         if (sceneOpaqueCount > 0) DrawFacesGNorm(vk, cmd, _mainSceneOpaqueVisible, baseIndex: opaqueCount);
         vk.Api.CmdEndRenderPass(cmd);
+
+        if (!ssaoOutputNeeded) return;
+        EnsureSsaoTargets(vk, pixelSize);
 
         // ── SSAO pass ────────────────────────────────────────────────────────────
         var ssaoBegin = new RenderPassBeginInfo
@@ -6391,6 +6549,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // requirement), where god-ray pipelines/descriptor sets don't exist at all, hence the gate.
         if (_graphicsTier == VkGraphicsTier.High)
             _postProcessDescSet?.UpdateGodRayDepthInput(depthImageInfo);
+
+        // SSR's own consumer of this same G-buffer depth+normal pair (point-sampled, same
+        // sampler SSAO/god-rays already use -- filtering across a depth/normal discontinuity
+        // produces nonsense). Only fires on (re)creation, same discipline as UpdateGbufferInputs
+        // just above.
+        _frameSets!.UpdateSsrGBuffer(depthImageInfo, normalImageInfo);
+        if (_frameSetsRefl != null) _frameSetsRefl.UpdateSsrGBuffer(depthImageInfo, normalImageInfo);
     }
 
     private unsafe void DestroyGBufferTarget(VkContext vk)
@@ -6574,20 +6739,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// Creates (or resizes) <see cref="_waterRefractionSourceImage"/>: a persistent copy target
-    /// water's split main pass copies the opaque scene colour into, between the opaque-only pass
-    /// and the water/alpha continuation pass. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
+    /// Creates (or resizes) <see cref="_opaqueSnapshotImage"/>: a persistent copy target the
+    /// split main pass copies the finished opaque scene colour into, between the opaque-only
+    /// pass and the water/SSR/alpha continuation pass. Originally built for water refraction
+    /// alone; now shared with SSR (see this field group's own header comment) -- both features
+    /// need exactly the same snapshot, so this one target/one copy serves both, patched into
+    /// both consumers' descriptor sets below. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
     /// shape exactly (see its doc comment) -- same "never a render-pass attachment itself, only a
     /// CmdCopyImage destination and a sampled texture" role -- except format
     /// <c>B10G11R11UfloatPack32</c> (matching <see cref="_hdrColorImage"/>'s own HDR format, not
     /// <see cref="_underwaterSourceImage"/>'s LDR <c>R8G8B8A8Unorm</c>: this copies pre-tonemap
     /// data). Called only from the split-main-pass branch of <c>RenderFrame</c>, i.e. only on
-    /// frames where water is actually visible on Medium/High tier.
+    /// frames where water OR SSR is actually active on Medium/High tier (see
+    /// <c>doOpaqueSnapshot</c>).
     /// </summary>
-    private unsafe void EnsureWaterRefractionTarget(VkContext vk, PixelSize size)
+    private unsafe void EnsureOpaqueSnapshotTarget(VkContext vk, PixelSize size)
     {
-        if (_waterRefractionTargetSize == size && _waterRefractionSourceView.Handle != 0) return;
-        DestroyWaterRefractionTarget(vk);
+        if (_opaqueSnapshotSize == size && _opaqueSnapshotView.Handle != 0) return;
+        DestroyOpaqueSnapshotTarget(vk);
 
         var info = new ImageCreateInfo
         {
@@ -6603,50 +6772,54 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SharingMode = SharingMode.Exclusive,
             InitialLayout = ImageLayout.Undefined
         };
-        vk.Api.CreateImage(vk.Device, in info, null, out _waterRefractionSourceImage).ThrowOnError();
-        vk.Api.GetImageMemoryRequirements(vk.Device, _waterRefractionSourceImage, out var req);
+        vk.Api.CreateImage(vk.Device, in info, null, out _opaqueSnapshotImage).ThrowOnError();
+        vk.Api.GetImageMemoryRequirements(vk.Device, _opaqueSnapshotImage, out var req);
         var alloc = new MemoryAllocateInfo
         {
             SType = StructureType.MemoryAllocateInfo,
             AllocationSize = req.Size,
             MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(vk.Api, vk.PhysicalDevice, req.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
         };
-        vk.Api.AllocateMemory(vk.Device, in alloc, null, out _waterRefractionSourceMemory).ThrowOnError();
-        vk.Api.BindImageMemory(vk.Device, _waterRefractionSourceImage, _waterRefractionSourceMemory, 0).ThrowOnError();
+        vk.Api.AllocateMemory(vk.Device, in alloc, null, out _opaqueSnapshotMemory).ThrowOnError();
+        vk.Api.BindImageMemory(vk.Device, _opaqueSnapshotImage, _opaqueSnapshotMemory, 0).ThrowOnError();
         var viewInfo = new ImageViewCreateInfo
         {
             SType = StructureType.ImageViewCreateInfo,
-            Image = _waterRefractionSourceImage,
+            Image = _opaqueSnapshotImage,
             ViewType = ImageViewType.Type2D,
             Format = Format.B10G11R11UfloatPack32,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
-        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _waterRefractionSourceView).ThrowOnError();
+        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _opaqueSnapshotView).ThrowOnError();
 
-        _waterRefractionTargetSize = size;
+        _opaqueSnapshotSize = size;
         // Fresh image -- caller's first barrier must transition FROM Undefined/None, not a stale
         // prior layout/access left over from the target this just destroyed.
-        _waterRefractionSourceLayout = ImageLayout.Undefined;
-        _waterRefractionSourceAccess = AccessFlags.None;
+        _opaqueSnapshotLayout = ImageLayout.Undefined;
+        _opaqueSnapshotAccess = AccessFlags.None;
 
         var refractionInfo = new DescriptorImageInfo
         {
             ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
-            ImageView = _waterRefractionSourceView,
+            ImageView = _opaqueSnapshotView,
             Sampler = _postProcessLinearSampler
         };
         _waterDescSet!.UpdateRefractionInput(refractionInfo);
+        // SSR's own consumer of this same snapshot -- see VkPrimDescriptorSets.UpdateSsrSceneColor's
+        // own "rewrite only on (re)creation" contract, identical to UpdateSsaoMap's.
+        _frameSets!.UpdateSsrSceneColor(refractionInfo);
+        if (_frameSetsRefl != null) _frameSetsRefl.UpdateSsrSceneColor(refractionInfo);
     }
 
-    private unsafe void DestroyWaterRefractionTarget(VkContext vk)
+    private unsafe void DestroyOpaqueSnapshotTarget(VkContext vk)
     {
-        if (_waterRefractionSourceView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _waterRefractionSourceView, null);
-        if (_waterRefractionSourceImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _waterRefractionSourceImage, null);
-        if (_waterRefractionSourceMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _waterRefractionSourceMemory, null);
-        _waterRefractionSourceView = default; _waterRefractionSourceImage = default; _waterRefractionSourceMemory = default;
-        _waterRefractionTargetSize = default;
-        _waterRefractionSourceLayout = ImageLayout.Undefined;
-        _waterRefractionSourceAccess = AccessFlags.None;
+        if (_opaqueSnapshotView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _opaqueSnapshotView, null);
+        if (_opaqueSnapshotImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _opaqueSnapshotImage, null);
+        if (_opaqueSnapshotMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _opaqueSnapshotMemory, null);
+        _opaqueSnapshotView = default; _opaqueSnapshotImage = default; _opaqueSnapshotMemory = default;
+        _opaqueSnapshotSize = default;
+        _opaqueSnapshotLayout = ImageLayout.Undefined;
+        _opaqueSnapshotAccess = AccessFlags.None;
     }
 
     private unsafe void DestroySsaoTargets(VkContext vk)
@@ -7310,9 +7483,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // be a real, validation-catchable layout-mismatch read, not merely a stale one.
         waterUbo.HasReflection = (!underwater && _waterReflReady && WaterReflectionsEnabled
             && _graphicsTier != VkGraphicsTier.Low) ? 1 : 0;
-        // Caller has already run the split-main-pass snapshot (EnsureWaterRefractionTarget + the
+        // Caller has already run the split-main-pass snapshot (EnsureOpaqueSnapshotTarget + the
         // copy sequence) before this call whenever hasRefraction is true -- see RenderFrame's own
-        // splitForRefraction branch. Independent of HasReflection: refraction doesn't depend on
+        // doOpaqueSnapshot branch. Independent of HasReflection: refraction doesn't depend on
         // the reflection pre-pass at all, just on the mid-frame colour snapshot. Unlike
         // HasReflection, deliberately NOT forced off when underwater: pass 1 always renders from
         // the actual current camera (underwater or not), so the snapshot is correct either way --
@@ -8400,7 +8573,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal,
             // TransferSrcBit on top of the usual ColorAttachmentBit|SampledBit: water refraction's
-            // split main pass copies this image out mid-frame (see EnsureWaterRefractionTarget) --
+            // split main pass copies this image out mid-frame (see EnsureOpaqueSnapshotTarget) --
             // added unconditionally rather than only on the tiers that actually use it, since this
             // method itself is already Medium/High-only (see its call site in RenderFrame).
             Usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit | ImageUsageFlags.TransferSrcBit,
@@ -8762,7 +8935,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // DestroyWaterReflectionTarget), then descriptor sets/pipeline, then the standalone
         // normal/dudv textures.
         unsafe { DestroyWaterReflectionTarget(vk); }
-        unsafe { DestroyWaterRefractionTarget(vk); }
+        unsafe { DestroyOpaqueSnapshotTarget(vk); }
         _frameSetsRefl?.Dispose(); _frameSetsRefl = null;
         _waterDescSet?.Dispose(); _waterDescSet = null;
         _waterPipeline?.Dispose(); _waterPipeline = null;
@@ -8828,6 +9001,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         if (_postProcessLinearSampler.Handle != 0) { unsafe { vk.Api.DestroySampler(vk.Device, _postProcessLinearSampler, null); } }
         _postProcessLinearSampler = default;
         _prim?.Dispose(); _prim = null;
+        _ssrPipelineReady = false;
         _swapchain?.DisposeAsync(); _swapchain = null;
         if (_renderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _renderPass, null); } }
         _renderPass = default;

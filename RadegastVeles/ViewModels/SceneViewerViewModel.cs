@@ -94,6 +94,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _showChatOverlay;
     [ObservableProperty] private bool   _frustumCullingEnabled = true;
     [ObservableProperty] private bool   _occlusionCullingEnabled = true;
+    [ObservableProperty] private bool   _ssrEnabled = false;
     [ObservableProperty] private bool   _waterReflectionsEnabled = false;
     [ObservableProperty] private bool   _atmosphericsEnabled = true;
     [ObservableProperty] private bool   _godRaysEnabled = true;
@@ -167,6 +168,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? instance.GlobalSettings["frustum_culling_enabled"].AsBoolean() : true;
         _occlusionCullingEnabled = instance.GlobalSettings["occlusion_culling_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["occlusion_culling_enabled"].AsBoolean() : true;
+        _ssrEnabled = instance.GlobalSettings["ssr_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["ssr_enabled"].AsBoolean() : false;
         _waterReflectionsEnabled = instance.GlobalSettings["water_reflections_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["water_reflections_enabled"].AsBoolean() : false;
         _atmosphericsEnabled = instance.GlobalSettings["atmospherics_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
@@ -203,6 +206,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     partial void OnOcclusionCullingEnabledChanged(bool value)
     {
         if (_viewport != null) _viewport.OcclusionCullingEnabled = value;
+    }
+
+    partial void OnSsrEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.SsrEnabled = value;
     }
 
     partial void OnWaterReflectionsEnabledChanged(bool value)
@@ -271,6 +279,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.SsaoEnabled                = SsaoEnabled;
         _viewport.FrustumCullingEnabled      = FrustumCullingEnabled;
         _viewport.OcclusionCullingEnabled    = OcclusionCullingEnabled;
+        _viewport.SsrEnabled                  = SsrEnabled;
         _viewport.WaterReflectionsEnabled    = WaterReflectionsEnabled;
         _viewport.AtmosphericsEnabled        = AtmosphericsEnabled;
         _viewport.GodRaysEnabled              = GodRaysEnabled;
@@ -281,7 +290,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         LibreMetaverse.Logger.Info(
             $"[SceneViewer] Graphics settings at open: SSAO={SsaoEnabled} FrustumCulling={FrustumCullingEnabled} " +
             $"WaterReflections={WaterReflectionsEnabled} Atmospherics={AtmosphericsEnabled} Shadows={ShadowsEnabled} " +
-            $"OcclusionCulling={OcclusionCullingEnabled} DrawDistance={DrawDistance}");
+            $"OcclusionCulling={OcclusionCullingEnabled} SSR={SsrEnabled} DrawDistance={DrawDistance}");
         _viewport.Stats.FrameCompleted  += OnFrameCompleted;
         _viewport.InitFailed += msg =>
         {
