@@ -31,18 +31,27 @@ Two install options, for x86, x64, and ARM64:
 
 ### macOS
 
-A single **universal DMG** covers both Intel and Apple Silicon Macs. It's
-ad-hoc signed — there's no Apple Developer ID certificate for this project
-yet, so Gatekeeper will refuse a normal double-click launch with an
-"unidentified developer" warning. To run it the first time:
+Downloads are **per-architecture** — pick the DMG matching your Mac's chip
+(Apple menu → About This Mac → Chip): `-osx-arm64` for Apple Silicon,
+`-osx-x64` for Intel. A single DMG that runs on both isn't possible for a
+self-contained .NET build (the runtime libraries are compiled per
+architecture), so grabbing the wrong one will fail to launch.
+
+It's ad-hoc signed — there's no Apple Developer ID certificate for this
+project yet — so a browser download picks up Gatekeeper's quarantine flag,
+which blocks the app from launching at all (it'll just quit immediately, or
+print "Permission denied" if run from a terminal). To run it the first time:
 
 1. Open the DMG and drag Radegast Veles to Applications (or wherever you
    like).
-2. **Right-click** (or Control-click) the app and choose **Open**.
-3. Confirm in the dialog that appears.
+2. In Terminal, run: `xattr -dr com.apple.quarantine /Applications/RadegastVeles.app`
+   (adjust the path if you installed it elsewhere).
+3. Launch normally from Finder or `open`.
 
 You only need to do this once per download — subsequent launches work
-normally.
+normally. If you'd rather avoid quarantine entirely, the `.tbz` archive
+attached to the same release runs without this step as long as you extract
+it with the command-line `tar`, not by double-clicking.
 
 ### Linux
 

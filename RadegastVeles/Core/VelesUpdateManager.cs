@@ -103,7 +103,17 @@ public static class VelesUpdateManager
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
-            return AppcastBaseUrl + "macos.json";
+            // NetSparkle does not filter appcast items by CPU architecture (only OS), and
+            // self-contained .NET publishes are architecture-specific on macOS (see
+            // publish-veles-macos.yml -- a lipo-fused "universal" build doesn't work because
+            // the BCL ships pre-compiled per-arch), so each arch needs its own appcast file,
+            // same as Windows above.
+            return RuntimeInformation.ProcessArchitecture switch
+            {
+                Architecture.X64 => AppcastBaseUrl + "macos-x64.json",
+                Architecture.Arm64 => AppcastBaseUrl + "macos-arm64.json",
+                _ => null
+            };
         }
 
         return null;

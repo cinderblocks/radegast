@@ -67,11 +67,16 @@ jobs:
           $downloadBase = "https://github.com/${{ github.repository }}/releases/download/${{ env.TAG }}"
           New-Item -ItemType Directory -Path out\veles\appcast -Force | Out-Null
 
+          # macOS DMGs are named "<repo>-<version>-osx-<arch>.dmg" (see publish-veles-macos.yml's
+          # DMG rename step) specifically so these two patterns can tell them apart -- there is
+          # no single fused "universal" DMG any more (lipo can't fuse the per-arch BCL), so each
+          # arch needs its own appcast file, same as the three Windows arches below.
           $targets = @(
-            @{ Name = "windows-x86";   Pattern = "*_x86_*.msi";   Os = "windows-x86" },
-            @{ Name = "windows-x64";   Pattern = "*_x64_*.msi";   Os = "windows-x64" },
-            @{ Name = "windows-arm64"; Pattern = "*_ARM64_*.msi"; Os = "windows-arm64" },
-            @{ Name = "macos";         Pattern = "*.dmg";         Os = "macos" }
+            @{ Name = "windows-x86";   Pattern = "*_x86_*.msi";     Os = "windows-x86" },
+            @{ Name = "windows-x64";   Pattern = "*_x64_*.msi";     Os = "windows-x64" },
+            @{ Name = "windows-arm64"; Pattern = "*_ARM64_*.msi";   Os = "windows-arm64" },
+            @{ Name = "macos-x64";     Pattern = "*-osx-x64.dmg";   Os = "macos-x64" },
+            @{ Name = "macos-arm64";   Pattern = "*-osx-arm64.dmg"; Os = "macos-arm64" }
           )
 
           $anyGenerated = $false

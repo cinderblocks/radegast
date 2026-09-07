@@ -22,6 +22,8 @@ jobs:
   build-macos:
     name: Build macOS per-arch
     runs-on: macos-latest
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -172,6 +174,14 @@ jobs:
           mkdir -p "$DIST_DIR"
           if npx --yes create-dmg "$SRC_APP" "$DIST_DIR"; then
             echo "DMG created for $RID"
+            # create-dmg names its output from the app's CFBundleName+version alone (e.g.
+            # "Radegast 1.9.0.dmg"), with no RID in it -- both matrix legs would otherwise
+            # produce an identically-named DMG, and uploading both to the same GitHub Release
+            # with --clobber would silently overwrite one arch's DMG with the other's.
+            DMG_FILE=$(find "$DIST_DIR" -maxdepth 1 -name '*.dmg' -print -quit)
+            if [ -n "$DMG_FILE" ]; then
+              mv "$DMG_FILE" "$DIST_DIR/${REPO_NAME}-${TAG_NAME#Veles/}-$RID.dmg"
+            fi
           else
             echo "create-dmg failed for $RID; DMG will be missing, tarball still produced below"
           fi
@@ -190,119 +200,16 @@ jobs:
           name: radegast-veles-macos-${{ matrix.arch }}-${{ env.VERSION }}
           path: dist/osx-${{ matrix.arch }}/*
 
-  build-universal:
-    name: Build universal macOS DMG
-    needs: build-macos
-    runs-on: macos-latest
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # See build-macos's own identically-named step -- same reasoning, and must be repeated
-      # here since GITHUB_ENV overrides from that job's steps don't carry across jobs.
-      - name: Resolve version for manual test build
-        if: github.event_name == 'workflow_dispatch'
-        run: echo "TAG_NAME=Veles/${{ inputs.version }}" >> "$GITHUB_ENV"
-
-      - name: Compute version
-        run: echo "VERSION=${TAG_NAME#Veles/}" >> "$GITHUB_ENV"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Download x64 publish
-        uses: actions/download-artifact@v4
-        with:
-          name: radegast-veles-macos-x64-publish
-          path: publish-x64
-
-      - name: Download arm64 publish
-        uses: actions/download-artifact@v4
-        with:
-          name: radegast-veles-macos-arm64-publish
-          path: publish-arm64
-
-      - name: Create universal .app
-        run: |
-          set -e
-          X64_APP=$(find publish-x64 -maxdepth 1 -type d -name '*.app' -print -quit)
-          ARM_APP=$(find publish-arm64 -maxdepth 1 -type d -name '*.app' -print -quit)
-          WORK=universal
-          mkdir -p $WORK
-          if [ -n "$X64_APP" ] && [ -n "$ARM_APP" ]; then
-            cp -R "$X64_APP" "$WORK/${REPO_NAME}.app"
-            BASE_APP="$WORK/${REPO_NAME}.app"
-            # Fuse all Mach-O binaries found in the x64 app with their arm64 counterparts
-            while IFS= read -r -d '' x64_bin; do
-              rel="${x64_bin#$X64_APP/}"
-              arm_bin="$ARM_APP/$rel"
-              base_bin="$BASE_APP/$rel"
-              if [ -f "$arm_bin" ] && file "$x64_bin" | grep -q "Mach-O"; then
-                echo "lipo: $rel"
-                lipo -create "$x64_bin" "$arm_bin" -output "$base_bin" || true
-                chmod +x "$base_bin"
-              fi
-            done < <(find "$X64_APP" -type f -print0)
-          else
-            echo "One or both .app bundles not found; creating simple app from publish folders"
-            mkdir -p "$WORK/${REPO_NAME}.app/Contents/MacOS"
-            cp -R publish-x64/* "$WORK/${REPO_NAME}.app/Contents/MacOS/" || true
-            # See build-macos's identically-named step for why this is targeted, not a blanket
-            # `chmod -R +x`: codesign --strict fails a signed bundle outright if any file in it
-            # is executable without its own valid signature, and that blanket form marked every
-            # managed .dll executable too.
-            chmod +x "$WORK/${REPO_NAME}.app/Contents/MacOS/RadegastVeles" || true
-            find "$WORK/${REPO_NAME}.app/Contents/MacOS" -maxdepth 1 -name '*.dylib' -exec chmod +x {} + || true
-          fi
-
-      - name: Ad-hoc code sign universal .app
-        run: |
-          set -e
-          UNIVERSAL_APP="universal/${REPO_NAME}.app"
-          if [ ! -d "$UNIVERSAL_APP" ]; then
-            echo "Universal app not found: $UNIVERSAL_APP"
-            exit 1
-          fi
-          # lipo rewrites individual binaries in place, which invalidates whatever signature
-          # they had going in — re-sign the assembled universal bundle from scratch. Ad-hoc
-          # only (no Apple Developer ID certificate available): satisfies the arm64 launch
-          # requirement but Gatekeeper still shows an "unidentified developer" prompt on
-          # first run — see README for the right-click > Open workaround.
-          codesign --force --deep --sign - "$UNIVERSAL_APP"
-          codesign --verify --verbose "$UNIVERSAL_APP"
-
-      - name: Create universal DMG and tarball
-        run: |
-          set -e
-          UNIVERSAL_APP="universal/${REPO_NAME}.app"
-          if [ ! -d "$UNIVERSAL_APP" ]; then
-            echo "Universal app not found: $UNIVERSAL_APP"
-            exit 1
-          fi
-          mkdir -p dist
-          if npx --yes create-dmg --no-code-sign "$UNIVERSAL_APP" dist; then
-            echo "Universal DMG created"
-          else
-            echo "create-dmg failed for universal app; DMG will be missing, tarball still produced below"
-          fi
-          # See build-macos's identically-named step for why this always runs, not just as a
-          # create-dmg fallback: it's the only distribution format that survives a browser
-          # download without inheriting Gatekeeper's quarantine block on an ad-hoc signature.
-          tar -cjf "dist/${REPO_NAME}-${TAG_NAME#Veles/}-universal.tbz" -C universal "${REPO_NAME}.app"
-
-      # Skipped entirely for manual test builds (workflow_dispatch): a test build must never
-      # create a tag or a release. gh release create with a tag_name that doesn't exist yet
-      # WOULD create that tag, which is exactly what this guard prevents. The DMG is still
-      # available either way via "Upload debug artifacts" below.
+      # A prior "universal" (lipo-fused x64+arm64) build was dropped: self-contained .NET
+      # publishes ship System.Private.CoreLib.dll (and the rest of the BCL) pre-compiled per
+      # architecture (R2R) inside a PE container, not Mach-O, so lipo can't fuse them (there is
+      # no such thing as a universal PE file) -- the fused apphost ran fine, then failed to load
+      # CoreLib with "incorrect format" (HRESULT 0x8007000B) since it was silently left x64-only.
+      # Shipping the two per-arch bundles this job already builds correctly is the standard
+      # approach for self-contained .NET on macOS. Matrix legs run in parallel, so this can race
+      # another leg creating the same release; treat "already exists" as success rather than
+      # failing, and skipped entirely for manual test builds (a test build must never create a
+      # tag/release -- gh release create with a tag_name that doesn't exist yet WOULD create it).
       - name: Ensure GitHub Release exists
         if: github.event_name != 'workflow_dispatch'
         run: |
@@ -312,28 +219,22 @@ jobs:
             if [[ "$VERSION" == *-* ]]; then
               extra_args+=(--prerelease)
             fi
-            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME" "${extra_args[@]}"
+            gh release create "$TAG_NAME" --draft --title "Radegast Veles ${TAG_NAME#Veles/}" --notes "Automated build for $TAG_NAME" "${extra_args[@]}" \
+              || gh release view "$TAG_NAME" >/dev/null 2>&1
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload universal packages to GitHub Release
+      - name: Upload per-arch packages to GitHub Release
         if: github.event_name != 'workflow_dispatch'
         run: |
           shopt -s nullglob
-          ASSETS=(dist/*.dmg dist/*.tbz)
+          RID=osx-${{ matrix.arch }}
+          ASSETS=(dist/$RID/*.dmg dist/$RID/*.tbz)
           if [ ${#ASSETS[@]} -eq 0 ]; then
-            echo "No universal packages found in dist/"
+            echo "No packages found in dist/$RID"
             exit 1
           fi
           gh release upload "$TAG_NAME" "${ASSETS[@]}" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload debug artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: radegast-veles-macos-universal-debug-${{ env.VERSION }}
-          path: |
-            universal/**
-            dist/**
