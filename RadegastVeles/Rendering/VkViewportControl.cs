@@ -22,6 +22,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -3484,11 +3485,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>Rebuilds <see cref="_sceneOpaque"/>/<see cref="_sceneAlpha"/> from
-    /// <see cref="_sceneObjects"/>, minus GL's batching-order sort: that sort exists to help GL's runtime instancing find
-    /// adjacent identical-mesh/texture faces across different objects, but this port's
-    /// <see cref="DrawFaces"/> already issues one draw call per face regardless of order (see
-    /// <see cref="_opaqueFaces"/>'s own "not deduplicated" doc comment) -- draw order doesn't
-    /// affect correctness here, so there is nothing for a sort to buy.</summary>
+    /// <see cref="_sceneObjects"/>, INCLUDING GL's batching-order sort on the opaque half --
+    /// restored (this port had dropped it: <see cref="DrawFaces"/> used to issue one draw call
+    /// per face regardless of order, so there was nothing for a sort to buy; now that it
+    /// coalesces consecutive same-(Mesh,Material) runs into real instanced draws, sorting here is
+    /// exactly what makes those runs longer). Opaque only, not alpha: opaque draw order has no
+    /// correctness constraint, but alpha's depth sort (back-to-front blending) must NOT be
+    /// disturbed by a mesh/material sort -- <see cref="DrawFaces"/> still opportunistically
+    /// coalesces alpha's already-adjacent runs without reordering anything.</summary>
     private void RebuildSceneFlatLists()
     {
         _sceneOpaque.Clear();
@@ -3501,6 +3505,12 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 else _sceneOpaque.Add(entry);
             }
         }
+
+        _sceneOpaque.Sort((a, b) =>
+        {
+            int meshCmp = RuntimeHelpers.GetHashCode(a.Mesh).CompareTo(RuntimeHelpers.GetHashCode(b.Mesh));
+            return meshCmp != 0 ? meshCmp : RuntimeHelpers.GetHashCode(a.Material).CompareTo(RuntimeHelpers.GetHashCode(b.Material));
+        });
     }
 
     /// <summary>
@@ -7237,19 +7247,40 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="WriteInstanceData"/> wrote it). Caller has already uploaded the combined
     /// instance buffer and bound the correct pipeline (Opaque/Alpha) and sets 0/1.
     /// </summary>
+    /// <summary>
+    /// Draws every face in <paramref name="faces"/>, coalescing consecutive runs that share the
+    /// same <c>Mesh</c> AND <c>Material</c> (reference equality -- same C# object means the same
+    /// underlying VBO/EBO and the same bound descriptor set, both of which a single draw call
+    /// only binds once, not per-instance) into ONE real instanced <c>vkCmdDrawIndexed</c> call
+    /// instead of one call per face. Safe for both opaque and depth-sorted alpha callers with no
+    /// reordering of its own: it only ever merges faces that are ALREADY adjacent in whatever
+    /// order <paramref name="faces"/> is in, so alpha's back-to-front blend order is untouched --
+    /// see <see cref="RebuildSceneFlatLists"/> for the one place that deliberately sorts an input
+    /// list (opaque only, no blend-order constraint) specifically to make these runs longer.
+    /// </summary>
     private unsafe void DrawFaces(VkContext vk, CommandBuffer cmd,
         List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> faces, int baseIndex)
     {
-        for (int i = 0; i < faces.Count; i++)
+        int i = 0;
+        while (i < faces.Count)
         {
-            // Set 2 (per-material) bound per-face now that every face has its own real
-            // material, right before that face's draw call -- sets 0/1 were already bound
-            // once for the frame and stay valid (see the caller's comment on why binding set
-            // 2 alone doesn't disturb them).
-            var materialSet = faces[i].Material.Set;
+            var mesh = faces[i].Mesh;
+            var material = faces[i].Material;
+            int runLength = 1;
+            while (i + runLength < faces.Count
+                && ReferenceEquals(faces[i + runLength].Mesh, mesh)
+                && ReferenceEquals(faces[i + runLength].Material, material))
+                runLength++;
+
+            // Set 2 (per-material) bound once per RUN, not per-face -- sets 0/1 were already
+            // bound once for the frame and stay valid (see the caller's comment on why binding
+            // set 2 alone doesn't disturb them).
+            var materialSet = material.Set;
             vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _prim!.Layout, 2, 1, &materialSet, 0, null);
-            _instanceDrawer!.DrawBatchedInstance(cmd, faces[i].Mesh, baseIndex + i);
-            _stats.RecordDraw(faces[i].Mesh.IndexCount); // mirrors GL's own DrawFaces call site
+            _instanceDrawer!.DrawBatchedInstances(cmd, mesh, baseIndex + i, runLength);
+            _stats.RecordDraw(mesh.IndexCount, runLength);
+
+            i += runLength;
         }
     }
 

@@ -259,11 +259,16 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
         FrameCompleted?.Invoke(stats);
     }
 
-    /// <summary>Record a single draw call covering <paramref name="indexCount"/> indices.</summary>
-    public void RecordDraw(int indexCount)
+    /// <summary>Record a single draw call covering <paramref name="indexCount"/> indices, drawn
+    /// <paramref name="instanceCount"/> times (default 1) -- e.g. <c>VkViewportControl.DrawFaces</c>'
+    /// batched same-mesh runs, one draw call rendering several instances at once. Draw-call count
+    /// still increments by exactly 1 regardless of <paramref name="instanceCount"/> (that's the
+    /// point of batching being visible here); triangle count scales by it so the total stays
+    /// accurate.</summary>
+    public void RecordDraw(int indexCount, int instanceCount = 1)
     {
         _drawCalls++;
-        _triangles += indexCount / 3;
+        _triangles += indexCount / 3 * instanceCount;
     }
 
     /// <summary>Increment the face-submitted counter (called regardless of cull result).</summary>

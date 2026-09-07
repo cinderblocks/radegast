@@ -129,6 +129,29 @@ internal sealed unsafe class VkInstanceDrawer : IDisposable
         api.CmdDrawIndexed(cmd, (uint)mesh.IndexCount, 1, 0, 0, 0);
     }
 
+    /// <summary>Records a bind + indexed draw covering <paramref name="instanceCount"/>
+    /// CONSECUTIVE instance slots starting at <paramref name="baseIndex"/>, from the batch most
+    /// recently uploaded by <see cref="UploadInstanceBatch"/> -- the real multi-instance path
+    /// (<c>instanceCount &gt; 1</c> in a single <c>vkCmdDrawIndexed</c>) <see cref="DrawInstanced"/>
+    /// already does against its own offset-0 slot, generalized to read from an arbitrary offset
+    /// into the SHARED per-frame batch buffer instead. Valid only when the caller has already
+    /// verified all <paramref name="instanceCount"/> slots really do belong to
+    /// <paramref name="mesh"/> and share one descriptor-set-2 bind (both bound once for the whole
+    /// draw call, not per-instance) -- see <c>VkViewportControl.DrawFaces</c>'s own
+    /// same-(Mesh,Material)-run coalescing for the only current caller. Caller owns command
+    /// buffer recording/submission.</summary>
+    public void DrawBatchedInstances(CommandBuffer cmd, VkMesh mesh, int baseIndex, int instanceCount)
+    {
+        var api = _vk.Api;
+        var vbo = mesh.Vbo;
+        var instBuf = _instanceBuffer;
+        var buffers = stackalloc Buffer[2] { vbo, instBuf };
+        var offsets = stackalloc ulong[2] { 0, (ulong)(baseIndex * InstanceStride) };
+        api.CmdBindVertexBuffers(cmd, 0, 2, buffers, offsets);
+        api.CmdBindIndexBuffer(cmd, mesh.Ebo, 0, IndexType.Uint16);
+        api.CmdDrawIndexed(cmd, (uint)mesh.IndexCount, (uint)instanceCount, 0, 0, 0);
+    }
+
     private void EnsureCapacity(int floatCount)
     {
         if (floatCount <= _capacityFloats && _instanceBuffer.Handle != 0) return;
