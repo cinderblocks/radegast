@@ -63,10 +63,14 @@ layout(set = 1, binding = 0) uniform WaterPass
     float uTime;           // animation clock (seconds, monotonically increasing)
     vec4  uWaterColor;     // deep-water tint (rgba) -- EEP water_fog_color
     int   uHasReflection;  // 1 = reflection FBO available
+    int   uHasRefraction;  // 1 = pre-water opaque-scene snapshot available (see VkViewportControl's
+                            // split-main-pass refraction snapshot; 0 on Low tier or before the
+                            // first split-path frame has run)
 } waterPass;
 layout(set = 1, binding = 1) uniform sampler2D uReflectionTex; // unit 0 - reflected scene FBO
 layout(set = 1, binding = 2) uniform sampler2D uNormalMap;     // unit 1 - water surface normals
 layout(set = 1, binding = 3) uniform sampler2D uDudvMap;       // unit 2 - distortion UV map
+layout(set = 1, binding = 4) uniform sampler2D uRefractionTex; // unit 3 - pre-water opaque scene snapshot
 
 #define uViewProj      waterPass.uViewProj
 #define uReflViewProj  waterPass.uReflViewProj
@@ -76,6 +80,7 @@ layout(set = 1, binding = 3) uniform sampler2D uDudvMap;       // unit 2 - disto
 #define uTime          waterPass.uTime
 #define uWaterColor    waterPass.uWaterColor
 #define uHasReflection waterPass.uHasReflection
+#define uHasRefraction waterPass.uHasRefraction
 
 layout(location = 0) in  vec2 vNdc;
 layout(location = 0) out vec4 fragColor;
@@ -172,10 +177,27 @@ void main()
     }
 
     // ── Water body colour ─────────────────────────────────────────────────────
-    // Deep-water tint lit by the environment so it tracks day/night instead of
-    // rendering as a constant flat blue sheet.
+    // Flat, environment-lit tint -- the fallback when no refraction snapshot is available
+    // (Low tier, or before the first split-main-pass frame has run), and also what distant/
+    // deep water fades TOWARD even when refraction IS available (see absorption below).
     vec3 deepCol = uWaterColor.rgb
                  * (uAmbient + uSunlightColor * max(uSunDirection.z, 0.0) * 0.8);
+
+    if (uHasRefraction != 0)
+    {
+        // Real refraction: sample the pre-water opaque-scene snapshot at this pixel's own
+        // screen position, distorted by the SAME wave normal already driving the reflection
+        // sample above (so refraction and reflection ripple coherently), then fade toward the
+        // flat tint with distance -- a cheap Beer-Lambert-ish stand-in for light absorption
+        // with depth (no real per-pixel water depth is available, only eye-to-surface
+        // distance `t`, which is a reasonable proxy: shallow/near water shows real underwater
+        // detail, distant/deep water reads as the same flat tint it always did).
+        vec2 screenUv   = gl_FragCoord.xy / frame.uScreenSize;
+        vec2 refractUv  = clamp(screenUv + mapNorm.xy * 0.02 * nFade, 0.0, 1.0);
+        vec3 refractCol = texture(uRefractionTex, refractUv).rgb;
+        float absorption = 1.0 - exp(-t * 0.05);
+        deepCol = mix(refractCol, deepCol, absorption);
+    }
 
     vec3 col = mix(deepCol, reflColor, fresnel);
 

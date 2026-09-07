@@ -307,11 +307,11 @@ internal static class VkDescriptorSetLayouts
     /// shared with the prim pipeline family's own set 1: the water pipeline's set 0 reuses
     /// <see cref="VkPrimPipeline.PerFrameLayout"/> directly (same pattern as the sky pipeline's
     /// set 0), but its set 1 is water-only data nothing else needs. Binding 0 = the
-    /// <c>WaterPass</c> UBO, bindings 1-3 = uReflectionTex/uNormalMap/uDudvMap. Fragment-only --
-    /// water.vert reads none of these.</summary>
+    /// <c>WaterPass</c> UBO, bindings 1-4 = uReflectionTex/uNormalMap/uDudvMap/uRefractionTex.
+    /// Fragment-only -- water.vert reads none of these.</summary>
     public static unsafe DescriptorSetLayout CreateWaterPassLayout(VkContext vk)
     {
-        var bindings = stackalloc DescriptorSetLayoutBinding[4];
+        var bindings = stackalloc DescriptorSetLayoutBinding[5];
         bindings[0] = new DescriptorSetLayoutBinding
         {
             Binding = 0,
@@ -319,7 +319,7 @@ internal static class VkDescriptorSetLayouts
             DescriptorCount = 1,
             StageFlags = ShaderStageFlags.FragmentBit
         };
-        for (uint i = 1; i < 4; i++)
+        for (uint i = 1; i < 5; i++)
         {
             bindings[i] = new DescriptorSetLayoutBinding
             {
@@ -332,7 +332,7 @@ internal static class VkDescriptorSetLayouts
         var createInfo = new DescriptorSetLayoutCreateInfo
         {
             SType = StructureType.DescriptorSetLayoutCreateInfo,
-            BindingCount = 4,
+            BindingCount = 5,
             PBindings = bindings
         };
         vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();

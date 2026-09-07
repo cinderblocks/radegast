@@ -266,6 +266,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             || e.Message.Contains("ErrorOutOfHostMemory", StringComparison.Ordinal));
 
     private RenderPass _renderPass;
+    // Split-main-pass pair, used ONLY on frames where water is visible on Medium/High tier (see
+    // RenderFrame's own splitForRefraction gate) -- render-pass-COMPATIBLE with _renderPass (same
+    // attachment formats/sample counts, just different load/store ops and layouts), so every
+    // pipeline already created against _renderPass (_prim.Opaque/Alpha, _waterPipeline,
+    // _wireframe, _outline, the particle pipeline) can record draws into either of these directly
+    // with no separate pipeline variant needed -- unlike _prim.ReflOpaque, which exists only
+    // because the water REFLECTION pass targets a genuinely different (smaller, different-format)
+    // offscreen target. See VkRenderPass.CreateMainScenePassOpaque/CreateMainScenePassContinuation's
+    // own doc comments for the full two-pass picture.
+    private RenderPass _mainScenePassOpaque;
+    private RenderPass _mainScenePassContinuation;
     private VkInteropSwapchain? _swapchain;
     // this panel's own pending-command-buffer list, replacing the old
     // process-wide one VkCommandBufferPool used to own. Shared with _swapchain (and the
@@ -374,6 +385,26 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // invalid Vulkan usage. Same rationale as _ssaoNearestSampler/_ssaoLinearSampler each being
     // dedicated rather than reused from VkPlaceholderTextures.
     private Sampler _underwaterLinearSampler;
+
+    // ── Water refraction snapshot ───────────────────────────────────────────────────────────
+    // Mirrors _underwaterSourceImage/_underwaterTargetSize/_underwaterSourceLayout/Access's own
+    // shape exactly (see those fields' doc comments) -- same "plain Image, hand-tracked
+    // layout/access, CmdCopyImage destination + sampled texture, never a render-pass attachment
+    // itself" role, just a different source (the still-open _hdrColorImage mid-frame, not the
+    // fully-composited swapchain image post-frame) and format (B10G11R11UfloatPack32, matching
+    // _hdrColorImage's own HDR format -- must NOT be _underwaterSourceImage's R8G8B8A8Unorm,
+    // since this copies pre-tonemap HDR data water.frag's existing HDR-space math depends on).
+    // Created lazily, only on frames where the main-pass split actually runs (RenderFrame's own
+    // splitForRefraction gate) -- reuses _postProcessLinearSampler rather than a dedicated
+    // sampler, since that's already a plain linear-clamp sampler with no lifetime coupling to
+    // anything this feature doesn't already depend on (it's created alongside the mandatory
+    // tonemap chain on the same Medium/High tiers this feature is scoped to).
+    private PixelSize _waterRefractionTargetSize;
+    private Image _waterRefractionSourceImage;
+    private DeviceMemory _waterRefractionSourceMemory;
+    private ImageView _waterRefractionSourceView;
+    private ImageLayout _waterRefractionSourceLayout = ImageLayout.Undefined;
+    private AccessFlags _waterRefractionSourceAccess = AccessFlags.None;
 
     // ── Directional shadows ─────────────────────────────────────────────────────────────────
     // Point-light shadows explicitly OUT of scope -- point-light illumination itself was never
@@ -1799,6 +1830,16 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             _renderPass = _graphicsTier == VkGraphicsTier.Low
                 ? VkRenderPass.CreateMainScenePassDirect(vk, Format.R8G8B8A8Unorm, Format.D32Sfloat)
                 : VkRenderPass.CreateMainScenePass(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
+            // Water-refraction split pair -- Medium/High only (Low has no HDR buffer to split,
+            // see _mainScenePassOpaque's own field comment), created unconditionally alongside
+            // _renderPass on those tiers even though the split path only actually runs on frames
+            // where water is visible (same "always create the objects, only conditionally use
+            // them" posture as bloom/god-rays' own pipeline construction).
+            if (_graphicsTier != VkGraphicsTier.Low)
+            {
+                _mainScenePassOpaque = VkRenderPass.CreateMainScenePassOpaque(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
+                _mainScenePassContinuation = VkRenderPass.CreateMainScenePassContinuation(vk, Format.B10G11R11UfloatPack32, Format.D32Sfloat);
+            }
             _swapchain = new VkInteropSwapchain(vk, interop, _surface, _reapRing);
             _prim = VkPrimPipeline.Create(vk, _renderPass);
             _wireframe = VkWireframePipeline.Create(vk, _renderPass);
@@ -1998,8 +2039,15 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     ImageView = _waterReflColorView,
                     Sampler = _waterReflColorSampler
                 };
+                // Refraction's own target doesn't exist yet at this point (lazy, only created on
+                // frames where water is actually visible on Medium/High tier -- see
+                // EnsureWaterRefractionTarget) -- bind the shared placeholder here, same as every
+                // other "optional texture not available yet" binding in this codebase, and let
+                // EnsureWaterRefractionTarget's own VkWaterDescriptorSet.UpdateRefractionInput
+                // call rewrite it once the real target exists.
                 _waterDescSet = new VkWaterDescriptorSet(vk, _waterPipeline,
-                    reflTexInfo, _waterNormalTex.DescriptorImageInfo, _waterDudvTex.DescriptorImageInfo);
+                    reflTexInfo, _waterNormalTex.DescriptorImageInfo, _waterDudvTex.DescriptorImageInfo,
+                    _placeholders!.Black);
 
                 // Own PerFrame descriptor set for the reflection pass -- see this field's own
                 // doc comment for why sharing _frameSets would be wrong. WritePassSetPlaceholders
@@ -4510,6 +4558,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 
         var vk = VkApi.Context;
         Framebuffer framebuffer = default;
+        // Only ever created (and needs destroying) on the water-refraction split path -- see
+        // RenderFrame's own splitForRefraction branch. Declared here, not locally in that branch,
+        // so the deferred-destroy in this method's own finally block below can see it.
+        Framebuffer framebuffer2 = default;
         try
         {
             var pendingSubmission = Interlocked.Exchange(ref _pendingSubmission, null);
@@ -5078,17 +5130,35 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _graphicsTier == VkGraphicsTier.Low ? new ImageView(image.ViewHandle) : _hdrColorView,
                 _depthView
             };
-            var fbInfo = new FramebufferCreateInfo
+
+            // Water refraction needs a snapshot of the opaque scene colour taken between opaque
+            // geometry and water -- vkCmdCopyImage isn't legal inside an active render pass, so
+            // that snapshot needs an actual pass boundary. Gated on doWater, NOT on whether water
+            // is actually visible this frame: doWater just means the sim has a water height set,
+            // which is true on nearly every region, so this split (extra pass boundary + full-res
+            // HDR copy) runs on essentially every Medium/High-tier frame, indoors and underground
+            // included -- there's no cheap per-frame "is the water plane actually on screen" signal
+            // in this codebase to gate on instead (DrawWater itself draws unconditionally whenever
+            // doWater is true, with no frustum/occlusion check of its own). If profiling shows this
+            // costs real frame time in non-water scenes, tighten this gate rather than assuming
+            // it's free. Low tier has no HDR buffer to split (CreateMainScenePassDirect writes the
+            // swapchain directly), so it's excluded regardless of doWater.
+            bool splitForRefraction = doWater && _graphicsTier != VkGraphicsTier.Low;
+
+            if (!splitForRefraction)
             {
-                SType = StructureType.FramebufferCreateInfo,
-                RenderPass = _renderPass,
-                AttachmentCount = 2,
-                PAttachments = attachments,
-                Width = (uint)pixelSize.Width,
-                Height = (uint)pixelSize.Height,
-                Layers = 1
-            };
-            vk.Api.CreateFramebuffer(vk.Device, in fbInfo, null, out framebuffer).ThrowOnError();
+                var fbInfo = new FramebufferCreateInfo
+                {
+                    SType = StructureType.FramebufferCreateInfo,
+                    RenderPass = _renderPass,
+                    AttachmentCount = 2,
+                    PAttachments = attachments,
+                    Width = (uint)pixelSize.Width,
+                    Height = (uint)pixelSize.Height,
+                    Layers = 1
+                };
+                vk.Api.CreateFramebuffer(vk.Device, in fbInfo, null, out framebuffer).ThrowOnError();
+            }
 
             PreCullMs = _renderStopwatch.Elapsed.TotalMilliseconds;
 
@@ -5145,89 +5215,215 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 new ClearValue { Color = new ClearColorValue { Float32_0 = clearR, Float32_1 = clearG, Float32_2 = clearB, Float32_3 = 1f } },
                 new ClearValue { DepthStencil = new ClearDepthStencilValue { Depth = 1f, Stencil = 0 } }
             };
-            var beginInfo = new RenderPassBeginInfo
-            {
-                SType = StructureType.RenderPassBeginInfo,
-                RenderPass = _renderPass,
-                Framebuffer = framebuffer,
-                RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
-                ClearValueCount = 2,
-                PClearValues = clearValues
-            };
             SubPassMs = _renderStopwatch.Elapsed.TotalMilliseconds;
-            vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo, SubpassContents.Inline);
 
-            // drawn before everything else so it fills pixels not covered by
-            // geometry -- placed
-            // immediately after the per-frame UBO is up to date, before the shadow/main
-            // geometry passes). Depends on frameUbo already being written to _frameSets'
-            // buffer above: the sky pipeline's set 0 reuses that SAME descriptor set.
-            if (ShowSky && _skyReady)
-                DrawSky(vk, cmd.InternalHandle, view, proj);
-
-            if (mainOpaqueFaceCount > 0 || alphaCount > 0)
+            if (!splitForRefraction)
             {
-                // Sets 0+1 (per-frame UBO, per-pass samplers) bound once for the whole frame;
-                // set 2 (per-material) is bound per-face inside DrawFaces now that every face
-                // carries its own real VkMaterialDescriptorSet -- binding set 2 alone via
-                // firstSet=2 doesn't disturb sets 0/1 as long as the pipeline layout used stays
-                // compatible (it does: every draw this frame uses _prim.Layout).
-                var frameAndPassSets = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
-                vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSets, 0, null);
+                var beginInfo = new RenderPassBeginInfo
+                {
+                    SType = StructureType.RenderPassBeginInfo,
+                    RenderPass = _renderPass,
+                    Framebuffer = framebuffer,
+                    RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
+                    ClearValueCount = 2,
+                    PClearValues = clearValues
+                };
+                vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo, SubpassContents.Inline);
+
+                // drawn before everything else so it fills pixels not covered by
+                // geometry -- placed
+                // immediately after the per-frame UBO is up to date, before the shadow/main
+                // geometry passes). Depends on frameUbo already being written to _frameSets'
+                // buffer above: the sky pipeline's set 0 reuses that SAME descriptor set.
+                if (ShowSky && _skyReady)
+                    DrawSky(vk, cmd.InternalHandle, view, proj);
+
+                if (mainOpaqueFaceCount > 0 || alphaCount > 0)
+                {
+                    // Sets 0+1 (per-frame UBO, per-pass samplers) bound once for the whole frame;
+                    // set 2 (per-material) is bound per-face inside DrawFaces now that every face
+                    // carries its own real VkMaterialDescriptorSet -- binding set 2 alone via
+                    // firstSet=2 doesn't disturb sets 0/1 as long as the pipeline layout used stays
+                    // compatible (it does: every draw this frame uses _prim.Layout).
+                    var frameAndPassSets = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
+                    vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSets, 0, null);
+
+                    if (mainOpaqueFaceCount > 0)
+                    {
+                        vk.Api.CmdBindPipeline(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Opaque);
+                        if (mainOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainOpaqueVisible, baseIndex: 0);
+                        if (mainSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainSceneOpaqueVisible, baseIndex: mainOpaqueCount);
+                    }
+
+                    // water surface, drawn after opaque geometry (correct depth test
+                    // against real terrain/objects) but before the alpha pass (transparent objects
+                    // above water render in front of it).
+                    if (doWater)
+                        DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: false);
+
+                    if (alphaCount > 0)
+                    {
+                        // Re-bind sets 0/1: if doWater ran above, DrawWater bound _waterPipeline's
+                        // OWN set 1 (WaterPassLayout, a different VkDescriptorSetLayout object than
+                        // prim's PerPassSamplersLayout) at the same set index -- Vulkan considers
+                        // that binding no longer "compatible" for a later draw through a DIFFERENT
+                        // pipeline layout at that set index, so the alpha pass can't assume sets 0/1
+                        // are still whatever the opaque block bound. Rebinding unconditionally here
+                        // (cheap, one CmdBindDescriptorSets call) removes any doubt rather than
+                        // conditioning it on doWater specifically.
+                        var frameAndPassSetsAlpha = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
+                        vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSetsAlpha, 0, null);
+                        vk.Api.CmdBindPipeline(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Alpha);
+                        DrawFaces(vk, cmd.InternalHandle, _mergedAlpha, baseIndex: mainOpaqueFaceCount);
+                    }
+                }
+                else if (doWater)
+                {
+                    // water can still draw even with zero opaque/alpha faces this
+                    // frame (e.g. an empty scene over a water plane) -- the outer `if` above only
+                    // guards the opaque+alpha block, so this mirrors that same doWater draw for the
+                    // "nothing else to draw" case. No extra descriptor-set bind needed here: DrawWater
+                    // binds its own sets 0+1 through _waterPipeline.Layout unconditionally, regardless
+                    // of whether the opaque block ran first. hasRefraction is always false here too:
+                    // this whole branch only runs when splitForRefraction is false (Low tier, given
+                    // doWater is true or this else-if wouldn't have been reached).
+                    DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: false);
+                }
+
+                if (Wireframe && _wireframe != null)
+                    DrawWireframeOverlay(vk, cmd.InternalHandle, view, proj);
+
+                // Selection outline is independent of the Wireframe toggle -- it's touch/select
+                // feedback, not a debug view, so it draws whenever something is selected.
+                if (_selectedOutlineLocalId != 0 && _outline != null)
+                    DrawSelectionOutline(vk, cmd.InternalHandle, view, proj);
+
+                // last thing drawn in the main pass, matching GL's own placement
+                // (DrawParticles is called immediately before BlitSceneToFb in GlRenderCore).
+                DrawParticles(vk, cmd.InternalHandle, view, proj);
+
+                vk.Api.CmdEndRenderPass(cmd.InternalHandle);
+            }
+            else
+            {
+                // ── Split main pass for water refraction -- see this session's plan file (and
+                // VkRenderPass.CreateMainScenePassOpaque/CreateMainScenePassContinuation's own doc
+                // comments) for the full rationale. Pass 1: sky + opaque only. ────────────────────
+                var fbInfo1 = new FramebufferCreateInfo
+                {
+                    SType = StructureType.FramebufferCreateInfo,
+                    RenderPass = _mainScenePassOpaque,
+                    AttachmentCount = 2,
+                    PAttachments = attachments,
+                    Width = (uint)pixelSize.Width,
+                    Height = (uint)pixelSize.Height,
+                    Layers = 1
+                };
+                vk.Api.CreateFramebuffer(vk.Device, in fbInfo1, null, out framebuffer).ThrowOnError();
+
+                var beginInfo1 = new RenderPassBeginInfo
+                {
+                    SType = StructureType.RenderPassBeginInfo,
+                    RenderPass = _mainScenePassOpaque,
+                    Framebuffer = framebuffer,
+                    RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
+                    ClearValueCount = 2,
+                    PClearValues = clearValues
+                };
+                vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo1, SubpassContents.Inline);
+
+                if (ShowSky && _skyReady)
+                    DrawSky(vk, cmd.InternalHandle, view, proj);
 
                 if (mainOpaqueFaceCount > 0)
                 {
+                    var frameAndPassSets = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
+                    vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSets, 0, null);
                     vk.Api.CmdBindPipeline(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Opaque);
                     if (mainOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainOpaqueVisible, baseIndex: 0);
                     if (mainSceneOpaqueCount > 0) DrawFaces(vk, cmd.InternalHandle, _mainSceneOpaqueVisible, baseIndex: mainOpaqueCount);
                 }
 
-                // water surface, drawn after opaque geometry (correct depth test
-                // against real terrain/objects) but before the alpha pass (transparent objects
-                // above water render in front of it).
-                if (doWater)
-                    DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater);
+                vk.Api.CmdEndRenderPass(cmd.InternalHandle);
+
+                // ── Snapshot the opaque scene colour for refraction (mirrors RenderUnderwaterPass's
+                // own copy sequence exactly, just a different source/dest pair and timing) ────────
+                EnsureWaterRefractionTarget(vk, pixelSize);
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _hdrColorImage,
+                    ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit,
+                    ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit, 1);
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _waterRefractionSourceImage,
+                    _waterRefractionSourceLayout, _waterRefractionSourceAccess,
+                    ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, 1);
+
+                var refractionCopyRegion = new ImageCopy
+                {
+                    SrcSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+                    SrcOffset = new Offset3D(0, 0, 0),
+                    DstSubresource = new ImageSubresourceLayers(ImageAspectFlags.ColorBit, 0, 0, 1),
+                    DstOffset = new Offset3D(0, 0, 0),
+                    Extent = new Extent3D((uint)pixelSize.Width, (uint)pixelSize.Height, 1)
+                };
+                vk.Api.CmdCopyImage(cmd.InternalHandle, _hdrColorImage, ImageLayout.TransferSrcOptimal,
+                    _waterRefractionSourceImage, ImageLayout.TransferDstOptimal, 1, in refractionCopyRegion);
+
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _waterRefractionSourceImage,
+                    ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit,
+                    ImageLayout.ShaderReadOnlyOptimal, AccessFlags.ShaderReadBit, 1);
+                _waterRefractionSourceLayout = ImageLayout.ShaderReadOnlyOptimal;
+                _waterRefractionSourceAccess = AccessFlags.ShaderReadBit;
+
+                VkMemoryHelper.TransitionLayout(vk.Api, cmd.InternalHandle, _hdrColorImage,
+                    ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit,
+                    ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit, 1);
+
+                // ── Pass 2: water, alpha, overlays -- continues into the SAME attachments via
+                // LoadOp=Load, no clear ────────────────────────────────────────────────────────
+                var fbInfo2 = new FramebufferCreateInfo
+                {
+                    SType = StructureType.FramebufferCreateInfo,
+                    RenderPass = _mainScenePassContinuation,
+                    AttachmentCount = 2,
+                    PAttachments = attachments,
+                    Width = (uint)pixelSize.Width,
+                    Height = (uint)pixelSize.Height,
+                    Layers = 1
+                };
+                vk.Api.CreateFramebuffer(vk.Device, in fbInfo2, null, out framebuffer2).ThrowOnError();
+
+                var beginInfo2 = new RenderPassBeginInfo
+                {
+                    SType = StructureType.RenderPassBeginInfo,
+                    RenderPass = _mainScenePassContinuation,
+                    Framebuffer = framebuffer2,
+                    RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)pixelSize.Width, (uint)pixelSize.Height)),
+                    ClearValueCount = 0
+                };
+                vk.Api.CmdBeginRenderPass(cmd.InternalHandle, in beginInfo2, SubpassContents.Inline);
+
+                // doWater is unconditionally true on this path (splitForRefraction's own
+                // definition) -- no guard needed, unlike the single-pass branch above.
+                DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater, hasRefraction: true);
 
                 if (alphaCount > 0)
                 {
-                    // Re-bind sets 0/1: if doWater ran above, DrawWater bound _waterPipeline's
-                    // OWN set 1 (WaterPassLayout, a different VkDescriptorSetLayout object than
-                    // prim's PerPassSamplersLayout) at the same set index -- Vulkan considers
-                    // that binding no longer "compatible" for a later draw through a DIFFERENT
-                    // pipeline layout at that set index, so the alpha pass can't assume sets 0/1
-                    // are still whatever the opaque block bound. Rebinding unconditionally here
-                    // (cheap, one CmdBindDescriptorSets call) removes any doubt rather than
-                    // conditioning it on doWater specifically.
                     var frameAndPassSetsAlpha = stackalloc DescriptorSet[2] { _frameSets.FrameSet, _frameSets.PassSet };
                     vk.Api.CmdBindDescriptorSets(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Layout, 0, 2, frameAndPassSetsAlpha, 0, null);
                     vk.Api.CmdBindPipeline(cmd.InternalHandle, PipelineBindPoint.Graphics, _prim.Alpha);
                     DrawFaces(vk, cmd.InternalHandle, _mergedAlpha, baseIndex: mainOpaqueFaceCount);
                 }
+
+                if (Wireframe && _wireframe != null)
+                    DrawWireframeOverlay(vk, cmd.InternalHandle, view, proj);
+
+                if (_selectedOutlineLocalId != 0 && _outline != null)
+                    DrawSelectionOutline(vk, cmd.InternalHandle, view, proj);
+
+                DrawParticles(vk, cmd.InternalHandle, view, proj);
+
+                vk.Api.CmdEndRenderPass(cmd.InternalHandle);
             }
-            else if (doWater)
-            {
-                // water can still draw even with zero opaque/alpha faces this
-                // frame (e.g. an empty scene over a water plane) -- the outer `if` above only
-                // guards the opaque+alpha block, so this mirrors that same doWater draw for the
-                // "nothing else to draw" case. No extra descriptor-set bind needed here: DrawWater
-                // binds its own sets 0+1 through _waterPipeline.Layout unconditionally, regardless
-                // of whether the opaque block ran first.
-                DrawWater(vk, cmd.InternalHandle, view, proj, waterHeightVal, underwater);
-            }
 
-            if (Wireframe && _wireframe != null)
-                DrawWireframeOverlay(vk, cmd.InternalHandle, view, proj);
-
-            // Selection outline is independent of the Wireframe toggle -- it's touch/select
-            // feedback, not a debug view, so it draws whenever something is selected.
-            if (_selectedOutlineLocalId != 0 && _outline != null)
-                DrawSelectionOutline(vk, cmd.InternalHandle, view, proj);
-
-            // last thing drawn in the main pass, matching GL's own placement
-            // (DrawParticles is called immediately before BlitSceneToFb in GlRenderCore).
-            DrawParticles(vk, cmd.InternalHandle, view, proj);
-
-            vk.Api.CmdEndRenderPass(cmd.InternalHandle);
             _stats.WriteEndTimestamp(vk, cmd.InternalHandle);
             MainPassRecordMs = _renderStopwatch.Elapsed.TotalMilliseconds;
 
@@ -5354,6 +5550,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             {
                 var fbToDestroy = framebuffer;
                 _reapRing.MarkPendingDestroy(() => vk.Api.DestroyFramebuffer(vk.Device, fbToDestroy, null));
+            }
+            if (framebuffer2.Handle != 0)
+            {
+                var fbToDestroy2 = framebuffer2;
+                _reapRing.MarkPendingDestroy(() => vk.Api.DestroyFramebuffer(vk.Device, fbToDestroy2, null));
             }
         }
     }
@@ -5994,6 +6195,82 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _underwaterSourceAccess = AccessFlags.None;
     }
 
+    /// <summary>
+    /// Creates (or resizes) <see cref="_waterRefractionSourceImage"/>: a persistent copy target
+    /// water's split main pass copies the opaque scene colour into, between the opaque-only pass
+    /// and the water/alpha continuation pass. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
+    /// shape exactly (see its doc comment) -- same "never a render-pass attachment itself, only a
+    /// CmdCopyImage destination and a sampled texture" role -- except format
+    /// <c>B10G11R11UfloatPack32</c> (matching <see cref="_hdrColorImage"/>'s own HDR format, not
+    /// <see cref="_underwaterSourceImage"/>'s LDR <c>R8G8B8A8Unorm</c>: this copies pre-tonemap
+    /// data). Called only from the split-main-pass branch of <c>RenderFrame</c>, i.e. only on
+    /// frames where water is actually visible on Medium/High tier.
+    /// </summary>
+    private unsafe void EnsureWaterRefractionTarget(VkContext vk, PixelSize size)
+    {
+        if (_waterRefractionTargetSize == size && _waterRefractionSourceView.Handle != 0) return;
+        DestroyWaterRefractionTarget(vk);
+
+        var info = new ImageCreateInfo
+        {
+            SType = StructureType.ImageCreateInfo,
+            ImageType = ImageType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
+            MipLevels = 1,
+            ArrayLayers = 1,
+            Samples = SampleCountFlags.Count1Bit,
+            Tiling = ImageTiling.Optimal,
+            Usage = ImageUsageFlags.TransferDstBit | ImageUsageFlags.SampledBit,
+            SharingMode = SharingMode.Exclusive,
+            InitialLayout = ImageLayout.Undefined
+        };
+        vk.Api.CreateImage(vk.Device, in info, null, out _waterRefractionSourceImage).ThrowOnError();
+        vk.Api.GetImageMemoryRequirements(vk.Device, _waterRefractionSourceImage, out var req);
+        var alloc = new MemoryAllocateInfo
+        {
+            SType = StructureType.MemoryAllocateInfo,
+            AllocationSize = req.Size,
+            MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(vk.Api, vk.PhysicalDevice, req.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+        };
+        vk.Api.AllocateMemory(vk.Device, in alloc, null, out _waterRefractionSourceMemory).ThrowOnError();
+        vk.Api.BindImageMemory(vk.Device, _waterRefractionSourceImage, _waterRefractionSourceMemory, 0).ThrowOnError();
+        var viewInfo = new ImageViewCreateInfo
+        {
+            SType = StructureType.ImageViewCreateInfo,
+            Image = _waterRefractionSourceImage,
+            ViewType = ImageViewType.Type2D,
+            Format = Format.B10G11R11UfloatPack32,
+            SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
+        };
+        vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _waterRefractionSourceView).ThrowOnError();
+
+        _waterRefractionTargetSize = size;
+        // Fresh image -- caller's first barrier must transition FROM Undefined/None, not a stale
+        // prior layout/access left over from the target this just destroyed.
+        _waterRefractionSourceLayout = ImageLayout.Undefined;
+        _waterRefractionSourceAccess = AccessFlags.None;
+
+        var refractionInfo = new DescriptorImageInfo
+        {
+            ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+            ImageView = _waterRefractionSourceView,
+            Sampler = _postProcessLinearSampler
+        };
+        _waterDescSet!.UpdateRefractionInput(refractionInfo);
+    }
+
+    private unsafe void DestroyWaterRefractionTarget(VkContext vk)
+    {
+        if (_waterRefractionSourceView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _waterRefractionSourceView, null);
+        if (_waterRefractionSourceImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _waterRefractionSourceImage, null);
+        if (_waterRefractionSourceMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _waterRefractionSourceMemory, null);
+        _waterRefractionSourceView = default; _waterRefractionSourceImage = default; _waterRefractionSourceMemory = default;
+        _waterRefractionTargetSize = default;
+        _waterRefractionSourceLayout = ImageLayout.Undefined;
+        _waterRefractionSourceAccess = AccessFlags.None;
+    }
+
     private unsafe void DestroySsaoTargets(VkContext vk)
     {
         if (_ssaoFramebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _ssaoFramebuffer, null);
@@ -6431,7 +6708,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     /// <see cref="VkPerFrameUbo"/> (the SECOND write, with the correct HasSsao) via
     /// <c>_frameSets.UpdatePerFrame</c> before calling this.
     /// </summary>
-    private unsafe void DrawWater(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj, float waterHeight, bool underwater)
+    private unsafe void DrawWater(VkContext vk, CommandBuffer cmd, Matrix4x4 view, Matrix4x4 proj, float waterHeight, bool underwater,
+        bool hasRefraction)
     {
         long now = Environment.TickCount64;
         float dt = _waterLastTick == 0 ? 0f : MathF.Min((now - _waterLastTick) / 1000f, 0.1f);
@@ -6461,6 +6739,16 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // be a real, validation-catchable layout-mismatch read, not merely a stale one.
         waterUbo.HasReflection = (!underwater && _waterReflReady && WaterReflectionsEnabled
             && _graphicsTier != VkGraphicsTier.Low) ? 1 : 0;
+        // Caller has already run the split-main-pass snapshot (EnsureWaterRefractionTarget + the
+        // copy sequence) before this call whenever hasRefraction is true -- see RenderFrame's own
+        // splitForRefraction branch. Independent of HasReflection: refraction doesn't depend on
+        // the reflection pre-pass at all, just on the mid-frame colour snapshot. Unlike
+        // HasReflection, deliberately NOT forced off when underwater: pass 1 always renders from
+        // the actual current camera (underwater or not), so the snapshot is correct either way --
+        // above water it's the scene behind the surface; from below (water.frag's eyeBelow branch,
+        // looking up) it's whatever opaque geometry/sky sits beyond the surface in that direction,
+        // which is the right thing to show through the wave-distorted UV in both cases.
+        waterUbo.HasRefraction = hasRefraction ? 1 : 0;
         _waterDescSet!.UpdateWater(waterUbo);
 
         vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _waterPipeline!.Pipeline);
@@ -7374,7 +7662,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal,
-            Usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit,
+            // TransferSrcBit on top of the usual ColorAttachmentBit|SampledBit: water refraction's
+            // split main pass copies this image out mid-frame (see EnsureWaterRefractionTarget) --
+            // added unconditionally rather than only on the tiers that actually use it, since this
+            // method itself is already Medium/High-only (see its call site in RenderFrame).
+            Usage = ImageUsageFlags.ColorAttachmentBit | ImageUsageFlags.SampledBit | ImageUsageFlags.TransferSrcBit,
             SharingMode = SharingMode.Exclusive,
             InitialLayout = ImageLayout.Undefined
         };
@@ -7722,6 +8014,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // DestroyWaterReflectionTarget), then descriptor sets/pipeline, then the standalone
         // normal/dudv textures.
         unsafe { DestroyWaterReflectionTarget(vk); }
+        unsafe { DestroyWaterRefractionTarget(vk); }
         _frameSetsRefl?.Dispose(); _frameSetsRefl = null;
         _waterDescSet?.Dispose(); _waterDescSet = null;
         _waterPipeline?.Dispose(); _waterPipeline = null;
@@ -7790,5 +8083,9 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _swapchain?.DisposeAsync(); _swapchain = null;
         if (_renderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _renderPass, null); } }
         _renderPass = default;
+        if (_mainScenePassOpaque.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _mainScenePassOpaque, null); } }
+        _mainScenePassOpaque = default;
+        if (_mainScenePassContinuation.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _mainScenePassContinuation, null); } }
+        _mainScenePassContinuation = default;
     }
 }

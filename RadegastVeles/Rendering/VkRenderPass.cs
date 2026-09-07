@@ -212,6 +212,192 @@ internal static class VkRenderPass
     }
 
     /// <summary>
+    /// First half of the main scene pass, split in two ONLY on frames where water is visible and
+    /// refraction needs a pre-water snapshot of the opaque scene colour (<c>vkCmdCopyImage</c>
+    /// isn't legal inside an active render pass -- see <see cref="CreateMainScenePassContinuation"/>'s
+    /// own doc comment for the full two-pass picture). Draws sky + opaque geometry only, then ends
+    /// -- the caller copies <c>_hdrColorImage</c> out, transitions it back, and begins the
+    /// continuation pass for water/alpha/overlays.
+    /// <para>
+    /// Same attachment shape as <see cref="CreateMainScenePass"/> (this is still the frame's FIRST
+    /// write -- same entry dependency, guarding the persistent, cross-frame-reused <c>_hdrColorImage</c>/
+    /// depth against the PREVIOUS frame's fragment-shader read) except <c>FinalLayout =
+    /// ColorAttachmentOptimal</c>, not <c>ShaderReadOnlyOptimal</c>: this pass's output is read by
+    /// the very next thing in this same command buffer (the manual copy-out transition the caller
+    /// records immediately after <c>CmdEndRenderPass</c>), never by a later pass's fragment shader,
+    /// so no exit dependency is needed -- same reasoning <see cref="CreateMainScenePassDirect"/>
+    /// already documents for its own single-dependency shape.
+    /// </para>
+    /// </summary>
+    public static unsafe RenderPass CreateMainScenePassOpaque(VkContext vk, Format colorFormat, Format depthFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.ColorAttachmentOptimal
+        };
+
+        var depthAttachment = new AttachmentDescription
+        {
+            Format = depthFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Clear,
+            // Store, NOT DontCare (unlike CreateMainScenePass's own depth attachment, which is
+            // genuinely never read again): CreateMainScenePassContinuation's depth attachment
+            // LoadOp=Load reads THIS pass's depth buffer back. DontCare would leave that load
+            // reading undefined contents -- no validation error for it, just silent depth-test/
+            // depth-write corruption that happens to "work" on GPUs that leave the memory intact.
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.Undefined,
+            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var depthRef = new AttachmentReference { Attachment = 1, Layout = ImageLayout.DepthStencilAttachmentOptimal };
+
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef,
+            PDepthStencilAttachment = &depthRef
+        };
+
+        var dependency = new SubpassDependency
+        {
+            SrcSubpass = Vk.SubpassExternal,
+            DstSubpass = 0,
+            SrcStageMask = PipelineStageFlags.FragmentShaderBit,
+            SrcAccessMask = AccessFlags.ShaderReadBit,
+            DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+            DstAccessMask = AccessFlags.ColorAttachmentWriteBit | AccessFlags.DepthStencilAttachmentWriteBit
+        };
+
+        var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 2,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 1,
+            PDependencies = &dependency
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
+    /// Second half of the main scene pass split (see <see cref="CreateMainScenePassOpaque"/>'s own
+    /// doc comment for why this split exists and the full sequence around it): continues into the
+    /// SAME <c>_hdrColorImage</c>/depth attachments <see cref="CreateMainScenePassOpaque"/> just
+    /// wrote (<c>LoadOp = Load</c> on both -- no clear, nothing is discarded), draws water + alpha
+    /// + wireframe/selection-outline/particle overlays, then ends. This pass, not the opaque half,
+    /// now owns the <c>FinalLayout = ShaderReadOnlyOptimal</c> transition <see cref="CreateMainScenePass"/>
+    /// used to own directly -- it's the frame's actual last write to <c>_hdrColorImage</c>, so the
+    /// same two-dependency "cross-frame-reused AND read later this frame" shape moves here.
+    /// <para>
+    /// Depth needs no copy/manual barrier at all (unlike color): <c>InitialLayout = FinalLayout =
+    /// DepthStencilAttachmentOptimal</c>, identical on both sides of the split, so ordinary
+    /// entry-dependency ordering against <see cref="CreateMainScenePassOpaque"/>'s own depth write
+    /// (same command buffer, submission-order-adjacent) is all that's needed -- no explicit
+    /// transition, since the layout never actually changes.
+    /// </para>
+    /// <para>
+    /// Entry dependency's source side combines TWO distinct things this pass picks up after: the
+    /// caller's own manual colour transition-back (<c>TransferSrcOptimal -&gt; ColorAttachmentOptimal</c>,
+    /// recorded immediately before <c>CmdBeginRenderPass</c> for this pass, mirroring
+    /// <see cref="CreateUnderwaterPass"/>'s identical "picks up after an external transition, not a
+    /// cross-frame guard" entry-dependency shape) AND <see cref="CreateMainScenePassOpaque"/>'s own
+    /// depth write completing -- both must be ordered-before this pass's own attachment writes.
+    /// </para>
+    /// </summary>
+    public static unsafe RenderPass CreateMainScenePassContinuation(VkContext vk, Format colorFormat, Format depthFormat)
+    {
+        var colorAttachment = new AttachmentDescription
+        {
+            Format = colorFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Load,
+            StoreOp = AttachmentStoreOp.Store,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.ColorAttachmentOptimal,
+            FinalLayout = ImageLayout.ShaderReadOnlyOptimal
+        };
+
+        var depthAttachment = new AttachmentDescription
+        {
+            Format = depthFormat,
+            Samples = SampleCountFlags.Count1Bit,
+            LoadOp = AttachmentLoadOp.Load,
+            StoreOp = AttachmentStoreOp.DontCare,
+            StencilLoadOp = AttachmentLoadOp.DontCare,
+            StencilStoreOp = AttachmentStoreOp.DontCare,
+            InitialLayout = ImageLayout.DepthStencilAttachmentOptimal,
+            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+        };
+
+        var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
+        var depthRef = new AttachmentReference { Attachment = 1, Layout = ImageLayout.DepthStencilAttachmentOptimal };
+
+        var subpass = new SubpassDescription
+        {
+            PipelineBindPoint = PipelineBindPoint.Graphics,
+            ColorAttachmentCount = 1,
+            PColorAttachments = &colorRef,
+            PDepthStencilAttachment = &depthRef
+        };
+
+        var dependencies = stackalloc SubpassDependency[2]
+        {
+            new SubpassDependency
+            {
+                SrcSubpass = Vk.SubpassExternal,
+                DstSubpass = 0,
+                SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit | PipelineStageFlags.LateFragmentTestsBit,
+                SrcAccessMask = AccessFlags.ColorAttachmentWriteBit | AccessFlags.DepthStencilAttachmentWriteBit,
+                DstStageMask = PipelineStageFlags.ColorAttachmentOutputBit | PipelineStageFlags.EarlyFragmentTestsBit,
+                DstAccessMask = AccessFlags.ColorAttachmentWriteBit | AccessFlags.DepthStencilAttachmentWriteBit
+            },
+            new SubpassDependency
+            {
+                SrcSubpass = 0,
+                DstSubpass = Vk.SubpassExternal,
+                SrcStageMask = PipelineStageFlags.ColorAttachmentOutputBit,
+                SrcAccessMask = AccessFlags.ColorAttachmentWriteBit,
+                DstStageMask = PipelineStageFlags.FragmentShaderBit,
+                DstAccessMask = AccessFlags.ShaderReadBit
+            }
+        };
+
+        var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
+        var createInfo = new RenderPassCreateInfo
+        {
+            SType = StructureType.RenderPassCreateInfo,
+            AttachmentCount = 2,
+            PAttachments = attachments,
+            SubpassCount = 1,
+            PSubpasses = &subpass,
+            DependencyCount = 2,
+            PDependencies = dependencies
+        };
+
+        vk.Api.CreateRenderPass(vk.Device, in createInfo, null, out var renderPass).ThrowOnError();
+        return renderPass;
+    }
+
+    /// <summary>
     /// Creates the tonemap/bloom composite pass's render pass: one color attachment, no depth,
     /// targeting the REAL swapchain image -- this pass, not <see cref="CreateMainScenePass"/>
     /// (whose output now lands in an offscreen HDR buffer instead, see that method's own doc

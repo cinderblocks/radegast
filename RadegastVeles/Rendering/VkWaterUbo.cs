@@ -34,7 +34,9 @@
 //   float uTime           offset 208, size 4
 //   vec4  uWaterColor     offset 224, size 16 (vec4 is 16-aligned; 208+4=212 rounds up to 224)
 //   int   uHasReflection  offset 240, size 4
-//   total size 256 (240+4=244 rounds up to the next 16-byte multiple)
+//   int   uHasRefraction  offset 244, size 4 (packs right after uHasReflection, still within
+//                                              the existing 256-byte total -- no size change)
+//   total size 256
 
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -52,4 +54,5 @@ internal struct VkWaterUbo
     [FieldOffset(208)] public float Time;
     [FieldOffset(224)] public Vector4 WaterColor;
     [FieldOffset(240)] public int HasReflection;
+    [FieldOffset(244)] public int HasRefraction;
 }

@@ -17,15 +17,20 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Owns the water pipeline's set 1 (WaterPass UBO + 3 samplers). Mirrors
-// VkSkyDescriptorSet.cs's shape (host-visible UBO buffer + AllocateSet helper), extended to 3
-// sampler bindings instead of 1. ALL FOUR bindings are written differently from SSAO's own
-// per-target-recreation-only pattern: unlike the SSAO/G-buffer targets (which resize with the
-// viewport), the water reflection target is a FIXED 512x512 resolution, created once at init and
-// never recreated on resize -- so its ImageView is stable for the panel's whole lifetime, and
-// (like the normal/dudv maps, which never change at all after load) can be written ONCE at
-// construction here, same as VkSkyDescriptorSet's own cloud-noise sampler binding. Only the UBO
-// (binding 0) is rewritten every frame, via UpdateWater.
+// Owns the water pipeline's set 1 (WaterPass UBO + 4 samplers: reflection, normal, dudv,
+// refraction). Mirrors VkSkyDescriptorSet.cs's shape (host-visible UBO buffer + AllocateSet
+// helper), extended to 4 sampler bindings instead of 1. The first three sampler bindings are
+// written differently from SSAO's own per-target-recreation-only pattern: unlike the SSAO/
+// G-buffer targets (which resize with the viewport), the water reflection target is a FIXED
+// 512x512 resolution, created once at init and never recreated on resize -- so its ImageView is
+// stable for the panel's whole lifetime, and (like the normal/dudv maps, which never change at
+// all after load) can be written ONCE at construction here, same as VkSkyDescriptorSet's own
+// cloud-noise sampler binding. The 4th sampler (refraction source) is DIFFERENT: it doesn't exist
+// yet at construction (created lazily, only on frames where water is actually visible on Medium/
+// High tier -- see VkViewportControl.EnsureWaterRefractionTarget), so the constructor binds a
+// placeholder there and UpdateRefractionInput rewrites it once the real target exists, mirroring
+// EnsureUnderwaterTarget's own "rewrite only on (re)creation" contract for its scene-colour input.
+// Only the UBO (binding 0) is rewritten every frame, via UpdateWater.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -44,7 +49,8 @@ internal sealed unsafe class VkWaterDescriptorSet : System.IDisposable
     private bool _disposed;
 
     public VkWaterDescriptorSet(VkContext vk, VkWaterPipeline pipeline,
-        DescriptorImageInfo reflectionTexInfo, DescriptorImageInfo normalMapInfo, DescriptorImageInfo dudvMapInfo)
+        DescriptorImageInfo reflectionTexInfo, DescriptorImageInfo normalMapInfo, DescriptorImageInfo dudvMapInfo,
+        DescriptorImageInfo refractionPlaceholderInfo)
     {
         _vk = vk;
 
@@ -72,7 +78,8 @@ internal sealed unsafe class VkWaterDescriptorSet : System.IDisposable
         var reflInfo = reflectionTexInfo;
         var normInfo = normalMapInfo;
         var dudvInfo = dudvMapInfo;
-        var writes = stackalloc WriteDescriptorSet[4]
+        var refrInfo = refractionPlaceholderInfo;
+        var writes = stackalloc WriteDescriptorSet[5]
         {
             new WriteDescriptorSet
             {
@@ -109,9 +116,37 @@ internal sealed unsafe class VkWaterDescriptorSet : System.IDisposable
                 DescriptorType = DescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 PImageInfo = &dudvInfo
+            },
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = Set,
+                DstBinding = 4,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &refrInfo
             }
         };
-        vk.Api.UpdateDescriptorSets(vk.Device, 4, writes, 0, null);
+        vk.Api.UpdateDescriptorSets(vk.Device, 5, writes, 0, null);
+    }
+
+    /// <summary>Rewrites binding 4 (uRefractionTex) to point at the real refraction-source image
+    /// -- call ONLY when that target is (re)created (<c>VkViewportControl.EnsureWaterRefractionTarget</c>),
+    /// mirroring <c>VkUnderwaterDescriptorSet.UpdateSceneColorInput</c>'s identical "rewrite only
+    /// on (re)creation, never per-frame" contract.</summary>
+    public void UpdateRefractionInput(DescriptorImageInfo refractionTexInfo)
+    {
+        var info = refractionTexInfo;
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = Set,
+            DstBinding = 4,
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+            PImageInfo = &info
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
     /// <summary>Overwrites the WaterPass UBO's contents -- call once per frame before recording
