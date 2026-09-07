@@ -267,12 +267,7 @@ jobs:
             exit 1
           fi
           mkdir -p dist
-          if npx --yes create-dmg "$UNIVERSAL_APP" dist; then
-            echo "Universal DMG created"
-          else
-            echo "create-dmg failed for universal app; creating fallback tar.gz"
-            tar -czf "dist/${REPO_NAME}-${TAG_NAME#Veles/}-universal.tar.gz" -C universal "${REPO_NAME}.app"
-          fi
+          npx --yes create-dmg --no-code-sign "$UNIVERSAL_APP" dist
 
       # Skipped entirely for manual test builds (workflow_dispatch): a test build must never
       # create a tag or a release. gh release create with a tag_name that doesn't exist yet
@@ -292,15 +287,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload universal package to GitHub Release
+      - name: Upload universal DMG to GitHub Release
         if: github.event_name != 'workflow_dispatch'
         run: |
-          ASSET=$(find dist -maxdepth 1 -type f \( -name '*.dmg' -o -name '*.tar.gz' \) -print -quit)
-          if [ -z "$ASSET" ]; then
-            echo "No universal package found in dist/"
+          DMG=$(find dist -maxdepth 1 -type f -name '*.dmg' -print -quit)
+          if [ -z "$DMG" ]; then
+            echo "No universal DMG found in dist/"
             exit 1
           fi
-          gh release upload "$TAG_NAME" "$ASSET" --clobber
+          gh release upload "$TAG_NAME" "$DMG" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
