@@ -151,6 +151,30 @@ internal sealed unsafe class VkPrimDescriptorSets : IDisposable
         _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
+    /// <summary>Rewrites PassSet binding 2 (slot 0, uPointShadowMap0) or binding 3 (slot 1,
+    /// uPointShadowMap1) to point at a real cube shadow target. Same rewrite-on-(re)creation-only
+    /// discipline as <see cref="UpdateShadowMap"/> -- call ONLY at init, once per slot per
+    /// descriptor-set instance (both a panel's main FrameSets AND its separate reflection-pass
+    /// instance, mirroring how the directional shadow map is patched into both). The binding
+    /// itself never changes again after that; only the image CONTENTS change via re-rendering.
+    /// Whether a given slot's contents are meaningful this frame is controlled entirely by
+    /// <c>VkPerFrameUbo.PointShadowCount</c> -- shadow.glsl's own samplePointShadow early-returns
+    /// 1.0 for any slot index &gt;= that count, so a stale/unused slot's contents are harmless
+    /// even though this binding is never rewritten again.</summary>
+    public void UpdatePointShadowMap(int slot, DescriptorImageInfo shadowMapInfo)
+    {
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = PassSet,
+            DstBinding = (uint)(2 + slot), // binding 2 = slot 0 (uPointShadowMap0), 3 = slot 1
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+            PImageInfo = &shadowMapInfo
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
+    }
+
     private static DescriptorSet AllocateSet(VkContext vk, DescriptorSetLayout layout)
     {
         var setLayout = layout;

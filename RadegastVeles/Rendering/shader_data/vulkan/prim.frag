@@ -332,7 +332,7 @@ vec3 pointLightsPBR(vec3 albedo, float metallic, float roughness, vec3 F0,
         atten *= atten;
         if (atten <= 0.0) continue;
 
-        float shadow = samplePointShadow(i, vWorldPos);
+        float shadow = samplePointShadow(i, vWorldPos, n);
         vec3  radiance = uPointLightColor[i] * atten * shadow;
 
         vec3  H     = normalize(L + v);
@@ -470,7 +470,7 @@ vec3 pointLightsLegacy(vec3 albedo, vec3 n, vec3 v, vec3 specTint, float shinine
         atten *= atten;
         if (atten <= 0.0) continue;
 
-        float shadow  = samplePointShadow(i, vWorldPos);
+        float shadow  = samplePointShadow(i, vWorldPos, n);
         vec3  contrib = uPointLightColor[i] * atten * shadow;
 
         float diff = max(dot(n, L), 0.0);

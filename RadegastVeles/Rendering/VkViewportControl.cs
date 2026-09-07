@@ -162,10 +162,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
 #endif
 
     // Local point-light forward-lighting selection (mirrors GL's own
-    // MaxLocalLightsLit/LocalLightRange/_litLights/_litLightCount). Deliberately does NOT port
-    // the shadow-casting half (_shadowLightCount/MaxLocalLightsShadowed/LocalLightShadowRange,
-    // point-light shadow cubemap rendering) -- point lights are directional+water only;
-    // VkPerFrameUbo.PointShadowCount stays 0 unconditionally.
+    // MaxLocalLightsLit/LocalLightRange/_litLights/_litLightCount). The shadow-casting half
+    // (MaxLocalLightsShadowed/LocalLightShadowRange/_pointShadowCasters, cube shadow-map
+    // rendering) is a separate block near _shadowRenderPass/_shadowPipeline below -- see
+    // SelectPointShadowCasters' own doc comment.
     // PatchSceneObjectTexture's semaphore-gated back-pressure pipeline. The "semaphore" is a CPU-side
     // System.Threading.SemaphoreSlim throttling how many DECODED bitmaps can sit in the pending
     // queue at once, not a GPU/Vulkan synchronization primitive (confirmed via research before
@@ -424,9 +424,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private AccessFlags _waterRefractionSourceAccess = AccessFlags.None;
 
     // ── Directional shadows ─────────────────────────────────────────────────────────────────
-    // Point-light shadows explicitly OUT of scope -- point-light illumination itself was never
-    // ported to Vulkan either (see shadow.glsl's own TODO note on samplePointShadowCube) --
-    // uPointShadowCount stays 0 always, so only the directional path below is real.
+    // Point-light (local-light) cube shadows share this same toggle -- see
+    // SelectPointShadowCasters' own doc comment for why a separate toggle wasn't added.
     public bool ShadowsEnabled { get; set; } = false;
     /// <summary>Above this opaque face count (default 30000) the shadow pass is skipped for the frame even when
     /// <see cref="ShadowsEnabled"/> is true, since it re-renders every opaque face a second
@@ -453,6 +452,96 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // shadow map, so a single write only patches one of them).
     private DescriptorImageInfo _shadowMapInfo;
     private Matrix4x4 _shadowLightVp;
+
+    // ── Point-light (local-light) cube shadows ──────────────────────────────────────────────
+    // Two fixed "slots" (NOT tied to a specific SL light's identity), reused frame-to-frame for
+    // "whichever shadow-casting light currently ranks 0/1 by SelectPointShadowCasters" -- see
+    // that method's own doc comment. Reuses _shadowRenderPass/_shadowPipeline (depth-only,
+    // Format.D32Sfloat, no set-1/2 binds) -- Vulkan render-pass compatibility only cares about
+    // attachment format/sample-count, not resolution or which image is bound, so no new pipeline
+    // or render pass is needed for this feature at all.
+    private const int MaxLocalLightsShadowed = 2; // MUST equal shadow.glsl's own kMaxShadowedPointLights
+    // Half of LocalLightRange (32m): bounds the added per-frame culling/draw cost (up to
+    // MaxLocalLightsShadowed * 6 extra culled+rendered depth faces) to only nearby/significant
+    // lights -- a forward-lit-but-unshadowed light out to the full 32m is comparatively cheap
+    // (no extra culling/draw passes), a shadow-casting one is not.
+    private const float LocalLightShadowRange = 16f;
+    private const int PointShadowMapSize = 512; // per cube face, fixed regardless of tier (Medium/High only)
+    // MUST match shadow.glsl's own hardcoded `const float kPointShadowNear = 0.1;` in
+    // samplePointShadowCube exactly -- baked into both the CPU-side per-face projection matrix
+    // AND the shader's analytic ndcZ reconstruction; a mismatch between the two silently
+    // corrupts every point-shadow compare.
+    private const float PointShadowNear = 0.1f;
+    private const int PointShadowSlotCount = MaxLocalLightsShadowed;
+    private const int PointShadowFaceCount = 6;
+
+    // Standard OpenGL/Vulkan hardware-cubemap face convention: Vulkan's ImageViewType.TypeCube
+    // layer order is fixed by the API spec as 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z. This table is
+    // independent of this engine's own Z-up gameplay convention -- it operates purely on the
+    // render camera's own local axes for each face, the same table used regardless of what a
+    // given engine calls "up". A sign error here produces a shadow mirrored/rotated WITHIN a
+    // face, not a missing shadow -- verify with the 6-position test in this session's plan file,
+    // not a single "light near a wall" placement, before trusting this table.
+    private static readonly Vector3[] PointShadowFaceDir =
+    {
+        new(1, 0, 0), new(-1, 0, 0),
+        new(0, 1, 0), new(0, -1, 0),
+        new(0, 0, 1), new(0, 0, -1),
+    };
+    private static readonly Vector3[] PointShadowFaceUp =
+    {
+        new(0, -1, 0), new(0, -1, 0),
+        new(0, 0, 1), new(0, 0, -1),
+        new(0, -1, 0), new(0, -1, 0),
+    };
+
+    private readonly Image[] _pointShadowImages = new Image[PointShadowSlotCount];
+    private readonly DeviceMemory[] _pointShadowMemories = new DeviceMemory[PointShadowSlotCount];
+    // One Type2D view per face (Vulkan cannot render directly into a TypeCube view -- render
+    // targets are always single 2D layers; the TypeCube view below is ONLY for sampling).
+    // Indexed [slot * PointShadowFaceCount + face].
+    private readonly ImageView[] _pointShadowFaceViews = new ImageView[PointShadowSlotCount * PointShadowFaceCount];
+    // One TypeCube sampling view per slot, over the SAME image as that slot's 6 face views.
+    private readonly ImageView[] _pointShadowCubeViews = new ImageView[PointShadowSlotCount];
+    private readonly Sampler[] _pointShadowSamplers = new Sampler[PointShadowSlotCount];
+    private readonly Framebuffer[] _pointShadowFramebuffers = new Framebuffer[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly DescriptorImageInfo[] _pointShadowMapInfo = new DescriptorImageInfo[PointShadowSlotCount];
+    private bool _pointShadowReady;
+
+    // This frame's selected shadow-casting lights (a range-filtered prefix of _litLights -- see
+    // SelectPointShadowCasters), and the per-slot/per-face culled draw lists + view/proj matrices
+    // that RenderFrame's Loop A (culling, during shared instance-buffer build) writes and Loop B
+    // (recording) reads. Persisted as fields (not locals) because the write and the read happen
+    // in two DIFFERENT places in RenderFrame, separated by the single UploadInstanceBatch call
+    // that must see every region's data first -- mirrors why _shadowOpaqueVisible/
+    // _reflOpaqueVisible are already fields, not locals.
+    private int _pointShadowCasterCount;
+    private readonly LocalLight[] _pointShadowCasters = new LocalLight[MaxLocalLightsShadowed];
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)>[] _pointShadowOpaqueVisible =
+        CreateFaceLists(PointShadowSlotCount * PointShadowFaceCount);
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)>[] _pointShadowSceneOpaqueVisible =
+        CreateFaceLists(PointShadowSlotCount * PointShadowFaceCount);
+    private readonly HashSet<ulong>[] _pointShadowVisibleSceneKeys = CreateKeySets(PointShadowSlotCount * PointShadowFaceCount);
+    private readonly int[] _pointShadowBase = new int[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly int[] _pointShadowSceneBase = new int[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly int[] _pointShadowOpaqueCount = new int[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly int[] _pointShadowSceneOpaqueCount = new int[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly Matrix4x4[] _pointShadowFaceView = new Matrix4x4[PointShadowSlotCount * PointShadowFaceCount];
+    private readonly Matrix4x4[] _pointShadowFaceProj = new Matrix4x4[PointShadowSlotCount * PointShadowFaceCount];
+
+    private static List<(VkMesh, VkMaterialDescriptorSet, PrimRenderFace)>[] CreateFaceLists(int n)
+    {
+        var arr = new List<(VkMesh, VkMaterialDescriptorSet, PrimRenderFace)>[n];
+        for (int i = 0; i < n; i++) arr[i] = new();
+        return arr;
+    }
+
+    private static HashSet<ulong>[] CreateKeySets(int n)
+    {
+        var arr = new HashSet<ulong>[n];
+        for (int i = 0; i < n; i++) arr[i] = new();
+        return arr;
+    }
 
     // ── Water: surface pass + reflection pre-pass ──────────────────────
     /// <summary>Default
@@ -2083,6 +2172,26 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _shadowReady = false;
             }
 
+            // Point-light cube shadows: reuses _shadowRenderPass/_shadowPipeline, so this can
+            // only succeed if the directional-shadow block immediately above did. Best-effort/
+            // independent _pointShadowReady flag -- a cube-target failure must not disable
+            // directional shadows. Medium/High only (not the stricter High-only gate god-rays/
+            // bloom use -- point shadows are meaningfully cheaper than a full-screen post-process
+            // chain, closer in cost to the existing SSAO/water-reflection passes).
+            if (_shadowReady && _graphicsTier != VkGraphicsTier.Low)
+            {
+                try
+                {
+                    CreatePointShadowTargets(vk);
+                    _pointShadowReady = true;
+                }
+                catch
+                {
+                    unsafe { DestroyPointShadowTargets(vk); }
+                    _pointShadowReady = false;
+                }
+            }
+
             // water surface + reflection pre-pass. Best-effort, matching GL's own
             // InitWater posture (a reflection-FBO completeness failure still leaves the water
             // surface itself drawable via the analytic sky-gradient reflection fallback -- see
@@ -2130,6 +2239,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // patch it to the real one immediately if shadows already initialized above.
                 _frameSetsRefl = new VkPrimDescriptorSets(vk, _prim, _placeholders!);
                 if (_shadowReady) _frameSetsRefl.UpdateShadowMap(_shadowMapInfo);
+                if (_pointShadowReady)
+                {
+                    _frameSetsRefl.UpdatePointShadowMap(0, _pointShadowMapInfo[0]);
+                    _frameSetsRefl.UpdatePointShadowMap(1, _pointShadowMapInfo[1]);
+                }
 
                 _waterLastTick = Environment.TickCount64;
                 _waterReady = true;
@@ -3778,6 +3892,39 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
+    /// Selects up to <see cref="MaxLocalLightsShadowed"/> (2) shadow-casting lights as a
+    /// range-filtered PREFIX of <see cref="_litLights"/> -- NOT a separate distance sort.
+    /// <see cref="_litLights"/> is already nearest-first sorted by <see cref="SelectLocalLights"/>
+    /// (top <see cref="MaxLocalLightsLit"/>), so the shadow casters are simply its first
+    /// <c>min(_litLightCount, MaxLocalLightsShadowed)</c> entries, further filtered to
+    /// <see cref="LocalLightShadowRange"/> (16m, half of <see cref="LocalLightRange"/>=32m) to
+    /// bound the added per-frame culling/draw cost to only nearby/significant lights. Order here
+    /// becomes slot assignment: caster[0] -&gt; slot 0 (uPointShadowMap0), caster[1] -&gt; slot 1.
+    /// Must run AFTER <see cref="SelectLocalLights"/>.
+    /// <para>
+    /// No separate settings toggle: this reuses <see cref="ShadowsEnabled"/> (default off).
+    /// Combined with the tier gate (Medium/High only) and this range/count cap, point shadows
+    /// only ever cost anything for a user who already opted into shadows AND is within 16m of a
+    /// lit prim -- a second toggle for that intersection would be settings-surface bloat for a
+    /// case already opted out of by the first toggle.
+    /// </para>
+    /// </summary>
+    private void SelectPointShadowCasters()
+    {
+        _pointShadowCasterCount = 0;
+        for (int i = 0; i < _litLightCount && _pointShadowCasterCount < MaxLocalLightsShadowed; i++)
+        {
+            var d2 = Vector3.DistanceSquared(_litLights[i].WorldPosition, _camera.EyePosition);
+            if (d2 > LocalLightShadowRange * LocalLightShadowRange) continue;
+            // NOTE: since _litLights is nearest-first, once one entry fails the range check
+            // every later entry is farther and would also fail -- `continue` (not `break`) here
+            // is deliberately conservative in case a future caller reorders _litLights;
+            // correctness doesn't depend on the early-exit optimization.
+            _pointShadowCasters[_pointShadowCasterCount++] = _litLights[i];
+        }
+    }
+
+    /// <summary>
     /// dead-reckons every scene object tracked in <see cref="_sceneObjectMotion"/>
     /// forward from its last terse update using the velocity/angular-velocity/acceleration the
     /// simulator reported, and writes the extrapolated pose straight into the faces' <see
@@ -4703,6 +4850,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // populated below (its PointLightPos/Color/Radius/Falloff/Count fields read
             // straight from _litLights/_litLightCount).
             SelectLocalLights();
+            SelectPointShadowCasters();
 
             // pull the current EEP-driven Sky/WaterFogColor sample once per frame,
             // before either is read below (Sky feeds frameUbo just past this point; WaterFogColor
@@ -4952,6 +5100,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             Matrix4x4 shadowLightView = default, shadowLightProj = default;
             if (doShadow) doShadow = TryComputeShadowLightVp(out shadowLightView, out shadowLightProj);
 
+            // Point-light shadow gate: same ShadowsEnabled toggle as directional (see
+            // SelectPointShadowCasters' own doc comment for why no separate toggle), same
+            // Low-tier hard ceiling, additionally requires _pointShadowReady (cube targets
+            // exist) and at least one selected caster this frame.
+            bool doPointShadows = ShadowsEnabled && _pointShadowReady && _graphicsTier != VkGraphicsTier.Low
+                && _pointShadowCasterCount > 0;
+
             // Shadow pass's own independent frustum/grid query, always run when doShadow is true
             // regardless of FrustumCullingEnabled (mirrors GL's RenderDirectionalShadow, which
             // computes lightFrustum/queries the grid unconditionally). Must not reuse
@@ -4965,6 +5120,37 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 FilterVisible(_sceneOpaque, _shadowSceneOpaqueVisible, shadowFrustum, _shadowVisibleSceneKeys);
                 shadowOpaqueCount = _shadowOpaqueVisible.Count;
                 shadowSceneOpaqueCount = _shadowSceneOpaqueVisible.Count;
+            }
+
+            // Point-light shadow faces' own independent frustum/grid queries -- one per face per
+            // active caster slot, same "always independent of FrustumCullingEnabled" posture as
+            // the directional shadow query immediately above. Populates the per-face view/proj
+            // matrices too (Loop A of the two-loop shape this feature needs: this culling +
+            // WriteInstanceData below must run before UploadInstanceBatch; RenderPointShadowFace's
+            // actual recording, Loop B, happens later after the shared buffer is uploaded).
+            if (doPointShadows)
+            {
+                for (int slot = 0; slot < _pointShadowCasterCount; slot++)
+                {
+                    var caster = _pointShadowCasters[slot];
+                    for (int face = 0; face < PointShadowFaceCount; face++)
+                    {
+                        int idx = slot * PointShadowFaceCount + face;
+                        var faceView = Matrix4x4.CreateLookAt(caster.WorldPosition,
+                            caster.WorldPosition + PointShadowFaceDir[face], PointShadowFaceUp[face]);
+                        var faceProj = Matrix4x4.CreatePerspectiveFieldOfView(
+                            MathF.PI / 2f, 1f, PointShadowNear, caster.Radius);
+                        _pointShadowFaceView[idx] = faceView;
+                        _pointShadowFaceProj[idx] = faceProj;
+
+                        var faceFrustum = FrustumCuller.ExtractPlanes(faceView * faceProj);
+                        _spatialGrid.QueryVisible(faceFrustum, _pointShadowVisibleSceneKeys[idx]);
+                        FilterVisible(_opaqueFaces, _pointShadowOpaqueVisible[idx], faceFrustum, null);
+                        FilterVisible(_sceneOpaque, _pointShadowSceneOpaqueVisible[idx], faceFrustum, _pointShadowVisibleSceneKeys[idx]);
+                        _pointShadowOpaqueCount[idx] = _pointShadowOpaqueVisible[idx].Count;
+                        _pointShadowSceneOpaqueCount[idx] = _pointShadowSceneOpaqueVisible[idx].Count;
+                    }
+                }
             }
 
             // water surface + reflection gates. Mirrors GL's own doWater/
@@ -5102,9 +5288,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (doShadow) frameUbo.LightVp = _shadowLightVp;
 
             // Local point-light forward-lighting array, populated from SelectLocalLights' result
-            // above, field-for-field in the same
-            // ordering. PointShadowCount is left at its default 0 -- see _litLights' own doc
-            // comment for why.
+            // above, field-for-field in the same ordering.
             frameUbo.PointLightCount = _litLightCount;
             if (_litLightCount > 0) frameUbo.PointLightPos0 = _litLights[0].WorldPosition;
             if (_litLightCount > 0) frameUbo.PointLightColor0 = _litLights[0].Color;
@@ -5122,6 +5306,24 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             if (_litLightCount > 3) frameUbo.PointLightColor3 = _litLights[3].Color;
             if (_litLightCount > 3) frameUbo.PointLightRadius3 = _litLights[3].Radius;
             if (_litLightCount > 3) frameUbo.PointLightFalloff3 = _litLights[3].Falloff;
+
+            // Point-shadow UBO fields -- PointShadowPos/Far MUST use the identical
+            // caster.WorldPosition/caster.Radius values fed to CreateLookAt/
+            // CreatePerspectiveFieldOfView above (not recomputed), or the shader's whole-cube
+            // compare silently desyncs from what was actually rendered. The reflection pass's
+            // own UBO (a struct copy of frameUbo made further down) picks these up automatically,
+            // same as ShadowsOn/LightVp already do -- no separate write needed there.
+            frameUbo.PointShadowCount = doPointShadows ? _pointShadowCasterCount : 0;
+            if (doPointShadows && _pointShadowCasterCount > 0)
+            {
+                frameUbo.PointShadowPos0 = _pointShadowCasters[0].WorldPosition;
+                frameUbo.PointShadowFar0 = _pointShadowCasters[0].Radius;
+            }
+            if (doPointShadows && _pointShadowCasterCount > 1)
+            {
+                frameUbo.PointShadowPos1 = _pointShadowCasters[1].WorldPosition;
+                frameUbo.PointShadowFar1 = _pointShadowCasters[1].Radius;
+            }
 
             _frameSets.UpdatePerFrame(frameUbo);
 
@@ -5171,7 +5373,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // are always present -- that would silently read another pass's matrices.
             int shadowBase = 0, shadowSceneBase = 0, reflBase = 0, reflSceneBase = 0;
             bool needInstanceBuffer = mainOpaqueFaceCount > 0 || _alphaFaces.Count > 0 || _sceneAlpha.Count > 0
-                                       || doShadow || doWaterReflThisFrame;
+                                       || doShadow || doWaterReflThisFrame || doPointShadows;
             if (needInstanceBuffer)
             {
                 // Merge the single-submission path's own alpha faces with
@@ -5207,6 +5409,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                     reflSceneBase = reflBase + reflOpaqueCount;
                     totalCount += reflOpaqueCount + reflSceneOpaqueCount;
                 }
+                if (doPointShadows)
+                {
+                    for (int slot = 0; slot < _pointShadowCasterCount; slot++)
+                    for (int face = 0; face < PointShadowFaceCount; face++)
+                    {
+                        int idx = slot * PointShadowFaceCount + face;
+                        _pointShadowBase[idx] = totalCount;
+                        _pointShadowSceneBase[idx] = totalCount + _pointShadowOpaqueCount[idx];
+                        totalCount += _pointShadowOpaqueCount[idx] + _pointShadowSceneOpaqueCount[idx];
+                    }
+                }
 
                 // a reused, grow-on-demand field, not a fresh `new float[]` every
                 // frame -- at PrimViewer/AvatarViewer's own small face counts a per-frame
@@ -5230,6 +5443,18 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 {
                     WriteInstanceData(instanceData, reflBase, _reflOpaqueVisible, reflView, proj);
                     WriteInstanceData(instanceData, reflSceneBase, _reflSceneOpaqueVisible, reflView, proj);
+                }
+                if (doPointShadows)
+                {
+                    for (int slot = 0; slot < _pointShadowCasterCount; slot++)
+                    for (int face = 0; face < PointShadowFaceCount; face++)
+                    {
+                        int idx = slot * PointShadowFaceCount + face;
+                        WriteInstanceData(instanceData, _pointShadowBase[idx], _pointShadowOpaqueVisible[idx],
+                            _pointShadowFaceView[idx], _pointShadowFaceProj[idx]);
+                        WriteInstanceData(instanceData, _pointShadowSceneBase[idx], _pointShadowSceneOpaqueVisible[idx],
+                            _pointShadowFaceView[idx], _pointShadowFaceProj[idx]);
+                    }
                 }
                 _instanceDrawer!.UploadInstanceBatch(instanceData, totalCount);
             }
@@ -5299,6 +5524,25 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // restored to pixelSize internally before returning.
             if (doShadow)
                 RenderShadowPass(vk, cmd.InternalHandle, pixelSize, shadowBase, shadowSceneBase, shadowOpaqueCount, shadowSceneOpaqueCount);
+
+            // Point-light shadow face passes, immediately after the directional shadow pass and
+            // before SSAO/main pass -- all shadow-PRODUCING passes before anything that CONSUMES
+            // a shadow map. Each face is its own render-pass instance against _shadowRenderPass
+            // (REUSED, see CreatePointShadowTargets), same recording shape as RenderShadowPass,
+            // parameterized by this face's own framebuffer/instance-region instead of the fixed
+            // directional ones. Loop B of the two-loop shape -- the culling/WriteInstanceData
+            // this reads from (Loop A) already ran above, before UploadInstanceBatch.
+            if (doPointShadows)
+            {
+                for (int slot = 0; slot < _pointShadowCasterCount; slot++)
+                for (int face = 0; face < PointShadowFaceCount; face++)
+                {
+                    int idx = slot * PointShadowFaceCount + face;
+                    RenderPointShadowFace(vk, cmd.InternalHandle, pixelSize, idx,
+                        _pointShadowFramebuffers[idx], _pointShadowBase[idx], _pointShadowSceneBase[idx],
+                        _pointShadowOpaqueCount[idx], _pointShadowSceneOpaqueCount[idx]);
+                }
+            }
 
             // recorded as three SEPARATE render-pass instances, entirely before
             // the main render pass begins -- see RenderSsaoPasses' own doc comment for why this
@@ -6533,6 +6777,155 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
+    /// Creates PointShadowSlotCount (2) real cube shadow targets ONCE at init, reusing
+    /// _shadowRenderPass/_shadowPipeline (already built by the directional-shadow init block that
+    /// must run before this one -- see call site). Each slot is ArrayLayers=6,
+    /// Flags=CreateCubeCompatibleBit, Format.D32Sfloat (same shape as
+    /// VkPlaceholderTextures.CreateShadowPlaceholder(cube:true), EXCEPT Usage below adds
+    /// DepthStencilAttachmentBit -- the placeholder is never rendered into, this target must be).
+    /// Six per-face Type2D views (one per cube layer, framebuffer-attachable) plus one TypeCube
+    /// sampling view per slot, over the SAME image -- Vulkan cannot render directly into a
+    /// TypeCube view, only sample through one.
+    /// </summary>
+    private unsafe void CreatePointShadowTargets(VkContext vk)
+    {
+        for (int slot = 0; slot < PointShadowSlotCount; slot++)
+        {
+            var imageInfo = new ImageCreateInfo
+            {
+                SType = StructureType.ImageCreateInfo,
+                ImageType = ImageType.Type2D,
+                Format = Format.D32Sfloat,
+                Extent = new Extent3D(PointShadowMapSize, PointShadowMapSize, 1),
+                MipLevels = 1,
+                ArrayLayers = 6,
+                Samples = SampleCountFlags.Count1Bit,
+                Tiling = ImageTiling.Optimal,
+                // DepthStencilAttachmentBit added vs. CreateShadowPlaceholder's shape -- this
+                // target IS rendered into (6 framebuffers below), unlike the placeholder.
+                // TransferDstBit needed for the initial UploadDepthAndTransition clear, same
+                // reasoning as CreateShadowTarget's own comment on this flag.
+                Usage = ImageUsageFlags.DepthStencilAttachmentBit | ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
+                SharingMode = SharingMode.Exclusive,
+                InitialLayout = ImageLayout.Undefined,
+                Flags = ImageCreateFlags.CreateCubeCompatibleBit
+            };
+            vk.Api.CreateImage(vk.Device, in imageInfo, null, out _pointShadowImages[slot]).ThrowOnError();
+            vk.Api.GetImageMemoryRequirements(vk.Device, _pointShadowImages[slot], out var req);
+            var alloc = new MemoryAllocateInfo
+            {
+                SType = StructureType.MemoryAllocateInfo,
+                AllocationSize = req.Size,
+                MemoryTypeIndex = (uint)VkMemoryHelper.FindSuitableMemoryTypeIndex(
+                    vk.Api, vk.PhysicalDevice, req.MemoryTypeBits, MemoryPropertyFlags.DeviceLocalBit)
+            };
+            vk.Api.AllocateMemory(vk.Device, in alloc, null, out _pointShadowMemories[slot]).ThrowOnError();
+            vk.Api.BindImageMemory(vk.Device, _pointShadowImages[slot], _pointShadowMemories[slot], 0).ThrowOnError();
+
+            // Clear all 6 layers to depth=1.0 and transition to ShaderReadOnlyOptimal BEFORE any
+            // per-face view/framebuffer exists -- same real bug CreateShadowTarget's own comment
+            // documents (a descriptor claims ShaderReadOnlyOptimal while the real image stays
+            // Undefined if this is skipped and RenderFrame never runs this slot's faces, e.g.
+            // ShadowsEnabled=false all session).
+            VkPlaceholderTextures.UploadDepthAndTransition(vk, _pointShadowImages[slot], layers: 6);
+
+            for (int face = 0; face < PointShadowFaceCount; face++)
+            {
+                var faceViewInfo = new ImageViewCreateInfo
+                {
+                    SType = StructureType.ImageViewCreateInfo,
+                    Image = _pointShadowImages[slot],
+                    ViewType = ImageViewType.Type2D,
+                    Format = Format.D32Sfloat,
+                    SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.DepthBit, 0, 1, (uint)face, 1)
+                };
+                vk.Api.CreateImageView(vk.Device, in faceViewInfo, null,
+                    out _pointShadowFaceViews[slot * PointShadowFaceCount + face]).ThrowOnError();
+            }
+
+            var cubeViewInfo = new ImageViewCreateInfo
+            {
+                SType = StructureType.ImageViewCreateInfo,
+                Image = _pointShadowImages[slot],
+                ViewType = ImageViewType.TypeCube,
+                Format = Format.D32Sfloat,
+                Components = new ComponentMapping(ComponentSwizzle.Identity, ComponentSwizzle.Identity,
+                    ComponentSwizzle.Identity, ComponentSwizzle.Identity),
+                SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.DepthBit, 0, 1, 0, 6)
+            };
+            vk.Api.CreateImageView(vk.Device, in cubeViewInfo, null, out _pointShadowCubeViews[slot]).ThrowOnError();
+
+            var samplerInfo = new SamplerCreateInfo
+            {
+                SType = StructureType.SamplerCreateInfo,
+                MagFilter = Filter.Linear,
+                MinFilter = Filter.Linear,
+                MipmapMode = SamplerMipmapMode.Nearest,
+                AddressModeU = SamplerAddressMode.ClampToEdge,
+                AddressModeV = SamplerAddressMode.ClampToEdge,
+                AddressModeW = SamplerAddressMode.ClampToEdge,
+                CompareEnable = true,
+                CompareOp = CompareOp.LessOrEqual,
+                MinLod = 0,
+                MaxLod = 1,
+                BorderColor = BorderColor.FloatOpaqueWhite
+            };
+            vk.Api.CreateSampler(vk.Device, in samplerInfo, null, out _pointShadowSamplers[slot]).ThrowOnError();
+
+            for (int face = 0; face < PointShadowFaceCount; face++)
+            {
+                var viewLocal = _pointShadowFaceViews[slot * PointShadowFaceCount + face];
+                var fbInfo = new FramebufferCreateInfo
+                {
+                    SType = StructureType.FramebufferCreateInfo,
+                    RenderPass = _shadowRenderPass, // REUSED, not a new render pass
+                    AttachmentCount = 1,
+                    PAttachments = &viewLocal,
+                    Width = PointShadowMapSize,
+                    Height = PointShadowMapSize,
+                    Layers = 1
+                };
+                vk.Api.CreateFramebuffer(vk.Device, in fbInfo, null,
+                    out _pointShadowFramebuffers[slot * PointShadowFaceCount + face]).ThrowOnError();
+            }
+
+            _pointShadowMapInfo[slot] = new DescriptorImageInfo
+            {
+                ImageLayout = ImageLayout.ShaderReadOnlyOptimal,
+                ImageView = _pointShadowCubeViews[slot],
+                Sampler = _pointShadowSamplers[slot]
+            };
+        }
+
+        _frameSets!.UpdatePointShadowMap(0, _pointShadowMapInfo[0]);
+        _frameSets.UpdatePointShadowMap(1, _pointShadowMapInfo[1]);
+    }
+
+    private unsafe void DestroyPointShadowTargets(VkContext vk)
+    {
+        for (int i = 0; i < _pointShadowFramebuffers.Length; i++)
+        {
+            if (_pointShadowFramebuffers[i].Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _pointShadowFramebuffers[i], null);
+            _pointShadowFramebuffers[i] = default;
+        }
+        for (int slot = 0; slot < PointShadowSlotCount; slot++)
+        {
+            if (_pointShadowSamplers[slot].Handle != 0) vk.Api.DestroySampler(vk.Device, _pointShadowSamplers[slot], null);
+            if (_pointShadowCubeViews[slot].Handle != 0) vk.Api.DestroyImageView(vk.Device, _pointShadowCubeViews[slot], null);
+            for (int face = 0; face < PointShadowFaceCount; face++)
+            {
+                var v = _pointShadowFaceViews[slot * PointShadowFaceCount + face];
+                if (v.Handle != 0) vk.Api.DestroyImageView(vk.Device, v, null);
+                _pointShadowFaceViews[slot * PointShadowFaceCount + face] = default;
+            }
+            if (_pointShadowImages[slot].Handle != 0) vk.Api.DestroyImage(vk.Device, _pointShadowImages[slot], null);
+            if (_pointShadowMemories[slot].Handle != 0) vk.Api.FreeMemory(vk.Device, _pointShadowMemories[slot], null);
+            _pointShadowSamplers[slot] = default; _pointShadowCubeViews[slot] = default;
+            _pointShadowImages[slot] = default; _pointShadowMemories[slot] = default;
+        }
+    }
+
+    /// <summary>
     /// Computes this frame's directional light view-projection (texel-snapped ortho volume
     /// centred on the camera, NaN guards on Sky.SunDirection -- a
     /// NaN sun direction is a real, previously-hit hazard, not defensive paranoia -- and a
@@ -6623,6 +7016,50 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // query (never gated on FrustumCullingEnabled).
         if (opaqueCount > 0) DrawFacesGNorm(vk, cmd, _shadowOpaqueVisible, baseIndex: shadowBase);
         if (sceneOpaqueCount > 0) DrawFacesGNorm(vk, cmd, _shadowSceneOpaqueVisible, baseIndex: shadowSceneBase);
+
+        vk.Api.CmdEndRenderPass(cmd);
+
+        RestoreMainViewportScissor(vk, cmd, pixelSize);
+    }
+
+    /// <summary>
+    /// Records one cube-face depth pass for point-light shadows into <paramref name="cmd"/>.
+    /// Caller has already uploaded this frame's shared instance buffer including this face's
+    /// region (light-space MVP, baked via <see cref="WriteInstanceData"/> with that face's own
+    /// view/proj -- see <see cref="PointShadowFaceDir"/>/<see cref="PointShadowFaceUp"/>) at
+    /// <paramref name="baseIndex"/>/<paramref name="sceneBaseIndex"/>. Reuses
+    /// <see cref="_shadowRenderPass"/>/<see cref="_shadowPipeline"/> -- render-pass compatibility
+    /// only cares about attachment format/sample-count, not resolution or which framebuffer is
+    /// bound, so no separate pipeline/render pass exists for point shadows at all. Restores
+    /// viewport/scissor to <paramref name="pixelSize"/> before returning, same reasoning as
+    /// <see cref="RenderShadowPass"/>'s own restore.
+    /// </summary>
+    private unsafe void RenderPointShadowFace(VkContext vk, CommandBuffer cmd, PixelSize pixelSize, int faceIndex,
+        Framebuffer framebuffer, int baseIndex, int sceneBaseIndex, int opaqueCount, int sceneOpaqueCount)
+    {
+        var clearValue = new ClearValue { DepthStencil = new ClearDepthStencilValue { Depth = 1f, Stencil = 0 } };
+        var beginInfo = new RenderPassBeginInfo
+        {
+            SType = StructureType.RenderPassBeginInfo,
+            RenderPass = _shadowRenderPass,
+            Framebuffer = framebuffer,
+            RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D(PointShadowMapSize, PointShadowMapSize)),
+            ClearValueCount = 1,
+            PClearValues = &clearValue
+        };
+        vk.Api.CmdBeginRenderPass(cmd, in beginInfo, SubpassContents.Inline);
+
+        var faceViewport = new Viewport { X = 0, Y = 0, Width = PointShadowMapSize, Height = PointShadowMapSize, MinDepth = 0, MaxDepth = 1 };
+        vk.Api.CmdSetViewport(cmd, 0, 1, in faceViewport);
+        var faceScissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D(PointShadowMapSize, PointShadowMapSize) };
+        vk.Api.CmdSetScissor(cmd, 0, 1, &faceScissor);
+
+        vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _shadowPipeline!.Pipeline);
+        var frameSet = _frameSets!.FrameSet;
+        vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _shadowPipeline.Layout, 0, 1, &frameSet, 0, null);
+
+        if (opaqueCount > 0) DrawFacesGNorm(vk, cmd, _pointShadowOpaqueVisible[faceIndex], baseIndex: baseIndex);
+        if (sceneOpaqueCount > 0) DrawFacesGNorm(vk, cmd, _pointShadowSceneOpaqueVisible[faceIndex], baseIndex: sceneBaseIndex);
 
         vk.Api.CmdEndRenderPass(cmd);
 
@@ -8315,6 +8752,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         // shadow target/pipeline/render-pass, same unwind-order convention as
         // SSAO immediately above (targets first, then pipeline, then render pass).
         unsafe { DestroyShadowTarget(vk); }
+        unsafe { DestroyPointShadowTargets(vk); }
+        _pointShadowReady = false;
         _shadowPipeline?.Dispose(); _shadowPipeline = null;
         if (_shadowRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _shadowRenderPass, null); } }
         _shadowRenderPass = default;

@@ -91,22 +91,34 @@ float sampleDirShadow(vec3 worldPos, vec3 normal, float NdotL)
 // perspective projection that axis is the eye-space Z of whichever face would have been selected.
 // Standard scalar cubemap-shadow trick; avoids a geometry shader (unavailable in GLSL ES 3.00)
 // and per-face matrices in the fragment shader. Must mirror the depth pass's own projection
-// exactly (kPointShadowNear, point-shadow far == light radius).
-float samplePointShadowCube(samplerCubeShadow map, vec3 lightPos, float farPlane, vec3 worldPos)
+// exactly (kPointShadowNear, point-shadow far == light radius -- see
+// VkViewportControl.PointShadowNear/RenderPointShadowFace's own comments).
+float samplePointShadowCube(samplerCubeShadow map, vec3 lightPos, float farPlane, vec3 worldPos, vec3 normal)
 {
-    vec3 toFrag = worldPos - lightPos;
+    // Fixed world-space normal offset, same constant sampleDirShadow uses for its
+    // near-perpendicular case -- no slope-scaled term here since NdotL isn't threaded through
+    // this call (point lights already attenuate to ~0 at grazing angles via their own
+    // atten*atten falloff, so acne there is far less visible than on the sun's key light).
+    vec3 offsetPos = worldPos + normal * kShadowOffsetBase;
+    vec3 toFrag = offsetPos - lightPos;
 
     const float kPointShadowNear = 0.1;
     float zEye = max(max(abs(toFrag.x), abs(toFrag.y)), abs(toFrag.z));
+
+    // Beyond the light's own radius -> fully lit, same "outside the shadowed volume" contract
+    // sampleDirShadow's own `proj.z > 1.0` check provides. Without this, zEye > farPlane would
+    // produce ndcZ > 1 below, which compares as fully OCCLUDED against the <=1 stored depth --
+    // exactly backwards from what should happen just past the light's falloff radius.
+    if (zEye >= farPlane) return 1.0;
+
+    // Vulkan-native [0,1] depth range already, verified algebraically against
+    // CreatePerspectiveFieldOfView's own matrix entries: at zEye=kPointShadowNear this is 0, at
+    // zEye=farPlane this is 1. No GL-style remap needed -- unlike the stale comment this
+    // function used to carry, this formula was already correct; the bug was the remap that used
+    // to follow it.
     float ndcZ = farPlane / (farPlane - kPointShadowNear)
                - (farPlane * kPointShadowNear) / ((farPlane - kPointShadowNear) * zEye);
-    // Point-light shadows are not yet enabled (uPointShadowCount stays 0, so this function is
-    // unreachable dead code), and this ndcZ formula still carries the same depth-range issue
-    // sampleDirShadow's own comment above documents, unfixed. Unlike the X/Y-vs-Z split there,
-    // this formula needs re-deriving against the actual perspective-projection matrix entries
-    // before applying a fix -- do that re-derivation, and apply it, when point-light shadows are
-    // implemented.
-    float compareZ = ndcZ * 0.5 + 0.5; // same GL-style remap sampleDirShadow used before its fix
+    float compareZ = ndcZ - 0.0005; // small constant bias, matches sampleDirShadow's own -0.0005
 
     return texture(map, vec4(toFrag, compareZ));
 }
@@ -116,10 +128,10 @@ float samplePointShadowCube(samplerCubeShadow map, vec3 lightPos, float farPlane
 // uShadowsOn (the directional map's readiness flag): uPointShadowCount already collapses to 0
 // whenever shadows are off or this light isn't a shadow caster, so gating on both would wrongly
 // suppress point shadows if the directional pass alone ever failed to be ready on a given frame.
-float samplePointShadow(int i, vec3 worldPos)
+float samplePointShadow(int i, vec3 worldPos, vec3 normal)
 {
     if (i >= uPointShadowCount) return 1.0;
-    if (i == 0) return samplePointShadowCube(uPointShadowMap0, uPointShadowPos[0], uPointShadowFar[0], worldPos);
-    if (i == 1) return samplePointShadowCube(uPointShadowMap1, uPointShadowPos[1], uPointShadowFar[1], worldPos);
+    if (i == 0) return samplePointShadowCube(uPointShadowMap0, uPointShadowPos[0], uPointShadowFar[0], worldPos, normal);
+    if (i == 1) return samplePointShadowCube(uPointShadowMap1, uPointShadowPos[1], uPointShadowFar[1], worldPos, normal);
     return 1.0;
 }
