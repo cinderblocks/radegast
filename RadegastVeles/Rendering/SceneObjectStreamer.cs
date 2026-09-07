@@ -1019,6 +1019,8 @@ internal sealed class SceneObjectStreamer : IDisposable
             var rotQ   = new Quaternion(rootPrim.Rotation.X, rootPrim.Rotation.Y, rootPrim.Rotation.Z, rootPrim.Rotation.W);
             _lastRebuiltPose[sceneKey] = (worldPos, rotQ, scaleV);
             _lastBuildHadFlexi[sceneKey] = submission.FlexiPrims.Length > 0;
+            if (rootPrim.PrimData.PCode is PCode.Tree or PCode.NewTree or PCode.Grass)
+                _viewport.RegisterWindSwayObject(sceneKey, worldPos, rotQ);
             ObjectBuilt?.Invoke(rootLocalId, submission);
         }
         catch (OperationCanceledException) { }

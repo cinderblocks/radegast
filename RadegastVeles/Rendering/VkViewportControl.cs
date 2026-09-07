@@ -604,6 +604,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // off under stale velocity forever.
     private const float MaxDeadReckoningSeconds = 2f;
 
+    // Linden tree/grass wind sway: a purely cosmetic whole-object tilt, recomputed every frame
+    // from each registered object's rest pose (see ApplyWindSway) -- reuses the exact same
+    // ApplyTransformToFaces path as dead-reckoning motion, so it needs no shader or vertex-format
+    // changes. Registered once at build time (see RegisterWindSwayObject); Phase is a per-object
+    // hash-derived offset so trees don't all sway in lockstep.
+    private readonly ConcurrentDictionary<ulong, (Vector3 Position, Quaternion Rotation, float Phase)> _windSwayObjects = new();
+
     private readonly struct SceneObjectMotion
     {
         public readonly Vector3 Scale;
@@ -1653,6 +1660,21 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                       * Matrix4x4.CreateFromQuaternion(rotation)
                       * Matrix4x4.CreateTranslation(position);
         SetSceneObjectTransform(sceneKey, transform);
+    }
+
+    /// <summary>Registers <paramref name="sceneKey"/> (a Linden tree/grass object) for the
+    /// purely cosmetic per-frame wind-tilt applied by <see cref="ApplyWindSway"/>. Call once at
+    /// build time with the object's rest position/rotation (no scale -- foliage mesh vertices
+    /// already bake the prim's Scale in themselves, see PrimMeshBuilder's isFoliage transform
+    /// path, so composing scale here too would double it). Re-registering the same
+    /// <paramref name="sceneKey"/> (e.g. a rebuild) simply replaces the stored rest pose.
+    /// Thread-safe; actual sway application only ever runs on the render thread.</summary>
+    public void RegisterWindSwayObject(ulong sceneKey, Vector3 position, Quaternion rotation)
+    {
+        // Cheap deterministic per-object phase so trees don't all sway in lockstep -- derived
+        // from sceneKey, not a random source, so it's stable across rebuilds of the same object.
+        float phase = (sceneKey * 2654435761UL % 6283) / 1000f; // ~[0, 2*pi)
+        _windSwayObjects[sceneKey] = (position, rotation, phase);
     }
 
     /// <summary>Part of both <see cref="ISceneViewport"/> and <see cref="ISingleObjectViewport"/>:
@@ -3316,6 +3338,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _sceneObjectTransformOverrides.TryRemove(rootId, out _);
         _spatialGrid.Remove(rootId);
         _sceneObjectMotion.TryRemove(rootId, out _);
+        _windSwayObjects.TryRemove(rootId, out _);
 
         _sceneObjectTextures.Remove(rootId, out var textures);
         _sceneSkinGpuDataMap.Remove(rootId, out var skinGpuList);
@@ -3626,6 +3649,49 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             var transform = Matrix4x4.CreateScale(m.Scale)
                           * Matrix4x4.CreateFromQuaternion(rotation)
                           * Matrix4x4.CreateTranslation(position);
+            ApplyTransformToFaces(faces, transform);
+            if (faces.Count > 0)
+            {
+                var (aabbMin, aabbMax) = ComputeObjectWorldAabb(faces);
+                _spatialGrid.Upsert(sceneKey, aabbMin, aabbMax);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Applies a small, purely cosmetic per-frame tilt to every registered Linden tree/grass
+    /// object (see <see cref="RegisterWindSwayObject"/>) so they read as swaying gently rather
+    /// than standing perfectly rigid -- SL's own wind-sway system bends per-vertex based on
+    /// height; this is a much cheaper whole-object approximation (tilts the entire tree about
+    /// its base) that needs no shader or vertex-format changes, reusing the exact same
+    /// <see cref="ApplyTransformToFaces"/> path <see cref="ExtrapolateMovingSceneObjects"/> uses
+    /// for network motion. Two layered sine waves (a slow primary sway + a faster, smaller
+    /// flutter) around a fixed world-X wind axis, each object's phase offset so a whole stand of
+    /// trees doesn't sway in unison. Called once per rendered frame, alongside
+    /// <see cref="ExtrapolateMovingSceneObjects"/>.
+    /// </summary>
+    private void ApplyWindSway()
+    {
+        if (_windSwayObjects.IsEmpty) return;
+
+        const float primaryAmplitudeDeg = 1.4f;
+        const float primaryFreqHz       = 0.35f;
+        const float flutterAmplitudeDeg = 0.5f;
+        const float flutterFreqHz       = 0.9f;
+
+        float t = Environment.TickCount64 / 1000f;
+        var windAxis = Vector3.UnitX;
+
+        foreach (var (sceneKey, sway) in _windSwayObjects)
+        {
+            if (!_sceneObjects.TryGetValue(sceneKey, out var faces)) continue;
+
+            float angleDeg = primaryAmplitudeDeg * MathF.Sin(t * primaryFreqHz * MathF.Tau + sway.Phase)
+                           + flutterAmplitudeDeg * MathF.Sin(t * flutterFreqHz * MathF.Tau + sway.Phase * 1.3f);
+            var tilt = Quaternion.CreateFromAxisAngle(windAxis, angleDeg * (MathF.PI / 180f));
+
+            var transform = Matrix4x4.CreateFromQuaternion(tilt * sway.Rotation)
+                          * Matrix4x4.CreateTranslation(sway.Position);
             ApplyTransformToFaces(faces, transform);
             if (faces.Count > 0)
             {
@@ -4443,6 +4509,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // exact received pose at t=0) and before any culling/draw pass so they see the same
             // extrapolated face.Transform this frame.
             ExtrapolateMovingSceneObjects();
+
+            // purely cosmetic Linden tree/grass wind tilt -- same ordering requirement as
+            // ExtrapolateMovingSceneObjects (must land before any culling/draw pass reads
+            // face.Transform this frame).
+            ApplyWindSway();
 
             // local point-light selection, once per frame, before frameUbo is
             // populated below (its PointLightPos/Color/Radius/Falloff/Count fields read

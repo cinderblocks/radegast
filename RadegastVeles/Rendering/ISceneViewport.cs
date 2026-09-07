@@ -110,6 +110,14 @@ public interface ISceneViewport
     void RebaseSceneObjectTransforms(IReadOnlyCollection<ulong> sceneKeys, Vector3 delta);
     void SetSceneObjectMotion(ulong sceneKey, Vector3 scale, Quaternion rotation, Vector3 position,
         Vector3 velocity, Vector3 angularVelocity, Vector3 acceleration);
+    /// <summary>
+    /// Registers a Linden tree/grass object for the purely cosmetic per-frame wind tilt (see
+    /// <c>VkViewportControl.ApplyWindSway</c>). <paramref name="position"/>/<paramref name="rotation"/>
+    /// are the object's rest pose (no scale -- foliage mesh vertices already bake the prim's
+    /// Scale in themselves). Call once at build time; re-registering the same
+    /// <paramref name="sceneKey"/> just replaces the stored rest pose.
+    /// </summary>
+    void RegisterWindSwayObject(ulong sceneKey, Vector3 position, Quaternion rotation);
     void PatchSceneObjectTexture(SceneTexturePatch patch, CancellationToken ct = default);
     void ScheduleSceneVertexUpdate(uint rootId, int faceOffset, float[] verts, int vertsLength, bool isPoolRented = false);
 

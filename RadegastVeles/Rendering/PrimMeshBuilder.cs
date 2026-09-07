@@ -33,6 +33,7 @@ using Microsoft.Extensions.Logging;
 using Radegast.Veles.Core;
 using SkiaSharp;
 using Quaternion   = System.Numerics.Quaternion;
+using Vector2      = System.Numerics.Vector2;
 using Vector3      = System.Numerics.Vector3;
 using Vector4      = System.Numerics.Vector4;
 
@@ -429,17 +430,27 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
             // ── Build per-prim transform ──────────────────────────────────
             var scale = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
+            // Linden tree/grass mesh generators (GenerateTreeMesh/GenerateGrassMesh) already
+            // bake prim.Scale into their vertices' final world-space size (SL's own
+            // getScale().magVec()*0.05 formula, since raw species lengths aren't meters) --
+            // unlike every other mesh type here, which is built in unit/local space and relies
+            // on this transform's CreateScale to reach world size. Applying CreateScale(scale)
+            // again on top of already-scaled foliage geometry compounds prim.Scale a second
+            // time, inflating trees by another factor of their own Scale (a small tree can come
+            // out over 100x too large this way).
+            bool isFoliage = prim.PrimData.PCode is PCode.Tree or PCode.NewTree or PCode.Grass;
+            var scaleMat = isFoliage ? Matrix4x4.Identity : Matrix4x4.CreateScale(scale);
             Matrix4x4 transform;
             if (prim.LocalID == rootLocalId)
             {
-                transform = Matrix4x4.CreateScale(scale)
+                transform = scaleMat
                           * Matrix4x4.CreateFromQuaternion(rootRot);
             }
             else
             {
                 var pos = new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z);
                 var rot = new Quaternion(prim.Rotation.X, prim.Rotation.Y, prim.Rotation.Z, prim.Rotation.W);
-                transform = Matrix4x4.CreateScale(scale)
+                transform = scaleMat
                           * Matrix4x4.CreateFromQuaternion(rot)
                           * Matrix4x4.CreateTranslation(pos)
                           * Matrix4x4.CreateFromQuaternion(rootRot);
@@ -1141,12 +1152,312 @@ internal sealed class PrimMeshBuilder(GridClient client)
         }
     }
 
+    // ── Linden tree / grass procedural geometry ──────────────────────────────────
+    //
+    // Recursion structure verified against the actual SL viewer source
+    // (indra/newview/llvotree.cpp genBranchPipeline/calcNumVerts, llvograss.cpp
+    // plantBlades/getGeometry) rather than reconstructed from general knowledge:
+    // every segment (trunk *or* branch) recurses into `Branches` children (depth-1)
+    // AND, if it still has TrunkDepth budget left, ALSO continues the trunk itself
+    // (same depth, trunk_depth-1, rotated only by a fixed 70.5 degree Z "phase" spiral,
+    // no droop) -- so branches sprout in whorls off every trunk segment, not just off
+    // a single straight pre-built trunk. Leaf UV rect (0.52,0.52)-(0.98,1.0) and bark
+    // UV U-range [0,0.5] are the real species-texture layout (LEAF_LEFT/RIGHT/TOP/BOTTOM
+    // constants in llvotree.cpp), not a guess. Branch/trunk geometry itself is still a
+    // flat double-sided crossed quad rather than SL's revolved cylinder -- an approved
+    // simplification (see this session's plan file) that keeps the recursive branching
+    // *structure* and species texture correct without a full LOD-cylinder mesher.
+    //
+    // Every branch/leaf quad is emitted TWICE (normal + reverse winding, flipped normal)
+    // rather than relying on PrimRenderFace.IsTwoSided (present but not confirmed wired to
+    // an actual GPU cull-mode toggle -- VkPrimPipeline.cs hardcodes CullMode.BackBit).
+    // Cheap for these low-poly elements, and correct regardless of what IsTwoSided does.
+    //
+    // ushort indices cap a single Face at 65535 vertices. Because branches now sprout at
+    // every trunk segment (not just after one straight trunk), pathological species
+    // parameters can generate far more geometry than a naive Branches^Depth estimate --
+    // GenerateBranch hard-stops (falls back to a leaf) once the vertex count nears the
+    // ushort ceiling, so index overflow can't happen regardless of species data.
+
+    private const float DegToRad = MathF.PI / 180f;
+    private const int MaxTreeVertices = 60_000; // guards the 65535 ushort index ceiling
+
+    // Leaf UV sub-rect within the shared species texture (LEAF_LEFT/RIGHT/TOP/BOTTOM in
+    // llvotree.cpp) -- bark occupies the other ~half of the texture (U in [0, 0.5]).
+    private const float LeafUvLeft = 0.52f;
+    private const float LeafUvRight = 0.98f;
+    private const float LeafUvBottom = 0.52f;
+    private const float LeafUvTop = 1.0f;
+
+    // Grass species' BladeSizeX/Y are multipliers on these fixed base dimensions
+    // (GRASS_BLADE_BASE/GRASS_BLADE_HEIGHT in llvograss.cpp), not absolute meters.
+    private const float GrassBladeBaseWidth = 0.25f;
+    private const float GrassBladeBaseHeight = 0.5f;
+
+    /// <summary>Builds a single-<see cref="Face"/> <see cref="FacetedMesh"/> for a Linden
+    /// tree prim (<see cref="PCode.Tree"/>/<see cref="PCode.NewTree"/>) via the recursive
+    /// trunk/branch/leaf structure in <see cref="GenerateBranch"/>. Deterministic per prim
+    /// (seeded from <see cref="Primitive.ID"/>) so rebuilding the same tree (LOD change,
+    /// texture patch, etc.) never changes its shape.</summary>
+    private FacetedMesh GenerateTreeMesh(Primitive prim)
+    {
+        var def = prim.GetTreeDefinition();
+        var rng = new Random(prim.ID.GetHashCode());
+        var vertices = new List<Vertex>();
+        var indices = new List<ushort>();
+
+        // Species lengths (e.g. TrunkLength up to ~11) are raw XML units, not meters --
+        // llvotree.cpp's updateMesh() maps them into the prim's actual world size via
+        // getScale().magVec() * 0.05. Without this the tree renders ~magVec()*20x too big.
+        float scaleMag = MathF.Sqrt(prim.Scale.X * prim.Scale.X + prim.Scale.Y * prim.Scale.Y
+            + prim.Scale.Z * prim.Scale.Z);
+        float sizeFactor = Math.Max(0.001f, scaleMag * 0.05f);
+
+        int trunkDepth = Math.Max(0, (int)MathF.Round(def.TrunkDepth));
+        int depth = Math.Max(0, def.Depth);
+        GenerateBranch(vertices, indices, rng, in def, Vector3.Zero, Quaternion.Identity,
+            depth, trunkDepth, scale: 1f, sizeFactor);
+
+        return BuildSingleFaceTreeMesh(prim, vertices, indices);
+    }
+
+    /// <summary>Recursive trunk/branch step, matching llvotree.cpp's genBranchPipeline:
+    /// emits one bark segment along <paramref name="orient"/>'s local +Z, then (while
+    /// <paramref name="depth"/> remains) always splits into <see cref="TreeDefinition.Branches"/>
+    /// child branches (depth-1, droop/twist rotated, no further trunk continuation) and,
+    /// if <paramref name="trunkDepth"/> is still &gt;0, additionally continues the trunk
+    /// itself (same depth, trunkDepth-1, straight -- only a 70.5 degree phase spiral so the
+    /// next whorl of branches lands at a different angle). At depth 0, emits a leaf cross
+    /// instead of a segment.</summary>
+    private void GenerateBranch(List<Vertex> vertices, List<ushort> indices, Random rng,
+        in TreeDefinition def, Vector3 pos, Quaternion orient, int depth, int trunkDepth, float scale,
+        float sizeFactor)
+    {
+        if (vertices.Count >= MaxTreeVertices)
+            return; // hard stop: guards the ushort index ceiling on pathological species data
+
+        if (depth <= 0)
+        {
+            Vector3 leafUp = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, orient));
+            Vector3 leafRight = Vector3.Normalize(Vector3.Transform(Vector3.UnitX, orient));
+            float leafSize = Math.Max(0.02f, scale * def.LeafScale * sizeFactor);
+            float jitterDeg = ((float)rng.NextDouble() * 2f - 1f) * def.LeafRotate;
+            EmitLeafCross(vertices, indices, pos, leafUp, leafRight, leafSize, leafSize, jitterDeg);
+            return;
+        }
+
+        bool useTrunkSizing = trunkDepth > 0 || scale == 1f;
+        float length = scale * (useTrunkSizing ? def.TrunkLength : def.BranchLength) * sizeFactor;
+        float aspect = useTrunkSizing ? def.TrunkAspect : def.BranchAspect;
+        float width = Math.Max(0.001f, length * aspect);
+
+        Vector3 dir = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, orient));
+        Vector3 endPos = pos + dir * length;
+        EmitBranchSegment(vertices, indices, pos, endPos, width, width * def.Taper, def.RepeatZ);
+
+        int numBranches = Math.Max(1, (int)MathF.Round(def.Branches));
+        float constantTwist = 360f / numBranches;
+        float childScale = scale * def.ScaleStep;
+
+        for (int i = 0; i < numBranches && vertices.Count < MaxTreeVertices; i++)
+        {
+            float twistAngle = constantTwist * i + ((i % 2 == 0) ? def.Twist : -def.Twist) * i;
+            Quaternion localDelta =
+                Quaternion.CreateFromAxisAngle(Vector3.UnitZ, twistAngle * DegToRad) *
+                Quaternion.CreateFromAxisAngle(Vector3.UnitY, def.Droop * DegToRad);
+            Quaternion childOrient = orient * localDelta;
+
+            GenerateBranch(vertices, indices, rng, in def, endPos, childOrient,
+                depth - 1, 0, childScale, sizeFactor);
+        }
+
+        if (trunkDepth > 0 && vertices.Count < MaxTreeVertices)
+        {
+            Quaternion trunkDelta = Quaternion.CreateFromAxisAngle(Vector3.UnitZ, 70.5f * DegToRad);
+            Quaternion trunkOrient = orient * trunkDelta;
+
+            GenerateBranch(vertices, indices, rng, in def, endPos, trunkOrient,
+                depth, trunkDepth - 1, childScale, sizeFactor);
+        }
+    }
+
+    /// <summary>Any unit vector perpendicular to <paramref name="dir"/> -- used to lay out
+    /// a bark segment's two crossed quads. Falls back to a different reference axis when
+    /// <paramref name="dir"/> is (near-)parallel to world-up, avoiding a degenerate
+    /// near-zero-length cross product.</summary>
+    private static Vector3 ComputePerpendicular(Vector3 dir)
+    {
+        Vector3 perp = Vector3.Cross(dir, Vector3.UnitZ);
+        if (perp.LengthSquared() < 1e-6f) perp = Vector3.Cross(dir, Vector3.UnitX);
+        return Vector3.Normalize(perp);
+    }
+
+    /// <summary>Emits one bark segment as two perpendicular double-sided quads (a "cross"),
+    /// from <paramref name="pos"/> to <paramref name="endPos"/>, width tapering
+    /// <paramref name="baseRadius"/> -&gt; <paramref name="tipRadius"/>. Bark UV: U spans
+    /// [0, 0.5] (the bark half of the shared species texture -- see the section header;
+    /// the leaf half is [0.52, 0.98]x[0.52, 1.0]), V spans 0..<paramref name="repeatZ"/>
+    /// (tiled along the segment's length, matching <see cref="TreeDefinition.RepeatZ"/>).</summary>
+    private static void EmitBranchSegment(List<Vertex> vertices, List<ushort> indices,
+        Vector3 pos, Vector3 endPos, float baseRadius, float tipRadius, int repeatZ)
+    {
+        Vector3 dir = endPos - pos;
+        if (dir.LengthSquared() < 1e-10f) return;
+        dir = Vector3.Normalize(dir);
+        Vector3 right1 = ComputePerpendicular(dir);
+        Vector3 right2 = Vector3.Normalize(Vector3.Cross(dir, right1));
+        float v1 = Math.Max(1, repeatZ);
+
+        EmitDoubleSidedQuad(vertices, indices,
+            pos - right1 * baseRadius, pos + right1 * baseRadius,
+            endPos + right1 * tipRadius, endPos - right1 * tipRadius,
+            new Vector2(0, 0), new Vector2(0.5f, 0), new Vector2(0.5f, v1), new Vector2(0, v1),
+            right2);
+        EmitDoubleSidedQuad(vertices, indices,
+            pos - right2 * baseRadius, pos + right2 * baseRadius,
+            endPos + right2 * tipRadius, endPos - right2 * tipRadius,
+            new Vector2(0, 0), new Vector2(0.5f, 0), new Vector2(0.5f, v1), new Vector2(0, v1),
+            right1);
+    }
+
+    /// <summary>Emits a 2-quad leaf/blade billboard cross centered at <paramref name="center"/>,
+    /// extending along <paramref name="up"/> from its base, <paramref name="width"/> wide and
+    /// <paramref name="height"/> tall, with the second quad's reference edge rotated
+    /// <paramref name="rotationDeg"/> + 90 degrees around <paramref name="up"/> from
+    /// <paramref name="refRight"/> (tree callers pass the branch tip's own tilted local frame so
+    /// leaves fan out with the branch instead of always billboarding to world-up; grass passes
+    /// world Z/X). UV uses the real species-texture leaf sub-rect (see the section header).</summary>
+    private static void EmitLeafCross(List<Vertex> vertices, List<ushort> indices,
+        Vector3 center, Vector3 up, Vector3 refRight, float width, float height, float rotationDeg)
+    {
+        up = Vector3.Normalize(up);
+        refRight = Vector3.Normalize(refRight);
+        var uvBL = new Vector2(LeafUvLeft, LeafUvBottom);
+        var uvBR = new Vector2(LeafUvRight, LeafUvBottom);
+        var uvTR = new Vector2(LeafUvRight, LeafUvTop);
+        var uvTL = new Vector2(LeafUvLeft, LeafUvTop);
+
+        for (int q = 0; q < 2; q++)
+        {
+            float angle = (rotationDeg + q * 90f) * DegToRad;
+            Vector3 right = Vector3.Normalize(Vector3.Transform(refRight, Quaternion.CreateFromAxisAngle(up, angle)));
+            Vector3 normal = Vector3.Normalize(Vector3.Cross(right, up));
+            Vector3 p0 = center - right * (width * 0.5f);
+            Vector3 p1 = center + right * (width * 0.5f);
+            Vector3 p2 = p1 + up * height;
+            Vector3 p3 = p0 + up * height;
+            EmitDoubleSidedQuad(vertices, indices, p0, p1, p2, p3, uvBL, uvBR, uvTR, uvTL, normal);
+        }
+    }
+
+    /// <summary>Emits a quad (corners in order p0-&gt;p1-&gt;p2-&gt;p3) as two triangles, plus a
+    /// second reverse-winding copy with flipped normals -- see this section's header comment
+    /// on why every foliage quad is doubled rather than relying on IsTwoSided.</summary>
+    // LibreMetaverse.Rendering.Vertex's Position/Normal/TexCoord are LibreMetaverse's OWN
+    // Vector3/Vector2 (OpenMetaverse math types), distinct from this file's System.Numerics
+    // aliases used for all the cross-product/quaternion geometry math above -- these two
+    // helpers are the conversion boundary, called only where a Vertex is actually constructed.
+    private static LibreMetaverse.Vector3 ToOmv(Vector3 v) => new(v.X, v.Y, v.Z);
+    private static LibreMetaverse.Vector2 ToOmv(Vector2 v) => new(v.X, v.Y);
+
+    private static void EmitDoubleSidedQuad(List<Vertex> vertices, List<ushort> indices,
+        Vector3 p0, Vector3 p1, Vector3 p2, Vector3 p3,
+        Vector2 uv0, Vector2 uv1, Vector2 uv2, Vector2 uv3, Vector3 normal)
+    {
+        ushort b = (ushort)vertices.Count;
+        var n = ToOmv(normal);
+        vertices.Add(new Vertex { Position = ToOmv(p0), Normal = n, TexCoord = ToOmv(uv0) });
+        vertices.Add(new Vertex { Position = ToOmv(p1), Normal = n, TexCoord = ToOmv(uv1) });
+        vertices.Add(new Vertex { Position = ToOmv(p2), Normal = n, TexCoord = ToOmv(uv2) });
+        vertices.Add(new Vertex { Position = ToOmv(p3), Normal = n, TexCoord = ToOmv(uv3) });
+        indices.Add(b); indices.Add((ushort)(b + 1)); indices.Add((ushort)(b + 2));
+        indices.Add(b); indices.Add((ushort)(b + 2)); indices.Add((ushort)(b + 3));
+
+        ushort b2 = (ushort)vertices.Count;
+        var back = ToOmv(-normal);
+        vertices.Add(new Vertex { Position = ToOmv(p0), Normal = back, TexCoord = ToOmv(uv0) });
+        vertices.Add(new Vertex { Position = ToOmv(p1), Normal = back, TexCoord = ToOmv(uv1) });
+        vertices.Add(new Vertex { Position = ToOmv(p2), Normal = back, TexCoord = ToOmv(uv2) });
+        vertices.Add(new Vertex { Position = ToOmv(p3), Normal = back, TexCoord = ToOmv(uv3) });
+        indices.Add(b2); indices.Add((ushort)(b2 + 2)); indices.Add((ushort)(b2 + 1));
+        indices.Add(b2); indices.Add((ushort)(b2 + 3)); indices.Add((ushort)(b2 + 2));
+    }
+
+    /// <summary>Wraps pre-built vertices/indices into a single-<see cref="Face"/>
+    /// <see cref="FacetedMesh"/>, matching <see cref="MeshFoundry.GenerateFacetedMesh"/>'s
+    /// shape (empty <see cref="Profile"/>/<see cref="Path"/> -- neither is used downstream
+    /// for a procedurally-generated face like this one).</summary>
+    private static FacetedMesh BuildSingleFaceTreeMesh(Primitive prim, List<Vertex> vertices, List<ushort> indices)
+    {
+        return new FacetedMesh
+        {
+            Prim = prim,
+            Profile = new Profile { Faces = new List<ProfileFace>(), Positions = new List<LibreMetaverse.Vector3>() },
+            Path = new Path { Points = new List<PathPoint>() },
+            Faces = new List<Face>
+            {
+                new Face { Vertices = vertices, Indices = indices, TextureFace = new Primitive.TextureEntryFace(null) }
+            }
+        };
+    }
+
+    /// <summary>Builds a single-<see cref="Face"/> <see cref="FacetedMesh"/> for a Linden
+    /// grass prim (<see cref="PCode.Grass"/>): a handful of 2-quad billboard-cross blade
+    /// clusters scattered within the prim's local XY footprint. Does not attempt to match SL's
+    /// own gaussian-scatter placement (llvograss.cpp plantBlades) -- reads as "a patch of
+    /// grass" rather than a white box, which is what this feature actually needs to fix.
+    /// <see cref="GrassDefinition.BladeSizeX"/>/Y are multipliers on fixed base dimensions
+    /// (GRASS_BLADE_BASE=0.25m wide, GRASS_BLADE_HEIGHT=0.5m tall in the source), not
+    /// absolute meters -- using them directly would render some species several times too
+    /// large. Deterministic per prim (seeded from <see cref="Primitive.ID"/>), same
+    /// rebuild-stability reasoning as <see cref="GenerateTreeMesh"/>.</summary>
+    private FacetedMesh GenerateGrassMesh(Primitive prim)
+    {
+        var def = prim.GetGrassDefinition();
+        var rng = new Random(prim.ID.GetHashCode());
+        var vertices = new List<Vertex>();
+        var indices = new List<ushort>();
+
+        float bladeWidth = GrassBladeBaseWidth * def.BladeSizeX;
+        float bladeHeight = GrassBladeBaseHeight * def.BladeSizeY;
+
+        float footprintArea = Math.Max(0.01f, prim.Scale.X * prim.Scale.Y);
+        float bladeArea = Math.Max(0.01f, bladeWidth * bladeHeight);
+        int clusterCount = Math.Clamp((int)MathF.Ceiling(footprintArea / bladeArea), 1, 24);
+
+        float halfX = prim.Scale.X * 0.5f;
+        float halfY = prim.Scale.Y * 0.5f;
+        for (int i = 0; i < clusterCount; i++)
+        {
+            Vector3 center = new Vector3(
+                ((float)rng.NextDouble() * 2f - 1f) * halfX,
+                ((float)rng.NextDouble() * 2f - 1f) * halfY,
+                0f);
+            float rotationDeg = (float)rng.NextDouble() * 360f;
+            EmitLeafCross(vertices, indices, center, Vector3.UnitZ, Vector3.UnitX,
+                bladeWidth, bladeHeight, rotationDeg);
+        }
+
+        return BuildSingleFaceTreeMesh(prim, vertices, indices);
+    }
+
     // ── Shared prim helpers (continued) ──────────────────────────────────────────
 
     /// <summary>Tessellates a single prim into a <see cref="FacetedMesh"/>.</summary>
     private async Task<FacetedMesh?> GetPrimMeshAsync(Primitive prim, CancellationToken ct,
         DetailLevel detailLevel = DetailLevel.High)
     {
+        // Linden tree/grass: PCode takes priority over Sculpt/parametric -- neither of those
+        // shape systems is meaningful for foliage (PathCurve/ProfileCurve are leftover/default
+        // values, not a real prim shape), and building from them was what rendered every tree
+        // and grass patch as a plain white box. Synchronous: no network fetch needed here, the
+        // species texture is resolved later through the same per-face texture pipeline as any
+        // other face (see AppendFaces' PCode override).
+        if (prim.PrimData.PCode is PCode.Tree or PCode.NewTree)
+            return GenerateTreeMesh(prim);
+        if (prim.PrimData.PCode == PCode.Grass)
+            return GenerateGrassMesh(prim);
+
         if (prim.Sculpt != null && prim.Sculpt.SculptTexture != UUID.Zero)
         {
             if (prim.Sculpt.Type != SculptType.Mesh)
@@ -1197,13 +1508,18 @@ internal sealed class PrimMeshBuilder(GridClient client)
         Matrix4x4?  faceTransformOverride = null)
     {
         var faceTransform = faceTransformOverride ?? transform;
+        // Tree/grass faces' TexCoords are already final (baked by GenerateTreeMesh/
+        // GenerateGrassMesh below) -- skip the planar/tiling UV transform, which is
+        // meaningless for foliage and would stomp them using prim.Textures' (blank, for
+        // these PCodes) default face parameters.
+        bool isFoliage = prim.PrimData.PCode is PCode.Tree or PCode.NewTree or PCode.Grass;
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
             var face = mesh.Faces[fi];
             if (face.Vertices.Count == 0) continue;
 
             var texFace = prim.Textures?.GetFace((uint)fi);
-            if (texFace != null)
+            if (texFace != null && !isFoliage)
                 _mesher.TransformTexCoords(face.Vertices, face.Center, texFace, prim.Scale);
 
             // Pack into interleaved float array: position(3) + normal(3) + uv(2) + tangent(4) = 12 floats.
@@ -1252,6 +1568,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             FaceAlphaMode alphaMode  = FaceAlphaMode.None;
             UUID          materialId = UUID.Zero;
             UUID          renderMaterialId = UUID.Zero;
+            float         alphaCutoff = 0.004f;
 
             if (texFace != null)
             {
@@ -1277,6 +1594,29 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 alphaMode = hasAlpha ? FaceAlphaMode.Blend : FaceAlphaMode.None;
             }
 
+            // Linden tree/grass prims carry no meaningful TextureEntry -- texFace above is
+            // null or a blank default (which is what was rendering as a plain white box
+            // before tree/grass mesh generation existed). Override with the species texture
+            // and alpha-masked (not blended) cutout rendering, matching how the SL viewer
+            // treats foliage: opaque-pass depth-write with a shader discard, not a sorted
+            // translucent draw -- see GenerateTreeMesh/GenerateGrassMesh's own callers.
+            if (prim.PrimData.PCode is PCode.Tree or PCode.NewTree or PCode.Grass)
+            {
+                texId = prim.PrimData.PCode == PCode.Grass
+                    ? prim.GetGrassDefinition().TextureId
+                    : prim.GetTreeDefinition().TextureId;
+                r = g = b = a = 1f;
+                fullbright = false;
+                glow = 0f;
+                shiny = 0f;
+                hasBump = false;
+                materialId = UUID.Zero;
+                renderMaterialId = UUID.Zero;
+                hasAlpha = false; // Mask, not Blend -- opaque-pass cutout, see comment above
+                alphaMode = FaceAlphaMode.Mask;
+                alphaCutoff = 0.5f; // foliage cutout textures want a firm edge, not the 0.004 near-zero default
+            }
+
             // Skip fully-invisible faces — alpha at or below this threshold means
             // the face will never contribute visible pixels (mirrors SL viewer logic).
             if (a <= 0.01f) continue;
@@ -1284,7 +1624,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
             faces.Add(new RawFace(verts, needed, indices,
                 new Vector4(r, g, b, a), fullbright, glow, hasAlpha, texId, faceTransform,
                 prim.LocalID, fi, centroid,
-                Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode,
+                Shiny: shiny, HasBump: hasBump, AlphaMode: alphaMode, AlphaCutoff: alphaCutoff,
                 MaterialId: materialId, RenderMaterialId: renderMaterialId));
         }
     }
