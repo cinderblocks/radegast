@@ -17,32 +17,27 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Pipeline layout + VkPipeline for the tonemap/bloom composite (quad.vert + tonemap.frag) --
-// FINAL stage of the post-process chain, and the thing that now writes the real swapchain
-// image (see VkRenderPass.CreateTonemapOutputPass's own doc comment).
+// Pipeline layout + VkPipeline for the god-ray radial blur (quad.vert + godray_radial_blur.frag)
+// -- second/final stage of the god-ray chain before tonemap.frag composites the result in.
 //
-// Chain overview (all four stages recorded back-to-back in VkViewportControl.RenderFrame,
-// right after the main scene render pass ends, before underwater -- see that call site's own
-// comment for exact ordering):
-//   1. VkBloomExtractPipeline (bloom_extract.frag): full-res HDR scene colour -> half-res
-//      soft-thresholded bright-pass target ("ping").
-//   2. VkBloomBlurPipeline (bloom_blur.frag), horizontal:  ping -> "pong".
-//   3. VkBloomBlurPipeline (bloom_blur.frag), vertical:    pong -> ping (final blurred bloom).
-//   4. THIS pipeline (tonemap.frag): full-res HDR scene colour + ping (blurred bloom) ->
-//      tonemapped LDR, written into the actual swapchain image.
-// Three sampler bindings (VkDescriptorSetLayouts.CreateTonemapSamplerLayout: HDR, bloom, god-ray)
-// plus a single-float push constant (uGodRayIntensity, see tonemap.frag) -- everything else
-// (bloom intensity, god-ray tint, ACES curve constants) stays a shader constant, matching how
-// sky.frag/atmosphere.glsl tune their own constants inline rather than plumbing UBO fields for
-// values nothing outside the shader currently needs to vary at runtime. uGodRayIntensity is the
-// one exception: it must vary per-frame (CPU-computed sun visibility), not per-build.
+// Chain overview (recorded in VkViewportControl.RenderTonemapChain, immediately before the
+// existing bloom stages, on the same command buffer):
+//   1. VkGodRayMaskPipeline (godray_mask.frag): full-res HDR scene colour + SSAO's G-buffer depth
+//      -> half-res "sky-only" occlusion mask.
+//   2. THIS pipeline (godray_radial_blur.frag): mask -> half-res streak toward the sun's
+//      screen-space position (CPU-computed each frame, see VkViewportControl).
+//   3. VkTonemapPipeline (tonemap.frag): additively composites the streak alongside bloom.
+// Reuses VkDescriptorSetLayouts.CreateBlurSamplerLayout directly (one CombinedImageSampler,
+// binding 0, fragment-only) -- identical shape to VkBloomBlurPipeline's own sampler set, only the
+// push constant (16 bytes: sun UV + intensity + decay, vs bloom's 8-byte direction) and .frag
+// differ.
 
 using System;
 using Silk.NET.Vulkan;
 
 namespace Radegast.Veles.Rendering;
 
-internal sealed class VkTonemapPipeline : IDisposable
+internal sealed class VkGodRayBlurPipeline : IDisposable
 {
     public PipelineLayout Layout { get; }
     public Pipeline Pipeline { get; }
@@ -50,7 +45,7 @@ internal sealed class VkTonemapPipeline : IDisposable
 
     private readonly VkContext _vk;
 
-    private VkTonemapPipeline(VkContext vk, PipelineLayout layout, Pipeline pipeline, DescriptorSetLayout samplerLayout)
+    private VkGodRayBlurPipeline(VkContext vk, PipelineLayout layout, Pipeline pipeline, DescriptorSetLayout samplerLayout)
     {
         _vk = vk;
         Layout = layout;
@@ -58,16 +53,16 @@ internal sealed class VkTonemapPipeline : IDisposable
         SamplerLayout = samplerLayout;
     }
 
-    public static unsafe VkTonemapPipeline Create(VkContext vk, RenderPass renderPass)
+    public static unsafe VkGodRayBlurPipeline Create(VkContext vk, RenderPass renderPass)
     {
-        var samplerLayout = VkDescriptorSetLayouts.CreateTonemapSamplerLayout(vk);
+        var samplerLayout = VkDescriptorSetLayouts.CreateBlurSamplerLayout(vk);
 
         PipelineLayout layout = default;
         Pipeline pipeline = default;
         try
         {
             CreatePipelineInternal(vk, renderPass, samplerLayout, out layout, out pipeline);
-            return new VkTonemapPipeline(vk, layout, pipeline, samplerLayout);
+            return new VkGodRayBlurPipeline(vk, layout, pipeline, samplerLayout);
         }
         catch
         {
@@ -87,7 +82,7 @@ internal sealed class VkTonemapPipeline : IDisposable
         {
             StageFlags = ShaderStageFlags.FragmentBit,
             Offset = 0,
-            Size = 4 // uGodRayIntensity (see tonemap.frag)
+            Size = 16 // vec2 uSunUv + float uIntensity + float uDecay (see godray_radial_blur.frag)
         };
         var layoutCreateInfo = new PipelineLayoutCreateInfo
         {
@@ -100,7 +95,7 @@ internal sealed class VkTonemapPipeline : IDisposable
         vk.Api.CreatePipelineLayout(vk.Device, in layoutCreateInfo, null, out layout).ThrowOnError();
 
         using var vert = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/quad.vert.spv");
-        using var frag = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/tonemap.frag.spv");
+        using var frag = VkShaderModule.LoadFromFile(vk, "Rendering/shader_data/vulkan/godray_radial_blur.frag.spv");
 
         using var entryPoint = new VkByteString("main");
         var stages = stackalloc PipelineShaderStageCreateInfo[2]

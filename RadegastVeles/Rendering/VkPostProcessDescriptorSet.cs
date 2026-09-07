@@ -37,12 +37,15 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
     public DescriptorSet BlurHSet { get; }
     public DescriptorSet BlurVSet { get; }
     public DescriptorSet TonemapSet { get; }
+    public DescriptorSet GodRayMaskSet { get; }
+    public DescriptorSet GodRayBlurSet { get; }
 
     private readonly VkContext _vk;
     private bool _disposed;
 
     public VkPostProcessDescriptorSet(VkContext vk, VkBloomExtractPipeline extractPipeline,
-        VkBloomBlurPipeline blurPipeline, VkTonemapPipeline tonemapPipeline)
+        VkBloomBlurPipeline blurPipeline, VkTonemapPipeline tonemapPipeline,
+        VkGodRayMaskPipeline godRayMaskPipeline, VkGodRayBlurPipeline godRayBlurPipeline)
     {
         _vk = vk;
 
@@ -50,9 +53,12 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
         BlurHSet = Allocate(vk, blurPipeline.SamplerLayout);
         BlurVSet = Allocate(vk, blurPipeline.SamplerLayout);
         TonemapSet = Allocate(vk, tonemapPipeline.SamplerLayout);
-        // Every binding on all four sets is left unwritten here -- VkViewportControl's
-        // EnsureHdrColorTarget/EnsureBloomTargets write them on first creation (before any of
-        // these sets is ever bound for a real draw), via UpdateHdrInput/UpdateBloomTargets below.
+        GodRayMaskSet = Allocate(vk, godRayMaskPipeline.SamplerLayout);
+        GodRayBlurSet = Allocate(vk, godRayBlurPipeline.SamplerLayout);
+        // Every binding on all six sets is left unwritten here -- VkViewportControl's
+        // EnsureHdrColorTarget/EnsureBloomTargets/EnsureGodRayTargets write them on first creation
+        // (before any of these sets is ever bound for a real draw), via UpdateHdrInput/
+        // UpdateBloomTargets/UpdateGodRayDepthInput/UpdateGodRayTargets below.
     }
 
     private static DescriptorSet Allocate(VkContext vk, DescriptorSetLayout layout)
@@ -69,12 +75,13 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
         return set;
     }
 
-    /// <summary>Rewrites ExtractSet's and TonemapSet's uSceneColor binding (both sample the SAME
-    /// full-res HDR buffer) -- call ONLY when that buffer is (re)created.</summary>
+    /// <summary>Rewrites ExtractSet's, TonemapSet's, and GodRayMaskSet's uSceneColor binding (all
+    /// three sample the SAME full-res HDR buffer) -- call ONLY when that buffer is
+    /// (re)created.</summary>
     public void UpdateHdrInput(DescriptorImageInfo hdrColorInfo)
     {
         var info = hdrColorInfo;
-        var writes = stackalloc WriteDescriptorSet[2]
+        var writes = stackalloc WriteDescriptorSet[3]
         {
             new WriteDescriptorSet
             {
@@ -93,9 +100,89 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
                 DescriptorType = DescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 PImageInfo = &info
+            },
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = GodRayMaskSet,
+                DstBinding = 0,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &info
+            }
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 3, writes, 0, null);
+    }
+
+    /// <summary>Rewrites GodRayMaskSet's uDepthTex binding (SSAO's G-buffer depth) -- call ONLY
+    /// when that target is (re)created (<c>VkViewportControl.EnsureGBufferTarget</c>), same
+    /// "rewrite rarely" contract as every other binding in this class. Separate from
+    /// <see cref="UpdateHdrInput"/> since the G-buffer depth target has its own, independent
+    /// resize/recreation lifecycle (it's SSAO's, not this chain's own).</summary>
+    public void UpdateGodRayDepthInput(DescriptorImageInfo gbufDepthInfo)
+    {
+        var info = gbufDepthInfo;
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = GodRayMaskSet,
+            DstBinding = 1,
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+            PImageInfo = &info
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
+    }
+
+    /// <summary>Rewrites the god-ray mask -> blur binding, and TonemapSet's uGodRayTex binding --
+    /// call ONLY when the god-ray targets are (re)created (mirrors <see cref="UpdateBloomTargets"/>
+    /// exactly, just a single target instead of a ping-pong pair, since the radial blur is one
+    /// pass, not separable like bloom's Gaussian).</summary>
+    public void UpdateGodRayTargets(DescriptorImageInfo maskInfo, DescriptorImageInfo blurInfo)
+    {
+        var mask = maskInfo;
+        var blur = blurInfo;
+        var writes = stackalloc WriteDescriptorSet[2]
+        {
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = GodRayBlurSet,
+                DstBinding = 0,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &mask
+            },
+            new WriteDescriptorSet
+            {
+                SType = StructureType.WriteDescriptorSet,
+                DstSet = TonemapSet,
+                DstBinding = 2,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                PImageInfo = &blur
             }
         };
         _vk.Api.UpdateDescriptorSets(_vk.Device, 2, writes, 0, null);
+    }
+
+    /// <summary>VkGraphicsTier.Medium only: binds TonemapSet's binding 2 (uGodRayTex) to a shared
+    /// placeholder -- mirrors <see cref="BindNoBloomPlaceholder"/> exactly (that tier never calls
+    /// VkViewportControl.EnsureGodRayTargets either, god rays being High-only same as bloom).
+    /// Call once, right after construction, ONLY on that tier.</summary>
+    public void BindNoGodRayPlaceholder(DescriptorImageInfo blackInfo)
+    {
+        var info = blackInfo;
+        var write = new WriteDescriptorSet
+        {
+            SType = StructureType.WriteDescriptorSet,
+            DstSet = TonemapSet,
+            DstBinding = 2,
+            DescriptorType = DescriptorType.CombinedImageSampler,
+            DescriptorCount = 1,
+            PImageInfo = &info
+        };
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
     /// <summary>Rewrites the bloom ping-pong bindings -- call ONLY when the bloom targets are
@@ -165,7 +252,8 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        var sets = stackalloc DescriptorSet[4] { ExtractSet, BlurHSet, BlurVSet, TonemapSet };
-        _vk.Api.FreeDescriptorSets(_vk.Device, _vk.DescriptorPool, 4, sets);
+        var sets = stackalloc DescriptorSet[6]
+            { ExtractSet, BlurHSet, BlurVSet, TonemapSet, GodRayMaskSet, GodRayBlurSet };
+        _vk.Api.FreeDescriptorSets(_vk.Device, _vk.DescriptorPool, 6, sets);
     }
 }

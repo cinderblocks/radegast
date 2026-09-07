@@ -303,6 +303,12 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _atmosphericsEnabled = true;
 
+    /// <summary>Volumetric god rays (screen-space light shafts toward the sun). Default true, but
+    /// only actually renders on High-tier hardware with SSAO also enabled (the mask stage reuses
+    /// SSAO's G-buffer depth) -- see ISceneViewport.GodRaysEnabled's own doc comment.</summary>
+    [ObservableProperty]
+    private bool _godRaysEnabled = true;
+
     /// <summary>
     /// Real-time shadows: a directional shadow map from the sun/moon plus cubemap
     /// shadows from the nearest in-world "Light" prims. Default false — a full extra
@@ -708,6 +714,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["water_reflections_enabled"].AsBoolean() : false;
         AtmosphericsEnabled = s["atmospherics_enabled"].Type != OSDType.Unknown
             ? s["atmospherics_enabled"].AsBoolean() : true;
+        GodRaysEnabled = s["god_rays_enabled"].Type != OSDType.Unknown
+            ? s["god_rays_enabled"].AsBoolean() : true;
         ShadowsEnabled = s["shadows_enabled"].Type != OSDType.Unknown
             ? s["shadows_enabled"].AsBoolean() : false;
         SceneViewerDrawDistance = s["scene_draw_distance"].Type != OSDType.Unknown
@@ -890,6 +898,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         s["frustum_culling_enabled"] = OSD.FromBoolean(FrustumCullingEnabled);
         s["water_reflections_enabled"] = OSD.FromBoolean(WaterReflectionsEnabled);
         s["atmospherics_enabled"] = OSD.FromBoolean(AtmosphericsEnabled);
+        s["god_rays_enabled"] = OSD.FromBoolean(GodRaysEnabled);
         s["shadows_enabled"] = OSD.FromBoolean(ShadowsEnabled);
         s["scene_draw_distance"] = OSD.FromReal(SceneViewerDrawDistance);
         s["avatar_complexity_threshold"] = OSD.FromReal(AvatarComplexityThreshold);

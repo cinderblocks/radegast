@@ -487,6 +487,11 @@
                                   AutomationProperties.Name="Enable atmospheric haze" />
                         <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
                                    Text="Fades distant terrain and objects toward the sky's horizon colour (aerial perspective). Very cheap; disable only to see distant geometry at full contrast. Takes effect the next time a viewer window is opened." />
+                        <CheckBox Content="Volumetric god rays"
+                                  IsChecked="{Binding GodRaysEnabled}"
+                                  AutomationProperties.Name="Enable volumetric god rays" />
+                        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource VelesMutedForeground}" FontSize="11"
+                                   Text="Light shafts through occluders (trees, buildings) toward the sun. Only renders on High-tier graphics hardware, and requires SSAO also enabled (they share an occlusion source). Takes effect the next time a viewer window is opened." />
                         <CheckBox Content="Shadows"
                                   IsChecked="{Binding ShadowsEnabled}"
                                   AutomationProperties.Name="Enable shadows" />

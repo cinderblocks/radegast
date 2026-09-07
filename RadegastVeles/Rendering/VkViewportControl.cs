@@ -793,6 +793,25 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // be torn down independently of this mandatory chain.
     private Sampler _postProcessLinearSampler;
 
+    // God-ray (volumetric light shaft) mask + radial-blur targets -- half resolution, same
+    // _bloomSize/_bloomOffscreenRenderPass reuse as bloom's own ping-pong (see
+    // EnsureGodRayTargets), but dedicated images: the mask stage's output must survive
+    // independently of bloom's own ping/pong content within the same frame. High tier only,
+    // like bloom (see VkGraphicsTier's own field comment) -- AND requires SsaoEnabled, since the
+    // mask stage's depth input is SSAO's own G-buffer depth, not a dedicated target (accepted
+    // coupling, see this session's plan). Best-effort in spirit (an optional, user-toggleable
+    // effect via GodRaysEnabled), but the pipeline OBJECTS themselves are created unconditionally
+    // alongside bloom on High tier -- only the per-frame DRAW calls are gated -- so toggling the
+    // setting at runtime never needs to create/destroy Vulkan objects.
+    private PixelSize _godRaySize;
+    private Image _godRayMaskImage, _godRayBlurImage;
+    private DeviceMemory _godRayMaskMemory, _godRayBlurMemory;
+    private ImageView _godRayMaskView, _godRayBlurView;
+    private Framebuffer _godRayMaskFramebuffer, _godRayBlurFramebuffer;
+    private VkGodRayMaskPipeline? _godRayMaskPipeline;
+    private VkGodRayBlurPipeline? _godRayBlurPipeline;
+    public bool GodRaysEnabled { get; set; } = true;
+
     // Pick render target -- mirrors _depthImage/_depthView's EnsureDepthTarget pattern (a
     // second, resizable, per-panel offscreen target), not a new class: this plays the exact
     // same role for the pick pass that the depth target plays for the main pass. Color needs
@@ -1806,7 +1825,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 _bloomExtractPipeline = VkBloomExtractPipeline.Create(vk, _bloomOffscreenRenderPass);
                 _bloomBlurPipeline = VkBloomBlurPipeline.Create(vk, _bloomOffscreenRenderPass);
                 _tonemapPipeline = VkTonemapPipeline.Create(vk, _tonemapRenderPass);
-                _postProcessDescSet = new VkPostProcessDescriptorSet(vk, _bloomExtractPipeline, _bloomBlurPipeline, _tonemapPipeline);
+                // God-ray pipeline OBJECTS are created here unconditionally too (same posture as
+                // bloom's own pair above) -- only the offscreen TARGETS (EnsureGodRayTargets,
+                // High-only) and the per-frame draws (RenderTonemapChain's own tier/toggle/SSAO
+                // gate) are actually tier-gated. Reuses _bloomOffscreenRenderPass, same shape.
+                _godRayMaskPipeline = VkGodRayMaskPipeline.Create(vk, _bloomOffscreenRenderPass);
+                _godRayBlurPipeline = VkGodRayBlurPipeline.Create(vk, _bloomOffscreenRenderPass);
+                _postProcessDescSet = new VkPostProcessDescriptorSet(vk, _bloomExtractPipeline, _bloomBlurPipeline,
+                    _tonemapPipeline, _godRayMaskPipeline, _godRayBlurPipeline);
                 var postProcessSamplerInfo = new SamplerCreateInfo
                 {
                     SType = StructureType.SamplerCreateInfo,
@@ -1831,7 +1857,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 // same math result as a genuinely-computed, fully-dark bloom pass would produce,
                 // just without ever running the extract/blur draws or allocating their targets.
                 if (_graphicsTier == VkGraphicsTier.Medium)
+                {
                     _postProcessDescSet.BindNoBloomPlaceholder(_placeholders.Black);
+                    // Same reasoning as BindNoBloomPlaceholder immediately above, for the
+                    // god-ray chain instead of bloom -- Medium never calls EnsureGodRayTargets
+                    // either (High-only, RenderTonemapChain's own tier check).
+                    _postProcessDescSet.BindNoGodRayPlaceholder(_placeholders.Black);
+                }
             }
 
             // Best-effort: a sky-pipeline/cloud-texture
@@ -4687,7 +4719,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             {
                 EnsureHdrColorTarget(vk, pixelSize);
                 if (_graphicsTier == VkGraphicsTier.High)
+                {
                     EnsureBloomTargets(vk, pixelSize);
+                    EnsureGodRayTargets(vk, pixelSize);
+                }
             }
 
             var view = _camera.GetViewMatrix();
@@ -4857,6 +4892,30 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // stay pointed at whatever it was last written to (see EnsureSsaoTargets' own note
             // on why that binding is rewritten only on target (re)creation, never per-frame).
             frameUbo.HasSsao = doSsao ? 1 : 0;
+
+            // God rays: project a point far along the sun direction through this frame's
+            // view*proj to get its screen-space UV, plus a fade scalar -- 0 when the sun is below
+            // the horizon, behind the camera, or off-screen (ramped near those edges to avoid a
+            // pop), computed once here and threaded down to RenderTonemapChain below. Gated the
+            // same way the chain's own draws are (High tier, toggle, doSsao -- see this session's
+            // plan for why god rays are coupled to SSAO) so this projection is skipped entirely
+            // most frames it wouldn't matter.
+            var sunScreenUv = Vector2.Zero;
+            float sunIntensity = 0f;
+            if (_graphicsTier == VkGraphicsTier.High && GodRaysEnabled && doSsao && worldSunNorm.Z > 0.02f)
+            {
+                var sunWorldPoint = _camera.EyePosition + worldSunNorm * 5000f;
+                var clip = Vector4.Transform(new Vector4(sunWorldPoint, 1f), view * proj);
+                if (clip.W > 0.0001f)
+                {
+                    var ndc = new Vector2(clip.X / clip.W, clip.Y / clip.W);
+                    sunScreenUv = ndc * 0.5f + new Vector2(0.5f);
+                    float horizonFade = Math.Clamp(worldSunNorm.Z / 0.15f, 0f, 1f);
+                    float edgeFadeX = 1f - Math.Clamp((MathF.Abs(sunScreenUv.X - 0.5f) - 0.4f) / 0.15f, 0f, 1f);
+                    float edgeFadeY = 1f - Math.Clamp((MathF.Abs(sunScreenUv.Y - 0.5f) - 0.4f) / 0.15f, 0f, 1f);
+                    sunIntensity = horizonFade * edgeFadeX * edgeFadeY;
+                }
+            }
 
             // ShadowsOn/LightVp are shared IDENTICALLY across the main pass and the reflection
             // pass -- both must read the same world-space light transform regardless of which
@@ -5169,7 +5228,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // Low: the main pass just wrote the swapchain image directly already, exactly as it
             // did before this chain existed -- see _graphicsTier's own field comment.
             if (_graphicsTier != VkGraphicsTier.Low)
-                RenderTonemapChain(vk, cmd.InternalHandle, pixelSize, image);
+                RenderTonemapChain(vk, cmd.InternalHandle, pixelSize, image, sunScreenUv, sunIntensity);
 
             // Underwater post-process, recorded right after tonemap (or, on Low, right after the
             // main pass -- there is no tonemap stage to follow) and before submission -- runs on
@@ -5423,17 +5482,23 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     }
 
     /// <summary>
-    /// The 4-stage tonemap/bloom composite chain -- see <see cref="VkTonemapPipeline"/>'s own
-    /// doc comment for the stage overview. Recorded into the SAME command buffer as the main
+    /// The tonemap/bloom/god-ray composite chain -- see <see cref="VkTonemapPipeline"/>'s own
+    /// doc comment for the bloom stage overview, and <see cref="VkGodRayBlurPipeline"/>'s for the
+    /// 2 god-ray stages this method now also records (before bloom, gated on
+    /// <paramref name="sunIntensity"/>). Recorded into the SAME command buffer as the main
     /// pass, immediately after it ends (<c>vk.Api.CmdEndRenderPass</c> for <see cref="_renderPass"/>
     /// already ran by the time this is called) and BEFORE underwater, which now runs after this
     /// method instead of directly after the main pass -- see <c>RenderFrame</c>'s own call site
     /// comment for why. <paramref name="image"/> is the real swapchain interop image; every
     /// earlier stage in this method targets the persistent, full/half-res offscreen targets
-    /// (<see cref="_hdrColorView"/>/<see cref="_bloomPingView"/>/<see cref="_bloomPongView"/>)
-    /// instead, only the FINAL (tonemap) stage writes into <paramref name="image"/>.
+    /// (<see cref="_hdrColorView"/>/<see cref="_bloomPingView"/>/<see cref="_bloomPongView"/>/
+    /// <see cref="_godRayMaskView"/>/<see cref="_godRayBlurView"/>) instead, only the FINAL
+    /// (tonemap) stage writes into <paramref name="image"/>. <paramref name="sunScreenUv"/>/
+    /// <paramref name="sunIntensity"/> are computed once per frame in <c>RenderFrame</c>, see its
+    /// own comment on that computation.
     /// </summary>
-    private unsafe void RenderTonemapChain(VkContext vk, CommandBuffer cmd, PixelSize pixelSize, VkInteropImage image)
+    private unsafe void RenderTonemapChain(VkContext vk, CommandBuffer cmd, PixelSize pixelSize, VkInteropImage image,
+        Vector2 sunScreenUv, float sunIntensity)
     {
         // Stages 1-3 (bloom) are VkGraphicsTier.High only -- see _graphicsTier's own field
         // comment. On Medium, TonemapSet's bloom binding was already pointed at a shared black
@@ -5451,6 +5516,53 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             vk.Api.CmdSetViewport(cmd, 0, 1, in bloomViewport);
             var bloomScissor = new Rect2D { Offset = new Offset2D(0, 0), Extent = new Extent2D((uint)_bloomSize.Width, (uint)_bloomSize.Height) };
             vk.Api.CmdSetScissor(cmd, 0, 1, &bloomScissor);
+
+            // ── God rays (2 stages, before bloom) -- sunIntensity already folds in every gate
+            // (tier/GodRaysEnabled/doSsao/horizon/screen-edge fade, see RenderFrame's own
+            // computation), so a plain > 0 check here is the complete early-out: skip both draws
+            // entirely on a frame where the sun's down, off-screen, or the feature's off, rather
+            // than running them and relying on the tonemap composite alone to zero the result.
+            // _godRaySize == _bloomSize always (both derived from the same halved pixelSize), so
+            // the viewport/scissor just set above is already correct for these too.
+            if (sunIntensity > 0f)
+            {
+                // ── Stage 0a: occlusion mask, full-res HDR + G-buffer depth -> half-res ──────
+                var maskBegin = new RenderPassBeginInfo
+                {
+                    SType = StructureType.RenderPassBeginInfo,
+                    RenderPass = _bloomOffscreenRenderPass,
+                    Framebuffer = _godRayMaskFramebuffer,
+                    RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)_godRaySize.Width, (uint)_godRaySize.Height)),
+                    ClearValueCount = 0
+                };
+                vk.Api.CmdBeginRenderPass(cmd, in maskBegin, SubpassContents.Inline);
+                vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _godRayMaskPipeline!.Pipeline);
+                var maskSet = _postProcessDescSet!.GodRayMaskSet;
+                vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _godRayMaskPipeline.Layout, 0, 1, &maskSet, 0, null);
+                var maskSrcTexelSize = new Vector2(1.0f / pixelSize.Width, 1.0f / pixelSize.Height);
+                vk.Api.CmdPushConstants(cmd, _godRayMaskPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &maskSrcTexelSize);
+                vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+                vk.Api.CmdEndRenderPass(cmd);
+
+                // ── Stage 0b: radial blur toward the sun, mask -> half-res streak ───────────
+                var blurBegin = new RenderPassBeginInfo
+                {
+                    SType = StructureType.RenderPassBeginInfo,
+                    RenderPass = _bloomOffscreenRenderPass,
+                    Framebuffer = _godRayBlurFramebuffer,
+                    RenderArea = new Rect2D(new Offset2D(0, 0), new Extent2D((uint)_godRaySize.Width, (uint)_godRaySize.Height)),
+                    ClearValueCount = 0
+                };
+                vk.Api.CmdBeginRenderPass(cmd, in blurBegin, SubpassContents.Inline);
+                vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _godRayBlurPipeline!.Pipeline);
+                var godRayBlurSet = _postProcessDescSet.GodRayBlurSet;
+                vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _godRayBlurPipeline.Layout, 0, 1, &godRayBlurSet, 0, null);
+                Span<float> godRayPc = stackalloc float[4] { sunScreenUv.X, sunScreenUv.Y, sunIntensity, 0.955f };
+                fixed (float* p = godRayPc)
+                    vk.Api.CmdPushConstants(cmd, _godRayBlurPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 16, p);
+                vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
+                vk.Api.CmdEndRenderPass(cmd);
+            }
 
             // ── Stage 1: bright-pass extract, full-res HDR -> half-res Ping ──────────────
             var extractBegin = new RenderPassBeginInfo
@@ -5544,6 +5656,11 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _tonemapPipeline!.Pipeline);
         var tonemapSet = _postProcessDescSet!.TonemapSet;
         vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _tonemapPipeline.Layout, 0, 1, &tonemapSet, 0, null);
+        // Redundant with the sunIntensity>0 gate around the god-ray stages above (a skipped frame
+        // passes 0 here too, see tonemap.frag's own doc comment on this push constant) --
+        // guarantees correctness independent of that early-out, not just an optimization mirror.
+        float godRayIntensityPc = sunIntensity;
+        vk.Api.CmdPushConstants(cmd, _tonemapPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 4, &godRayIntensityPc);
         vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
         vk.Api.CmdEndRenderPass(cmd);
 
@@ -5678,6 +5795,13 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         var depthImageInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _gbufDepthView, Sampler = _ssaoNearestSampler };
         var normalImageInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _gbufNormalView, Sampler = _ssaoNearestSampler };
         _ssaoDescSet!.UpdateGbufferInputs(depthImageInfo, normalImageInfo);
+
+        // God rays (High tier only, see _postProcessDescSet's own construction) reuse this SAME
+        // G-buffer depth as their occlusion source -- see this session's plan for why, and
+        // godray_mask.frag for how. SSAO itself also runs on Medium (doSsao has no tier==High
+        // requirement), where god-ray pipelines/descriptor sets don't exist at all, hence the gate.
+        if (_graphicsTier == VkGraphicsTier.High)
+            _postProcessDescSet?.UpdateGodRayDepthInput(depthImageInfo);
     }
 
     private unsafe void DestroyGBufferTarget(VkContext vk)
@@ -7370,6 +7494,69 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _bloomSize = default;
     }
 
+    /// <summary>Mirrors <see cref="EnsureBloomTargets"/> exactly (half-resolution,
+    /// B10G11R11UfloatPack32, reuses <see cref="_bloomOffscreenRenderPass"/>'s shape) -- two
+    /// dedicated targets (mask output, radial-blur output) rather than a ping-pong pair, since the
+    /// god-ray chain is mask -&gt; blur -&gt; done, not separable like bloom's two-pass Gaussian.
+    /// Called from the same resize path as <see cref="EnsureBloomTargets"/>, High tier only.</summary>
+    private unsafe void EnsureGodRayTargets(VkContext vk, PixelSize fullSize)
+    {
+        var size = new PixelSize(Math.Max(1, fullSize.Width / 2), Math.Max(1, fullSize.Height / 2));
+        if (_godRaySize == size && _godRayMaskView.Handle != 0) return;
+        DestroyGodRayTargets(vk);
+
+        CreateBloomTarget(vk, size, out _godRayMaskImage, out _godRayMaskMemory, out _godRayMaskView);
+        CreateBloomTarget(vk, size, out _godRayBlurImage, out _godRayBlurMemory, out _godRayBlurView);
+
+        var maskViewLocal = _godRayMaskView;
+        var maskFbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _bloomOffscreenRenderPass,
+            AttachmentCount = 1,
+            PAttachments = &maskViewLocal,
+            Width = (uint)size.Width,
+            Height = (uint)size.Height,
+            Layers = 1
+        };
+        vk.Api.CreateFramebuffer(vk.Device, in maskFbInfo, null, out _godRayMaskFramebuffer).ThrowOnError();
+
+        var blurViewLocal = _godRayBlurView;
+        var blurFbInfo = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = _bloomOffscreenRenderPass,
+            AttachmentCount = 1,
+            PAttachments = &blurViewLocal,
+            Width = (uint)size.Width,
+            Height = (uint)size.Height,
+            Layers = 1
+        };
+        vk.Api.CreateFramebuffer(vk.Device, in blurFbInfo, null, out _godRayBlurFramebuffer).ThrowOnError();
+
+        _godRaySize = size;
+
+        var maskInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _godRayMaskView, Sampler = _postProcessLinearSampler };
+        var blurInfo = new DescriptorImageInfo { ImageLayout = ImageLayout.ShaderReadOnlyOptimal, ImageView = _godRayBlurView, Sampler = _postProcessLinearSampler };
+        _postProcessDescSet!.UpdateGodRayTargets(maskInfo, blurInfo);
+    }
+
+    private unsafe void DestroyGodRayTargets(VkContext vk)
+    {
+        if (_godRayMaskFramebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _godRayMaskFramebuffer, null);
+        if (_godRayBlurFramebuffer.Handle != 0) vk.Api.DestroyFramebuffer(vk.Device, _godRayBlurFramebuffer, null);
+        if (_godRayMaskView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _godRayMaskView, null);
+        if (_godRayMaskImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _godRayMaskImage, null);
+        if (_godRayMaskMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _godRayMaskMemory, null);
+        if (_godRayBlurView.Handle != 0) vk.Api.DestroyImageView(vk.Device, _godRayBlurView, null);
+        if (_godRayBlurImage.Handle != 0) vk.Api.DestroyImage(vk.Device, _godRayBlurImage, null);
+        if (_godRayBlurMemory.Handle != 0) vk.Api.FreeMemory(vk.Device, _godRayBlurMemory, null);
+        _godRayMaskFramebuffer = default; _godRayBlurFramebuffer = default;
+        _godRayMaskView = default; _godRayMaskImage = default; _godRayMaskMemory = default;
+        _godRayBlurView = default; _godRayBlurImage = default; _godRayBlurMemory = default;
+        _godRaySize = default;
+    }
+
     private void FreePanelResources()
     {
         if (!VkApi.IsInitialized) return;
@@ -7554,11 +7741,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             DestroyHdrColorTarget(vk);
             DestroyBloomTargets(vk);
+            DestroyGodRayTargets(vk);
         }
         _postProcessDescSet?.Dispose(); _postProcessDescSet = null;
         _tonemapPipeline?.Dispose(); _tonemapPipeline = null;
         _bloomBlurPipeline?.Dispose(); _bloomBlurPipeline = null;
         _bloomExtractPipeline?.Dispose(); _bloomExtractPipeline = null;
+        _godRayBlurPipeline?.Dispose(); _godRayBlurPipeline = null;
+        _godRayMaskPipeline?.Dispose(); _godRayMaskPipeline = null;
         if (_tonemapRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _tonemapRenderPass, null); } }
         _tonemapRenderPass = default;
         if (_bloomOffscreenRenderPass.Handle != 0) { unsafe { vk.Api.DestroyRenderPass(vk.Device, _bloomOffscreenRenderPass, null); } }

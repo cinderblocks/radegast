@@ -9,6 +9,17 @@ precision highp float;
 
 layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (B10G11R11UfloatPack32)
 layout(set = 0, binding = 1) uniform sampler2D uBloomTex;   // half-res, already blurred
+layout(set = 0, binding = 2) uniform sampler2D uGodRayTex;  // half-res, already blurred/streaked
+
+layout(push_constant) uniform PerDraw
+{
+    // Redundant with godray_radial_blur.frag's own uIntensity multiply (already zeroed there
+    // when the sun's below the horizon/off-screen) -- kept here too so a frame where the god-ray
+    // passes were skipped entirely (CPU-side early-out) can't accidentally composite in whatever
+    // stale content uGodRayTex was last written with; this scalar alone decides its contribution.
+    float uGodRayIntensity;
+} pc;
+#define uGodRayIntensity pc.uGodRayIntensity
 
 layout(location = 0) in  vec2 vTexCoord;
 layout(location = 0) out vec4 fragColor;
@@ -18,6 +29,11 @@ layout(location = 0) out vec4 fragColor;
 // (the sun disc, water sparkle, the sky shader's cloud silver lining), not a global soft-focus
 // wash over the whole frame.
 const float kBloomIntensity = 0.55;
+
+// Tint for the god-ray contribution -- warm, matching the sun disc rather than a neutral white
+// streak. Modest additive weight for the same "glow, not a wash" reasoning as kBloomIntensity.
+const vec3  kGodRayTint      = vec3(1.0, 0.92, 0.75);
+const float kGodRayIntensity = 0.9;
 
 // ACES filmic tonemap curve (Narkowicz 2015 fit) -- a cheap, well-behaved approximation of the
 // full ACES reference curve: rolls bright highlights off toward white with a smooth shoulder
@@ -40,10 +56,12 @@ vec3 acesFilm(vec3 x)
 
 void main()
 {
-    vec3 hdr   = texture(uSceneColor, vTexCoord).rgb;
-    vec3 bloom = texture(uBloomTex, vTexCoord).rgb;
+    vec3 hdr    = texture(uSceneColor, vTexCoord).rgb;
+    vec3 bloom  = texture(uBloomTex, vTexCoord).rgb;
+    vec3 godRay = texture(uGodRayTex, vTexCoord).rgb;
 
-    vec3 combined = hdr + bloom * kBloomIntensity;
+    vec3 combined = hdr + bloom * kBloomIntensity
+                        + godRay * kGodRayTint * (kGodRayIntensity * uGodRayIntensity);
     vec3 mapped   = acesFilm(combined);
 
     // Dither: same reasoning as sky.frag's own dither at the very end of its main() -- a smooth

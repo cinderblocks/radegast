@@ -95,6 +95,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool   _frustumCullingEnabled = true;
     [ObservableProperty] private bool   _waterReflectionsEnabled = false;
     [ObservableProperty] private bool   _atmosphericsEnabled = true;
+    [ObservableProperty] private bool   _godRaysEnabled = true;
     [ObservableProperty] private bool   _shadowsEnabled = false;
     [ObservableProperty] private bool   _avatarRenderInfoReportingEnabled = true;
     /// <summary>
@@ -167,6 +168,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             ? instance.GlobalSettings["water_reflections_enabled"].AsBoolean() : false;
         _atmosphericsEnabled = instance.GlobalSettings["atmospherics_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["atmospherics_enabled"].AsBoolean() : true;
+        _godRaysEnabled = instance.GlobalSettings["god_rays_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? instance.GlobalSettings["god_rays_enabled"].AsBoolean() : true;
         _shadowsEnabled = instance.GlobalSettings["shadows_enabled"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? instance.GlobalSettings["shadows_enabled"].AsBoolean() : false;
         _drawDistance = instance.GlobalSettings["scene_draw_distance"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
@@ -202,6 +205,11 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     partial void OnAtmosphericsEnabledChanged(bool value)
     {
         if (_viewport != null) _viewport.AtmosphericsEnabled = value;
+    }
+
+    partial void OnGodRaysEnabledChanged(bool value)
+    {
+        if (_viewport != null) _viewport.GodRaysEnabled = value;
     }
 
     partial void OnShadowsEnabledChanged(bool value)
@@ -256,6 +264,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         _viewport.FrustumCullingEnabled      = FrustumCullingEnabled;
         _viewport.WaterReflectionsEnabled    = WaterReflectionsEnabled;
         _viewport.AtmosphericsEnabled        = AtmosphericsEnabled;
+        _viewport.GodRaysEnabled              = GodRaysEnabled;
         _viewport.ShadowsEnabled              = ShadowsEnabled;
         _viewport.ShowPerfOverlay              = ShowPerfOverlay;
         _viewport.WaterHeight            = _instance.Client.Network.CurrentSim?.WaterHeight ?? float.NaN;

@@ -226,12 +226,14 @@ internal static class VkDescriptorSetLayouts
         return layout;
     }
 
-    /// <summary>Set 0 of the tonemap composite pass (tonemap.frag): binding 0 = the full-res HDR
-    /// scene colour, binding 1 = the blurred bloom target. Two bindings, unlike
-    /// <see cref="CreateBlurSamplerLayout"/>'s one -- this is the only post-process pass that
-    /// needs to sample two different images at once (every other stage in that chain is a single-
-    /// input full-screen pass, see VkBloomExtractPipeline/VkBloomBlurPipeline).</summary>
-    public static unsafe DescriptorSetLayout CreateTonemapSamplerLayout(VkContext vk)
+    /// <summary>Set 0 of the god-ray occlusion-mask pass (godray_mask.frag): binding 0 = the
+    /// full-res HDR scene colour (same source bloom's own extract stage reads), binding 1 = SSAO's
+    /// G-buffer depth (<c>_gbufDepthView</c>, already sampled -- see
+    /// <see cref="CreateSsaoParamsLayout"/>'s binding 1) -- reused rather than the main pass's own
+    /// depth target, which is write-only and never transitioned for sampling. Two bindings, same
+    /// shape as <see cref="CreateTonemapSamplerLayout"/> but a distinct layout object since this
+    /// pass's second input is depth, not a second color target.</summary>
+    public static unsafe DescriptorSetLayout CreateGodRayMaskSamplerLayout(VkContext vk)
     {
         var bindings = stackalloc DescriptorSetLayoutBinding[2]
         {
@@ -254,6 +256,47 @@ internal static class VkDescriptorSetLayouts
         {
             SType = StructureType.DescriptorSetLayoutCreateInfo,
             BindingCount = 2,
+            PBindings = bindings
+        };
+        vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();
+        return layout;
+    }
+
+    /// <summary>Set 0 of the tonemap composite pass (tonemap.frag): binding 0 = the full-res HDR
+    /// scene colour, binding 1 = the blurred bloom target, binding 2 = the blurred god-ray target
+    /// (see <see cref="CreateGodRayMaskSamplerLayout"/>'s own doc comment for that pass' own
+    /// inputs) -- three bindings, unlike <see cref="CreateBlurSamplerLayout"/>'s one, since this
+    /// is the pass that composites every post-process stage's output together.</summary>
+    public static unsafe DescriptorSetLayout CreateTonemapSamplerLayout(VkContext vk)
+    {
+        var bindings = stackalloc DescriptorSetLayoutBinding[3]
+        {
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 0,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            },
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 1,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            },
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 2,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
+            }
+        };
+        var createInfo = new DescriptorSetLayoutCreateInfo
+        {
+            SType = StructureType.DescriptorSetLayoutCreateInfo,
+            BindingCount = 3,
             PBindings = bindings
         };
         vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();
