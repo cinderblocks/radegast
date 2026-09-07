@@ -124,7 +124,17 @@ jobs:
               cp "RadegastVeles/Assets/veles.icns" "$APP_DIR/Contents/Resources/veles.icns"
               # Exclude the .app dir itself to avoid a self-referential copy
               rsync -a --exclude="$APP_NAME" "$PUB_DIR/" "$APP_DIR/Contents/MacOS/"
-              chmod -R +x "$APP_DIR/Contents/MacOS" || true
+              # Only the actual native executables need +x -- rsync -a already preserved
+              # dotnet publish's own correct permission bits (apphost and .dylibs executable,
+              # managed .dlls not), this just backstops that. A blanket `chmod -R +x` here
+              # previously marked every one of the ~250 managed .dlls executable too, and
+              # `codesign --verify --deep --strict` treats any executable-permission file in a
+              # signed bundle as code that must carry its own signature -- since those .dlls
+              # never got one, the whole bundle failed strict validation ("code object is not
+              # signed at all... LibreMetaverse.LslTools.dll") and macOS's AMFI refused to
+              # launch it at all (SIGKILL, exit 137) at first run, unrelated to quarantine.
+              chmod +x "$APP_DIR/Contents/MacOS/RadegastVeles"
+              find "$APP_DIR/Contents/MacOS" -maxdepth 1 -name '*.dylib' -exec chmod +x {} +
             fi
           else
             echo "Publish directory not found: $PUB_DIR"
@@ -246,7 +256,12 @@ jobs:
             echo "One or both .app bundles not found; creating simple app from publish folders"
             mkdir -p "$WORK/${REPO_NAME}.app/Contents/MacOS"
             cp -R publish-x64/* "$WORK/${REPO_NAME}.app/Contents/MacOS/" || true
-            chmod -R +x "$WORK/${REPO_NAME}.app/Contents/MacOS" || true
+            # See build-macos's identically-named step for why this is targeted, not a blanket
+            # `chmod -R +x`: codesign --strict fails a signed bundle outright if any file in it
+            # is executable without its own valid signature, and that blanket form marked every
+            # managed .dll executable too.
+            chmod +x "$WORK/${REPO_NAME}.app/Contents/MacOS/RadegastVeles" || true
+            find "$WORK/${REPO_NAME}.app/Contents/MacOS" -maxdepth 1 -name '*.dylib' -exec chmod +x {} + || true
           fi
 
       - name: Ad-hoc code sign universal .app
