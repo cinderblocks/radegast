@@ -57,11 +57,15 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # Scoped to $VELES_PROJECT -- see publish-veles-macos.yml's identically-named steps for
+      # the full reasoning (a bare `dotnet restore`/`dotnet build` defaults to Radegast.sln,
+      # which also pulls in the Windows-only WiX installer projects; those can't be restored on
+      # a Linux runner either).
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore "$VELES_PROJECT"
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build "$VELES_PROJECT" --configuration Release --no-restore
 
       - name: Publish (self-contained, linux-x64)
         run: |

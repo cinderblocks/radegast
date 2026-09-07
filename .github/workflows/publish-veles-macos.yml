@@ -73,11 +73,17 @@ jobs:
           key: npm-${{ hashFiles('package-lock.json') }}
           restore-keys: npm-
 
+      # Scoped to $VELES_PROJECT, not the bare `dotnet restore`/`dotnet build` this used to be:
+      # with no target, both default to discovering Radegast.sln in the repo root, which also
+      # pulls in the Windows-only WiX installer projects (Install/VelesSetup,
+      # Install/RadegastSetup) -- those can't be restored/built on a macOS runner at all
+      # (WiX toolset is Windows-only), and fail with "project.assets.json does not exist"
+      # since nothing ever restored them.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore "$VELES_PROJECT"
 
       - name: Build
-        run: dotnet build --configuration Release --no-restore
+        run: dotnet build "$VELES_PROJECT" --configuration Release --no-restore
 
       - name: Publish for macOS (osx-${{ matrix.arch }})
         run: |
