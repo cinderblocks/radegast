@@ -625,6 +625,21 @@ internal sealed unsafe class VkContext : IDisposable
             : VkGraphicsTier.High;
         LibreMetaverse.Logger.Info(
             $"[VkContext] Device-local VRAM: {deviceLocalBytes / (1024.0 * 1024.0):F0} MB -> GraphicsTier={tier}");
+
+        // Dev-only escape hatch (mirrors VELES_VK_VALIDATION's own env-var-gated pattern): lets
+        // Medium/High-tier-only rendering paths (god-rays, bloom, water reflections/refraction)
+        // be exercised on hardware the VRAM heuristic above would otherwise pin to a lower tier.
+        // Deliberately NOT a GlobalSettings/Preferences toggle -- this can push a real low-VRAM
+        // card into allocating High-tier resources (HDR buffer, multiple full-res post-process
+        // targets) it may not have the memory for, so it needs to be a deliberate, out-of-band
+        // opt-in each launch, not a persisted setting someone could leave on by accident.
+        var forcedTier = Environment.GetEnvironmentVariable("VELES_VK_FORCE_TIER");
+        if (!string.IsNullOrEmpty(forcedTier) && Enum.TryParse<VkGraphicsTier>(forcedTier, true, out var parsed))
+        {
+            LibreMetaverse.Logger.Info(
+                $"[VkContext] GraphicsTier forced by VELES_VK_FORCE_TIER: {tier} -> {parsed}");
+            tier = parsed;
+        }
         return tier;
     }
 
