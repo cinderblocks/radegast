@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'Veles/*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.9.0) -- test build only, no tag or release is created'
+        required: true
+        type: string
 
 jobs:
   build:
@@ -39,8 +45,17 @@ jobs:
       - name: Set version variables
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          $tagVersion = $tag -replace '^Veles/',''
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            # Test-build-only path: no real tag exists at this ref, so TAG is synthesized in
+            # the same "Veles/<version>" shape a real tag would have -- the release job (which
+            # would otherwise create that tag for real) is skipped entirely for this trigger,
+            # see that job's own `if:` condition.
+            $tag = "Veles/${{ inputs.version }}"
+            $tagVersion = "${{ inputs.version }}"
+          } else {
+            $tag = '${{ github.ref_name }}'
+            $tagVersion = $tag -replace '^Veles/',''
+          }
           $buildVersion = "$tagVersion.${{ github.run_number }}"
           Write-Host "Tag: $tag"
           Write-Host "Tag Version: $tagVersion"
@@ -433,6 +448,13 @@ jobs:
   release:
     name: Create Release Draft
     needs: build
+    # Skipped entirely for manual test builds (workflow_dispatch): this job creates a real git
+    # tag (via softprops/action-gh-release's tag_name, which creates the tag if it doesn't
+    # already exist) and a draft GitHub Release, and uploads symbols to BugSplat under that
+    # release's version -- none of which a throwaway test build should do. Installers/artifacts
+    # from the build job above are still available via "Upload build artifacts" regardless of
+    # this job running.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: windows-2022
     permissions:
       contents: write

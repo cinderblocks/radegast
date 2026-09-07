@@ -254,6 +254,12 @@ jobs:
   release:
     name: Create Release Draft
     needs: build
+    # Skipped entirely for manual test builds (workflow_dispatch): this job creates a real git
+    # tag (via softprops/action-gh-release's tag_name, which creates the tag if it doesn't
+    # already exist) and a draft GitHub Release -- neither of which a throwaway test build
+    # should produce. Installers/artifacts from the build job above are still available via
+    # "Upload build artifacts" regardless of this job running.
+    if: github.event_name != 'workflow_dispatch'
     runs-on: windows-2022
     permissions:
       contents: write
