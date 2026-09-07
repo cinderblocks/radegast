@@ -215,12 +215,24 @@ internal sealed unsafe class VkContext : IDisposable
         };
 
         var enabledExtensions = new List<string> { "VK_KHR_get_physical_device_properties2" };
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            enabledExtensions.Add("VK_KHR_portability_enumeration");
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
             enabledExtensions.AddRange(["VK_KHR_external_memory_capabilities", "VK_KHR_external_semaphore_capabilities"]);
 
         var api = Vk.GetApi();
+
+        // VK_KHR_portability_enumeration is normally advertised by the Vulkan Loader itself (not
+        // any specific ICD) to satisfy portability-subset compliance. This app links directly
+        // against MoltenVK's dylib instead of going through the real Vulkan Loader (see
+        // publish-veles-macos.yml's "Bundle MoltenVK" step for why), and MoltenVK's own
+        // vkEnumerateInstanceExtensionProperties does NOT report this extension as supported even
+        // though it does support the paired device-level VK_KHR_portability_subset -- confirmed
+        // live: unconditionally requesting it failed vkCreateInstance with
+        // "VK_ERROR_EXTENSION_NOT_PRESENT: ... VK_KHR_portability_enumeration is not supported".
+        // Enable it, and only then set the matching instance-create flag below, when it's there.
+        var portabilityEnumerationAvailable = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+            && IsInstanceExtensionAvailable(api, "VK_KHR_portability_enumeration");
+        if (portabilityEnumerationAvailable)
+            enabledExtensions.Add("VK_KHR_portability_enumeration");
 
         // Dev-only, off by default: VK_LAYER_KHRONOS_validation is availability-checked, never a
         // hard requirement, so a machine without the Vulkan SDK installed just logs a warning and
@@ -289,7 +301,7 @@ internal sealed unsafe class VkContext : IDisposable
                 EnabledExtensionCount = pRequiredExtensions.UCount,
                 PpEnabledLayerNames = pEnabledLayers,
                 EnabledLayerCount = pEnabledLayers.UCount,
-                Flags = RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? InstanceCreateFlags.EnumeratePortabilityBitKhr : default
+                Flags = portabilityEnumerationAvailable ? InstanceCreateFlags.EnumeratePortabilityBitKhr : default
             };
 
             api.CreateInstance(in instanceCreateInfo, null, out var vkInstance).ThrowOnError();
@@ -323,6 +335,15 @@ internal sealed unsafe class VkContext : IDisposable
             var requireDeviceExtensions = new List<string>();
             if (!RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 requireDeviceExtensions.AddRange(["VK_KHR_external_memory", "VK_KHR_external_semaphore"]);
+            else
+                // Per spec, a device that advertises VK_KHR_portability_subset (MoltenVK's
+                // always does) MUST have it explicitly enabled at vkCreateDevice time. This is
+                // the device-level counterpart to VK_KHR_portability_enumeration above, but
+                // unlike that one it's provided by MoltenVK itself, not the (bypassed) Vulkan
+                // Loader, so no availability check is needed -- the physical-device filter loop
+                // below (requireDeviceExtensions.Any(... !IsDeviceExtensionPresent ...)) already
+                // skips any device that somehow doesn't support it.
+                requireDeviceExtensions.Add("VK_KHR_portability_subset");
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {

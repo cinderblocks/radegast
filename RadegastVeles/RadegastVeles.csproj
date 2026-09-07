@@ -101,4 +101,27 @@
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\x86&quot; &quot;$(OutDir)dll\x86\&quot; /E/I" />
     <Exec Command="xcopy /y &quot;$(MSBuildThisFileDirectory)..\Radegast.Core\assemblies\arm64&quot; &quot;$(OutDir)dll\arm64\&quot; /E/I" />
   </Target>
+  <!-- macOS/Linux equivalent of CopyNativeAssemblies above, done here rather than in
+       Radegast.Core.csproj (where fmod's actual DllImport lives): confirmed by a local
+       `dotnet publish -r osx-arm64` test that $(RuntimeIdentifier) does NOT propagate down into
+       a multi-targeted (net481;net10.0) ProjectReference's own MSBuild evaluation, an
+       equivalent Condition placed in Radegast.Core.csproj silently never fired. RadegastVeles.csproj
+       is the actual project `dotnet publish -r <RID>` is invoked against, so $(RuntimeIdentifier)
+       is guaranteed set here. The Windows CopyNativeAssemblies target above only fires when the
+       MSBuild host itself is Windows, never true on the macOS/Linux CI runners that publish those
+       platforms, so fmod's native library never made it into those publish outputs at all;
+       WindowsLibraryLoader (Radegast.Core/NativeMethods.cs) only loads on Windows too, so on
+       macOS/Linux this instead relies on the .NET runtime's own default P/Invoke probing for a
+       bare [DllImport("fmod")], which finds "lib" + name + ".dylib"/".so" automatically as long
+       as the file sits next to the assembly, no custom loader needed, just get it copied there. -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <None Include="..\Radegast.Core\assemblies\libfmod.dylib" CopyToOutputDirectory="PreserveNewest" Link="libfmod.dylib" />
+  </ItemGroup>
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('linux'))">
+    <!-- assemblies\libfmod.so / libfmod.so.12 are supposed to be symlinks to this real file,
+         chained the way the upstream FMOD SDK ships them (SONAME-versioned .so), but git on
+         Windows checked them in as empty regular files instead of preserving the symlinks.
+         Ship the real file directly under the plain name instead of relying on that chain. -->
+    <None Include="..\Radegast.Core\assemblies\libfmod.so.12.10" CopyToOutputDirectory="PreserveNewest" Link="libfmod.so" />
+  </ItemGroup>
 </Project>
