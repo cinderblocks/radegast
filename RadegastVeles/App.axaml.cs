@@ -38,6 +38,13 @@ public class App : Application
     private LoginWindow? _loginWindow;
     private TrayIcon? _trayIcon;
 
+    // Avalonia.Native's macOS tray-menu exporter tracks incremental changes against whatever
+    // NativeMenu instance it was first bound to via TrayIcon.Menu; swapping in a brand-new
+    // NativeMenu on every rebuild (as this used to do) throws "The menu being updated does not
+    // match" from __MicroComIAvnMenuProxy.Update the next time it's reassigned -- unhandled,
+    // that aborts the whole process. Reuse one instance and mutate its Items instead.
+    private readonly NativeMenu _trayMenu = new();
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -133,7 +140,7 @@ public class App : Application
     {
         if (_trayIcon == null) return;
 
-        var menu = new NativeMenu();
+        _trayMenu.Items.Clear();
 
         foreach (var session in _sessionManager.Sessions)
         {
@@ -149,32 +156,32 @@ public class App : Application
                     w.Activate();
                 }
             };
-            menu.Items.Add(showItem);
+            _trayMenu.Items.Add(showItem);
 
             var logoutItem = new NativeMenuItem($"Logout {agentName}");
             logoutItem.Click += (_, _) => OnLogoutRequested(capturedSession);
-            menu.Items.Add(logoutItem);
+            _trayMenu.Items.Add(logoutItem);
 
-            menu.Items.Add(new NativeMenuItemSeparator());
+            _trayMenu.Items.Add(new NativeMenuItemSeparator());
         }
 
         var loginItem = new NativeMenuItem("New Login");
         loginItem.Click += (_, _) => ShowLogin();
-        menu.Items.Add(loginItem);
+        _trayMenu.Items.Add(loginItem);
 
-        menu.Items.Add(new NativeMenuItemSeparator());
+        _trayMenu.Items.Add(new NativeMenuItemSeparator());
 
         var checkForUpdatesItem = new NativeMenuItem("Check for Updates...");
         checkForUpdatesItem.Click += (_, _) => VelesUpdateManager.CheckForUpdatesAtUserRequest();
-        menu.Items.Add(checkForUpdatesItem);
+        _trayMenu.Items.Add(checkForUpdatesItem);
 
-        menu.Items.Add(new NativeMenuItemSeparator());
+        _trayMenu.Items.Add(new NativeMenuItemSeparator());
 
         var exitItem = new NativeMenuItem("Exit");
         exitItem.Click += (_, _) => Exit();
-        menu.Items.Add(exitItem);
+        _trayMenu.Items.Add(exitItem);
 
-        _trayIcon.Menu = menu;
+        _trayIcon.Menu = _trayMenu;
     }
 
     private void Exit()
