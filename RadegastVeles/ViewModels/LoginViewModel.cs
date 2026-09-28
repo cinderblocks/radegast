@@ -466,7 +466,9 @@ public partial class LoginViewModel : ObservableObject
     private void NetCom_ClientLoginStatus(object? sender, LoginProgressEventArgs e)
     {
         // MFA challenge: server wants a TOTP token, hash already updated in LoginOptions by NetComAvalonia.
-        if (e.FailReason == "mfa_challenge")
+        // FailReason can still read "mfa_challenge" on later progress events of the token retry,
+        // so only a Failed status is an actual challenge.
+        if (e.Status == LoginStatus.Failed && e.FailReason == "mfa_challenge")
         {
             IsMfaRequired = true;
             IsLoggingIn = false;

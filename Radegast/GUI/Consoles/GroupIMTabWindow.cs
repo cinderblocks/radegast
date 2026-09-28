@@ -184,7 +184,9 @@ namespace Radegast
 
                     if (client.Self.GroupChatSessions.TryGetValue(SessionId, out participants))
                     {
-                        ChatSessionMember[] members = participants.ToArray();
+                        // LibreMetaverse mutates this list from the network thread under lock(list).
+                        ChatSessionMember[] members;
+                        lock (participants) members = participants.ToArray();
                         foreach (var participant in members)
                         {
                             ListViewItem item = new ListViewItem

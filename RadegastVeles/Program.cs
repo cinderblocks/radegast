@@ -69,6 +69,7 @@ internal static class Program
         {
             builder.SetMinimumLevel(LogLevel.Debug);
             builder.AddProvider(new VelesLogProvider());
+            builder.AddProvider(new SeedCapsRetryGuard());
         });
         Logger.SetLoggerFactory(loggerFactory, "RadegastVeles");
 

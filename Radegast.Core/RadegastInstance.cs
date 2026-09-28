@@ -235,35 +235,7 @@ namespace Radegast
                     try
                     {
                         Logger.Info("COF initialization requested", Client);
-
-                        // Wait for simulator capabilities (necessary for Appearance/GetCurrentOutfitFolder)
-                        var capsReady = await WaitForSimulatorCapabilitiesAsync(client, TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
-                        if (!capsReady)
-                        {
-                            Logger.Warn("COF initialization: simulator capabilities not ready; will retry", Client);
-                            throw new InvalidOperationException("Simulator capabilities not ready");
-                        }
-
-                        COF = new OutfitManager(this);
-
-                        Logger.Info("COF initialization: COF constructed", Client);
-
-                        // Caps are already available but SimChanged already fired before OutfitManager
-                        // was constructed, so Simulator_OnCapabilitiesReceived never hooked up.
-                        // Explicitly initialize COF now.
-                        var initialized = await COF.InitializeAsync(token).ConfigureAwait(false);
-                        if (!initialized)
-                        {
-                            Logger.Warn("COF initialization: InitializeAsync returned false; will retry", Client);
-                            throw new InvalidOperationException("COF.InitializeAsync failed");
-                        }
-
-                        // Now it's safe to initialize RLV and the managers that depend on COF
-                        RLV = new RlvManager(this);
-
-                        // Initialize core handlers that rely on client/login lifecycle
-                        _initialOutfitHandler = new InitialOutfitHandler(client, COF);
-
+                        await InitializeCOFAsync(client, token).ConfigureAwait(false);
                         Logger.Info("COF initialization completed", Client);
                         break;
                     }
@@ -286,32 +258,7 @@ namespace Radegast
 
                                 try
                                 {
-                                    COF = new OutfitManager(this);
-                                    Logger.Info("COF initialization: COF constructed on periodic retry", Client);
-
-                                    var retryInit = await COF.InitializeAsync(token).ConfigureAwait(false);
-                                    if (!retryInit)
-                                    {
-                                        throw new InvalidOperationException("COF.InitializeAsync failed on periodic retry");
-                                    }
-
-                                    RLV = new RlvManager(this);
-
-                                    GridManger = new GridManager();
-                                    GridManger.LoadGrids();
-
-                                    Names = new NameManager(this);
-                                    GestureManager = new GestureManager(Client);
-                                    LslSyntax = new LslSyntax(Client);
-
-                                    IMSessions = new IMSessionManager(this);
-                                    IMSessions.SessionOpened += IMSessions_SessionOpened;
-                                    IMSessions.SessionClosed += IMSessions_SessionClosed;
-                                    IMSessions.TypingStarted += IMSessions_TypingStarted;
-                                    IMSessions.TypingStopped += IMSessions_TypingStopped;
-
-                                    _initialOutfitHandler = new InitialOutfitHandler(client, COF);
-
+                                    await InitializeCOFAsync(client, token).ConfigureAwait(false);
                                     Logger.Info("COF periodic retry succeeded", Client);
                                     return;
                                 }
@@ -334,6 +281,52 @@ namespace Radegast
                     }
                 }
             }, token);
+        }
+
+        /// <summary>
+        /// Single COF initialization attempt: waits for caps, then builds COF, RLV and the
+        /// initial outfit handler, disposing whatever a previous attempt/connection left behind.
+        /// Throws on failure so the caller can retry.
+        /// </summary>
+        private async Task InitializeCOFAsync(GridClient client, CancellationToken token)
+        {
+            // Wait for simulator capabilities (necessary for Appearance/GetCurrentOutfitFolder)
+            if (!await WaitForSimulatorCapabilitiesAsync(client, TimeSpan.FromSeconds(10), token).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Simulator capabilities not ready");
+            }
+
+            var cof = new OutfitManager(this);
+            try
+            {
+                // Caps are already available but SimChanged already fired before OutfitManager
+                // was constructed, so Simulator_OnCapabilitiesReceived never hooked up.
+                // Explicitly initialize COF now.
+                if (!await cof.InitializeAsync(token).ConfigureAwait(false))
+                {
+                    throw new InvalidOperationException("COF.InitializeAsync failed");
+                }
+            }
+            catch
+            {
+                cof.Dispose();
+                throw;
+            }
+
+            // Swap in the new instances, then dispose the ones from a previous connection so
+            // their event subscriptions don't linger.
+            var oldCof = COF;
+            var oldRlv = RLV;
+            var oldHandler = _initialOutfitHandler;
+
+            COF = cof;
+            // Now it's safe to initialize RLV and the managers that depend on COF
+            RLV = new RlvManager(this);
+            (oldHandler as IDisposable)?.Dispose();
+            _initialOutfitHandler = new InitialOutfitHandler(client, COF);
+
+            oldRlv?.Dispose();
+            oldCof?.Dispose();
         }
 
         private void IMSessions_SessionOpened(object? sender, IMSessionEventArgs e)
@@ -393,6 +386,7 @@ namespace Radegast
             client.Groups.GroupDropped += Groups_GroupDropped;
             client.Groups.GroupJoinedReply += Groups_GroupsChanged;
             client.Network.LoginProgress += Network_LoginProgress;
+            SeedCapsRetryGuard.Register(client);
             if (NetCom != null)
             {
                 NetCom.ClientConnected += NetCom_ClientConnected;
@@ -407,6 +401,7 @@ namespace Radegast
             client.Groups.GroupDropped -= Groups_GroupDropped;
             client.Groups.GroupJoinedReply -= Groups_GroupsChanged;
             client.Network.LoginProgress -= Network_LoginProgress;
+            SeedCapsRetryGuard.Unregister(client);
             if (NetCom != null)
             {
                 NetCom.ClientConnected -= NetCom_ClientConnected;

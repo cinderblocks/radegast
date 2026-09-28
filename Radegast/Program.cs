@@ -132,6 +132,7 @@ namespace Radegast
             {
                 builder.SetMinimumLevel(LogLevel.Debug);
                 builder.AddProvider(new RadegastAppender());
+                builder.AddProvider(new SeedCapsRetryGuard());
             });
             Logger.SetLoggerFactory(LoggerFactory, "Radegast");
 

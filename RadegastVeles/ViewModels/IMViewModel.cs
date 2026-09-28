@@ -657,7 +657,10 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
     {
         session.Participants.Clear();
         if (!Client.Self.GroupChatSessions.TryGetValue(session.SessionId, out var members)) return;
-        foreach (var m in members)
+        // LibreMetaverse mutates this list from the network thread under lock(list); snapshot the same way.
+        ChatSessionMember[] snapshot;
+        lock (members) snapshot = members.ToArray();
+        foreach (var m in snapshot)
         {
             var name = _instance.Names.Get(m.AvatarKey);
             session.Participants.Add(new IMParticipant(m.AvatarKey, name, m.IsModerator));
