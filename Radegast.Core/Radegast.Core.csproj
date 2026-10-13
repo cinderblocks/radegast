@@ -17,25 +17,23 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
     <ItemGroup>
-    <PackageReference Include="LibreMetaverse" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.Imaging.Skia" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.LslTools" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.PrimMesher" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.Rendering.MeshFoundry" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.RLV" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.StructuredData" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.Types" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.Utilities" Version="3.1.5" />
-    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.1.5" />
+    <PackageReference Include="LibreMetaverse" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.Imaging.Skia" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.LslTools" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.ModelFormats" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.PrimMesher" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.Rendering.MeshFoundry" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.RLV" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.StructuredData" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.Types" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.Utilities" Version="3.2.0" />
+    <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.2.0" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CoreJ2K.Skia" Version="2.3.3.91" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.151.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.151.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.151.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.0" />
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.10" />
-    <PackageReference Include="System.Threading.RateLimiting" Version="10.0.11" />
   </ItemGroup>
   <!-- Bakes every PackageReference's id+version into this assembly's metadata attributes so
        RadegastVeles' About dialog (AboutWindow.axaml.cs, PopulateLibraries) can credit them at
