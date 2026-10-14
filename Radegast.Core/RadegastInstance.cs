@@ -64,6 +64,10 @@ namespace Radegast
         /// </summary>
         public Dictionary<UUID, Group> Groups { get; private set; } = new Dictionary<UUID, Group>();
         private readonly object _groupsLock = new object();
+        // Last notice/profile flags the user set, kept until a membership update echoes them.
+        // Group is a struct, and a refresh that races the SetGroupAcceptNotices round-trip
+        // would otherwise put the previous flags back and notices would keep opening.
+        private readonly Dictionary<UUID, (bool AcceptNotices, bool ListInProfile)> _pendingNoticeSettings = new Dictionary<UUID, (bool AcceptNotices, bool ListInProfile)>();
 
         #region Managers
         public StateManager State { get; private set; } = null!;
@@ -591,15 +595,52 @@ namespace Radegast
         {
             if (e.Success)
             {
-                lock (_groupsLock) { Groups.Remove(e.GroupID); }
+                lock (_groupsLock)
+                {
+                    Groups.Remove(e.GroupID);
+                    _pendingNoticeSettings.Remove(e.GroupID);
+                }
             }
             Client.Groups.RequestCurrentGroups();
         }
 
         private void Groups_GroupDropped(object? sender, GroupDroppedEventArgs e)
         {
-            lock (_groupsLock) { Groups.Remove(e.GroupID); }
+            lock (_groupsLock)
+            {
+                Groups.Remove(e.GroupID);
+                _pendingNoticeSettings.Remove(e.GroupID);
+            }
             Client.Groups.RequestCurrentGroups();
+        }
+
+        /// <summary>
+        /// Save whether this avatar receives notices from <paramref name="groupId"/> and
+        /// whether the group is listed on the profile. Updates the local cache immediately
+        /// and tells the simulator. A membership refresh that still carries the old flags
+        /// does not undo the change.
+        /// </summary>
+        public void UpdateGroupNoticeSettings(UUID groupId, bool acceptNotices, bool listInProfile)
+        {
+            lock (_groupsLock)
+            {
+                _pendingNoticeSettings[groupId] = (acceptNotices, listInProfile);
+                GroupNotices.TryStore(Groups, groupId, acceptNotices, listInProfile);
+            }
+
+            Client.Groups.SetGroupAcceptNotices(groupId, acceptNotices, listInProfile);
+        }
+
+        /// <summary>
+        /// False when the sending group's membership has notices turned off.
+        /// Notices for a group we have not heard about yet are left alone.
+        /// </summary>
+        public bool ShouldPresentGroupNotice(InstantMessage msg)
+        {
+            lock (_groupsLock)
+            {
+                return GroupNotices.ShouldPresent(Groups, msg);
+            }
         }
 
         private void Groups_CurrentGroups(object? sender, CurrentGroupsEventArgs e)
@@ -615,7 +656,7 @@ namespace Radegast
                 {
                     foreach (var kv in e.Groups)
                     {
-                        Groups[kv.Key] = kv.Value;
+                        Groups[kv.Key] = GroupNotices.MergeMembership(kv.Key, kv.Value, _pendingNoticeSettings);
                     }
                 }
             }
