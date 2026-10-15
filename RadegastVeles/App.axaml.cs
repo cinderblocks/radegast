@@ -38,12 +38,13 @@ public class App : Application
     private LoginWindow? _loginWindow;
     private TrayIcon? _trayIcon;
 
-    // Avalonia.Native's macOS tray-menu exporter tracks incremental changes against whatever
-    // NativeMenu instance it was first bound to via TrayIcon.Menu; swapping in a brand-new
-    // NativeMenu on every rebuild (as this used to do) throws "The menu being updated does not
-    // match" from __MicroComIAvnMenuProxy.Update the next time it's reassigned -- unhandled,
-    // that aborts the whole process. Reuse one instance and mutate its Items instead.
-    private readonly NativeMenu _trayMenu = new();
+    // Avalonia.Native's macOS tray-menu exporter binds to the first NativeMenu instance it sees
+    // for a TrayIcon and throws "The menu being updated does not match" from
+    // __MicroComIAvnMenuProxy.Update if it is ever handed a different one -- unhandled, that
+    // aborts the whole process. Since Avalonia 12.1 the native tray icon is created when the icon
+    // is attached (during XAML load) and binds to an empty NativeMenu if none is set yet, so the
+    // menu is declared in App.axaml and we mutate that same instance's Items from here on.
+    private NativeMenu? _trayMenu;
 
     public override void Initialize()
     {
@@ -140,7 +141,9 @@ public class App : Application
     {
         if (_trayIcon == null) return;
 
-        _trayMenu.Items.Clear();
+        // Fall back to a fresh menu only if the XAML-declared one is missing (pre-12.1 behaviour).
+        var trayMenu = _trayMenu ??= _trayIcon.Menu ?? new NativeMenu();
+        trayMenu.Items.Clear();
 
         foreach (var session in _sessionManager.Sessions)
         {
@@ -156,32 +159,33 @@ public class App : Application
                     w.Activate();
                 }
             };
-            _trayMenu.Items.Add(showItem);
+            trayMenu.Items.Add(showItem);
 
             var logoutItem = new NativeMenuItem($"Logout {agentName}");
             logoutItem.Click += (_, _) => OnLogoutRequested(capturedSession);
-            _trayMenu.Items.Add(logoutItem);
+            trayMenu.Items.Add(logoutItem);
 
-            _trayMenu.Items.Add(new NativeMenuItemSeparator());
+            trayMenu.Items.Add(new NativeMenuItemSeparator());
         }
 
         var loginItem = new NativeMenuItem("New Login");
         loginItem.Click += (_, _) => ShowLogin();
-        _trayMenu.Items.Add(loginItem);
+        trayMenu.Items.Add(loginItem);
 
-        _trayMenu.Items.Add(new NativeMenuItemSeparator());
+        trayMenu.Items.Add(new NativeMenuItemSeparator());
 
         var checkForUpdatesItem = new NativeMenuItem("Check for Updates...");
         checkForUpdatesItem.Click += (_, _) => VelesUpdateManager.CheckForUpdatesAtUserRequest();
-        _trayMenu.Items.Add(checkForUpdatesItem);
+        trayMenu.Items.Add(checkForUpdatesItem);
 
-        _trayMenu.Items.Add(new NativeMenuItemSeparator());
+        trayMenu.Items.Add(new NativeMenuItemSeparator());
 
         var exitItem = new NativeMenuItem("Exit");
         exitItem.Click += (_, _) => Exit();
-        _trayMenu.Items.Add(exitItem);
+        trayMenu.Items.Add(exitItem);
 
-        _trayIcon.Menu = _trayMenu;
+        if (!ReferenceEquals(_trayIcon.Menu, trayMenu))
+            _trayIcon.Menu = trayMenu;
     }
 
     private void Exit()

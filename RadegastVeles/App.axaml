@@ -58,7 +58,11 @@
         <TrayIcons>
             <TrayIcon Icon="/Assets/veles.ico"
                       ToolTipText="Radegast Veles"
-                      IsVisible="True" />
+                      IsVisible="True">
+                <TrayIcon.Menu>
+                    <NativeMenu />
+                </TrayIcon.Menu>
+            </TrayIcon>
         </TrayIcons>
     </TrayIcon.Icons>
 
