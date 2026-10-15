@@ -229,7 +229,7 @@ public sealed partial class PiperVoiceDownloaderViewModel : ObservableObject, ID
             {
                 string? topDir = null;
                 using var fileStream = File.OpenRead(tmpFile);
-                using var reader     = ReaderFactory.OpenReader(fileStream);
+                using var reader     = ReaderFactory.Open(fileStream);
 
                 long total   = new FileInfo(tmpFile).Length;
                 long read    = 0;

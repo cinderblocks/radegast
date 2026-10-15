@@ -36,27 +36,27 @@
     <AssemblyMetadata Include="BugsplatDatabase" Value="$(BugsplatDatabase)" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Avalonia" Version="12.0.5" />
+    <PackageReference Include="Avalonia" Version="12.1.4" />
     <PackageReference Include="Avalonia.AvaloniaEdit" Version="12.0.0" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.0.5" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.5" />
-    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.0.5" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
     <PackageReference Include="BugSplatDotNetStandard" Version="4.3.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="NetSparkleUpdater.SparkleUpdater" Version="3.1.0" />
     <PackageReference Include="NetSparkleUpdater.UI.Avalonia" Version="3.1.0" />
     <!-- sherpa-onnx: managed API + platform-specific native runtimes -->
-    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-x64" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-x64" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.3" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.3" />
-    <PackageReference Include="CoreJ2K.Avalonia" Version="2.3.3.91" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-x64" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.win-arm64" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-x64" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.linux-arm64" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-x64" Version="1.13.8" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx.runtime.osx-arm64" Version="1.13.8" />
+    <PackageReference Include="CoreJ2K.Avalonia" Version="2.4.1.108" />
     <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
     <PackageReference Include="NVorbis" Version="0.10.5" />
-    <PackageReference Include="SharpCompress" Version="0.49.1" />
+    <PackageReference Include="SharpCompress" Version="1.0.0" />
     <PackageReference Include="Silk.NET.Vulkan" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" Version="2.23.0" />
     <PackageReference Include="Silk.NET.Vulkan.Extensions.EXT" Version="2.23.0" />

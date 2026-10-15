@@ -30,9 +30,9 @@
     <PackageReference Include="LibreMetaverse.Voice.WebRTC" Version="3.2.0" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="CoreJ2K.Skia" Version="2.3.3.91" />
+    <PackageReference Include="CoreJ2K.Skia" Version="2.4.1.108" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.152.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
     <PackageReference Include="System.ComponentModel.Composition" Version="10.0.10" />
   </ItemGroup>
   <!-- Bakes every PackageReference's id+version into this assembly's metadata attributes so
