@@ -43,7 +43,9 @@ namespace Radegast
         /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
         protected override void Dispose(bool disposing)
         {
-            if (InvokeRequired)
+            // Only marshal explicit disposal. The finalizer calls Dispose(false) on its own thread
+            // after the window handle may be gone, and Invoke() there kills the process (#197).
+            if (disposing && InvokeRequired && IsHandleCreated)
             {
                 Invoke(new System.Windows.Forms.MethodInvoker(() => { Dispose(disposing); }));
                 return;
