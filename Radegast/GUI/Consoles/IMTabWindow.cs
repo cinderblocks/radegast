@@ -45,7 +45,11 @@ namespace Radegast
             SessionId = session;
             TargetName = toName;
 
-            TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Agent, SessionId, toName);
+            // Screen readers announce focus changes by accessible name, so name the controls after the contact (#196)
+            cbxInput.AccessibleName = $"Message to {toName}";
+            rtbIMText.AccessibleName = $"Conversation with {toName}";
+
+            TextManager =new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Agent, SessionId, toName);
             cbAlwaysDing.Checked = TextManager.DingOnAllIncoming;
 
             AddNetcomEvents();

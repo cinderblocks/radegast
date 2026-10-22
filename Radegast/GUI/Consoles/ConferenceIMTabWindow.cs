@@ -50,6 +50,9 @@ namespace Radegast
 
             SessionId = session;
 
+            cbxInput.AccessibleName = $"Message to conference {sessionName}";
+            rtbIMText.AccessibleName = $"Conference conversation with {sessionName}";
+
             TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Conference, SessionId, sessionName);
 
             // Callbacks

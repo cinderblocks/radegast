@@ -48,6 +48,9 @@ namespace Radegast
             this.instance = instance;
             SessionId = session;
 
+            cbxInput.AccessibleName = $"Message to group {sessionName}";
+            rtbIMText.AccessibleName = $"Group conversation with {sessionName}";
+
             TextManager = new IMTextManager(this.instance, new RichTextBoxPrinter(rtbIMText), IMTextManagerType.Group, SessionId, sessionName);
 
             btnShow.Text = "Show";
