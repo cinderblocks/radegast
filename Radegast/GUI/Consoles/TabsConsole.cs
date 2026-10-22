@@ -645,8 +645,8 @@ namespace Radegast
 
         /// <summary>
         /// Remembers the focused control under <paramref name="root"/>, including its text selection,
-        /// and returns an action that hands focus back to it. A bare Focus() on a ComboBox or TextBox
-        /// selects all of its text, so the user's next keystroke would overwrite what they were typing (#82).
+        /// and returns an action that hands focus back to it with that selection intact, so the user's
+        /// next keystroke doesn't replace what they were typing when a new tab or dialog opens (#82).
         /// </summary>
         public static Action CaptureFocus(Control root)
         {
