@@ -644,6 +644,38 @@ namespace Radegast
         }
 
         /// <summary>
+        /// Remembers the focused control under <paramref name="root"/>, including its text selection,
+        /// and returns an action that hands focus back to it. A bare Focus() on a ComboBox or TextBox
+        /// selects all of its text, so the user's next keystroke would overwrite what they were typing (#82).
+        /// </summary>
+        public static Action CaptureFocus(Control root)
+        {
+            var active = FindFocusedControl(root);
+            if (active == null) return () => { };
+
+            var combo = active as ComboBox;
+            var text = active as TextBoxBase;
+            var start = combo?.SelectionStart ?? text?.SelectionStart ?? 0;
+            var length = combo?.SelectionLength ?? text?.SelectionLength ?? 0;
+
+            return () =>
+            {
+                if (active.IsDisposed) return;
+                active.Focus();
+                if (combo != null)
+                {
+                    combo.SelectionStart = start;
+                    combo.SelectionLength = length;
+                }
+                else if (text != null)
+                {
+                    text.SelectionStart = start;
+                    text.SelectionLength = length;
+                }
+            };
+        }
+
+        /// <summary>
         /// Creates new IM tab if needed
         /// </summary>
         /// <param name="agentID">IM session with agentID</param>
@@ -663,7 +695,7 @@ namespace Radegast
 
             instance.MediaManager.PlayUISound(makeActive ? UISounds.IMWindow : UISounds.IM);
 
-            Control active = FindFocusedControl(instance.MainForm);
+            var restoreFocus = CaptureFocus(instance.MainForm);
 
             instance.TabConsole.AddIMTab(agentID, client.Self.AgentID ^ agentID, label);
 
@@ -673,7 +705,7 @@ namespace Radegast
             }
             else
             {
-                active?.Focus();
+                restoreFocus();
             }
 
             return true;
@@ -739,13 +771,13 @@ namespace Radegast
 
             instance.MediaManager.PlayUISound(UISounds.IM);
 
-            Control active = FindFocusedControl(instance.MainForm);
+            var restoreFocus = CaptureFocus(instance.MainForm);
 
             ConferenceIMTabWindow imTab = AddConferenceIMTab(e.IM.IMSessionID, Utils.BytesToString(e.IM.BinaryBucket));
             Tabs[e.IM.IMSessionID.ToString()].Highlight();
             imTab.TextManager.ProcessIM(e, true);
 
-            active?.Focus();
+            restoreFocus();
         }
 
         private void HandleGroupIM(InstantMessageEventArgs e)
@@ -765,13 +797,13 @@ namespace Radegast
                 instance.MediaManager.PlayUISound(UISounds.IM);
             }
 
-            Control active = FindFocusedControl(instance.MainForm);
+            var restoreFocus = CaptureFocus(instance.MainForm);
 
             GroupIMTabWindow imTab = AddGroupIMTab(e.IM.IMSessionID, Utils.BytesToString(e.IM.BinaryBucket));
             imTab.TextManager.ProcessIM(e, true);
             Tabs[e.IM.IMSessionID.ToString()].Highlight();
 
-            active?.Focus();
+            restoreFocus();
         }
 
         public void InitializeMainTab()

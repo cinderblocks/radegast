@@ -952,7 +952,7 @@ namespace Radegast
                 }
             }
 
-            var active = TabsConsole.FindFocusedControl(this);
+            var restoreFocus = TabsConsole.CaptureFocus(this);
 
             FormFlash.StartFlash(this);
             pnlDialog.Visible = true;
@@ -1012,7 +1012,7 @@ namespace Radegast
 
             btnDialogNextControl.Visible = notifications.Count > 1;
 
-            active?.Focus();
+            restoreFocus();
         }
 
         public void RemoveNotification(INotification notification)
