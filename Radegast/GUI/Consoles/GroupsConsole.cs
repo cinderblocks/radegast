@@ -58,8 +58,11 @@ namespace Radegast
             client.Self.AgentDataReply -= Self_AgentDataReply;
         }
 
+        private string activeGroupTitle = string.Empty;
+
         private void Self_AgentDataReply(object sender, AgentDataReplyEventArgs e)
         {
+            activeGroupTitle = e.GroupTitle ?? string.Empty;
             if (IsHandleCreated)
             {
                 BeginInvoke(new MethodInvoker(RefreshActiveGroup));
@@ -76,7 +79,8 @@ namespace Radegast
             var activeName = activeId != UUID.Zero && instance.Groups.TryGetValue(activeId, out var active)
                 ? active.Name
                 : "none";
-            listBox1.AccessibleName = $"List of groups, active group: {activeName}";
+            var tag = activeId != UUID.Zero && activeGroupTitle.Length > 0 ? $", tag: {activeGroupTitle}" : string.Empty;
+            listBox1.AccessibleName = $"List of groups, active group: {activeName}{tag}";
             listBox1.Invalidate();
         }
 
