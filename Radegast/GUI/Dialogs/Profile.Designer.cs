@@ -802,6 +802,7 @@ namespace Radegast
             // 
             // btnDeletePick
             // 
+            this.btnDeletePick.AccessibleName = "Delete pick";
             this.btnDeletePick.Location = new System.Drawing.Point(191, 10);
             this.btnDeletePick.Name = "btnDeletePick";
             this.btnDeletePick.Size = new System.Drawing.Size(75, 23);
@@ -813,6 +814,7 @@ namespace Radegast
             // 
             // btnShowOnMap
             // 
+            this.btnShowOnMap.AccessibleName = "Show pick on map";
             this.btnShowOnMap.Location = new System.Drawing.Point(87, 10);
             this.btnShowOnMap.Name = "btnShowOnMap";
             this.btnShowOnMap.Size = new System.Drawing.Size(98, 23);
@@ -823,6 +825,7 @@ namespace Radegast
             // 
             // btnTeleport
             // 
+            this.btnTeleport.AccessibleName = "Teleport to pick";
             this.btnTeleport.Location = new System.Drawing.Point(6, 10);
             this.btnTeleport.Name = "btnTeleport";
             this.btnTeleport.Size = new System.Drawing.Size(75, 23);
@@ -863,6 +866,7 @@ namespace Radegast
             // btnNewPick
             // 
             this.btnNewPick.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+            this.btnNewPick.AccessibleName = "New pick";
             this.btnNewPick.Location = new System.Drawing.Point(33, 439);
             this.btnNewPick.Name = "btnNewPick";
             this.btnNewPick.Size = new System.Drawing.Size(75, 23);
