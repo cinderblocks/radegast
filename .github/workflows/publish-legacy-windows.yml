@@ -124,7 +124,14 @@ jobs:
 
           Write-Host "Copying application binaries..."
           Copy-Item -Path "bin\Radegast\Release\*" -Destination "$artifactDir\" -Recurse -Force `
-            -Exclude @("*.pdb", "*.xml", "*.vshost.*")
+            -Exclude @("*.pdb", "*.vshost.*")
+
+          # Drop C# XML doc-comment files, which sit next to each DLL at the output root only.
+          # Excluding *.xml in Copy-Item above matches at every depth and also strips runtime data
+          # (grids.xml, linden\**\*.xml, aiml_config\*.xml), breaking login on the tarball (#193).
+          Get-ChildItem -Path $artifactDir -Filter "*.xml" -File |
+            Where-Object { $_.Name -ne "grids.xml" } |
+            Remove-Item -Force
 
           Write-Host "Collecting PDB files..."
           $pdbDir = "$artifactDir\symbols"
