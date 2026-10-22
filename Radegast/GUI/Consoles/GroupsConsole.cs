@@ -42,6 +42,7 @@ namespace Radegast
             client.Groups.GroupCreatedReply += Groups_GroupCreatedReply;
             client.Groups.GroupRoleDataReply += Groups_GroupRoleDataReply;
             client.Self.MuteListUpdated += Self_MuteListUpdated;
+            client.Self.AgentDataReply += Self_AgentDataReply;
             client.Groups.RequestCurrentGroups();
             UpdateDisplay();
 
@@ -54,6 +55,29 @@ namespace Radegast
             client.Groups.GroupCreatedReply -= Groups_GroupCreatedReply;
             client.Groups.GroupRoleDataReply += Groups_GroupRoleDataReply;
             client.Self.MuteListUpdated -= Self_MuteListUpdated;
+            client.Self.AgentDataReply -= Self_AgentDataReply;
+        }
+
+        private void Self_AgentDataReply(object sender, AgentDataReplyEventArgs e)
+        {
+            if (IsHandleCreated)
+            {
+                BeginInvoke(new MethodInvoker(RefreshActiveGroup));
+            }
+        }
+
+        /// <summary>
+        /// The active group is only marked visually in the owner-drawn list, which screen readers can't see (#141),
+        /// so also spell it out in the list's accessible name. Leaves the user's current selection alone.
+        /// </summary>
+        private void RefreshActiveGroup()
+        {
+            var activeId = client.Self.ActiveGroup;
+            var activeName = activeId != UUID.Zero && instance.Groups.TryGetValue(activeId, out var active)
+                ? active.Name
+                : "none";
+            listBox1.AccessibleName = $"List of groups, active group: {activeName}";
+            listBox1.Invalidate();
         }
 
         private void Groups_GroupRoleDataReply(object sender, GroupRolesDataReplyEventArgs e)
@@ -127,6 +151,8 @@ namespace Radegast
                         break;
                     }
                 }
+
+                RefreshActiveGroup();
 
                 lblGroupNr.Text = $"{instance.Groups.Count} groups";
                 lblGrpMax.Text = client.Network.MaxAgentGroups > 0 ? $"max {client.Network.MaxAgentGroups} groups" : string.Empty;
@@ -324,13 +350,15 @@ namespace Radegast
                         {
                             UUID gid = ((Group)item).ID;
                             bool isMuted = client.Self.MuteList.Values.Any(me => me.ID == gid && me.Type == MuteType.Group);
-                            if (isMuted)
+                            bool isActive = gid != UUID.Zero && gid == client.Self.ActiveGroup;
+                            if (isMuted || isActive)
                             {
                                 var tsize = e.Graphics.MeasureString(title, e.Font);
+                                var tags = string.Join(" ", isActive ? "(active)" : null, isMuted ? "(muted)" : null).Trim();
 
                                 using (var font = new Font(e.Font, FontStyle.Italic))
                                 {
-                                    e.Graphics.DrawString("(muted)", font, brush, e.Bounds.X + tsize.Width + 10, e.Bounds.Y + 2);
+                                    e.Graphics.DrawString(tags, font, brush, e.Bounds.X + tsize.Width + 10, e.Bounds.Y + 2);
                                 }
                             }
                         }
