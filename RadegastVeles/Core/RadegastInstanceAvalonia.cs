@@ -349,6 +349,9 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
 
             case InstantMessageDialog.GroupNotice:
                 if (Client.Self.MuteList.Values.Any(m => m.Type == MuteType.Group && m.ID == msg.FromAgentID)) return;
+                // "Receive group notices" is per membership. The simulator still delivers
+                // notices that were already queued, and sometimes live ones too.
+                if (!ShouldPresentGroupNotice(msg)) return;
                 NotificationReceived?.Invoke(this, NotificationViewModel.ForGroupNotice(Client, msg));
                 MediaManager.PlayUISound(UISounds.Alert);
                 break;
