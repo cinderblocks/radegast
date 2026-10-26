@@ -177,11 +177,11 @@ namespace Radegast
             float delta = (float)timer!.Interval / 1000f;
             if (turningLeft) {
                 client.Self.Movement.TurnLeft = true;
-                client.Self.Movement.BodyRotation = client.Self.Movement.BodyRotation * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, delta);
+                AvatarFacing.Yaw(client.Self.Movement, delta);
                 client.Self.Movement.SendUpdate(true);
             } else if (turningRight) {
                 client.Self.Movement.TurnRight = true;
-                client.Self.Movement.BodyRotation = client.Self.Movement.BodyRotation * Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -delta);
+                AvatarFacing.Yaw(client.Self.Movement, -delta);
                 client.Self.Movement.SendUpdate(true);
             }
         }
