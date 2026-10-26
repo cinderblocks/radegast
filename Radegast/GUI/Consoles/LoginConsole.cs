@@ -141,18 +141,13 @@ namespace Radegast
             {
                 savedLogin.Username = globalSettings["username"] = username;
 
-                if (LoginOptions.IsPasswordMD5(passTxt))
-                {
-                    savedLogin.Password = passTxt;
-                    globalSettings["password"] = passTxt;
-                }
-                else
-                {
-                    var passwd = Utils.MD5(passTxt.Length > 16 
-                        ? passTxt.Substring(0, 16) : passTxt);
-                    savedLogin.Password = passwd;
-                    globalSettings["password"] = passwd;
-                }
+                // Saved hashed, as the grid will want it: from the first 16 characters on Second Life, from all of it elsewhere
+                var loginUri = savedLogin.GridID == "custom_login_uri"
+                    ? savedLogin.CustomURI
+                    : (cbxGrid.SelectedItem as Grid)?.LoginURI ?? string.Empty;
+                var passwd = LoginRequest.HashPassword(passTxt, LoginRequest.IsSecondLifeLoginServer(loginUri));
+                savedLogin.Password = passwd;
+                globalSettings["password"] = passwd;
 
                 savedLogin.CustomStartLocation = cbxLocation.SelectedIndex == -1 
                     ? cbxLocation.Text : string.Empty;

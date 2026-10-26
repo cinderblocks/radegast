@@ -151,14 +151,10 @@ public sealed class NetComAvalonia : INetCom
                 break;
         }
 
-        string password = LoginOptions.IsPasswordMD5(LoginOptions.Password!)
-            ? LoginOptions.Password!
-            : Utils.MD5(LoginOptions.Password!.Length > 16
-                ? LoginOptions.Password[..16]
-                : LoginOptions.Password);
-
+        // LibreMetaverse hashes a plaintext password when it logs in, taking only the first 16 characters
+        // on Second Life and the whole of it on a grid such as OpenSim
         var loginParams = Client.Network.DefaultLoginParams(
-            LoginOptions.FirstName!, LoginOptions.LastName!, password,
+            LoginOptions.FirstName!, LoginOptions.LastName!, LoginOptions.Password!,
             LoginOptions.Channel, LoginOptions.Version);
 
         Grid = LoginOptions.Grid!;

@@ -294,21 +294,10 @@ namespace Radegast
                     break;
             }
 
-            string password;
-
-            if (LoginOptions.IsPasswordMD5(LoginOptions.Password!))
-            {
-                password = LoginOptions.Password!;
-            }
-            else
-            {
-                password = Utils.MD5(LoginOptions.Password!.Length > 16
-                    ? LoginOptions.Password.Substring(0, 16) 
-                    : LoginOptions.Password);
-            }
-
+            // LibreMetaverse hashes a plaintext password when it logs in, taking only the first 16 characters
+            // on Second Life and the whole of it on a grid such as OpenSim
             LoginParams loginParams = Client.Network.DefaultLoginParams(
-                LoginOptions.FirstName!, LoginOptions.LastName!, password,
+                LoginOptions.FirstName!, LoginOptions.LastName!, LoginOptions.Password!,
                 LoginOptions.Channel, LoginOptions.Version);
 
             Grid = LoginOptions.Grid!;
