@@ -142,7 +142,7 @@ namespace Radegast
                 listBox1.Items.Clear();
                 listBox1.Items.Add(none);
 
-                foreach (Group g in instance.Groups.Values)
+                foreach (Group g in instance.GetGroups())
                 {
                     listBox1.Items.Add(g);
                 }
