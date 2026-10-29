@@ -168,7 +168,13 @@ namespace Radegast
             {
                 instance.MediaManager.PlayUISound(UISounds.IM);
             }
-            PrintIM(DateTime.Now, instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName), e.IM.FromAgentID, msg, isNewMessage);
+            var fromName = instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
+            PrintIM(DateTime.Now, fromName, e.IM.FromAgentID, msg, isNewMessage);
+
+            if (isNewMessage)
+            {
+                AnnounceToScreenReader(fromName, msg);
+            }
 
             if (!AutoResponseSent && Type == IMTextManagerType.Agent && e.IM.FromAgentID != UUID.Zero && e.IM.FromAgentName != "Second Life")
             {
@@ -197,6 +203,20 @@ namespace Radegast
 
                     PrintIM(DateTime.Now, instance.Client.Self.Name, instance.Client.Self.AgentID, instance.GlobalSettings["auto_response_text"].AsString(), isNewMessage);
                 }
+            }
+        }
+
+        private void AnnounceToScreenReader(string fromName, string message)
+        {
+            // Who first, then where: "Kestrel, IM: hello", "Kestrel, Builders: hello"
+            var text = message.StartsWith("/me ") ? fromName + message.Substring(3) : message;
+            if (Type == IMTextManagerType.Agent)
+            {
+                instance.ScreenReader?.Announce(ScreenReaderAnnouncer.IMSetting, $"{fromName}, IM: {SpeakableText(text)}");
+            }
+            else
+            {
+                instance.ScreenReader?.Announce(ScreenReaderAnnouncer.GroupIMSetting, $"{fromName}, {sessionName}: {SpeakableText(text)}");
             }
         }
 
