@@ -188,6 +188,16 @@ namespace Radegast
             }
         }
 
+        /// <summary>
+        /// The text as the history shows it, with links as their names rather than raw URIs, for screen readers
+        /// </summary>
+        protected string SpeakableText(string text)
+        {
+            text = SanitizeText(text);
+            if (string.IsNullOrEmpty(text)) return text;
+            return SlUriParser.UrlRegex.Replace(text, m => uriParser.GetLinkName(m.Value).DisplayText);
+        }
+
         // Remove basic HTML tags and control characters; limit overall length
         private string SanitizeText(string input)
         {
