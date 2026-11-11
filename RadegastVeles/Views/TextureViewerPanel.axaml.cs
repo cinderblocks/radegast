@@ -79,7 +79,7 @@ public partial class TextureViewerPanel : UserControl
         try
         {
             await using var stream = await file.OpenWriteAsync();
-            _vm.TextureBitmap.Save(stream);
+            _vm.TextureBitmap.Save(stream, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         }
         catch { }
     }

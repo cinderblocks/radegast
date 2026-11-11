@@ -294,12 +294,12 @@ internal class VkCommandBufferPool : IDisposable
                 {
                     PNext = keyedMutex != null ? &mutex : (void*)pNext,
                     SType = StructureType.SubmitInfo,
-                    WaitSemaphoreCount = waitSemaphores != null ? (uint)waitSemaphores.Length : 0,
+                    WaitSemaphoreCount = (uint)waitSemaphores.Length,
                     PWaitSemaphores = pWaitSemaphores,
                     PWaitDstStageMask = pWaitDstStageMask,
                     CommandBufferCount = 1,
                     PCommandBuffers = &commandBuffer,
-                    SignalSemaphoreCount = signalSemaphores != null ? (uint)signalSemaphores.Length : 0,
+                    SignalSemaphoreCount = (uint)signalSemaphores.Length,
                     PSignalSemaphores = pSignalSemaphores,
                 };
 

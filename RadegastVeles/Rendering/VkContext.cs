@@ -418,8 +418,9 @@ internal sealed unsafe class VkContext : IDisposable
 
                 uint queueFamilyCount = 0;
                 api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, ref queueFamilyCount, null);
-                var familyProperties = stackalloc QueueFamilyProperties[(int)queueFamilyCount];
-                api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, ref queueFamilyCount, familyProperties);
+                var familyProperties = new QueueFamilyProperties[(int)queueFamilyCount];
+                fixed (QueueFamilyProperties* pFamilyProperties = familyProperties)
+                    api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, ref queueFamilyCount, pFamilyProperties);
 
                 for (uint queueFamilyIndex = 0; queueFamilyIndex < queueFamilyCount; queueFamilyIndex++)
                 {
