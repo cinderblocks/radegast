@@ -620,7 +620,9 @@ void main()
 
         if (fullbright)
         {
-            vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
+            // Unclamped: a glowing face may exceed 1.0 so the bloom pass picks it up. UNORM targets
+        // (Low tier, water reflection) clamp on write.
+        vec3 glowCol = base.rgb * (1.0 + glow);
             fragColor = vec4(applyFog(glowCol), (alphaMode == 1) ? base.a : 1.0);
             return;
         }
@@ -716,7 +718,9 @@ void main()
     {
         // Glow adds extra brightness on top of the fully-lit base colour,
         // approximating the emission the face would contribute to a bloom pass.
-        vec3 glowCol = clamp(base.rgb * (1.0 + glow), 0.0, 1.0);
+        // Unclamped: a glowing face may exceed 1.0 so the bloom pass picks it up. UNORM targets
+        // (Low tier, water reflection) clamp on write.
+        vec3 glowCol = base.rgb * (1.0 + glow);
         fragColor = vec4(applyFog(glowCol), (alphaMode == 1) ? base.a : 1.0);
         return;
     }

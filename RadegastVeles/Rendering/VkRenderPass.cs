@@ -55,7 +55,7 @@ internal static class VkRenderPass
     /// image instead).
     /// </para>
     /// </summary>
-    public static unsafe RenderPass CreateMainScenePass(VkContext vk, Format colorFormat, Format depthFormat)
+    public static unsafe RenderPass CreateMainScenePass(VkContext vk, Format colorFormat, Format depthFormat, bool storeDepth = false)
     {
         var colorAttachment = new AttachmentDescription
         {
@@ -74,11 +74,11 @@ internal static class VkRenderPass
             Format = depthFormat,
             Samples = SampleCountFlags.Count1Bit,
             LoadOp = AttachmentLoadOp.Clear,
-            StoreOp = AttachmentStoreOp.DontCare,
+            StoreOp = storeDepth ? AttachmentStoreOp.Store : AttachmentStoreOp.DontCare,
             StencilLoadOp = AttachmentLoadOp.DontCare,
             StencilStoreOp = AttachmentStoreOp.DontCare,
             InitialLayout = ImageLayout.Undefined,
-            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+            FinalLayout = storeDepth ? ImageLayout.ShaderReadOnlyOptimal : ImageLayout.DepthStencilAttachmentOptimal
         };
 
         var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
@@ -118,6 +118,14 @@ internal static class VkRenderPass
                 DstAccessMask = AccessFlags.ShaderReadBit
             }
         };
+
+        // storeDepth: the depth attachment is sampled after this pass, so the exit dependency
+        // must also cover its writes.
+        if (storeDepth)
+        {
+            dependencies[1].SrcStageMask |= PipelineStageFlags.LateFragmentTestsBit;
+            dependencies[1].SrcAccessMask |= AccessFlags.DepthStencilAttachmentWriteBit;
+        }
 
         var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
         var createInfo = new RenderPassCreateInfo
@@ -326,7 +334,7 @@ internal static class VkRenderPass
     /// depth write completing -- both must be ordered-before this pass's own attachment writes.
     /// </para>
     /// </summary>
-    public static unsafe RenderPass CreateMainScenePassContinuation(VkContext vk, Format colorFormat, Format depthFormat)
+    public static unsafe RenderPass CreateMainScenePassContinuation(VkContext vk, Format colorFormat, Format depthFormat, bool storeDepth = false)
     {
         var colorAttachment = new AttachmentDescription
         {
@@ -345,11 +353,11 @@ internal static class VkRenderPass
             Format = depthFormat,
             Samples = SampleCountFlags.Count1Bit,
             LoadOp = AttachmentLoadOp.Load,
-            StoreOp = AttachmentStoreOp.DontCare,
+            StoreOp = storeDepth ? AttachmentStoreOp.Store : AttachmentStoreOp.DontCare,
             StencilLoadOp = AttachmentLoadOp.DontCare,
             StencilStoreOp = AttachmentStoreOp.DontCare,
             InitialLayout = ImageLayout.DepthStencilAttachmentOptimal,
-            FinalLayout = ImageLayout.DepthStencilAttachmentOptimal
+            FinalLayout = storeDepth ? ImageLayout.ShaderReadOnlyOptimal : ImageLayout.DepthStencilAttachmentOptimal
         };
 
         var colorRef = new AttachmentReference { Attachment = 0, Layout = ImageLayout.ColorAttachmentOptimal };
@@ -384,6 +392,14 @@ internal static class VkRenderPass
                 DstAccessMask = AccessFlags.ShaderReadBit
             }
         };
+
+        // storeDepth: the depth attachment is sampled after this pass, so the exit dependency
+        // must also cover its writes.
+        if (storeDepth)
+        {
+            dependencies[1].SrcStageMask |= PipelineStageFlags.LateFragmentTestsBit;
+            dependencies[1].SrcAccessMask |= AccessFlags.DepthStencilAttachmentWriteBit;
+        }
 
         var attachments = stackalloc AttachmentDescription[2] { colorAttachment, depthAttachment };
         var createInfo = new RenderPassCreateInfo

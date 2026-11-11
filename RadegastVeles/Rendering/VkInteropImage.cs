@@ -61,6 +61,7 @@ internal sealed unsafe class VkInteropImage : IDisposable
     private DeviceMemory _imageMemory;
     private ComPtr<ID3D11Texture2D> _d3dTexture2D;
 
+    private readonly Dictionary<ulong, Framebuffer> _framebuffers = new();
     internal Image InternalHandle { get; private set; }
     internal Format Format { get; }
     internal ImageAspectFlags AspectFlags { get; }
@@ -303,8 +304,32 @@ internal sealed unsafe class VkInteropImage : IDisposable
         commandBuffer.SubmitAndWait();
     }
 
+    /// <summary>Returns a framebuffer attaching only this image's view, compatible with
+    /// <paramref name="renderPass"/>, creating it on first use. Lives as long as the image.</summary>
+    public Framebuffer GetFramebuffer(RenderPass renderPass)
+    {
+        if (_framebuffers.TryGetValue(renderPass.Handle, out var framebuffer)) return framebuffer;
+
+        var view = _imageView;
+        var info = new FramebufferCreateInfo
+        {
+            SType = StructureType.FramebufferCreateInfo,
+            RenderPass = renderPass,
+            AttachmentCount = 1,
+            PAttachments = &view,
+            Width = (uint)Size.Width,
+            Height = (uint)Size.Height,
+            Layers = 1
+        };
+        Api.CreateFramebuffer(_device, in info, null, out framebuffer).ThrowOnError();
+        _framebuffers[renderPass.Handle] = framebuffer;
+        return framebuffer;
+    }
+
     public void Dispose()
     {
+        foreach (var framebuffer in _framebuffers.Values) Api.DestroyFramebuffer(_device, framebuffer, null);
+        _framebuffers.Clear();
         Api.DestroyImageView(_device, _imageView, null);
         Api.DestroyImage(_device, InternalHandle, null);
         if (_imageMemory.Handle != 0) Api.FreeMemory(_device, _imageMemory, null);

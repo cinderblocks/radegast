@@ -1,7 +1,7 @@
 #version 310 es
 precision highp float;
 
-// God-ray occlusion mask: reads the full-resolution HDR scene colour and SSAO's G-buffer depth,
+// God-ray occlusion mask: reads the full-resolution HDR scene colour and the main pass's depth,
 // and writes a downsampled (half-resolution, same target size as bloom) brightness mask of the
 // sky (sky pixels = their luminance, geometry pixels = 0). VkGodRayBlurPipeline then streaks
 // this toward the sun's screen position. Uses quad.vert like every other full-screen pass here.
@@ -14,7 +14,7 @@ precision highp float;
 // time, so god-rays always read as warm-white streaks regardless of the region's sky colour.
 
 layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (VkViewportControl._hdrColorFormat)
-layout(set = 0, binding = 1) uniform sampler2D uDepthTex;   // SSAO's G-buffer depth (same camera)
+layout(set = 0, binding = 1) uniform sampler2D uDepthTex;   // main-pass depth
 
 layout(push_constant) uniform PerDraw
 {

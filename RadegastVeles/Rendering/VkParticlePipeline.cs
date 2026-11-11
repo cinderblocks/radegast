@@ -81,7 +81,7 @@ internal sealed unsafe class VkParticlePipeline : IDisposable
     }
 
     /// <summary>Set 0, binding 0: uAlbedo, fragment-only -- particle.frag's only descriptor
-    /// binding (uHasTexture/uGlow live in the push-constant block instead).</summary>
+    /// binding (uHasTexture lives in the push-constant block instead).</summary>
     private static DescriptorSetLayout CreateSetLayout(VkContext vk)
     {
         var binding = new DescriptorSetLayoutBinding
@@ -104,9 +104,7 @@ internal sealed unsafe class VkParticlePipeline : IDisposable
     private static PipelineLayout CreatePipelineLayout(VkContext vk, DescriptorSetLayout setLayout)
     {
         // particle.vert/particle.frag's shared PushConstants block: mat4 uMvp (offset 0, 64B) +
-        // int uHasTexture (offset 64, 4B) + float uGlow (offset 68, 4B) = 72 bytes total,
-        // verified via Marshal.SizeOf/OffsetOf against VkParticlePushConstants the same way
-        // every other push-constant/UBO struct in this port was checked. ONE range covering
+        // int uHasTexture (offset 64, 4B) = 68 bytes total. ONE range covering
         // both stages (Vertex|Fragment), matching wireframe.vert/picking.frag's established
         // "single range, disjoint per-stage active spans" pattern rather than two ranges.
         var pushConstantRange = new PushConstantRange
@@ -295,13 +293,11 @@ internal sealed unsafe class VkParticlePipeline : IDisposable
 
 }
 
-/// <summary>C# mirror of particle.vert/particle.frag's shared PushConstants block. Offsets
-/// hand-derived and verified via Marshal.SizeOf/OffsetOf: mat4(0,64B) + int(64,4B) + float(68,4B)
-/// = 72 bytes, no padding needed since neither scalar requires 16-byte alignment.</summary>
-[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 72)]
+/// <summary>C# mirror of particle.vert/particle.frag's shared PushConstants block:
+/// mat4(0,64B) + int(64,4B) = 68 bytes.</summary>
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 68)]
 internal struct VkParticlePushConstants
 {
     [System.Runtime.InteropServices.FieldOffset(0)] public System.Numerics.Matrix4x4 Mvp;
     [System.Runtime.InteropServices.FieldOffset(64)] public int HasTexture;
-    [System.Runtime.InteropServices.FieldOffset(68)] public float Glow;
 }

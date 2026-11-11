@@ -269,13 +269,11 @@ internal static class VkDescriptorSetLayouts
     }
 
     /// <summary>Set 0 of the tonemap composite pass (tonemap.frag): binding 0 = the full-res HDR
-    /// scene colour, binding 1 = the blurred bloom target, binding 2 = the blurred god-ray target
-    /// (see <see cref="CreateGodRayMaskSamplerLayout"/>'s own doc comment for that pass' own
-    /// inputs) -- three bindings, unlike <see cref="CreateBlurSamplerLayout"/>'s one, since this
-    /// is the pass that composites every post-process stage's output together.</summary>
+    /// scene colour, binding 1 = the half-res blurred bloom target, binding 2 = the blurred god-ray
+    /// target, binding 3 = the quarter-res (wide) blurred bloom target.</summary>
     public static unsafe DescriptorSetLayout CreateTonemapSamplerLayout(VkContext vk)
     {
-        var bindings = stackalloc DescriptorSetLayoutBinding[3]
+        var bindings = stackalloc DescriptorSetLayoutBinding[4]
         {
             new DescriptorSetLayoutBinding
             {
@@ -297,12 +295,19 @@ internal static class VkDescriptorSetLayouts
                 DescriptorType = DescriptorType.CombinedImageSampler,
                 DescriptorCount = 1,
                 StageFlags = ShaderStageFlags.FragmentBit
+            },
+            new DescriptorSetLayoutBinding
+            {
+                Binding = 3,
+                DescriptorType = DescriptorType.CombinedImageSampler,
+                DescriptorCount = 1,
+                StageFlags = ShaderStageFlags.FragmentBit
             }
         };
         var createInfo = new DescriptorSetLayoutCreateInfo
         {
             SType = StructureType.DescriptorSetLayoutCreateInfo,
-            BindingCount = 3,
+            BindingCount = 4,
             PBindings = bindings
         };
         vk.Api.CreateDescriptorSetLayout(vk.Device, in createInfo, null, out var layout).ThrowOnError();

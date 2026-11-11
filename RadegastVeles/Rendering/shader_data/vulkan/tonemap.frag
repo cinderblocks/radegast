@@ -10,6 +10,7 @@ precision highp float;
 layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (VkViewportControl._hdrColorFormat)
 layout(set = 0, binding = 1) uniform sampler2D uBloomTex;   // half-res, already blurred
 layout(set = 0, binding = 2) uniform sampler2D uGodRayTex;  // half-res, already blurred/streaked
+layout(set = 0, binding = 3) uniform sampler2D uBloomWideTex; // quarter-res, blurred again
 
 layout(push_constant) uniform PerDraw
 {
@@ -29,6 +30,8 @@ layout(location = 0) out vec4 fragColor;
 // (the sun disc, water sparkle, the sky shader's cloud silver lining), not a global soft-focus
 // wash over the whole frame.
 const float kBloomIntensity = 0.55;
+// Share of that weight given to the wide (quarter-res) level; the rest goes to the tight one.
+const float kBloomWideShare = 0.5;
 
 // Tint for the god-ray contribution -- warm, matching the sun disc rather than a neutral white
 // streak. The mask (godray_mask.frag) outputs a luminance-only brightness value so the final
@@ -64,7 +67,8 @@ vec3 highlightShoulder(vec3 c)
 void main()
 {
     vec3 hdr   = texture(uSceneColor, vTexCoord).rgb;
-    vec3 bloom = texture(uBloomTex,   vTexCoord).rgb;
+    vec3 bloom = mix(texture(uBloomTex, vTexCoord).rgb,
+                     texture(uBloomWideTex, vTexCoord).rgb, kBloomWideShare);
 
     vec3 combined = hdr + bloom * kBloomIntensity;
 

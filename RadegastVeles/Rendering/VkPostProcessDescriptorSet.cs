@@ -36,6 +36,10 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
     public DescriptorSet ExtractSet { get; }
     public DescriptorSet BlurHSet { get; }
     public DescriptorSet BlurVSet { get; }
+    /// <summary>Reads the half-res blurred bloom (ping), writes the quarter-res pong.</summary>
+    public DescriptorSet BlurWideHSet { get; }
+    /// <summary>Reads the quarter-res pong, writes the quarter-res ping.</summary>
+    public DescriptorSet BlurWideVSet { get; }
     public DescriptorSet TonemapSet { get; }
     public DescriptorSet GodRayMaskSet { get; }
     public DescriptorSet GodRayBlurSet { get; }
@@ -52,10 +56,12 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
         ExtractSet = Allocate(vk, extractPipeline.SamplerLayout);
         BlurHSet = Allocate(vk, blurPipeline.SamplerLayout);
         BlurVSet = Allocate(vk, blurPipeline.SamplerLayout);
+        BlurWideHSet = Allocate(vk, blurPipeline.SamplerLayout);
+        BlurWideVSet = Allocate(vk, blurPipeline.SamplerLayout);
         TonemapSet = Allocate(vk, tonemapPipeline.SamplerLayout);
         GodRayMaskSet = Allocate(vk, godRayMaskPipeline.SamplerLayout);
         GodRayBlurSet = Allocate(vk, godRayBlurPipeline.SamplerLayout);
-        // Every binding on all six sets is left unwritten here -- VkViewportControl's
+        // Every binding on all eight sets is left unwritten here -- VkViewportControl's
         // EnsureHdrColorTarget/EnsureBloomTargets/EnsureGodRayTargets write them on first creation
         // (before any of these sets is ever bound for a real draw), via UpdateHdrInput/
         // UpdateBloomTargets/UpdateGodRayDepthInput/UpdateGodRayTargets below.
@@ -185,75 +191,63 @@ internal sealed unsafe class VkPostProcessDescriptorSet : System.IDisposable
         _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
     }
 
-    /// <summary>Rewrites the bloom ping-pong bindings -- call ONLY when the bloom targets are
-    /// (re)created. <c>pingInfo</c>/<c>pongInfo</c> match VkViewportControl's own naming: extract
-    /// writes ping, blur-H reads ping and writes pong, blur-V reads pong and writes BACK to ping
-    /// (so the final blurred result always ends up in ping, which is why TonemapSet's binding 1
-    /// points at ping here, not pong).</summary>
-    public void UpdateBloomTargets(DescriptorImageInfo pingInfo, DescriptorImageInfo pongInfo)
+    /// <summary>Rewrites the bloom bindings -- call ONLY when the bloom targets are (re)created.
+    /// Half-res chain: extract writes ping, blur-H reads ping and writes pong, blur-V reads pong
+    /// and writes ping. Quarter-res (wide) chain: blur-H reads the half-res ping and writes wide
+    /// pong, blur-V reads wide pong and writes wide ping. TonemapSet reads both pings (bindings 1
+    /// and 3).</summary>
+    public void UpdateBloomTargets(DescriptorImageInfo pingInfo, DescriptorImageInfo pongInfo,
+        DescriptorImageInfo widePingInfo, DescriptorImageInfo widePongInfo)
     {
         var ping = pingInfo;
         var pong = pongInfo;
-        var writes = stackalloc WriteDescriptorSet[3]
+        var widePing = widePingInfo;
+        var widePong = widePongInfo;
+        var writes = stackalloc WriteDescriptorSet[6]
         {
-            new WriteDescriptorSet
-            {
-                SType = StructureType.WriteDescriptorSet,
-                DstSet = BlurHSet,
-                DstBinding = 0,
-                DescriptorType = DescriptorType.CombinedImageSampler,
-                DescriptorCount = 1,
-                PImageInfo = &ping
-            },
-            new WriteDescriptorSet
-            {
-                SType = StructureType.WriteDescriptorSet,
-                DstSet = BlurVSet,
-                DstBinding = 0,
-                DescriptorType = DescriptorType.CombinedImageSampler,
-                DescriptorCount = 1,
-                PImageInfo = &pong
-            },
-            new WriteDescriptorSet
-            {
-                SType = StructureType.WriteDescriptorSet,
-                DstSet = TonemapSet,
-                DstBinding = 1,
-                DescriptorType = DescriptorType.CombinedImageSampler,
-                DescriptorCount = 1,
-                PImageInfo = &ping
-            }
+            ImageWrite(BlurHSet, 0, &ping),
+            ImageWrite(BlurVSet, 0, &pong),
+            ImageWrite(TonemapSet, 1, &ping),
+            ImageWrite(BlurWideHSet, 0, &ping),
+            ImageWrite(BlurWideVSet, 0, &widePong),
+            ImageWrite(TonemapSet, 3, &widePing)
         };
-        _vk.Api.UpdateDescriptorSets(_vk.Device, 3, writes, 0, null);
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 6, writes, 0, null);
     }
 
-    /// <summary>VkGraphicsTier.Medium only: binds TonemapSet's binding 1 (uBloomTex) to a shared
-    /// placeholder instead of a real bloom target -- that tier never calls
-    /// VkViewportControl.EnsureBloomTargets (bloom is High-only), so without this the binding
-    /// would stay permanently unwritten. Call once, right after construction, ONLY on that tier
-    /// -- UpdateBloomTargets above overwrites this same binding on High, the only other tier
-    /// that ever touches it.</summary>
+    private static WriteDescriptorSet ImageWrite(DescriptorSet set, uint binding, DescriptorImageInfo* info) => new()
+    {
+        SType = StructureType.WriteDescriptorSet,
+        DstSet = set,
+        DstBinding = binding,
+        DescriptorType = DescriptorType.CombinedImageSampler,
+        DescriptorCount = 1,
+        PImageInfo = info
+    };
+
+    /// <summary>VkGraphicsTier.Medium only: binds TonemapSet's bloom inputs (bindings 1 and 3) to
+    /// a shared placeholder. That tier never calls VkViewportControl.EnsureBloomTargets, so
+    /// without this the bindings would stay unwritten. Call once, right after construction.</summary>
     public void BindNoBloomPlaceholder(DescriptorImageInfo blackInfo)
     {
         var info = blackInfo;
-        var write = new WriteDescriptorSet
+        var writes = stackalloc WriteDescriptorSet[2]
         {
-            SType = StructureType.WriteDescriptorSet,
-            DstSet = TonemapSet,
-            DstBinding = 1,
-            DescriptorType = DescriptorType.CombinedImageSampler,
-            DescriptorCount = 1,
-            PImageInfo = &info
+            ImageWrite(TonemapSet, 1, &info),
+            ImageWrite(TonemapSet, 3, &info)
         };
-        _vk.Api.UpdateDescriptorSets(_vk.Device, 1, &write, 0, null);
+        _vk.Api.UpdateDescriptorSets(_vk.Device, 2, writes, 0, null);
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        var sets = stackalloc DescriptorSet[6]
-            { ExtractSet, BlurHSet, BlurVSet, TonemapSet, GodRayMaskSet, GodRayBlurSet };
-        _vk.Api.FreeDescriptorSets(_vk.Device, _vk.DescriptorPool, 6, sets);
+        var sets = stackalloc DescriptorSet[8]
+        {
+            ExtractSet, BlurHSet, BlurVSet, BlurWideHSet, BlurWideVSet, TonemapSet, GodRayMaskSet,
+            GodRayBlurSet
+        };
+        _vk.Api.FreeDescriptorSets(_vk.Device, _vk.DescriptorPool, 8, sets);
     }
 }

@@ -98,11 +98,17 @@ internal sealed unsafe class VkParticleBuffer : IDisposable
             var c2 = p.Position + r + u; // TR
             var c3 = p.Position - r + u; // TL
 
+            // Glow brightens the colour (up to 3x at glow = 1) rather than travelling as its own
+            // vertex attribute; particle.frag multiplies texture by colour, so the result is the
+            // same and the 36-byte vertex layout stays as is.
+            float glowGain = 1f + 2f * p.Glow * p.Glow;
+            var rgb = new Vector3(p.Color.X, p.Color.Y, p.Color.Z) * glowGain;
+
             void WriteVertex(Vector3 c, Vector2 uv)
             {
                 dest[idx++] = c.X; dest[idx++] = c.Y; dest[idx++] = c.Z;
                 dest[idx++] = uv.X; dest[idx++] = uv.Y;
-                dest[idx++] = p.Color.X; dest[idx++] = p.Color.Y; dest[idx++] = p.Color.Z; dest[idx++] = p.Color.W;
+                dest[idx++] = rgb.X; dest[idx++] = rgb.Y; dest[idx++] = rgb.Z; dest[idx++] = p.Color.W;
             }
 
             // Triangle 1: BL, BR, TR. Triangle 2: BL, TR, TL.

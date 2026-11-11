@@ -33,10 +33,7 @@ public interface ISceneViewport
     bool WaterReflectionsEnabled { get; set; }
     float WaterHeight { get; set; }
     bool AtmosphericsEnabled { get; set; }
-    /// <summary>Volumetric god rays (screen-space light shafts toward the sun). High-tier-only
-    /// and requires <see cref="SsaoEnabled"/> too (the mask stage reuses SSAO's G-buffer depth as
-    /// its occlusion source) -- see <c>VkViewportControl.RenderTonemapChain</c>'s own god-ray
-    /// stages for the full gate.</summary>
+    /// <summary>Volumetric god rays (screen-space light shafts toward the sun). High tier only.</summary>
     bool GodRaysEnabled { get; set; }
     bool FrustumCullingEnabled { get; set; }
     /// <summary>Hardware occlusion-query culling for scene objects fully hidden behind other

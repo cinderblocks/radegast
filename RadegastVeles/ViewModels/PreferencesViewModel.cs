@@ -320,8 +320,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private bool _atmosphericsEnabled = true;
 
     /// <summary>Volumetric god rays (screen-space light shafts toward the sun). Default true, but
-    /// only actually renders on High-tier hardware with SSAO also enabled (the mask stage reuses
-    /// SSAO's G-buffer depth) -- see ISceneViewport.GodRaysEnabled's own doc comment.</summary>
+    /// only renders on High-tier hardware.</summary>
     [ObservableProperty]
     private bool _godRaysEnabled = true;
 
