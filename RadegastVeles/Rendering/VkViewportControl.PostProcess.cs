@@ -46,12 +46,11 @@ public partial class VkViewportControl
     /// <summary>
     /// The tonemap/bloom/god-ray composite chain -- see <see cref="VkTonemapPipeline"/>'s own
     /// doc comment for the bloom stage overview, and <see cref="VkGodRayBlurPipeline"/>'s for the
-    /// 2 god-ray stages this method now also records (before bloom, gated on
+    /// 2 god-ray stages this method also records (before bloom, gated on
     /// <paramref name="sunIntensity"/>). Recorded into the SAME command buffer as the main
     /// pass, immediately after it ends (<c>vk.Api.CmdEndRenderPass</c> for <see cref="_renderPass"/>
-    /// already ran by the time this is called) and BEFORE underwater, which now runs after this
-    /// method instead of directly after the main pass -- see <c>RenderFrame</c>'s own call site
-    /// comment for why. <paramref name="image"/> is the real swapchain interop image; every
+    /// already ran by the time this is called) and BEFORE underwater, which runs after this
+    /// method -- see <c>RenderFrame</c>'s own call site comment for why. <paramref name="image"/> is the real swapchain interop image; every
     /// earlier stage in this method targets the persistent, full/half-res offscreen targets
     /// (<see cref="_hdrColorView"/>/<see cref="_bloomPingView"/>/<see cref="_bloomPongView"/>/
     /// <see cref="_godRayMaskView"/>/<see cref="_godRayBlurView"/>) instead, only the FINAL

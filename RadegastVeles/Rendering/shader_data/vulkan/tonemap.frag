@@ -1,11 +1,9 @@
 #version 310 es
 precision highp float;
 
-// Final composite: combines the full-resolution HDR scene colour with the blurred bloom target,
-// rolls off highlights above 1.0 (see highlightShoulder), and writes the result into the REAL swapchain image -- this
-// pass (not the main scene pass) is now the true last thing that touches it. See
-// VkRenderPass.CreateTonemapOutputPass's own doc comment for why this pass, not the main pass,
-// owns that role after the HDR buffer was introduced.
+// Final composite: adds bloom and god rays to the full-resolution HDR scene colour, rolls off
+// highlights above kKnee (see highlightShoulder) and writes the swapchain image. On the HDR tiers
+// this is the last pass to touch it (see VkRenderPass.CreateTonemapOutputPass).
 
 layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (VkViewportControl._hdrColorFormat)
 layout(set = 0, binding = 1) uniform sampler2D uBloomTex;   // half-res, already blurred
@@ -47,15 +45,8 @@ const float kGodRayIntensity = 0.9;
 // atmSoftClip. Those are the same values VkGraphicsTier.Low writes straight to the swapchain. So
 // the only job left here is rolling off what a UNORM target would have hard-clipped (the sun
 // disc's >1.0 core, specular spikes, bloom/god-ray additions): identity below kKnee, a smooth
-// C1-continuous shoulder toward 1.0 above it.
-//
-// This used to be the Narkowicz ACES fit, applied on top of the already-tonemapped, already-
-// gamma-encoded input. That second S-curve lifts mid values (0.2-0.5) by up to ~1.5x while
-// pulling everything above ~0.7 down (1.0 -> 0.80), per channel -- so in any colour, the MIDDLE
-// channel gained on the dominant one. Green is the middle channel of sky/water blues and of
-// skin/earth/brick warm tones alike (sky (0.40,0.60,0.95) -> (0.54,0.67,0.79), skin
-// (0.80,0.60,0.50) -> (0.75,0.67,0.62)), which read as a washed-out green cast over the whole
-// frame on Medium/High that Low never had.
+// C1-continuous shoulder toward 1.0 above it. A full tonemap curve here would be a second one on
+// top of the scene shaders' own and would shift hue.
 const float kKnee = 0.8;
 
 vec3 highlightShoulder(vec3 c)
@@ -81,8 +72,8 @@ void main()
         combined += godRay * kGodRayTint * (kGodRayIntensity * uGodRayIntensity);
     }
 
-    // The HDR buffer is a signed float format on macOS (see VkViewportControl._hdrColorFormat),
-    // so negative values can reach this point; the shoulder below assumes c >= 0.
+    // The RGBA16F fallback for the HDR buffer (see VkViewportControl._hdrColorFormat) is signed,
+    // so negative values can reach this point; the shoulder assumes c >= 0.
     vec3 mapped = highlightShoulder(max(combined, vec3(0.0)));
 
     // Dither: same reasoning as sky.frag's own dither at the very end of its main() -- a smooth

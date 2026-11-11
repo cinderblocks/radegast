@@ -93,12 +93,8 @@ public partial class VkViewportControl
             ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit,
             Tiling = ImageTiling.Optimal,
-            // TransferDstBit added alongside the original DepthStencilAttachmentBit|SampledBit:
-            // required by VkPlaceholderTextures.UploadDepthAndTransition's clear-via-
-            // TransferDstOptimal approach below (VUID-vkCmdClearDepthStencilImage-pRanges-02660
-            // -- found via this same self-test run, one edit after the layout-mismatch fix above,
-            // not assumed correct on the first try). One-time init cost only, no runtime-path
-            // consequence.
+            // TransferDstBit is required by VkPlaceholderTextures.UploadDepthAndTransition's
+            // clear-via-TransferDstOptimal below (VUID-vkCmdClearDepthStencilImage-pRanges-02660).
             Usage = ImageUsageFlags.DepthStencilAttachmentBit | ImageUsageFlags.SampledBit | ImageUsageFlags.TransferDstBit,
             SharingMode = SharingMode.Exclusive,
             InitialLayout = ImageLayout.Undefined
@@ -124,9 +120,8 @@ public partial class VkViewportControl
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _shadowDepthView).ThrowOnError();
 
-        // Real bug found via 8c-4's own combined self-test (ShadowsEnabled=false is this
-        // control's default, so RenderShadowPass never runs and never gets a chance to
-        // transition this image via the shadow render pass's own LoadOp=Clear): without this
+        // ShadowsEnabled=false is this control's default, so RenderShadowPass may never run and
+        // never transition this image via the shadow render pass's own LoadOp=Clear. Without this
         // explicit initial transition, _shadowMapInfo below claims ShaderReadOnlyOptimal while
         // the actual image stays Undefined (its InitialLayout above) for the panel's whole
         // lifetime whenever shadows are off -- a real VUID-vkCmdDraw-None-09600 validation error
@@ -233,7 +228,7 @@ public partial class VkViewportControl
             vk.Api.BindImageMemory(vk.Device, _pointShadowImages[slot], _pointShadowMemories[slot], 0).ThrowOnError();
 
             // Clear all 6 layers to depth=1.0 and transition to ShaderReadOnlyOptimal BEFORE any
-            // per-face view/framebuffer exists -- same real bug CreateShadowTarget's own comment
+            // per-face view/framebuffer exists -- same constraint CreateShadowTarget's own comment
             // documents (a descriptor claims ShaderReadOnlyOptimal while the real image stays
             // Undefined if this is skipped and RenderFrame never runs this slot's faces, e.g.
             // ShadowsEnabled=false all session).

@@ -2,8 +2,8 @@
 precision highp float;
 
 // One direction of a separable 9-tap Gaussian blur -- run twice by the SAME pipeline (see
-// VkBloomBlurPipeline), horizontal then vertical, ping-ponging between two half-resolution
-// targets. uDirection carries the per-pass texel step (see ssaoblur.frag's own doc comment for
+// VkBloomBlurPipeline), horizontal then vertical, ping-ponging between two targets of
+// the same size (once at half resolution, once at quarter resolution). uDirection carries the per-pass texel step (see ssaoblur.frag's own doc comment for
 // why this is a push constant rather than a UBO binding -- same reasoning, just a direction
 // vector here instead of a fixed box size): (1/w, 0) for the horizontal pass, (0, 1/h) for the
 // vertical pass, so this one shader body handles both without a branch.

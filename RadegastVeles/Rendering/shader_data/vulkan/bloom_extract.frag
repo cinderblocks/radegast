@@ -27,8 +27,8 @@ const float kKnee      = 0.5;
 // Upper bound on what one source texel may feed into bloom. The brightest legitimate content is
 // the sun disc (~8x sunlight colour, sky.frag); anything far past that is a shading blow-up
 // (a specular spike, or Inf from an overflowed half-float), and the blur would spread a single
-// such texel into a visible blotch. The lower bound matters on macOS, where the HDR buffer is a
-// signed format and can hold negative values that would SUBTRACT from the composite.
+// such texel into a visible blotch. The lower bound matters when the HDR buffer is the signed
+// RGBA16F fallback, whose negative values would SUBTRACT from the composite.
 const float kMaxSceneValue = 16.0;
 
 vec3 sceneTap(vec2 uv)

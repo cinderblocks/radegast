@@ -128,10 +128,9 @@ public partial class VkViewportControl
     /// <summary>
     /// Creates (or resizes) <see cref="_opaqueSnapshotImage"/>: a persistent copy target the
     /// split main pass copies the finished opaque scene colour into, between the opaque-only
-    /// pass and the water/SSR/alpha continuation pass. Originally built for water refraction
-    /// alone; now shared with SSR (see this field group's own header comment) -- both features
-    /// need exactly the same snapshot, so this one target/one copy serves both, patched into
-    /// both consumers' descriptor sets below. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
+    /// pass and the water/SSR/alpha continuation pass. Shared by water refraction and SSR (see
+    /// this field group's own header comment): both need exactly the same snapshot, so this one
+    /// target/one copy serves both, patched into both consumers' descriptor sets below. Mirrors <see cref="EnsureUnderwaterTarget"/>'s own
     /// shape exactly (see its doc comment) -- same "never a render-pass attachment itself, only a
     /// CmdCopyImage destination and a sampled texture" role -- except format
     /// <c>_hdrColorFormat</c> (matching <see cref="_hdrColorImage"/>'s own HDR format, not
