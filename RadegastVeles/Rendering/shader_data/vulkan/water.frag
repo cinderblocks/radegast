@@ -227,7 +227,9 @@ void main()
     // artefacts); near water keeps the EEP fog alpha for shallow translucency.
     float alpha = mix(uWaterColor.a * 0.72, 1.0, max(fresnel, aer));
 
-    fragColor = vec4(col, alpha);
+    // max(): the dither above can push a near-black channel below zero, which a signed float
+    // HDR target stores as-is (a UNORM target clamped it).
+    fragColor = vec4(max(col, vec3(0.0)), alpha);
 
     // Write the depth of the actual water surface so the water:
     //   • renders over underwater terrain (terrain depth > water depth -> Less passes)

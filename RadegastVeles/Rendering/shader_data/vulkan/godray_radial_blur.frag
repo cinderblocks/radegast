@@ -34,6 +34,15 @@ const float kExposure     = 0.35;
 
 void main()
 {
+    // Zero-intensity frames write true zeros without touching uMaskTex: VkViewportControl runs
+    // this pass once with uIntensity = 0 to give the target defined contents when the mask stage
+    // hasn't run (so uMaskTex may be uninitialised -- and garbage * 0.0 is NaN if it's Inf/NaN).
+    if (uIntensity <= 0.0)
+    {
+        fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+
     vec2  delta = (uSunUv - vTexCoord) * kDensity / float(kNumSamples);
     vec2  uv    = vTexCoord;
     float decay = 1.0;

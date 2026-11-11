@@ -13,7 +13,7 @@ precision highp float;
 // mask colour-neutral; the warm tint (kGodRayTint in tonemap.frag) is applied once, at composite
 // time, so god-rays always read as warm-white streaks regardless of the region's sky colour.
 
-layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (R16G16B16A16Sfloat)
+layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (VkViewportControl._hdrColorFormat)
 layout(set = 0, binding = 1) uniform sampler2D uDepthTex;   // SSAO's G-buffer depth (same camera)
 
 layout(push_constant) uniform PerDraw
@@ -31,6 +31,10 @@ layout(location = 0) out vec4 fragColor;
 // (unlike bloom's brightness knee): a pixel is either sky or it isn't.
 const float kSkyDepthThreshold = 0.9999;
 
+// Same cap bloom_extract.frag applies, for the same reason: one runaway texel would otherwise be
+// streaked across the frame by the radial blur.
+const float kMaxSceneValue = 16.0;
+
 void main()
 {
     float lumaSum = 0.0;
@@ -43,7 +47,7 @@ void main()
         float depth = texture(uDepthTex, uv).r;
         if (depth >= kSkyDepthThreshold)
         {
-            vec3 c = texture(uSceneColor, uv).rgb;
+            vec3 c = clamp(texture(uSceneColor, uv).rgb, vec3(0.0), vec3(kMaxSceneValue));
             lumaSum += dot(c, vec3(0.2126, 0.7152, 0.0722));
             skyTaps += 1.0;
         }

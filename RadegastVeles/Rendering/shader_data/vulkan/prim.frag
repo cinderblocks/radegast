@@ -554,7 +554,7 @@ void pbrLighting(vec3 albedo, float metallic, float roughness, float occlusion,
     // ACES filmic tonemap: compresses HDR highlights to [0,1] before gamma,
     // preventing hard clipping on smooth metallic specular spikes.
     col = acesFilmic(col);
-    col = pow(col, vec3(1.0 / 2.2));
+    col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
 
     result = vec4(col, alpha);
 }
@@ -866,7 +866,7 @@ void main()
     col += albedo * glow;
 
     // Convert back to sRGB for display.
-    col = pow(col, vec3(1.0 / 2.2));
+    col = pow(max(col, vec3(0.0)), vec3(1.0 / 2.2));
 
     // Emissive alpha mode (3): alpha drives additive emission rather than
     // transparency. The final fragment is fully opaque, mirroring the SL

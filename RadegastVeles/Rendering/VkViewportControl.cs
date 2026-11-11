@@ -447,7 +447,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // layout/access, CmdCopyImage destination + sampled texture, never a render-pass attachment
     // itself" role, just a different source (the still-open _hdrColorImage mid-frame, not the
     // fully-composited swapchain image post-frame) and format (_hdrColorFormat, matching
-    // _hdrColorImage's own HDR format -- must NOT be _underwaterSourceImage's R8G8B8A8Unorm,
+    // _hdrColorImage's own HDR format -- must NOT be _underwaterSourceImage's LDR swapchain format,
     // since this copies pre-tonemap HDR data water.frag's existing HDR-space math depends on).
     // Created lazily, only on frames where the main-pass split actually runs (RenderFrame's own
     // doOpaqueSnapshot gate) -- reuses _postProcessLinearSampler rather than a dedicated
@@ -991,6 +991,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     // bug when used as a color attachment (green output). R16G16B16A16Sfloat (MTLPixelFormatRGBA16Float)
     // has no such ambiguity. Costs 8 bytes/pixel vs 4, acceptable given unified-memory headroom.
     private Format _hdrColorFormat;
+    // The interop swapchain image's format (B8G8R8A8Unorm on macOS, R8G8B8A8Unorm elsewhere --
+    // see VkInteropSwapchain). Every render pass that attaches the swapchain image, and every
+    // image vkCmdCopyImage'd to/from it, must use this rather than a hardcoded RGBA8.
+    private Format _swapchainFormat;
 
     // Tonemap/bloom post-process chain -- when created at all (see _graphicsTier above),
     // it's mandatory the same way _prim/_renderPass are, unlike SSAO/shadows/water/underwater
@@ -1025,6 +1029,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
     private DeviceMemory _godRayMaskMemory, _godRayBlurMemory;
     private ImageView _godRayMaskView, _godRayBlurView;
     private Framebuffer _godRayMaskFramebuffer, _godRayBlurFramebuffer;
+    // False until something has rendered into _godRayBlurImage since it was (re)created.
+    // tonemap.frag has that image bound every frame on High, including the (common) frames where
+    // the god-ray stages are skipped -- see RenderTonemapChain's zero-fill for what this gates.
+    private bool _godRayBlurDefined;
     private VkGodRayMaskPipeline? _godRayMaskPipeline;
     private VkGodRayBlurPipeline? _godRayBlurPipeline;
     public bool GodRaysEnabled { get; set; } = true;
@@ -2015,6 +2023,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             // see VkInteropSwapchain.cs for why. The Low-tier direct-to-swapchain pass must match.
             var swapchainFormat = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
                 ? Format.B8G8R8A8Unorm : Format.R8G8B8A8Unorm;
+            _swapchainFormat = swapchainFormat;
             // macOS uses R16G16B16A16Sfloat instead of B10G11R11UfloatPack32 -- see _hdrColorFormat's
             // own field comment for why.
             _hdrColorFormat = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
@@ -2352,7 +2361,8 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             {
                 try
                 {
-                    _underwaterPass = VkRenderPass.CreateUnderwaterPass(vk, Format.R8G8B8A8Unorm);
+                    // Must match the swapchain image this pass attaches (BGRA8 on macOS).
+                    _underwaterPass = VkRenderPass.CreateUnderwaterPass(vk, _swapchainFormat);
                     _underwaterPipeline = VkUnderwaterPipeline.Create(vk, _underwaterPass);
                     var underwaterSamplerInfo = new SamplerCreateInfo
                     {
@@ -6303,8 +6313,17 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 vk.Api.CmdPushConstants(cmd, _godRayMaskPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 8, &maskSrcTexelSize);
                 vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
                 vk.Api.CmdEndRenderPass(cmd);
+            }
 
-                // ── Stage 0b: radial blur toward the sun, mask -> half-res streak ───────────
+            // ── Stage 0b: radial blur toward the sun, mask -> half-res streak ───────────────
+            // Also run ONCE with intensity 0 when the god-ray stages are skipped and nothing has
+            // rendered into the target since it was created: godray_radial_blur.frag writes plain
+            // zeros in that case, so the image tonemap.frag has bound is never undefined memory
+            // (and is in ShaderReadOnlyOptimal, which the descriptor claims). Once defined, a
+            // skipped frame leaves the previous streak in place; tonemap.frag doesn't sample it
+            // at intensity 0.
+            if (sunIntensity > 0f || !_godRayBlurDefined)
+            {
                 var blurBegin = new RenderPassBeginInfo
                 {
                     SType = StructureType.RenderPassBeginInfo,
@@ -6315,13 +6334,14 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
                 };
                 vk.Api.CmdBeginRenderPass(cmd, in blurBegin, SubpassContents.Inline);
                 vk.Api.CmdBindPipeline(cmd, PipelineBindPoint.Graphics, _godRayBlurPipeline!.Pipeline);
-                var godRayBlurSet = _postProcessDescSet.GodRayBlurSet;
+                var godRayBlurSet = _postProcessDescSet!.GodRayBlurSet;
                 vk.Api.CmdBindDescriptorSets(cmd, PipelineBindPoint.Graphics, _godRayBlurPipeline.Layout, 0, 1, &godRayBlurSet, 0, null);
-                Span<float> godRayPc = stackalloc float[4] { sunScreenUv.X, sunScreenUv.Y, sunIntensity, 0.955f };
+                Span<float> godRayPc = stackalloc float[4] { sunScreenUv.X, sunScreenUv.Y, MathF.Max(sunIntensity, 0f), 0.955f };
                 fixed (float* p = godRayPc)
                     vk.Api.CmdPushConstants(cmd, _godRayBlurPipeline.Layout, ShaderStageFlags.FragmentBit, 0, 16, p);
                 vk.Api.CmdDraw(cmd, 3, 1, 0, 0);
                 vk.Api.CmdEndRenderPass(cmd);
+                _godRayBlurDefined = true;
             }
 
             // ── Stage 1: bright-pass extract, full-res HDR -> half-res Ping ──────────────
@@ -6692,7 +6712,10 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         {
             SType = StructureType.ImageCreateInfo,
             ImageType = ImageType.Type2D,
-            Format = Format.R8G8B8A8Unorm,
+            // The swapchain image's own format, not a hardcoded RGBA8: vkCmdCopyImage is a raw
+            // texel copy, so copying macOS's BGRA8 swapchain image into an RGBA8 image would
+            // hand underwater.frag red and blue swapped.
+            Format = _swapchainFormat,
             Extent = new Extent3D((uint)size.Width, (uint)size.Height, 1),
             MipLevels = 1,
             ArrayLayers = 1,
@@ -6717,7 +6740,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
             SType = StructureType.ImageViewCreateInfo,
             Image = _underwaterSourceImage,
             ViewType = ImageViewType.Type2D,
-            Format = Format.R8G8B8A8Unorm,
+            Format = _swapchainFormat,
             SubresourceRange = new ImageSubresourceRange(ImageAspectFlags.ColorBit, 0, 1, 0, 1)
         };
         vk.Api.CreateImageView(vk.Device, in viewInfo, null, out _underwaterSourceView).ThrowOnError();
@@ -8797,6 +8820,7 @@ public class VkViewportControl : Control, ISingleObjectViewport, ISceneViewport,
         _godRayMaskView = default; _godRayMaskImage = default; _godRayMaskMemory = default;
         _godRayBlurView = default; _godRayBlurImage = default; _godRayBlurMemory = default;
         _godRaySize = default;
+        _godRayBlurDefined = false;
     }
 
     private void FreePanelResources()

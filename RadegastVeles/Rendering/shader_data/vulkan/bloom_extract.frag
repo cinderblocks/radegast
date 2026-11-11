@@ -6,7 +6,7 @@ precision highp float;
 // copy containing only the content bloom should spread. Uses quad.vert like every other
 // full-screen pass in this port.
 
-layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (B10G11R11UfloatPack32)
+layout(set = 0, binding = 0) uniform sampler2D uSceneColor; // full-res HDR (VkViewportControl._hdrColorFormat)
 
 layout(push_constant) uniform PerDraw
 {
@@ -23,6 +23,18 @@ layout(location = 0) out vec4 fragColor;
 // make the bloom's own edge visible as a ring around bright objects).
 const float kThreshold = 1.0;
 const float kKnee      = 0.5;
+
+// Upper bound on what one source texel may feed into bloom. The brightest legitimate content is
+// the sun disc (~8x sunlight colour, sky.frag); anything far past that is a shading blow-up
+// (a specular spike, or Inf from an overflowed half-float), and the blur would spread a single
+// such texel into a visible blotch. The lower bound matters on macOS, where the HDR buffer is a
+// signed format and can hold negative values that would SUBTRACT from the composite.
+const float kMaxSceneValue = 16.0;
+
+vec3 sceneTap(vec2 uv)
+{
+    return clamp(texture(uSceneColor, uv).rgb, vec3(0.0), vec3(kMaxSceneValue));
+}
 
 vec3 softThreshold(vec3 c)
 {
@@ -42,10 +54,10 @@ void main()
     // centres land -- flickering/aliasing under camera motion. Averaging an explicit 2x2 offset
     // pattern is cheap (4 taps) and stable regardless of exact alignment.
     vec3 sum = vec3(0.0);
-    sum += texture(uSceneColor, vTexCoord + uSrcTexelSize * vec2(-0.5, -0.5)).rgb;
-    sum += texture(uSceneColor, vTexCoord + uSrcTexelSize * vec2( 0.5, -0.5)).rgb;
-    sum += texture(uSceneColor, vTexCoord + uSrcTexelSize * vec2(-0.5,  0.5)).rgb;
-    sum += texture(uSceneColor, vTexCoord + uSrcTexelSize * vec2( 0.5,  0.5)).rgb;
+    sum += sceneTap(vTexCoord + uSrcTexelSize * vec2(-0.5, -0.5));
+    sum += sceneTap(vTexCoord + uSrcTexelSize * vec2( 0.5, -0.5));
+    sum += sceneTap(vTexCoord + uSrcTexelSize * vec2(-0.5,  0.5));
+    sum += sceneTap(vTexCoord + uSrcTexelSize * vec2( 0.5,  0.5));
     sum *= 0.25;
 
     fragColor = vec4(softThreshold(sum), 1.0);
