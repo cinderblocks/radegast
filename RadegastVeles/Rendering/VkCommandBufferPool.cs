@@ -53,6 +53,19 @@ internal class VkCommandBufferPool : IDisposable
     // against the same VkQueue, and today nothing prevents two threads (e.g. InitializeAsync's
     // post-await continuation and another panel's RenderFrame) from calling Submit() concurrently.
     private readonly object _queueLock = new();
+    private int _deviceLost;
+
+    /// <summary>True once any submit or fence wait has returned ErrorDeviceLost. The device
+    /// cannot recover from that, so submits become no-ops and callers should stop rendering.</summary>
+    public bool DeviceLost => System.Threading.Volatile.Read(ref _deviceLost) != 0;
+
+    private void NoteDeviceLost(string debugTag)
+    {
+        if (System.Threading.Interlocked.Exchange(ref _deviceLost, 1) != 0) return;
+        LibreMetaverse.Logger.Error(
+            $"[VkCommandBufferPool] The Vulkan device was lost (first seen on command buffer tagged \"{debugTag}\"). "
+            + "No further GPU work will be submitted in this process.");
+    }
 
     public unsafe VkCommandBufferPool(Vk api, Device device, Queue queue, uint queueFamilyIndex)
     {
@@ -166,7 +179,16 @@ internal class VkCommandBufferPool : IDisposable
             if (_fenceWaited) return _fenceWaitOk;
             _fenceWaited = true;
 
-            var result = _api.WaitForFences(_device, 1, in _fence, true, WaitTimeoutNs);
+            var result = _pool.DeviceLost
+                ? Result.ErrorDeviceLost
+                : _api.WaitForFences(_device, 1, in _fence, true, WaitTimeoutNs);
+            if (result == Result.ErrorDeviceLost)
+            {
+                _pool.NoteDeviceLost(_debugTag);
+                _api.DestroyFence(_device, _fence, null);
+                _fenceWaitOk = false;
+                return false;
+            }
             if (result != Result.Success)
             {
                 LibreMetaverse.Logger.Error(
@@ -256,6 +278,7 @@ internal class VkCommandBufferPool : IDisposable
             IntPtr pNext)
         {
             EndRecording();
+            if (_pool.DeviceLost) return;
             fence ??= _fence;
 
             ulong acquireKey = keyedMutex?.AcquireKey ?? 0, releaseKey = keyedMutex?.ReleaseKey ?? 0;
@@ -317,7 +340,11 @@ internal class VkCommandBufferPool : IDisposable
                 // recovers via WaitForFenceCore's own 5s bound, but this line is what actually
                 // names the failure instead of leaving it looking like a plain fence-wait
                 // timeout with no explanation.
-                if (submitResult != Result.Success)
+                if (submitResult == Result.ErrorDeviceLost)
+                {
+                    _pool.NoteDeviceLost(_debugTag);
+                }
+                else if (submitResult != Result.Success)
                 {
                     LibreMetaverse.Logger.Error(
                         $"[VkCommandBufferPool] QueueSubmit returned {submitResult} on command buffer "

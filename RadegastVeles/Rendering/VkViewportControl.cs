@@ -4828,6 +4828,13 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         if (!_attached || _swapchain == null || _prim == null || _frameSets == null
             || _placeholders == null || _instanceDrawer == null)
             return;
+        if (VkApi.Context.Pool.DeviceLost)
+        {
+            _renderDisabledAfterFailure = true;
+            InitFailed?.Invoke(
+                "The graphics device was lost, so 3D rendering has stopped. Restart Veles to restore it.");
+            return;
+        }
 
         var source = this.GetPresentationSource();
         if (source == null) return;
