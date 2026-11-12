@@ -35,25 +35,20 @@ namespace Radegast.Veles.Rendering;
 /// buffers to a <see cref="VkViewportControl"/> via a caller-supplied delegate.
 ///
 /// <para>
-/// The algorithm mirrors <c>LLVolumeImplFlexible::doFlexibleUpdate()</c> in the
-/// SL C++ viewer (indra/llprimitive/llvolume.cpp).  The spine is modelled as a
-/// chain of <c>N</c> segments; each segment carries a position and velocity that
-/// is advanced every tick using a semi-implicit Euler step:
-/// <list type="bullet">
-///   <item>Spring / tension force pulls each segment toward the prim rest axis.</item>
-///   <item>Gravity (negative Z in prim-local space) and user-defined force act on each segment.</item>
-///   <item>Wind (from the simulator wind grid) adds a lateral impulse scaled by the
-///         prim's <c>Wind</c> parameter.</item>
-///   <item>Drag damps velocity.</item>
-/// </list>
+/// The simulation follows <c>LLVolumeImplFlexible::doFlexibleUpdate()</c> in the SL viewer
+/// (indra/newview/llflexibleobject.cpp). The spine is a chain of <c>1 &lt;&lt; Softness</c>
+/// sections whose positions are kept in WORLD space. Each tick the first section is pinned to
+/// the prim's current base and every other section is displaced by gravity, wind and the user
+/// force, pulled toward its parent's direction by tension, carried by its previous displacement
+/// (inertia), then clamped to the section length and to a maximum bend angle. Because the
+/// sections live in world space, moving or turning the owner (an avatar, for an attachment)
+/// leaves them behind and they swing after it.
 /// </para>
 /// <para>
-/// Vertex deformation: vertices are stored in prim-local space with Z ∈ [−0.5, 0.5]
-/// (the path axis).  For each vertex we compute its normalised path parameter
-/// <c>t</c> = Z + 0.5, look up the interpolated spine position and tangent
-/// for that <c>t</c>, build a local-to-world rotation from the tangent, and apply
-/// it in place of the original Z-axis transform so that the cross-section follows
-/// the deformed path.
+/// The simulated sections are resampled with a cubic into <see cref="FlexiPrimInfo.PathSegments"/>
+/// spine points in prim-local metres. Vertices are stored in prim-local space with
+/// Z ∈ [−0.5, 0.5] (the path axis); each one takes the spine position and tangent at
+/// <c>t</c> = Z + 0.5 so that its cross-section follows the deformed path.
 /// </para>
 /// </summary>
 internal sealed class FlexiPrimAnimator : IDisposable
@@ -78,47 +73,57 @@ internal sealed class FlexiPrimAnimator : IDisposable
     private sealed class FlexiState
     {
         public readonly FlexiPrimInfo Info;
-        // Spine positions in PHYSICAL prim-local space (metres).
-        // [0] is the fixed anchor at the bottom of the prim (−Scale.Z/2).
-        // X/Y deflection is in metres; segment spacing along Z is Scale.Z/n.
+        // Render spine in PHYSICAL prim-local space (metres), PathSegments + 1 points, resampled
+        // from the simulated sections each tick. [0] is the anchor at −Scale.Z/2.
         public readonly Vector3[] Positions;
-        public readonly Vector3[] Velocities;
+        // Simulated sections, SectionCount + 1 entries, in world space. Directions[i] is the
+        // unit vector from section i−1 to section i; Velocities[i] is the displacement of
+        // section i over the previous tick.
+        public readonly Vector3[] SectionPositions;
+        public readonly Vector3[] SectionDirections;
+        public readonly Vector3[] SectionVelocities;
+        // False until the sections have been laid out along the prim's rest axis in world space.
+        public bool SectionsInitialized;
         // The attachTx last used to deform+upload this state's vertices, or null if it has
-        // never been placed yet. Lets TickAndUpload skip the (comparatively expensive)
-        // per-vertex deform/upload when physics simulation is disabled and nothing has moved,
-        // while still catching every case where it actually needs to run: first placement,
-        // and any avatar/bone/world-transform change even while frozen. See AnimationEnabled.
+        // never been placed yet. Lets TickAndUpload skip the per-vertex deform/upload when
+        // physics simulation is disabled and nothing has moved. See AnimationEnabled.
         public Matrix4x4? LastAttachTx;
 
+        public int SectionCount => SectionPositions.Length - 1;
+
         /// <param name="carryOver">
-        /// Spine state cloned from the same underlying prim's previous <see cref="FlexiState"/>
-        /// (matched by <see cref="LibreMetaverse.Primitive.LocalID"/> — see
-        /// <c>FlexiPrimAnimator.CaptureCarryOverState</c>), reused verbatim instead of resetting
-        /// to the rest pose when a rebuild (LOD change, draw-distance change, appearance rebake,
-        /// tab-switch/GL reset, ...) replaces the animator for a still-present flexi prim. Null
-        /// — or a length mismatch, e.g. the prim's Softness was edited and the segment count
-        /// changed — falls back to the straight rest pose.
+        /// Section state cloned from the same prim's previous <see cref="FlexiState"/> (matched
+        /// by <see cref="LibreMetaverse.Primitive.LocalID"/>), reused when a rebuild replaces the
+        /// animator for a still-present flexi prim. Null, or a section-count mismatch (the
+        /// prim's Softness changed), starts from the rest pose.
         /// </param>
-        public FlexiState(FlexiPrimInfo info, (Vector3[] Positions, Vector3[] Velocities)? carryOver = null)
+        public FlexiState(FlexiPrimInfo info, SectionSnapshot? carryOver = null)
         {
             Info = info;
             int n    = info.PathSegments + 1;
             float sz = info.Scale.Z;
 
-            if (carryOver is { } prior && prior.Positions.Length == n && prior.Velocities.Length == n)
+            Positions = new Vector3[n];
+            for (int i = 0; i < n; i++)
+                Positions[i] = new Vector3(0f, 0f, -sz * 0.5f + (float)i / info.PathSegments * sz);
+
+            int sections = ComputeSectionCount(info.Prim.Flexible!.Softness) + 1;
+            if (carryOver is { } prior && prior.Positions.Length == sections)
             {
-                Positions  = prior.Positions;
-                Velocities = prior.Velocities;
+                SectionPositions    = prior.Positions;
+                SectionDirections   = prior.Directions;
+                SectionVelocities   = prior.Velocities;
+                SectionsInitialized = true;
                 return;
             }
 
-            Positions  = new Vector3[n];
-            Velocities = new Vector3[n];
-            // Rest pose: straight along +Z, anchor at −sz/2.
-            for (int i = 0; i < n; i++)
-                Positions[i] = new Vector3(0f, 0f, -sz * 0.5f + (float)i / info.PathSegments * sz);
+            SectionPositions  = new Vector3[sections];
+            SectionDirections = new Vector3[sections];
+            SectionVelocities = new Vector3[sections];
         }
     }
+
+    private readonly record struct SectionSnapshot(Vector3[] Positions, Vector3[] Directions, Vector3[] Velocities);
 
     private readonly FlexiPrimInfo[]           _flexiPrims;
     private readonly FlexiState[]              _states;
@@ -131,6 +136,8 @@ internal sealed class FlexiPrimAnimator : IDisposable
     // single-object viewers (CreateSingleObjectScheduler callers other than
     // AvatarViewerViewModel) leave it null.
     private readonly Action<VkFlexiComputeJob>?  _scheduleCompute;
+    // Wind velocity (m/s) at a world position, or null to use a slow sinusoidal stand-in.
+    private readonly Func<Vector3, Vector3>?   _windSampler;
     private          CancellationTokenSource?  _cts;
     private          bool                      _disposed;
 
@@ -161,19 +168,25 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// own motion doesn't visibly snap it back and make it re-settle. Safe to pass an already
     /// disposed animator — disposal doesn't clear its state arrays.
     /// </param>
+    /// <param name="windSampler">
+    /// Returns the wind velocity in m/s at a world position (the region wind grid, for the
+    /// scene viewer). Null for viewers with no region.
+    /// </param>
     public FlexiPrimAnimator(PrimRenderSubmission submission, Action<int, float[], int, bool> scheduleUpdate,
-        Action<VkFlexiComputeJob>? scheduleCompute = null, FlexiPrimAnimator? priorAnimator = null)
+        Action<VkFlexiComputeJob>? scheduleCompute = null, FlexiPrimAnimator? priorAnimator = null,
+        Func<Vector3, Vector3>? windSampler = null)
     {
         _flexiPrims      = submission.FlexiPrims;
         _scheduleUpdate  = scheduleUpdate;
         _scheduleCompute = scheduleCompute;
+        _windSampler     = windSampler;
 
         var carryOver = priorAnimator?.CaptureCarryOverState();
         _states = new FlexiState[_flexiPrims.Length];
         for (int i = 0; i < _flexiPrims.Length; i++)
         {
             var fi = _flexiPrims[i];
-            (Vector3[], Vector3[])? prior = carryOver != null &&
+            SectionSnapshot? prior = carryOver != null &&
                 carryOver.TryGetValue(fi.Prim.LocalID, out var p) ? p : null;
             _states[i] = new FlexiState(fi, prior);
         }
@@ -188,11 +201,17 @@ internal sealed class FlexiPrimAnimator : IDisposable
     /// animator has started reading. At worst that race yields one tick's stale/torn read; the
     /// damped spring physics self-corrects within a tick or two, so it isn't worth a lock.
     /// </summary>
-    private Dictionary<uint, (Vector3[] Positions, Vector3[] Velocities)> CaptureCarryOverState()
+    private Dictionary<uint, SectionSnapshot> CaptureCarryOverState()
     {
-        var map = new Dictionary<uint, (Vector3[], Vector3[])>(_states.Length);
+        var map = new Dictionary<uint, SectionSnapshot>(_states.Length);
         foreach (var state in _states)
-            map[state.Info.Prim.LocalID] = ((Vector3[])state.Positions.Clone(), (Vector3[])state.Velocities.Clone());
+        {
+            if (!state.SectionsInitialized) continue;
+            map[state.Info.Prim.LocalID] = new SectionSnapshot(
+                (Vector3[])state.SectionPositions.Clone(),
+                (Vector3[])state.SectionDirections.Clone(),
+                (Vector3[])state.SectionVelocities.Clone());
+        }
         return map;
     }
 
@@ -345,14 +364,14 @@ internal sealed class FlexiPrimAnimator : IDisposable
     {
         if (_disposed) return;
         foreach (var state in _states)
-            TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute, simulate: AnimationEnabled);
+            TickAndUpload(state, dt, _scheduleUpdate, _scheduleCompute, _windSampler, simulate: AnimationEnabled);
     }
 
     // ── Simulation tick + vertex upload ──────────────────────────────────────────
 
     private static void TickAndUpload(FlexiState state, float dt,
         Action<int, float[], int, bool> scheduleUpdate, Action<VkFlexiComputeJob>? scheduleCompute,
-        bool simulate)
+        Func<Vector3, Vector3>? windSampler, bool simulate)
     {
         var info   = state.Info;
         var flex   = info.Prim.Flexible!;
@@ -390,103 +409,17 @@ internal sealed class FlexiPrimAnimator : IDisposable
         // this is Identity; for SceneViewer it carries the avatar / linkset world matrix.
         attachTx = attachTx * info.ExternalTransform;
 
-        // ── Physics constants matching LLVolumeImplFlexible::doFlexibleUpdate() ───
-        //
-        // Simulation runs in PHYSICAL prim-local space (metres).
-        // The prim's scale is (sx, sy, sz):
-        //   • sz  = length along the path (Z axis).
-        //   • segLen = sz / n  (metres per segment, matching SL's section_length).
-        // After deformation the metre positions are divided back by scale before
-        // writing to the VBO so the GPU's face.Transform (Scale × Rotation) lands
-        // the vertices in the right place without double-scaling.
-        //
-        // World-space forces (gravity) are rotated into prim-local space via the
-        // transpose of the rotation sub-matrix of attachTx.
-
+        // Physical prim scale in metres: sz is the length along the path (Z axis). Deformed
+        // positions are divided back by scale before being written so attachTx's own scale
+        // lands them correctly.
         float sx = info.Scale.X;
         float sy = info.Scale.Y;
         float sz = info.Scale.Z;
 
-        // Physics integration only runs when animation is enabled — see AnimationEnabled and
-        // the Tick() doc comment. World placement below (WorldBounds + deform/upload) always
-        // runs regardless, using whatever state.Positions currently holds (the rest pose if
-        // simulation has never run, or the last-simulated pose if it was just turned off).
+        // Physics only runs when animation is enabled. World placement below always runs,
+        // using whatever state.Positions currently holds.
         if (simulate)
-        {
-            // Prim world-orientation axes (normalised rows of attachTx rotation block).
-            var primRight = Vector3.Normalize(new Vector3(attachTx.M11, attachTx.M12, attachTx.M13));
-            var primFwd   = Vector3.Normalize(new Vector3(attachTx.M21, attachTx.M22, attachTx.M23));
-            var primUp    = Vector3.Normalize(new Vector3(attachTx.M31, attachTx.M32, attachTx.M33));
-
-            // World gravity (0,0,-1) rotated into prim-local space.
-            var wg = new Vector3(0f, 0f, -1f);
-            var localGrav = new Vector3(
-                Vector3.Dot(wg, primRight),
-                Vector3.Dot(wg, primFwd),
-                Vector3.Dot(wg, primUp));
-
-            float segLen     = sz / n;                  // metres per spine segment
-            float forceFactor = segLen * dt;             // SL: section_length * secondsThisFrame
-
-            // Tension: SL uses  t_factor = tension*0.1 * (1 - 0.85^(dt*30)), capped at 0.1
-            const float MaxTension = 0.1f;
-            float tFactor = flex.Tension * 0.1f * (1f - MathF.Pow(0.85f, dt * 30f));
-            if (tFactor > MaxTension) tFactor = MaxTension;
-
-            // Air-friction momentum: momentum = 1 / 10^((drag*2+1)*dt)
-            float frictionCoeff = MathF.Pow(10f, (flex.Drag * 2f + 1f) * dt);
-            if (frictionCoeff < 1f) frictionCoeff = 1f;
-            float momentum = 1f / frictionCoeff;
-
-            // Wind (sinusoidal stand-in, in metres, prim-local XY).
-            float windPhase  = (float)(Environment.TickCount64 * 0.001);
-            float windFactor = flex.Wind * 0.1f * segLen * dt;
-            float windX = MathF.Sin(windPhase * 0.7f) * windFactor;
-            float windY = MathF.Cos(windPhase * 0.5f) * windFactor;
-
-            // Per-tick position impulses (metres).
-            var gravImpulse = localGrav  * (flex.Gravity * forceFactor);
-            var userImpulse = new Vector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
-
-            // ── Anchor (segment 0): fixed at bottom of prim ──────────────────────────
-            state.Positions[0]  = new Vector3(0f, 0f, -sz * 0.5f);
-            state.Velocities[0] = Vector3.Zero;
-            var dir0 = Vector3.UnitZ;  // prim rest-axis direction
-
-            for (int i = 1; i <= n; i++)
-            {
-                ref Vector3 pos = ref state.Positions[i];
-                ref Vector3 vel = ref state.Velocities[i];
-                var lastPos = pos;
-
-                // Apply position impulses (SL style — forces directly displace position).
-                pos += gravImpulse;
-                pos += new Vector3(windX, windY, 0f);
-                pos += userImpulse;
-
-                // Tension toward parent segment direction.
-                var parentPos = state.Positions[i - 1];
-                var parentDir = (i == 1)
-                    ? dir0
-                    : Vector3.Normalize(state.Positions[i - 1] - state.Positions[i - 2]);
-                var currentVec = pos - parentPos;
-                var diff       = parentDir * segLen - currentVec;
-                pos += diff * tFactor;
-
-                // Inertia (carry-over velocity).
-                pos += vel * momentum;
-
-                // Clamp to segment length.
-                var d = pos - parentPos;
-                float dLen = d.Length();
-                if (dLen > 1e-6f)
-                    pos = parentPos + d * (segLen / dLen);
-
-                // Velocity = positional displacement this tick.
-                vel = pos - lastPos;
-                if (vel.LengthSquared() > 1f) vel = Vector3.Normalize(vel);
-            }
-        }
+            Simulate(state, flex, attachTx, sz, dt, windSampler);
 
         // Nothing left to do once simulation is disabled and attachTx hasn't changed since the
         // last time we placed this prim: WorldBounds and the vertex buffer are already correct
@@ -572,6 +505,11 @@ internal sealed class FlexiPrimAnimator : IDisposable
         //   4. Rotate the physical cross-section XY by the spine rotation.
         //   5. Write result back in NORMALISED coordinates (divide by scale)
         //      so AttachTransform's scale step produces the correct metre positions.
+        var scaleVec = new Vector3(sx, sy, sz);
+        var invScale = new Vector3(
+            sx > 1e-6f ? 1f / sx : 1f,
+            sy > 1e-6f ? 1f / sy : 1f,
+            sz > 1e-6f ? 1f / sz : 1f);
         for (int fi = 0; fi < info.FaceCount; fi++)
         {
             var src    = info.BaseVertices[fi];
@@ -616,11 +554,14 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 float pyM = spine.Y + rotCross.Y;
                 float pzM = spine.Z + rotCross.Z;
 
-                var normal    = new Vector3(src[o + 3], src[o + 4], src[o + 5]);
-                var rotNormal = Vector3.TransformNormal(normal, rot);
+                // Base normals/tangents belong to the unit-space mesh. Take them to physical
+                // space (a normal scales by 1/scale, a tangent by scale), rotate with the spine,
+                // then divide by scale so attachTx's scale cancels and only its rotation applies.
+                var normal    = SafeNormalize(new Vector3(src[o + 3], src[o + 4], src[o + 5]) * invScale);
+                var rotNormal = Vector3.TransformNormal(normal, rot) * invScale;
 
-                var tangentXyz  = new Vector3(src[o + 8], src[o + 9], src[o + 10]);
-                var rotTangent  = Vector3.TransformNormal(tangentXyz, rot);
+                var tangentXyz  = SafeNormalize(new Vector3(src[o + 8], src[o + 9], src[o + 10]) * scaleVec);
+                var rotTangent  = Vector3.TransformNormal(tangentXyz, rot) * invScale;
 
                 float pxN = (sx > 1e-6f) ? pxM / sx : pxM;
                 float pyN = (sy > 1e-6f) ? pyM / sy : pyM;
@@ -643,11 +584,170 @@ internal sealed class FlexiPrimAnimator : IDisposable
     // ── Public helpers
 
     /// <summary>
-    /// Returns the number of spine segments for a flexi prim.
-    /// Matches <c>LLVolumeImplFlexible::getSegmentCount()</c>:
-    /// <c>(softness + 1) * 10</c>.
+    /// Number of path segments a flexi prim's mesh and render spine are built with:
+    /// <c>(softness + 1) * 10</c>. Finer than the simulation (see
+    /// <see cref="ComputeSectionCount"/>) so the bend reads as a smooth curve.
     /// </summary>
     public static int ComputeSegmentCount(int softness) => (Math.Clamp(softness, 0, 3) + 1) * 10;
+
+    /// <summary>
+    /// Number of simulated sections: <c>1 &lt;&lt; softness</c>, as the SL viewer's
+    /// <c>1 &lt;&lt; mSimulateRes</c>. The per-section forces and the bend limit depend on the
+    /// section length, so this count determines how the prim moves.
+    /// </summary>
+    public static int ComputeSectionCount(int softness) => 1 << Math.Clamp(softness, 0, 3);
+
+    // ── Simulation ───────────────────────────────────────────────────────────────
+
+    // LLPrimitive's FLEXIBLE_OBJECT_MAX_INTERNAL_TENSION_FORCE.
+    private const float MaxTensionFactor = 0.99f;
+
+    // An anchor displacement beyond this in one tick is a relocation (region crossing, teleport,
+    // scene rebase), not motion: the sections are carried along instead of swinging after it.
+    private const float RelocationDistance = 16f;
+
+    private static void Simulate(FlexiState state, LibreMetaverse.Primitive.FlexibleData flex,
+        Matrix4x4 attachTx, float sz, float dt, Func<Vector3, Vector3>? windSampler)
+    {
+        var pos = state.SectionPositions;
+        var dir = state.SectionDirections;
+        var vel = state.SectionVelocities;
+        int sections = state.SectionCount;
+
+        // Frame of the prim in world space: unit axes (rows of attachTx's rotation block) and
+        // the position of its centre.
+        var axisX    = SafeNormalize(new Vector3(attachTx.M11, attachTx.M12, attachTx.M13), Vector3.UnitX);
+        var axisY    = SafeNormalize(new Vector3(attachTx.M21, attachTx.M22, attachTx.M23), Vector3.UnitY);
+        var axisZ    = SafeNormalize(new Vector3(attachTx.M31, attachTx.M32, attachTx.M33), Vector3.UnitZ);
+        var framePos = attachTx.Translation;
+
+        float sectionLength = sz / sections;
+        var anchor = framePos - axisZ * (sz * 0.5f);
+
+        if (!state.SectionsInitialized)
+        {
+            for (int i = 0; i <= sections; i++)
+            {
+                pos[i] = anchor + axisZ * (sectionLength * i);
+                dir[i] = axisZ;
+                vel[i] = Vector3.Zero;
+            }
+            state.SectionsInitialized = true;
+        }
+        else
+        {
+            var moved = anchor - pos[0];
+            if (moved.LengthSquared() > RelocationDistance * RelocationDistance)
+            {
+                for (int i = 1; i <= sections; i++)
+                    pos[i] += moved;
+            }
+        }
+
+        pos[0] = anchor;
+        dir[0] = axisZ;
+        vel[0] = Vector3.Zero;
+
+        float tFactor = flex.Tension * 0.1f * (1f - MathF.Pow(0.85f, dt * 30f));
+        if (tFactor > MaxTensionFactor) tFactor = MaxTensionFactor;
+
+        float frictionCoeff = MathF.Pow(10f, (flex.Drag * 2f + 1f) * dt);
+        if (frictionCoeff < 1f) frictionCoeff = 1f;
+        float momentum = 1f / frictionCoeff;
+
+        float forceFactor = sectionLength * dt;
+        float windFactor  = flex.Wind * 0.1f * sectionLength * dt;
+        float maxAngle    = MathF.Atan(sectionLength * 2f);
+        float cosMaxAngle = MathF.Cos(maxAngle);
+        float sinMaxAngle = MathF.Sin(maxAngle);
+
+        var userImpulse = new Vector3(flex.Force.X, flex.Force.Y, flex.Force.Z) * forceFactor;
+        float gravityImpulse = flex.Gravity * forceFactor;
+
+        bool windy = flex.Wind > 0.001f;
+        var standInWind = Vector3.Zero;
+        if (windy && windSampler == null)
+        {
+            float phase = (float)(Environment.TickCount64 * 0.001);
+            standInWind = new Vector3(MathF.Sin(phase * 0.7f), MathF.Cos(phase * 0.5f), 0f);
+        }
+
+        for (int i = 1; i <= sections; i++)
+        {
+            var lastPos = pos[i];
+            var p = lastPos;
+
+            p.Z -= gravityImpulse;
+            if (windy)
+                p += (windSampler != null ? windSampler(p) : standInWind) * windFactor;
+            p += userImpulse;
+
+            // Tension pulls toward where the section would sit if it continued the direction of
+            // the section before its parent (the anchor direction for the first one).
+            var parentPos           = pos[i - 1];
+            var parentDir           = dir[i - 1];
+            var parentSectionVector = i == 1 ? dir[0] : dir[i - 2];
+            p += (parentSectionVector * sectionLength - (p - parentPos)) * tFactor;
+
+            p += vel[i] * momentum;
+
+            // Clamp to the section length and to maxAngle away from the parent's direction.
+            var d = SafeNormalize(p - parentPos, parentDir);
+            float cosAngle = Vector3.Dot(parentDir, d);
+            if (cosAngle < cosMaxAngle)
+            {
+                var axis = Vector3.Cross(parentDir, d);
+                if (axis.LengthSquared() < 1e-12f)
+                    axis = Vector3.Cross(parentDir, MathF.Abs(parentDir.X) < 0.9f ? Vector3.UnitX : Vector3.UnitY);
+                axis = Vector3.Normalize(axis);
+                d = parentDir * cosMaxAngle + Vector3.Cross(axis, parentDir) * sinMaxAngle;
+            }
+
+            dir[i] = d;
+            pos[i] = parentPos + d * sectionLength;
+
+            var v = pos[i] - lastPos;
+            if (v.LengthSquared() > 1f) v = Vector3.Normalize(v);
+            vel[i] = v;
+        }
+
+        // Resample the sections into the render spine with a cubic through each pair of
+        // sections, using central-difference tangents, and express it in prim-local metres.
+        int n = state.Positions.Length - 1;
+        for (int j = 0; j <= n; j++)
+        {
+            float u = (float)j / n * sections;
+            int   k = Math.Min((int)u, sections - 1);
+            float t = u - k;
+
+            var c0 = SectionTangent(pos, k, sections);
+            var c1 = SectionTangent(pos, k + 1, sections);
+            var x  = pos[k + 1] - pos[k] - c0;
+            var a  = (c1 - c0) - 2f * x;
+            var b  = x - a;
+            var world = pos[k] + t * c0 + t * t * (b + t * a);
+
+            var rel = world - framePos;
+            state.Positions[j] = new Vector3(
+                Vector3.Dot(rel, axisX), Vector3.Dot(rel, axisY), Vector3.Dot(rel, axisZ));
+        }
+    }
+
+    // Derivative of the section curve at section i, scaled by the section length.
+    private static Vector3 SectionTangent(Vector3[] pos, int i, int sections)
+    {
+        if (i == 0)        return pos[1] - pos[0];
+        if (i == sections) return pos[sections] - pos[sections - 1];
+        return (pos[i + 1] - pos[i - 1]) * 0.5f;
+    }
+
+    private static Vector3 SafeNormalize(Vector3 v) => SafeNormalize(v, Vector3.UnitZ);
+
+    private static Vector3 SafeNormalize(Vector3 v, Vector3 fallback)
+    {
+        float lenSq = v.LengthSquared();
+        return lenSq > 1e-12f ? v / MathF.Sqrt(lenSq) : fallback;
+    }
 
     // ── Math helpers ─────────────────────────────────────────────────────────────
 

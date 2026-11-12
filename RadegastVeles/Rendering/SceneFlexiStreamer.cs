@@ -21,6 +21,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Numerics;
 using LibreMetaverse;
+using Vector3 = System.Numerics.Vector3;
 
 namespace Radegast.Veles.Rendering;
 
@@ -163,7 +164,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
                 vp.ScheduleSceneVertexUpdate((uint)sceneKey, faceIndex, verts, len, isPoolRented: pooled)
             : (_, _, _, _) => { };
 
-        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute, priorAnimator);
+        var animator = new FlexiPrimAnimator(submission, schedule, vp.ScheduleFlexiCompute, priorAnimator, SampleWind);
         // Registered with the shared scheduler, not animator.Start() — see FlexiSceneScheduler.
         _scheduler.Register(animator);
         _animators[key] = animator;
@@ -176,6 +177,45 @@ internal sealed class SceneFlexiStreamer : IDisposable
             _localToKey[avatarLocalId] = key;
             _animationStreamer?.SetFlexiAnimator(avatarLocalId, animator);
         }
+    }
+
+    private const int   WindGridSize  = 16;
+    private const float WindCellSize  = 16f;
+    private const float RegionWidth   = WindGridSize * WindCellSize;
+
+    /// <summary>
+    /// Wind velocity in m/s at a world position, bilinearly interpolated from the current
+    /// region's 16×16 wind grid. Positions outside the region wrap, as the SL viewer's
+    /// <c>LLWind::getVelocity</c> does.
+    /// </summary>
+    private Vector3 SampleWind(Vector3 worldPos)
+    {
+        var wind = _client.Network.CurrentSim?.WindSpeeds;
+        if (wind == null || wind.Length < WindGridSize * WindGridSize) return Vector3.Zero;
+
+        float gx = WrapToRegion(worldPos.X) / WindCellSize;
+        float gy = WrapToRegion(worldPos.Y) / WindCellSize;
+        int   i  = Math.Min((int)gx, WindGridSize - 1);
+        int   j  = Math.Min((int)gy, WindGridSize - 1);
+        float dx = gx - i;
+        float dy = gy - j;
+        int   i1 = Math.Min(i + 1, WindGridSize - 1);
+        int   j1 = Math.Min(j + 1, WindGridSize - 1);
+
+        var w00 = wind[i  + j  * WindGridSize];
+        var w10 = wind[i1 + j  * WindGridSize];
+        var w01 = wind[i  + j1 * WindGridSize];
+        var w11 = wind[i1 + j1 * WindGridSize];
+
+        float x = (w00.X * (1f - dx) + w10.X * dx) * (1f - dy) + (w01.X * (1f - dx) + w11.X * dx) * dy;
+        float y = (w00.Y * (1f - dx) + w10.Y * dx) * (1f - dy) + (w01.Y * (1f - dx) + w11.Y * dx) * dy;
+        return new Vector3(x, y, 0f);
+    }
+
+    private static float WrapToRegion(float v)
+    {
+        if (!float.IsFinite(v) || v < 0f) return 0f;
+        return v >= RegionWidth ? v % RegionWidth : v;
     }
 
     private void RemoveAnimator(ulong rootId)

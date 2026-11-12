@@ -52,6 +52,7 @@ internal sealed class FlexiSceneScheduler : IDisposable
 
     private CancellationTokenSource? _cts;
     private bool _disposed;
+    private bool _loggedTickError;
 
     public FlexiSceneScheduler(GridClient client) => _client = client;
 
@@ -103,11 +104,6 @@ internal sealed class FlexiSceneScheduler : IDisposable
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
 
-                // FlexiPrimAnimator.Tick() itself also gates on AnimationEnabled, but
-                // skipping the whole distance-lookup pass here when animation is off
-                // avoids paying for it every tick for no reason.
-                if (!FlexiPrimAnimator.AnimationEnabled) continue;
-
                 var self = _client.Self.SimPosition;
                 var selfPos = new Vector3(self.X, self.Y, self.Z);
 
@@ -137,7 +133,20 @@ internal sealed class FlexiSceneScheduler : IDisposable
                         // last real tick, not just this cycle's slice, or it would settle into a
                         // visibly stiffer rest pose than an un-throttled one. Still clamped to
                         // the same 0.1s stability bound TickAndUpload's own per-cycle dt uses.
-                        animator.Tick(Math.Min(dt * skipped, 0.1f));
+                        try
+                        {
+                            animator.Tick(Math.Min(dt * skipped, 0.1f));
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            // One animator throwing must not end the loop for every flexi
+                            // object in the scene.
+                            if (!_loggedTickError)
+                            {
+                                _loggedTickError = true;
+                                Logger.Error("FlexiSceneScheduler: a flexi animator's Tick threw", ex);
+                            }
+                        }
                         _registered[animator] = 0;
                     }
                     else

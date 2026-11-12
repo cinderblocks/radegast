@@ -96,8 +96,21 @@ void main() {
 
     // Rotate cross-section offset and accumulate with spine position
     highp vec3 rotCross = rot * vec3(bxM, byM, 0.0);
-    highp vec3 rotNorm  = rot * vec3(nx, ny, nz);
-    highp vec3 rotTang  = rot * vec3(ttx, tty, ttz);
+
+    // Base normals/tangents belong to the unit-space mesh. Take them to physical space (a
+    // normal scales by 1/scale, a tangent by scale), rotate with the spine, then divide by
+    // scale so uAttachTransform's scale cancels and only its rotation applies.
+    highp vec3 invScale = vec3(sx > 1e-6 ? 1.0 / sx : 1.0,
+                               sy > 1e-6 ? 1.0 / sy : 1.0,
+                               sz > 1e-6 ? 1.0 / sz : 1.0);
+    highp vec3 nPhys = vec3(nx, ny, nz) * invScale;
+    highp vec3 tPhys = vec3(ttx, tty, ttz) * uScale;
+    highp float nLen = length(nPhys);
+    highp float tLen = length(tPhys);
+    nPhys = nLen > 1e-6 ? nPhys / nLen : vec3(0.0, 0.0, 1.0);
+    tPhys = tLen > 1e-6 ? tPhys / tLen : vec3(0.0, 0.0, 1.0);
+    highp vec3 rotNorm  = (rot * nPhys) * invScale;
+    highp vec3 rotTang  = (rot * tPhys) * invScale;
 
     highp float pxM = spine.x + rotCross.x;
     highp float pyM = spine.y + rotCross.y;
