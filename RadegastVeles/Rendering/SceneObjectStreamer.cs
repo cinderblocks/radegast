@@ -1188,7 +1188,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             {
                 if (root.ParentID != 0) continue; // roots only -- CollectLinkset pulls children in
 
-                // A root whose position has never been filled in (still the zero placeholder) has
+                // A root that is still a placeholder (see IsPlaceholder) has
                 // reached ObjectsPrimitives without a full update -- possible if
                 // ObjectUpdateCachedHandler's CRC check decided a cached copy didn't need
                 // re-requesting, or if the root arrived via a reference from one of its own
@@ -1200,7 +1200,7 @@ internal sealed class SceneObjectStreamer : IDisposable
                 // so no further special-casing is needed once that lands. Reuses
                 // _reconcileAttempts as the same 60 s per-key cooldown so a still-stuck prim isn't
                 // re-requested every single 10 s sweep.
-                if (root.Position == OmVector3.Zero)
+                if (IsPlaceholder(root))
                 {
                     var zeroKey = MakeSceneKey(sim, root.LocalID, currentSim);
                     if (_reconcileAttempts.TryGetValue(zeroKey, out var lastZeroAttempt) &&
@@ -1211,7 +1211,7 @@ internal sealed class SceneObjectStreamer : IDisposable
                     if (_reconcileReported.TryAdd(zeroKey, 0))
                         Logger.Log(
                             $"SceneObjectStreamer: reconcile sweep found root prim {root.LocalID} " +
-                            $"in sim {sim.Name} with Position==Zero (never fully updated); re-requesting",
+                            $"in sim {sim.Name} that has never had a full update; re-requesting",
                             LogLevel.Warning);
                     _client.Objects.RequestObject(sim, root.LocalID);
                     continue;
@@ -1271,6 +1271,14 @@ internal sealed class SceneObjectStreamer : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// True for a prim the library created from a reference (a child's ParentID, a cached-object
+    /// CRC) and has not yet decoded an ObjectUpdate for. Both update handlers set the PCode, so
+    /// <see cref="PCode.None"/> identifies it. Its Position is the zero default, which cannot be
+    /// used as the test because a real prim can sit at the region origin.
+    /// </summary>
+    private static bool IsPlaceholder(Primitive prim) => prim.PrimData.PCode == PCode.None;
+
     private static bool IsWithinRadius(Vector3 primPos, OmVector3 avatarPos, float radius)
     {
         if (primPos == Vector3.Zero) return false;
@@ -1288,8 +1296,8 @@ internal sealed class SceneObjectStreamer : IDisposable
     /// whether that position is actually the root's (as opposed to the fallback below).
     /// <para>
     /// The fallback returns <paramref name="prim"/>'s own <c>Position</c> when the root hasn't
-    /// arrived in <c>sim.ObjectsPrimitives</c> yet (or reports <see cref="OmVector3.Zero"/>,
-    /// which the sim uses as a not-yet-known placeholder). For a CHILD prim that value is a
+    /// arrived in <c>sim.ObjectsPrimitives</c> yet (or is still a placeholder, see
+    /// <see cref="IsPlaceholder"/>). For a CHILD prim that value is a
     /// parent-relative offset, not a world position -- often just a few metres from the
     /// origin. Callers that gate culling on this must not treat that as "confirmed far away":
     /// doing so is what let an ordinary root-arrives-after-children race incorrectly cancel a
@@ -1306,7 +1314,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         }
 
         var objs = sim.ObjectsPrimitives;
-        if (objs != null && objs.TryGetValue(rootId, out var root) && root.Position != OmVector3.Zero)
+        if (objs != null && objs.TryGetValue(rootId, out var root) && !IsPlaceholder(root))
         {
             trustworthy = true;
             return new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
