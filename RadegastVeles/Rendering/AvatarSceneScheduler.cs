@@ -28,14 +28,14 @@ using Vector3 = System.Numerics.Vector3;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Drives every scene-viewer <see cref="SceneAvatarAnimator"/> from one shared ~30 Hz timer.
+/// Drives every scene-viewer <see cref="SceneAvatarAnimator"/> from one shared ~60 Hz timer.
 /// Mirrors <see cref="FlexiSceneScheduler"/>: a busy region can have dozens of avatars, and
 /// one timer/task per avatar is unnecessary overhead that scales with avatar count for no
 /// benefit.
 /// <para>
 /// Also applies the same distance-based tick throttling as <see cref="FlexiSceneScheduler"/>
 /// -- avatars far from the camera get their bone-hierarchy world matrices recomputed at a
-/// fraction of the base rate (see <see cref="TickDivisor"/>) instead of paying full 30 Hz
+/// fraction of the base rate (see <see cref="TickDivisor"/>) instead of paying full-rate
 /// skeleton-walk cost for something a few pixels wide or off to the side. Uses the same
 /// 16 m / 32 m breakpoints as <see cref="FlexiSceneScheduler.TickDivisor"/> and
 /// <c>SceneAvatarStreamer.AvatarLodForDistance</c> so an avatar's mesh LOD, skeletal update
@@ -47,7 +47,8 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class AvatarSceneScheduler : IDisposable
 {
-    private const float SimTickRate = 1f / 30f;
+    // Base rate matches a 60 Hz display, so nearby motion advances every frame.
+    private const float SimTickRate = 1f / 60f;
 
     private readonly GridClient _client;
     // Animator → consecutive skipped ticks since its last real Tick() call.
@@ -90,10 +91,10 @@ internal sealed class AvatarSceneScheduler : IDisposable
     // with those matters here, not just copy-paste convenience.
     private static int TickDivisor(float distance) => distance switch
     {
-        < 16f => 1,  // full 30 Hz
-        < 32f => 2,  // ~15 Hz
-        < 64f => 4,  // ~7.5 Hz
-        _     => 8,  // ~3.75 Hz -- still alive (no visible freeze/pop), close to free
+        < 16f => 1,  // 60 Hz
+        < 32f => 4,  // 15 Hz
+        < 64f => 8,  // 7.5 Hz
+        _     => 16, // 3.75 Hz
     };
 
     private async Task RunAsync(CancellationToken ct)

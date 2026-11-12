@@ -407,7 +407,11 @@ internal sealed class FlexiPrimAnimator : IDisposable
         // Apply the external (world-placement) transform AFTER attachment recomputation
         // so it survives the dynamic-branch rebuild above.  For PrimViewer / AvatarViewer
         // this is Identity; for SceneViewer it carries the avatar / linkset world matrix.
+        var ownerSpaceTx = attachTx;
         attachTx = attachTx * info.ExternalTransform;
+        // What the deformed vertices are written with: world space, or the owner's space when
+        // the faces' own transform supplies the world placement.
+        var outputTx = info.OutputInOwnerSpace ? ownerSpaceTx : attachTx;
 
         // Physical prim scale in metres: sz is the length along the path (Z axis). Deformed
         // positions are divided back by scale before being written so attachTx's own scale
@@ -491,7 +495,7 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 spineFloats[i * 4 + 2] = p.Z;
                 // [i*4+3] = 0 (zero-initialised)
             }
-            scheduleCompute(new VkFlexiComputeJob(gpuData, spineFloats, attachTx));
+            scheduleCompute(new VkFlexiComputeJob(gpuData, spineFloats, outputTx));
             return;
         }
 
@@ -566,9 +570,9 @@ internal sealed class FlexiPrimAnimator : IDisposable
                 float pxN = (sx > 1e-6f) ? pxM / sx : pxM;
                 float pyN = (sy > 1e-6f) ? pyM / sy : pyM;
                 float pzN = (sz > 1e-6f) ? pzM / sz : pzM;
-                var p4 = Vector4.Transform(new Vector4(pxN, pyN, pzN, 1f), attachTx);
-                var n4 = Vector4.Transform(new Vector4(rotNormal.X, rotNormal.Y, rotNormal.Z, 0f), attachTx);
-                var t4 = Vector4.Transform(new Vector4(rotTangent.X, rotTangent.Y, rotTangent.Z, 0f), attachTx);
+                var p4 = Vector4.Transform(new Vector4(pxN, pyN, pzN, 1f), outputTx);
+                var n4 = Vector4.Transform(new Vector4(rotNormal.X, rotNormal.Y, rotNormal.Z, 0f), outputTx);
+                var t4 = Vector4.Transform(new Vector4(rotTangent.X, rotTangent.Y, rotTangent.Z, 0f), outputTx);
                 dst[o]      = p4.X; dst[o + 1]  = p4.Y;        dst[o + 2]  = p4.Z;
                 dst[o + 3]  = n4.X; dst[o + 4]  = n4.Y;        dst[o + 5]  = n4.Z;
                 dst[o + 6]  = src[o + 6];                       // UV pass-through

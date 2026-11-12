@@ -574,6 +574,7 @@ internal sealed class AvatarMeshBuilder(GridClient client)
                         AttachJointName    = jointName.Length > 0 ? jointName : null,
                         AttachJointOffset  = jointOffset,
                         AttachJointRotation = jointRot,
+                        OutputInOwnerSpace  = true,
                     };
                     flexiInfos.Add(flexiInfo);
                     // Lets the frustum-cull path read this prim's live world bounds

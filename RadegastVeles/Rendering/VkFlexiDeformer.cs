@@ -84,6 +84,8 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
     /// </summary>
     public void DispatchPending()
     {
+        WaitForPrevious();
+
         // Runs even when nothing is pending -- see VkSkinDeformer.cs's identical block for why
         // (a prim fully serviced before its avatar rebuilds/disposes never passes back through
         // _pending, and the steady state is exactly when _pending.IsEmpty is true).
@@ -185,13 +187,27 @@ internal sealed unsafe class VkFlexiDeformer : IDisposable
             }
         }
 
-        cmd.SubmitAndWait();
+        // Not waited on here: the main pass is submitted to the same queue afterwards, so it
+        // reads the deformed buffers after these dispatches have run.
+        cmd.Submit(default);
+        _inFlight = cmd;
+    }
+
+    private VkCommandBufferPool.VkCommandBuffer? _inFlight;
+
+    /// <summary>Waits for and frees the previous dispatch's command buffer. Call on the render
+    /// thread before anything writes the buffers that dispatch reads.</summary>
+    public void WaitForPrevious()
+    {
+        _inFlight?.Dispose();
+        _inFlight = null;
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        WaitForPrevious();
         // _pipeline is owned by VkViewportControl (created/disposed alongside the other
         // pipelines), not by this class -- mirrors VkSkinDeformer's own identical note.
     }

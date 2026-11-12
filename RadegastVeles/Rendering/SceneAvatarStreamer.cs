@@ -239,6 +239,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
         _debounceTimer = new Timer(_ => ProcessDirty(), null,
             Timeout.Infinite, Timeout.Infinite);
 
+        _viewport.FrameUpdate                 += OnFrameUpdate;
         _overrides.OverrideChanged            += OnOverrideChanged;
         _client.Friends.FriendshipResponse    += OnFriendshipResponse;
         _client.Friends.FriendshipTerminated  += OnFriendshipTerminated;
@@ -273,6 +274,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
             }
 
             if (rootOfSeat != rootLocalId) continue;
+            _motion.TryRemove(localId, out _);
 
             // Re-resolve and push the updated world transform.
             var (resolvedPos, resolvedRot) = ResolveAvatarWorldTransform(sim, av);
@@ -301,6 +303,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var resolvedRot = _client.Self.SimRotation;
                 var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
                 var selfWorldMatrix = AvatarWorldMatrix(wp, resolvedRot);
+                _motion.TryRemove(SelfSceneId, out _);
+                _selfPose = new SelfPose(wp, ToNumerics(resolvedRot));
                 _viewport.SetSceneObjectTransform(SceneKey(SelfSceneId), selfWorldMatrix);
                 _animationStreamer?.OnFlexiWorldUpdate(SelfSceneId, selfWorldMatrix);
             }
@@ -330,14 +334,13 @@ internal sealed class SceneAvatarStreamer : IDisposable
         if (_rendered.ContainsKey(id))
         {
             // Fast-path: update world transform (translation + yaw) without a mesh rebuild.
+            // The transform is not applied directly: OnFrameUpdate moves the avatar toward
+            // this update, and on along its velocity, every frame.
             var wp = new Vector3(resolvedPos.X, resolvedPos.Y, resolvedPos.Z);
-            var worldMatrix = AvatarWorldMatrix(wp, resolvedRot);
-            _viewport.SetSceneObjectTransform(
-                SceneKey(id),
-                worldMatrix);
-            // Also update the flexi attachment animator so its ExternalTransform
-            // stays in sync with the avatar's new world position.
-            _animationStreamer?.OnFlexiWorldUpdate(id, worldMatrix);
+            var velocity = avatar.ParentID == 0
+                ? new Vector3(avatar.Velocity.X, avatar.Velocity.Y, avatar.Velocity.Z)
+                : Vector3.Zero;
+            SetAvatarMotion(id, wp, ToNumerics(resolvedRot), velocity);
         }
         else
         {
@@ -629,6 +632,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
     public void Clear()
     {
         if (_disposed) return;
+        _motion.Clear();
+        _selfPose = null;
         _dirty.Clear();
         _rendered.Clear();
         _lastVisualParamHash.Clear();
@@ -666,6 +671,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _viewport.FrameUpdate                -= OnFrameUpdate;
+        _motion.Clear();
         _overrides.OverrideChanged           -= OnOverrideChanged;
         _client.Friends.FriendshipResponse   -= OnFriendshipResponse;
         _client.Friends.FriendshipTerminated -= OnFriendshipTerminated;
@@ -769,6 +776,7 @@ internal sealed class SceneAvatarStreamer : IDisposable
 
     private void RemoveAvatar(uint localId)
     {
+        _motion.TryRemove(localId, out _);
         _dirty.TryRemove(localId, out _);
         _rendered.TryRemove(localId, out _);
         _lastVisualParamHash.TryRemove(localId, out _);
@@ -1246,9 +1254,10 @@ internal sealed class SceneAvatarStreamer : IDisposable
             {
                 worldMatrix = AvatarWorldMatrix(worldPos, worldRot);
 
-                // Flexi faces have Transform = Identity (set by AvatarMeshBuilder) and are
-                // fully positioned by FlexiPrimAnimator each tick via AttachTransform.
-                // Multiplying worldMatrix in here would double-apply the world placement.
+                // Flexi faces whose vertices FlexiPrimAnimator writes in world space keep
+                // Transform = Identity; multiplying worldMatrix in would double-apply it. Those
+                // written in the avatar's space (FlexiPrimInfo.OutputInOwnerSpace) take the
+                // world placement like every other face.
                 var flexiFaceIndices = new System.Collections.Generic.HashSet<int>();
                 foreach (var fp in submission.FlexiPrims)
                     for (int fi = fp.FaceStart; fi < fp.FaceStart + fp.FaceCount; fi++)
@@ -1257,7 +1266,8 @@ internal sealed class SceneAvatarStreamer : IDisposable
                 var translated  = new PrimRenderFace[submission.Faces.Length];
                 for (int i = 0; i < submission.Faces.Length; i++)
                 {
-                    if (flexiFaceIndices.Contains(i))
+                    if (flexiFaceIndices.Contains(i) &&
+                        !(submission.Faces[i].FlexiOwner?.OutputInOwnerSpace ?? false))
                     {
                         translated[i] = submission.Faces[i];
                         continue;
@@ -1370,6 +1380,106 @@ internal sealed class SceneAvatarStreamer : IDisposable
     /// Avatar geometry is built in bind pose oriented along +Y, so a yaw (rotation
     /// around the up-axis / Z) is all that is needed to face the correct heading.
     /// </summary>
+    // ── Per-frame motion ─────────────────────────────────────────────────────────
+    //
+    // Network updates for a moving avatar arrive a few times a second. Between them the avatar
+    // is carried along its reported velocity, and the jump from where it was being shown to
+    // where the new update puts it is blended out over a short time, so it moves every frame.
+
+    /// <param name="Position">World position reported by the update.</param>
+    /// <param name="PositionError">Displayed position minus <paramref name="Position"/> at
+    /// the moment the update arrived; decays to zero.</param>
+    /// <param name="RotationFrom">Displayed rotation when the update arrived.</param>
+    /// <param name="Timestamp"><see cref="System.Diagnostics.Stopwatch.GetTimestamp"/> at arrival.</param>
+    private sealed record AvatarMotion(
+        Vector3 Position, Quaternion Rotation, Vector3 Velocity,
+        Vector3 PositionError, Quaternion RotationFrom, long Timestamp);
+
+    private sealed record SelfPose(Vector3 Position, Quaternion Rotation);
+
+    private readonly ConcurrentDictionary<uint, AvatarMotion> _motion = new();
+    private volatile SelfPose? _selfPose;
+
+    // How long an avatar keeps moving along its last reported velocity with no new update.
+    private const float MaxExtrapolationSeconds = 1f;
+    // Time constant with which the correction toward a new update is blended out.
+    private const float CorrectionTimeConstant = 0.1f;
+    // A correction larger than this is a relocation and is applied at once.
+    private const float MaxSmoothedCorrection = 3f;
+    private const float MotionSettledBlend = 0.005f;
+
+    /// <summary>
+    /// The pose the agent's own avatar is being drawn with this frame, for the camera to
+    /// follow. False until the avatar has been placed once.
+    /// </summary>
+    public bool TryGetSelfPose(out Vector3 position, out Quaternion rotation)
+    {
+        var pose = _selfPose;
+        position = pose?.Position ?? default;
+        rotation = pose?.Rotation ?? Quaternion.Identity;
+        return pose != null;
+    }
+
+    private static Quaternion ToNumerics(LibreMetaverse.Quaternion q) => new(q.X, q.Y, q.Z, q.W);
+
+    private static float SecondsSince(long timestamp) =>
+        (float)((System.Diagnostics.Stopwatch.GetTimestamp() - timestamp) / (double)System.Diagnostics.Stopwatch.Frequency);
+
+    private static void Evaluate(AvatarMotion m, out Vector3 position, out Quaternion rotation, out bool settled)
+    {
+        float t     = SecondsSince(m.Timestamp);
+        float blend = MathF.Exp(-t / CorrectionTimeConstant);
+        position = m.Position + m.Velocity * MathF.Min(t, MaxExtrapolationSeconds) + m.PositionError * blend;
+        rotation = Quaternion.Slerp(m.Rotation, m.RotationFrom, blend);
+        settled  = blend < MotionSettledBlend
+                && (m.Velocity.LengthSquared() < 1e-6f || t >= MaxExtrapolationSeconds);
+    }
+
+    private void SetAvatarMotion(uint id, Vector3 position, Quaternion rotation, Vector3 velocity)
+    {
+        var error = Vector3.Zero;
+        var from  = rotation;
+        if (_motion.TryGetValue(id, out var current))
+        {
+            Evaluate(current, out var shownPos, out from, out _);
+            error = shownPos - position;
+            if (error.LengthSquared() > MaxSmoothedCorrection * MaxSmoothedCorrection)
+            {
+                error = Vector3.Zero;
+                from  = rotation;
+            }
+        }
+
+        var motion = new AvatarMotion(position, rotation, velocity, error, from,
+            System.Diagnostics.Stopwatch.GetTimestamp());
+        _motion[id] = motion;
+        Evaluate(motion, out var pos, out var rot, out _);
+        PushAvatarPose(id, pos, rot);
+        _viewport.RequestRender();
+    }
+
+    private void PushAvatarPose(uint id, Vector3 position, Quaternion rotation)
+    {
+        if (id == SelfSceneId) _selfPose = new SelfPose(position, rotation);
+        var worldMatrix = Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(position);
+        _viewport.SetSceneObjectTransform(SceneKey(id), worldMatrix);
+        // Keeps flexi and rigid attachments on the avatar's current world position.
+        _animationStreamer?.OnFlexiWorldUpdate(id, worldMatrix);
+    }
+
+    private void OnFrameUpdate()
+    {
+        if (_disposed || _motion.IsEmpty) return;
+        foreach (var (id, motion) in _motion)
+        {
+            Evaluate(motion, out var pos, out var rot, out bool settled);
+            PushAvatarPose(id, pos, rot);
+            if (settled)
+                ((ICollection<KeyValuePair<uint, AvatarMotion>>)_motion).Remove(new KeyValuePair<uint, AvatarMotion>(id, motion));
+        }
+        if (!_motion.IsEmpty) _viewport.RequestRender();
+    }
+
     private static Matrix4x4 AvatarWorldMatrix(Vector3 worldPos, LibreMetaverse.Quaternion rotation)
     {
         var q   = new Quaternion(rotation.X, rotation.Y, rotation.Z, rotation.W);

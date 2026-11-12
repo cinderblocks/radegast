@@ -28,7 +28,7 @@ using Vector3 = System.Numerics.Vector3;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Drives every scene-viewer <see cref="FlexiPrimAnimator"/> from one shared ~30 Hz timer
+/// Drives every scene-viewer <see cref="FlexiPrimAnimator"/> from one shared ~60 Hz timer
 /// instead of each animator owning its own <see cref="PeriodicTimer"/> and background
 /// <see cref="Task"/>. A busy sim can easily have dozens of flexi objects (grass, trees,
 /// flexi attachments on nearby avatars) — one timer/task per object is unnecessary
@@ -36,7 +36,7 @@ namespace Radegast.Veles.Rendering;
 /// <para>
 /// Also applies distance-based tick throttling: flexi prims far from the camera get
 /// simulated at a fraction of the base rate (see <see cref="TickDivisor"/>) rather than
-/// spending full 30 Hz spine-physics + vertex-deform cost on something a few pixels wide
+/// spending full-rate spine-physics + vertex-deform cost on something a few pixels wide
 /// or off to the side. Distance uses <see cref="FlexiPrimAnimator.ApproximateWorldPosition"/>,
 /// which is cheap (no extra lookups) but coarse — fine for LOD bucketing, not for anything
 /// requiring precision.
@@ -44,7 +44,8 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class FlexiSceneScheduler : IDisposable
 {
-    private const float SimTickRate = 1f / 30f;
+    // Base rate matches a 60 Hz display, so nearby motion advances every frame.
+    private const float SimTickRate = 1f / 60f;
 
     private readonly GridClient _client;
     // Animator → consecutive skipped ticks since its last real Tick() call.
@@ -80,14 +81,14 @@ internal sealed class FlexiSceneScheduler : IDisposable
     //
     // Mirrors the spirit of SceneAvatarStreamer.AvatarLodForDistance: things far from
     // the camera don't need full-rate simulation. A flexi prim that's simulated at
-    // 7.5 Hz instead of 30 Hz looks identical at 48+ metres, but costs a quarter as much
+    // 7.5 Hz instead of 60 Hz looks identical at 48+ metres, but costs an eighth as much
     // CPU (or GPU dispatch) time.
     private static int TickDivisor(float distance) => distance switch
     {
-        < 16f => 1,  // full 30 Hz
-        < 32f => 2,  // ~15 Hz
-        < 64f => 4,  // ~7.5 Hz
-        _     => 8,  // ~3.75 Hz — still alive (no visible freeze/pop), close to free
+        < 16f => 1,  // 60 Hz
+        < 32f => 4,  // 15 Hz
+        < 64f => 8,  // 7.5 Hz
+        _     => 16, // 3.75 Hz
     };
 
     private async Task RunAsync(CancellationToken ct)

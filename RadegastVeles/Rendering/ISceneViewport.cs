@@ -73,6 +73,12 @@ public interface ISceneViewport
     /// before the child viewport control is ever attached to the visual tree, so
     /// <c>InitializeAsync</c> cannot complete before the subscription exists.</summary>
     event Action? SceneReset;
+
+    /// <summary>Raised on the UI thread at the start of every rendered frame, before queued
+    /// transforms are applied and before the camera is read. Handlers update per-frame state
+    /// (interpolated transforms, camera follow) and call <see cref="RequestRender"/> to keep
+    /// frames coming while that state is still changing.</summary>
+    event Action? FrameUpdate;
     event Action<uint, int, FaceHitInfo>? FaceClicked;
     /// <summary>Plain right-click (select-for-menu, no touch) -- see
     /// <c>VkViewportControl.ObjectRightClicked</c>'s own doc comment.</summary>

@@ -144,7 +144,7 @@ public sealed class PrimRenderFace
     public          Matrix4x4 Transform
     {
         get => _transform;
-        set { _transform = value; _modelInv3Ready = false; }
+        set { _transform = value; _modelInv3Ready = false; _worldAabbReady = false; }
     }
 
     /// <summary>
@@ -376,6 +376,12 @@ public sealed class PrimRenderFace
     /// </summary>
     public void GetWorldAabb(out Vector3 min, out Vector3 max)
     {
+        if (_worldAabbReady)
+        {
+            min = _worldMin;
+            max = _worldMax;
+            return;
+        }
         EnsureLocalAabb();
         var t = Transform;
         // Transform 8 corners and reduce.
@@ -394,7 +400,14 @@ public sealed class PrimRenderFace
         }
         min = wMin;
         max = wMax;
+        _worldMin = wMin;
+        _worldMax = wMax;
+        _worldAabbReady = true;
     }
+
+    // World AABB for the current Transform; recomputed after Transform changes.
+    private Vector3 _worldMin, _worldMax;
+    private bool    _worldAabbReady;
 
     private void EnsureLocalAabb()
     {
@@ -609,6 +622,15 @@ public sealed class FlexiPrimInfo
     /// Default is Identity (no extra transform).
     /// </summary>
     public Matrix4x4 ExternalTransform { get; set; } = Matrix4x4.Identity;
+
+    /// <summary>
+    /// When true the animator writes vertices in the owner's space (everything up to, but not
+    /// including, <see cref="ExternalTransform"/>) and the faces' own
+    /// <see cref="PrimRenderFace.Transform"/> carries the owner's world placement, so the prim
+    /// stays on its owner between simulation ticks. Set for avatar attachments. When false
+    /// the vertices are written in world space and the faces keep an identity transform.
+    /// </summary>
+    public bool OutputInOwnerSpace { get; init; }
 
     // ── Live attachment tracking (avatar attachments only) ────────────────────
 

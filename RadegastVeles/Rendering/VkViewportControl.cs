@@ -52,6 +52,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// successfully, including tab-switch re-attaches (see <see cref="ISceneViewport.SceneReset"/>
     /// for the subscribe-before-fire race check).</summary>
     public event Action? SceneReset;
+    public event Action? FrameUpdate;
+    private bool _loggedFrameUpdateError;
 
     /// <summary>See <see cref="ISceneViewport.SceneObjectUploadFailed"/>. Raised synchronously
     /// on the render thread from <see cref="UploadSceneObjectNoRebuild"/>'s failure path --
@@ -559,7 +561,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         CreateFaceLists(PointShadowSlotCount * PointShadowFaceCount);
     private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)>[] _pointShadowSceneOpaqueVisible =
         CreateFaceLists(PointShadowSlotCount * PointShadowFaceCount);
-    private readonly HashSet<ulong>[] _pointShadowVisibleSceneKeys = CreateKeySets(PointShadowSlotCount * PointShadowFaceCount);
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _pointShadowCandidates = new();
+    private readonly List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> _pointShadowSceneCandidates = new();
     private readonly int[] _pointShadowBase = new int[PointShadowSlotCount * PointShadowFaceCount];
     private readonly int[] _pointShadowSceneBase = new int[PointShadowSlotCount * PointShadowFaceCount];
     private readonly int[] _pointShadowOpaqueCount = new int[PointShadowSlotCount * PointShadowFaceCount];
@@ -2810,8 +2813,9 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                 if (!_pendingSceneObjects.TryRemove(key, out var sub)) continue;
                 if (sub == null)
                 {
-                    RemoveSceneObjectGpuNoRebuild(key);
-                    sceneListDirty = true;
+                    // A removal for a key that was never uploaded leaves the lists as they are.
+                    if (RemoveSceneObjectGpuNoRebuild(key))
+                        sceneListDirty = true;
                 }
                 // A cooldown-parked re-add (see UploadSceneObjectNoRebuild's own comment) puts
                 // `key` back into _pendingSceneObjects, but .Keys above is a fixed snapshot taken
@@ -3688,13 +3692,14 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// <see cref="_sceneObjects"/>. Caller is responsible for calling <see cref="RebuildSceneFlatLists"/> once after a
     /// batch of removals.
     /// </summary>
-    private void RemoveSceneObjectGpuNoRebuild(ulong rootId)
+    /// <returns>True if the object existed and was removed.</returns>
+    private bool RemoveSceneObjectGpuNoRebuild(ulong rootId)
     {
         // Explicit removal (object actually left the scene) clears any lingering upload-failure
         // cooldown too, so a rootId that's reused later (unlikely but not impossible) doesn't
         // inherit a stale block.
         _recentSceneUploadFailures.Remove(rootId);
-        if (!_sceneObjects.TryGetValue(rootId, out var faces)) return;
+        if (!_sceneObjects.TryGetValue(rootId, out var faces)) return false;
 
         foreach (var (_, _, face) in faces)
         {
@@ -3756,6 +3761,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             if (skinGpuList != null) foreach (var gpu in skinGpuList) gpu.Dispose();
             if (flexiGpuList != null) foreach (var gpu in flexiGpuList) gpu.Dispose();
         });
+        return true;
     }
 
     /// <summary>
@@ -3844,12 +3850,20 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             }
         }
 
-        _sceneOpaque.Sort((a, b) =>
-        {
-            int meshCmp = RuntimeHelpers.GetHashCode(a.Mesh).CompareTo(RuntimeHelpers.GetHashCode(b.Mesh));
-            return meshCmp != 0 ? meshCmp : RuntimeHelpers.GetHashCode(a.Material).CompareTo(RuntimeHelpers.GetHashCode(b.Material));
-        });
+        // Group by mesh, then material, so identical draws end up adjacent. Sorting one
+        // precomputed key per face avoids recomputing both hashes in every comparison.
+        int count = _sceneOpaque.Count;
+        if (_sceneOpaqueSortKeys.Length < count)
+            _sceneOpaqueSortKeys = new long[Math.Max(count, _sceneOpaqueSortKeys.Length * 2)];
+        var items = CollectionsMarshal.AsSpan(_sceneOpaque);
+        var keys  = _sceneOpaqueSortKeys.AsSpan(0, count);
+        for (int i = 0; i < count; i++)
+            keys[i] = ((long)RuntimeHelpers.GetHashCode(items[i].Mesh) << 32)
+                    | (uint)RuntimeHelpers.GetHashCode(items[i].Material);
+        keys.Sort(items);
     }
+
+    private long[] _sceneOpaqueSortKeys = new long[1024];
 
     /// <summary>
     /// Drains <see cref="_pendingTransformOverrides"/> and patches <see cref="PrimRenderFace.
@@ -3902,12 +3916,17 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         }
     }
 
+    // A flexi face whose vertices are written in world space must keep its identity transform.
+    // One written in its owner's space takes the owner's transform like any other face.
+    private static bool KeepsOwnTransform(PrimRenderFace face) =>
+        face.IsFlexi && !(face.FlexiOwner?.OutputInOwnerSpace ?? false);
+
     private static void ApplyTransformToFaces(
         List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> faces, Matrix4x4 transform)
     {
         foreach (var entry in faces)
         {
-            if (entry.Face.IsFlexi) continue; // never stomp flexi, matches GL exactly
+            if (KeepsOwnTransform(entry.Face)) continue;
             entry.Face.Transform = transform;
         }
     }
@@ -3922,7 +3941,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         var translate = Matrix4x4.CreateTranslation(delta);
         foreach (var entry in faces)
         {
-            if (entry.Face.IsFlexi) continue; // never stomp flexi, matches ApplyTransformToFaces
+            if (KeepsOwnTransform(entry.Face)) continue;
             entry.Face.Transform *= translate;
         }
     }
@@ -4154,6 +4173,35 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                 dest.Add(entry);
             else
                 _stats.RecordFaceCulled();
+        }
+    }
+
+    /// <summary>Fills <paramref name="dest"/> (cleared first) with the faces of
+    /// <paramref name="source"/> whose world bounds overlap the box, keeping their order.</summary>
+    private static void CollectFacesInBox(
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> source,
+        List<(VkMesh Mesh, VkMaterialDescriptorSet Material, PrimRenderFace Face)> dest,
+        Vector3 boxMin, Vector3 boxMax)
+    {
+        dest.Clear();
+        foreach (var entry in source)
+        {
+            Vector3 min, max;
+            var face = entry.Face;
+            if (face.IsFlexi)
+            {
+                var bounds = face.FlexiOwner?.WorldBounds;
+                if (bounds == null) { dest.Add(entry); continue; }
+                min = bounds.Min; max = bounds.Max;
+            }
+            else
+            {
+                face.GetWorldAabb(out min, out max);
+            }
+            if (min.X <= boxMax.X && max.X >= boxMin.X &&
+                min.Y <= boxMax.Y && max.Y >= boxMin.Y &&
+                min.Z <= boxMax.Z && max.Z >= boxMin.Z)
+                dest.Add(entry);
         }
     }
 
@@ -4878,6 +4926,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         // _previousMainPassCmd's own field comment for why this is a targeted wait instead of
         // Step 5's general deferred-operation queue.
         _previousMainPassCmd?.WaitOnly();
+        _flexiDeformer?.WaitForPrevious();
+        _skinDeformer?.WaitForPrevious();
 
         var vk = VkApi.Context;
         Framebuffer framebuffer = default;
@@ -4914,6 +4964,19 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             // before the draw section below reads _sceneOpaque/_sceneAlpha/face.Transform.
             // Placed early in the frame, before other per-frame updates and before any pass
             // that draws scene faces.
+            try
+            {
+                FrameUpdate?.Invoke();
+            }
+            catch (Exception e) when (!_loggedFrameUpdateError)
+            {
+                _loggedFrameUpdateError = true;
+                LibreMetaverse.Logger.Error("[VkViewportControl] A FrameUpdate handler threw", e);
+            }
+            catch (Exception)
+            {
+            }
+
             _drainStopwatch.Restart();
             DrainPendingSceneObjects(vk);
             DrainSceneObjectsMs = _drainStopwatch.Elapsed.TotalMilliseconds;
@@ -5242,6 +5305,12 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                 for (int slot = 0; slot < _pointShadowCasterCount; slot++)
                 {
                     var caster = _pointShadowCasters[slot];
+                    // One pass over every face per caster picks out those within the light's
+                    // range; the six cube-face frusta are then tested against that short list.
+                    var casterMin = caster.WorldPosition - new Vector3(caster.Radius);
+                    var casterMax = caster.WorldPosition + new Vector3(caster.Radius);
+                    CollectFacesInBox(_opaqueFaces, _pointShadowCandidates, casterMin, casterMax);
+                    CollectFacesInBox(_sceneOpaque, _pointShadowSceneCandidates, casterMin, casterMax);
                     for (int face = 0; face < PointShadowFaceCount; face++)
                     {
                         int idx = slot * PointShadowFaceCount + face;
@@ -5253,9 +5322,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                         _pointShadowFaceProj[idx] = faceProj;
 
                         var faceFrustum = FrustumCuller.ExtractPlanes(faceView * faceProj);
-                        _spatialGrid.QueryVisible(faceFrustum, _pointShadowVisibleSceneKeys[idx]);
-                        FilterVisible(_opaqueFaces, _pointShadowOpaqueVisible[idx], faceFrustum, null);
-                        FilterVisible(_sceneOpaque, _pointShadowSceneOpaqueVisible[idx], faceFrustum, _pointShadowVisibleSceneKeys[idx]);
+                        FilterVisible(_pointShadowCandidates, _pointShadowOpaqueVisible[idx], faceFrustum, null);
+                        FilterVisible(_pointShadowSceneCandidates, _pointShadowSceneOpaqueVisible[idx], faceFrustum, null);
                         _pointShadowOpaqueCount[idx] = _pointShadowOpaqueVisible[idx].Count;
                         _pointShadowSceneOpaqueCount[idx] = _pointShadowSceneOpaqueVisible[idx].Count;
                     }

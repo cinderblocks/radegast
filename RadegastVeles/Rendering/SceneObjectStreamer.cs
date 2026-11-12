@@ -1232,7 +1232,8 @@ internal sealed class SceneObjectStreamer : IDisposable
             var objs = sim.ObjectsPrimitives;
             if (objs == null) continue;
 
-            foreach (var root in objs.Values)
+            // Enumerated directly: .Values would lock the whole dictionary and copy it.
+            foreach (var (_, root) in objs)
             {
                 if (root.ParentID != 0) continue; // roots only -- CollectLinkset pulls children in
 
