@@ -3328,9 +3328,10 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
 
         // Diagnostic for the ghost-avatar/scene-key-collision class of bug. A key that already
         // holds a committed object being overwritten is routine (rebuild-in-place always reuses
-        // the same key) -- only log when the identity actually changed (different PrimLocalId or
-        // terrain-ness), which is the signature an unrelated object/avatar landed on a key it
-        // shouldn't have. Turns an unreproducible field report into "which key got overwritten by
+        // the same key) -- only log when the identity actually changed (terrain-ness differs, or
+        // the new linkset has no face from the prim that owned the old first face), which is the
+        // signature an unrelated object/avatar landed on a key it shouldn't have. Face order
+        // within a linkset is not stable across rebuilds, so the first faces alone can differ. Turns an unreproducible field report into "which key got overwritten by
         // what, and when" if this recurs -- see SceneNeighborSimIndex's own header comment on why
         // sceneKey's upper 32 bits (sim index) should make a genuine collision unlikely.
         if (_sceneObjects.TryGetValue(rootId, out var existingFaces) && existingFaces.Count > 0
@@ -3338,7 +3339,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         {
             var (_, _, existingFace) = existingFaces[0];
             var newFace = sub.Faces[0];
-            if (existingFace.PrimLocalId != newFace.PrimLocalId || existingFace.IsTerrain != newFace.IsTerrain)
+            if (existingFace.IsTerrain != newFace.IsTerrain
+                || !Array.Exists(sub.Faces, f => f.PrimLocalId == existingFace.PrimLocalId))
             {
                 LibreMetaverse.Logger.Debug(
                     $"[VkViewportControl] SceneKey 0x{rootId:X16} identity changed on overwrite: "
