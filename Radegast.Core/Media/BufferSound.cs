@@ -163,32 +163,44 @@ namespace Radegast.Media
             ContainerId = UUID.Zero;
             Id = soundId;
 
-            // Try to get from cache first
-            var cachedData = manager.Cache?.Get(soundId);
-            if (cachedData != null)
-            {
-                // Use cached data directly
-                ProcessSoundData(cachedData);
-            }
-            else
-            {
-                // Request from asset system
-                _ = RequestAndProcessSoundAsync();
-            }
+            _ = RequestAndProcessSoundAsync();
+        }
+
+        /// <summary>
+        /// Downloads in progress, keyed by sound ID, so simultaneous requests for the same sound
+        /// share one asset request.
+        /// </summary>
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<UUID, System.Threading.Tasks.Task<byte[]?>> inflightFetches = new();
+
+        private static async System.Threading.Tasks.Task<byte[]?> FetchSoundDataAsync(UUID soundId)
+        {
+            var asset = await manager.Instance.Client.Assets.RequestAssetAsync(soundId, AssetType.Sound, false);
+            if (asset is not AssetSound s) return null;
+
+            s.Decode();
+            manager.Cache?.Add(soundId, s.AssetData);
+            return s.AssetData;
         }
 
         private async System.Threading.Tasks.Task RequestAndProcessSoundAsync()
         {
-            var asset = await manager.Instance.Client.Assets.RequestAssetAsync(Id, AssetType.Sound, false);
-            if (asset is not AssetSound s) return;
+            var data = manager.Cache?.Get(Id);
+            if (data == null)
+            {
+                var fetch = inflightFetches.GetOrAdd(Id, FetchSoundDataAsync);
+                try
+                {
+                    data = await fetch;
+                }
+                finally
+                {
+                    ((ICollection<KeyValuePair<UUID, System.Threading.Tasks.Task<byte[]?>>>)inflightFetches)
+                        .Remove(new KeyValuePair<UUID, System.Threading.Tasks.Task<byte[]?>>(Id, fetch));
+                }
+                if (data == null) return;
+            }
 
-            s.Decode();
-            var data = s.AssetData;
-
-            // Add to cache
-            manager.Cache?.Add(Id, data);
-
-            // If this was a Prefetch, just stop here.
+            // A prefetch only warms the cache.
             if (prefetchOnly) return;
 
             ProcessSoundData(data);

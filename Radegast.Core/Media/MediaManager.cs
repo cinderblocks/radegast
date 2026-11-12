@@ -414,7 +414,7 @@ namespace Radegast.Media
                 if (Environment.OSVersion.Platform == PlatformID.Unix || Environment.OSVersion.Platform == PlatformID.MacOSX)
                 {
                     bool audioOK = false;
-                    OUTPUTTYPE[] outputsToTry = Environment.OSVersion.Platform == PlatformID.MacOSX
+                    OUTPUTTYPE[] outputsToTry = RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
                         ? new[] { OUTPUTTYPE.COREAUDIO, OUTPUTTYPE.AUTODETECT }
                         : new[] { OUTPUTTYPE.PULSEAUDIO, OUTPUTTYPE.ALSA, OUTPUTTYPE.AUTODETECT };
 
