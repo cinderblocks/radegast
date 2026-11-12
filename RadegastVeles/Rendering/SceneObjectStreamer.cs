@@ -152,7 +152,7 @@ internal sealed class SceneObjectStreamer : IDisposable
     private readonly Timer  _debounceTimer;
     // Fires every 10 s to upgrade textures on objects that the avatar walked closer to.
     private readonly Timer  _textureLodTimer;
-    // Fires every 10 s to catch root prims that are sitting in a tracked simulator's
+    // Polls (see ReconcilePollMs) to catch root prims that are sitting in a tracked simulator's
     // ObjectsPrimitives (current OR neighbor) but that this streamer never learned about --
     // see ReconcileUntrackedPrims's own doc comment for why that gap exists and what this
     // recovers. Self-healing regardless of the exact cause, and a diagnostic in its own right:
@@ -172,6 +172,20 @@ internal sealed class SceneObjectStreamer : IDisposable
     // sceneKeys ReconcileUntrackedPrims has already logged a recovery for -- logged once per key
     // (not once per sweep) so a persistently-failing recovered object doesn't spam every 10 s.
     private readonly ConcurrentDictionary<ulong, byte> _reconcileReported = new();
+
+    // Roots dropped only because they were beyond the stream radius. ReconcileUntrackedPrims
+    // re-admits them without its cooldown or warning once the avatar comes within range.
+    private readonly ConcurrentDictionary<ulong, byte> _outOfRange = new();
+
+    // The reconcile timer ticks every ReconcilePollMs; a sweep runs when the avatar has moved
+    // ReconcileMoveThreshold metres since the last one, or after ReconcileIntervalMs regardless.
+    private const int   ReconcilePollMs        = 1_000;
+    private const long  ReconcileIntervalMs    = 10_000;
+    private const float ReconcileMoveThreshold = 4f;
+    private long      _lastReconcileTick;
+    private OmVector3 _lastReconcileAvatarPos;
+    private int       _reconcileRunning;
+    private readonly Dictionary<ulong, long> _droppedPacketsLogged = new();
 
     private float _maxStreamRadius = 96f;
 
@@ -200,7 +214,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _textureLodTimer = new Timer(_ => CheckTextureLodUpgrades(), null,
             TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
         _reconcileTimer  = new Timer(_ => ReconcileUntrackedPrims(), null,
-            TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+            TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(ReconcilePollMs));
 
         _viewport.SceneObjectUploadFailed += OnSceneObjectUploadFailed;
     }
@@ -292,7 +306,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             // cancel/starve a linkset's build purely on placeholder data. Falling through to
             // EnqueueDirty below is safe either way: the real radius gate re-runs once the root
             // is known, in ProcessDirty/EnqueueBuild's own position lookups.
-            CancelAndRemove(sceneKey);
+            DropOutOfRange(sceneKey);
             return;
         }
 
@@ -323,7 +337,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         // comment.
         if (trustworthyPos && !IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
         {
-            CancelAndRemove(sceneKey);
+            DropOutOfRange(sceneKey);
             return;
         }
 
@@ -446,6 +460,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         var currentSim = _client.Network.CurrentSim;
         var sceneKey   = MakeSceneKey(sim, localId, currentSim);
         CancelAndRemove(sceneKey);
+        _outOfRange.TryRemove(sceneKey, out _);
 
         if (sim.ObjectsPrimitives.TryGetValue(localId, out var prim) && prim.ParentID != 0)
         {
@@ -506,7 +521,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             if (objs == null || !objs.TryGetValue(rootLocalId, out var root)) continue;
             var worldPos = ApplyRegionOffset(new Vector3(root.Position.X, root.Position.Y, root.Position.Z), sim, currentSim);
             if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
-                CancelAndRemove(sceneKey);
+                DropOutOfRange(sceneKey);
         }
     }
 
@@ -524,6 +539,11 @@ internal sealed class SceneObjectStreamer : IDisposable
         {
             if (SimForSceneKey(sceneKey) == sim)
                 CancelAndRemove(sceneKey);
+        }
+        foreach (var sceneKey in _outOfRange.Keys)
+        {
+            if (SimForSceneKey(sceneKey) == sim)
+                _outOfRange.TryRemove(sceneKey, out _);
         }
     }
 
@@ -566,6 +586,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _neighborIndex.Clear();
         _reconcileAttempts.Clear();
         _reconcileReported.Clear();
+        _outOfRange.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _fetchScheduler.Clear();
 
@@ -653,6 +674,12 @@ internal sealed class SceneObjectStreamer : IDisposable
         _lastRebuiltPose.TryRemove(sceneKey, out _);
         _lastBuildHadFlexi.TryRemove(sceneKey, out _);
         _viewport.RemoveSceneObject(sceneKey);
+    }
+
+    private void DropOutOfRange(ulong sceneKey)
+    {
+        CancelAndRemove(sceneKey);
+        _outOfRange[sceneKey] = 0;
     }
 
     private const int MaxBuildsPerTick = 20;
@@ -1154,12 +1181,29 @@ internal sealed class SceneObjectStreamer : IDisposable
         var currentSim = _client.Network.CurrentSim;
         if (currentSim == null) return;
         var avatarPos = _client.Self.SimPosition;
+        var now = Environment.TickCount64;
 
+        if (now - _lastReconcileTick < ReconcileIntervalMs &&
+            OmVector3.Distance(avatarPos, _lastReconcileAvatarPos) < ReconcileMoveThreshold)
+            return;
+        if (Interlocked.Exchange(ref _reconcileRunning, 1) != 0) return;
+        try
+        {
+            _lastReconcileTick      = now;
+            _lastReconcileAvatarPos = avatarPos;
+            ReconcileSweep(currentSim, avatarPos, now);
+        }
+        finally
+        {
+            Volatile.Write(ref _reconcileRunning, 0);
+        }
+    }
+
+    private void ReconcileSweep(Simulator currentSim, OmVector3 avatarPos, long now)
+    {
         Simulator[] sims;
         lock (_client.Network.Simulators)
             sims = _client.Network.Simulators.ToArray();
-
-        var now = Environment.TickCount64;
 
         foreach (var sim in sims)
         {
@@ -1176,10 +1220,14 @@ internal sealed class SceneObjectStreamer : IDisposable
             // UDPBase.ReceiveLoopAsync's bounded-channel drop-write) -- the one place packet loss
             // for this connection would show up, since nothing else surfaces the counter.
             var dropped = sim.Stats.GetDroppedPackets();
-            if (dropped > 0)
+            _droppedPacketsLogged.TryGetValue(sim.Handle, out var loggedDropped);
+            if (dropped > 0 && dropped != loggedDropped)
+            {
+                _droppedPacketsLogged[sim.Handle] = dropped;
                 Logger.Log(
                     $"SceneObjectStreamer: sim {sim.Name} has dropped {dropped} inbound UDP packets this session",
                     LogLevel.Warning);
+            }
 
             var objs = sim.ObjectsPrimitives;
             if (objs == null) continue;
@@ -1224,13 +1272,22 @@ internal sealed class SceneObjectStreamer : IDisposable
                 if (_dirty.ContainsKey(sceneKey)) continue;
                 if (_inflight.TryGetValue(sceneKey, out var attempt) && !attempt.Completed) continue;
 
-                if (_reconcileAttempts.TryGetValue(sceneKey, out var lastAttempt) &&
+                bool cameIntoRange = _outOfRange.ContainsKey(sceneKey);
+                if (!cameIntoRange &&
+                    _reconcileAttempts.TryGetValue(sceneKey, out var lastAttempt) &&
                     now - lastAttempt < ReconcileRetryCooldownMs)
                     continue;
 
                 var worldPos = ApplyRegionOffset(
                     new Vector3(root.Position.X, root.Position.Y, root.Position.Z), sim, currentSim);
                 if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius)) continue;
+
+                if (cameIntoRange)
+                {
+                    _outOfRange.TryRemove(sceneKey, out _);
+                    EnqueueDirty(sceneKey);
+                    continue;
+                }
 
                 _reconcileAttempts[sceneKey] = now;
                 if (_reconcileReported.TryAdd(sceneKey, 0))
