@@ -1400,6 +1400,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         if (_attached && !_updateQueued && !_renderDisabledAfterFailure && _compositor != null)
         {
             _updateQueued = true;
+            _renderRequestedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
             _compositor.RequestCompositionUpdate(_updateAction);
         }
     }
@@ -4861,6 +4862,68 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     private static Vector4 UvToST(UvTransform xform) =>
         new(xform.ScaleX, xform.ScaleY, xform.OffsetX, xform.OffsetY);
 
+    // ── Delayed-frame diagnostic ─────────────────────────────────────────────────
+    //
+    // Frames are rendered on request, so a long gap between frames is not by itself a stall.
+    // What matters is how long a requested frame waited to start. When that exceeds
+    // DelayedFrameThresholdMs, one line records where the time could have gone: the previous
+    // frame's own duration and stage timings, and the garbage collector's pause time and
+    // collection counts since that frame started. A long wait with a short previous frame and
+    // no GC pause means the UI thread was busy with something other than rendering.
+    private const double DelayedFrameThresholdMs = 100.0;
+    private const long   DelayedFrameLogIntervalMs = 500;
+    private long     _renderRequestedTimestamp;
+    private long     _frameStartTimestamp;
+    private double   _lastFrameDurationMs;
+    private long     _lastDelayedFrameLogTick;
+    private TimeSpan _gcPauseAtFrameStart;
+    private int      _gen0AtFrameStart, _gen1AtFrameStart, _gen2AtFrameStart;
+
+    private void ReportDelayedFrameStart()
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var gcPause = GC.GetTotalPauseDuration();
+        int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+
+        long requested = _renderRequestedTimestamp;
+        if (requested != 0 && _frameStartTimestamp != 0)
+        {
+            double waitedMs = (now - requested) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            long tick = Environment.TickCount64;
+            if (waitedMs >= DelayedFrameThresholdMs && tick - _lastDelayedFrameLogTick >= DelayedFrameLogIntervalMs)
+            {
+                _lastDelayedFrameLogTick = tick;
+                LibreMetaverse.Logger.Debug(
+                    $"[VkViewportControl] Frame started {waitedMs:F0}ms after it was requested. "
+                    + $"Previous frame took {_lastFrameDurationMs:F1}ms "
+                    + $"(DrainObj {DrainSceneObjectsMs:F1} DrainPatch {DrainTexturePatchesMs:F1} "
+                    + $"Flexi {FlexiDispatchMs:F1} Skin {SkinDispatchMs:F1} Record {MainPassRecordMs:F1} "
+                    + $"Submit {MainPassSubmitWaitMs:F1} BeginDraw {BeginDrawMs:F1}). "
+                    + $"GC since then: paused {(gcPause - _gcPauseAtFrameStart).TotalMilliseconds:F0}ms, "
+                    + $"gen0 +{gen0 - _gen0AtFrameStart} gen1 +{gen1 - _gen1AtFrameStart} gen2 +{gen2 - _gen2AtFrameStart}. "
+                    + DescribeMemory());
+            }
+        }
+
+        _gcPauseAtFrameStart = gcPause;
+        _gen0AtFrameStart = gen0;
+        _gen1AtFrameStart = gen1;
+        _gen2AtFrameStart = gen2;
+    }
+
+    // Last collection's size and the process's memory, for the delayed-frame line: a long GC
+    // pause that promoted little points at the system (paging), not at the amount of garbage.
+    private static string DescribeMemory()
+    {
+        const double Mb = 1024.0 * 1024.0;
+        var info = GC.GetGCMemoryInfo();
+        return $"Last GC: gen{info.Generation}, promoted {info.PromotedBytes / Mb:F0}MB, "
+             + $"pinned {info.PinnedObjectsCount}, heap {info.HeapSizeBytes / Mb:F0}MB "
+             + $"(committed {info.TotalCommittedBytes / Mb:F0}MB). "
+             + $"Process working set {Environment.WorkingSet / Mb:F0}MB; "
+             + $"system memory load {info.MemoryLoadBytes / Mb:F0}MB of {info.TotalAvailableMemoryBytes / Mb:F0}MB.";
+    }
+
     private unsafe void RenderFrame()
     {
         _updateQueued = false;
@@ -4895,6 +4958,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         // This placement covers CPU time
         // for the whole frame, not just command-buffer recording.
         _stats.BeginFrame();
+        ReportDelayedFrameStart();
+        _frameStartTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
         // Must run before any MarkUsed/FreeUsed call this frame -- see VkFrameReapRing's own doc
         // comment for why "this frame's slot" and "the slot due for reaping" are the same index.
         _reapRing.BeginFrame();
@@ -6126,6 +6191,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                 var fbToDestroy = perFrameFramebuffer;
                 _reapRing.MarkPendingDestroy(() => vk.Api.DestroyFramebuffer(vk.Device, fbToDestroy, null));
             }
+            _lastFrameDurationMs = (System.Diagnostics.Stopwatch.GetTimestamp() - _frameStartTimestamp)
+                * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
         }
     }
 
