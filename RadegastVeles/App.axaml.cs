@@ -56,6 +56,7 @@ public class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            Radegast.Veles.Core.MacDockIcon.Apply();
 
             var icons = TrayIcon.GetIcons(this);
             if (icons?.Count > 0)

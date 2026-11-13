@@ -134,6 +134,12 @@
        libvulkan.dylib / libvulkan.1.dylib symlinks) match what the workflow step creates so the
        app finds Vulkan under either build mode. The version lives in moltenvk.version, the single
        source of truth also read by publish-veles-macos.yml. -->
+  <!-- macOS: the Dock icon for runs outside an app bundle (see MacDockIcon). The published
+       bundle carries its own copy in Contents/Resources. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <None Include="Assets\veles.icns" Link="veles.icns" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
     <MoltenVKVersion Condition="'$(MoltenVKVersion)' == ''">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)moltenvk.version').Trim())</MoltenVKVersion>
     <MoltenVKCacheDir>$(MSBuildThisFileDirectory)../.moltenvk/</MoltenVKCacheDir>
