@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using LibreMetaverse;
 
@@ -643,14 +644,18 @@ namespace Radegast
             return control;
         }
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetFocus();
+
         /// <summary>
-        /// Remembers the focused control under <paramref name="root"/>, including its text selection,
-        /// and returns an action that hands focus back to it with that selection intact, so the user's
-        /// next keystroke doesn't replace what they were typing when a new tab or dialog opens (#82).
+        /// Remembers the focused control, including its text selection, and returns an action that hands
+        /// focus back to it with that selection intact, so the user's next keystroke doesn't replace what
+        /// they were typing when a new tab or dialog opens (#82). The control can be in another of our
+        /// windows (a profile, a detached tab, preferences); falls back to the one under <paramref name="root"/>.
         /// </summary>
         public static Action CaptureFocus(Control root)
         {
-            var active = FindFocusedControl(root);
+            var active = Control.FromChildHandle(GetFocus()) ?? FindFocusedControl(root);
             if (active == null) return () => { };
 
             var combo = active as ComboBox;
@@ -1198,8 +1203,10 @@ namespace Radegast
         {
             IMTabWindow imTab = new IMTabWindow(instance, target, session, targetName);
 
+            // No SelectIMInput() here: the tab starts hidden, and selecting a control in a hidden tab moves focus to
+            // the nearest visible container, out of whatever the user was typing in (#82). The window focuses its
+            // input itself once the tab is shown.
             RadegastTab tab = AddTab(session.ToString(), "IM: " + targetName, imTab);
-            imTab.SelectIMInput();
 
             return imTab;
         }
@@ -1209,7 +1216,6 @@ namespace Radegast
             ConferenceIMTabWindow imTab = new ConferenceIMTabWindow(instance, session, name);
 
             RadegastTab tab = AddTab(session.ToString(), name, imTab);
-            imTab.SelectIMInput();
 
             return imTab;
         }
@@ -1219,7 +1225,6 @@ namespace Radegast
             GroupIMTabWindow imTab = new GroupIMTabWindow(instance, session, name);
 
             RadegastTab tab = AddTab(session.ToString(), name, imTab);
-            imTab.SelectIMInput();
 
             return imTab;
         }
