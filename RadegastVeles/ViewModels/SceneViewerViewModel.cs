@@ -1608,11 +1608,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
 
             const float TurnDelta = 0.1f; // seconds per tick
             if (turnLeft)
-                mv.BodyRotation *= LibreMetaverse.Quaternion.CreateFromAxisAngle(
-                    LibreMetaverse.Vector3.UnitZ, TurnDelta);
+                Radegast.AvatarFacing.Yaw(mv, TurnDelta);
             else if (turnRight)
-                mv.BodyRotation *= LibreMetaverse.Quaternion.CreateFromAxisAngle(
-                    LibreMetaverse.Vector3.UnitZ, -TurnDelta);
+                Radegast.AvatarFacing.Yaw(mv, -TurnDelta);
         }
 
         mv.SendUpdate();
