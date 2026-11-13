@@ -20,6 +20,7 @@
 
 using System;
 using System.Collections.Frozen;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -41,7 +42,6 @@ namespace Radegast
         private bool suppressOnTextChanged = false;
         private bool syntaxHighLightEnabled = false;
         private readonly bool monoRuntime = false;
-        private readonly string rtfHeader;
         private FrozenDictionary<string, LslSyntax.LslKeyword> Keywords;
 
         //  Tool tip related private members
@@ -93,27 +93,6 @@ namespace Radegast
             if (Type.GetType("Mono.Runtime") != null)
             {
                 monoRuntime = true;
-            }
-
-            // Extract a minimal RTF header fragment and ensure it contains
-            // an ANSI code page and the unicode fallback (\uc1) so that
-            // \uN? sequences are interpreted correctly by the control.
-            try
-            {
-                rtfHeader = Rtf.Substring(0, Rtf.IndexOf('{', 2)) + " ";
-                if (!rtfHeader.Contains("\\ansicpg"))
-                {
-                    rtfHeader = rtfHeader.Replace("{\\rtf1\\ansi", "{\\rtf1\\ansi\\ansicpg1252");
-                }
-                if (!rtfHeader.Contains("\\uc"))
-                {
-                    rtfHeader = rtfHeader + "\\uc1 ";
-                }
-            }
-            catch
-            {
-                // Fallback to a safe default header
-                rtfHeader = "{\\rtf1\\ansi\\ansicpg1252\\deff0\\deflang1033 \\uc1 ";
             }
 
             GUI.GuiHelpers.ApplyGuiFixes(this);
@@ -374,6 +353,8 @@ namespace Radegast
             get => base.Text;
             set
             {
+                linkTargets.Clear();
+
                 if (syntaxHighLightEnabled && value != null)
                 {
                     BeginUpdate();
@@ -589,14 +570,13 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Insert a given text at the current input position as a link.
-        /// The link text is followed by a hash (#) and the given hyperlink text, both of
-        /// them invisible.
-        /// When clicked on, the whole link text and hyperlink string are given in the
-        /// LinkClickedEventArgs.
+        /// Insert a given text at the current input position as a link to the given hyperlink.
+        /// Only the text goes into the box; the hyperlink is kept beside it.
+        /// When clicked on, or Enter is pressed on it, the link text and the hyperlink,
+        /// joined by LinkSeparator, are given in the LinkClickedEventArgs.
         /// </summary>
         /// <param name="text">Text to be inserted</param>
-        /// <param name="hyperlink">Invisible hyperlink string to be inserted</param>
+        /// <param name="hyperlink">Hyperlink the text links to</param>
         public void InsertLink(string text, string hyperlink)
         {
             InsertLink(text, hyperlink, SelectionStart);
@@ -604,6 +584,20 @@ namespace Radegast
 
         //public const char LinkSeparator = (char)0x1970;
         public const char LinkSeparator = (char)0x8D;
+
+        private class LinkTarget
+        {
+            public int Start;
+            public int Length;
+            public string Text;
+            public string Hyperlink;
+        }
+
+        // Links inserted with a hyperlink, in the order they were inserted
+        private readonly List<LinkTarget> linkTargets = new List<LinkTarget>();
+
+        // Where the link the control last sent EN_LINK about starts
+        private int notifiedLinkStart = -1;
 
         private string RtfUnicode(string s)
         {
@@ -623,13 +617,13 @@ namespace Radegast
         }
 
         /// <summary>
-        /// Insert a given text at a given position as a link. The link text is followed by
-        /// a hash (#) and the given hyperlink text, both of them invisible.
-        /// When clicked on, the whole link text and hyperlink string are given in the
-        /// LinkClickedEventArgs.
+        /// Insert a given text at a given position as a link to the given hyperlink.
+        /// Only the text goes into the box; the hyperlink is kept beside it.
+        /// When clicked on, or Enter is pressed on it, the link text and the hyperlink,
+        /// joined by LinkSeparator, are given in the LinkClickedEventArgs.
         /// </summary>
         /// <param name="text">Text to be inserted</param>
-        /// <param name="hyperlink">Invisible hyperlink string to be inserted</param>
+        /// <param name="hyperlink">Hyperlink the text links to</param>
         /// <param name="position">Insert position</param>
         public void InsertLink(string text, string hyperlink, int position)
         {
@@ -645,16 +639,63 @@ namespace Radegast
             }
             else
             {
-                // Escape/encode both the visible text and the hidden hyperlink so the
-                // constructed RTF is always valid. RtfUnicode will encode unicode
-                // sequences; make sure to also escape braces/backslashes inside it.
-                string encodedText = RtfUnicode(text);
-                string encodedHyperlink = RtfUnicode(hyperlink);
-                SelectedRtf = rtfHeader + encodedText + @"\v " + LinkSeparator + encodedHyperlink + @"\v0}";
-                Select(position, text.Length + hyperlink.Length + 1);
+                // The hyperlink used to follow the text as hidden text, but hidden text is still
+                // text: screen readers read it and copying took it along, so a bare URL came out
+                // twice. Keep it beside the text instead.
+                SelectedText = text;
+                int length = SelectionStart - position;
+                Select(position, length);
                 SetSelectionLink(true);
-                Select(position + text.Length + hyperlink.Length + 1, 0);
+                Select(position + length, 0);
+                linkTargets.Add(new LinkTarget { Start = position, Length = length, Text = text, Hyperlink = hyperlink });
             }
+        }
+
+        private LinkTarget FindLinkTarget(int charIndex)
+        {
+            for (int i = linkTargets.Count - 1; i >= 0; i--)
+            {
+                var link = linkTargets[i];
+                if (charIndex >= link.Start && charIndex < link.Start + link.Length)
+                {
+                    return link;
+                }
+            }
+            return null;
+        }
+
+        protected override void OnLinkClicked(LinkClickedEventArgs e)
+        {
+            var link = notifiedLinkStart >= 0 ? FindLinkTarget(notifiedLinkStart) : null;
+            base.OnLinkClicked(link != null ? new LinkClickedEventArgs(link.Text + LinkSeparator + link.Hyperlink) : e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.Handled || !ReadOnly || e.KeyData != Keys.Enter) return;
+
+            // Enter on a link opens it, as a click would, so links work from the keyboard
+            var link = FindLinkTarget(SelectionStart);
+            if (link != null)
+            {
+                e.Handled = e.SuppressKeyPress = true;
+                base.OnLinkClicked(new LinkClickedEventArgs(link.Text + LinkSeparator + link.Hyperlink));
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == Win32.WM_REFLECT_NOTIFY)
+            {
+                var nmhdr = (Win32.NMHDR)Marshal.PtrToStructure(m.LParam, typeof(Win32.NMHDR));
+                if (nmhdr.code == Win32.EN_LINK)
+                {
+                    var enLink = (Win32.ENLINK)Marshal.PtrToStructure(m.LParam, typeof(Win32.ENLINK));
+                    notifiedLinkStart = enLink.chrg.cpMin;
+                }
+            }
+            base.WndProc(ref m);
         }
 
         /// <summary>
@@ -771,6 +812,9 @@ namespace Radegast
             public const short KS_ON = 0x01;
             public const short KS_KEYDOWN = 0x80;
 
+            public const int WM_REFLECT_NOTIFY = 0x2000 + 0x004E;
+            public const int EN_LINK = 0x070B;
+
             public const int EM_GETCHARFORMAT = WM_USER + 58;
             public const int EM_SETCHARFORMAT = WM_USER + 68;
 
@@ -785,6 +829,32 @@ namespace Radegast
             {
                 public int x;
                 public int y;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            public struct NMHDR
+            {
+                public IntPtr hwndFrom;
+                public UIntPtr idFrom;
+                public int code;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            public struct CHARRANGE
+            {
+                public int cpMin;
+                public int cpMax;
+            }
+
+            // richedit.h packs its structures to 4 bytes, which moves chrg on 64-bit
+            [StructLayout(LayoutKind.Sequential, Pack = 4)]
+            public struct ENLINK
+            {
+                public NMHDR nmhdr;
+                public int msg;
+                public IntPtr wParam;
+                public IntPtr lParam;
+                public CHARRANGE chrg;
             }
 
             [StructLayout(LayoutKind.Sequential)]
