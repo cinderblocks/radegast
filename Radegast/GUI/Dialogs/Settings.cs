@@ -108,6 +108,12 @@ namespace Radegast
 
             if (!s.ContainsKey("taskbar_highlight")) s["taskbar_highlight"] = true;
 
+            if (!s.ContainsKey(ScreenReaderAnnouncer.EnabledSetting)) s[ScreenReaderAnnouncer.EnabledSetting] = false;
+            if (!s.ContainsKey(ScreenReaderAnnouncer.ChatSetting)) s[ScreenReaderAnnouncer.ChatSetting] = true;
+            if (!s.ContainsKey(ScreenReaderAnnouncer.IMSetting)) s[ScreenReaderAnnouncer.IMSetting] = true;
+            if (!s.ContainsKey(ScreenReaderAnnouncer.GroupIMSetting)) s[ScreenReaderAnnouncer.GroupIMSetting] = true;
+            if (!s.ContainsKey(ScreenReaderAnnouncer.NotificationSetting)) s[ScreenReaderAnnouncer.NotificationSetting] = true;
+
             if (!s.ContainsKey("rendering_occlusion_culling_enabled2")) s["rendering_occlusion_culling_enabled2"] = false;
 
             if (!s.ContainsKey("rendering_use_vbo")) s["rendering_use_vbo"] = true;
@@ -242,6 +248,8 @@ namespace Radegast
 
             cbResolveURIs.Checked = settings["resolve_uris"].AsBoolean();
             cbResolveURIs.CheckedChanged += cbResolveURIs_CheckedChanged;
+
+            BindAnnounceSettings();
 
             cbResolveURIsAsPlaintext.Checked = settings["resolve_uris_as_plaintext"].AsBoolean();
             cbResolveURIsAsPlaintext.Enabled = cbResolveURIs.Checked;
@@ -468,6 +476,31 @@ namespace Radegast
         private void cbAutoReconnect_CheckedChanged(object sender, EventArgs e)
         {
             settings["auto_reconnect"] = OSD.FromBoolean(cbAutoReconnect.Checked);
+        }
+
+        private void BindAnnounceSettings()
+        {
+            var kinds = new[]
+            {
+                (cbAnnounceChat, ScreenReaderAnnouncer.ChatSetting),
+                (cbAnnounceIMs, ScreenReaderAnnouncer.IMSetting),
+                (cbAnnounceGroupIMs, ScreenReaderAnnouncer.GroupIMSetting),
+                (cbAnnounceNotifications, ScreenReaderAnnouncer.NotificationSetting)
+            };
+
+            cbAnnounce.Checked = settings[ScreenReaderAnnouncer.EnabledSetting].AsBoolean();
+            cbAnnounce.CheckedChanged += (sender, e) =>
+            {
+                settings[ScreenReaderAnnouncer.EnabledSetting] = OSD.FromBoolean(cbAnnounce.Checked);
+                foreach (var (box, _) in kinds) box.Enabled = cbAnnounce.Checked;
+            };
+
+            foreach (var (box, key) in kinds)
+            {
+                box.Checked = settings[key].AsBoolean();
+                box.Enabled = cbAnnounce.Checked;
+                box.CheckedChanged += (sender, e) => settings[key] = OSD.FromBoolean(box.Checked);
+            }
         }
 
         private void cbResolveURIs_CheckedChanged(object sender, EventArgs e)

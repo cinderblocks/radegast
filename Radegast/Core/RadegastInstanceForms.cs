@@ -45,6 +45,9 @@ namespace Radegast
         /// <summary> Handles loading plugins and scripts</summary>
         public PluginManager PluginManager { get; private set; }
 
+        /// <summary>Reads incoming text out through the user's screen reader, when turned on</summary>
+        public ScreenReaderAnnouncer ScreenReader { get; private set; }
+
         /// <summary>
         /// Is system using plain color theme, with white background and dark text
         /// </summary>
@@ -67,6 +70,8 @@ namespace Radegast
             RegisterContextActions();
 
             PluginManager = new PluginManager(this);
+
+            ScreenReader = new ScreenReaderAnnouncer(this);
 
             MainForm = new frmMain(this);
             MainForm.InitializeControls();

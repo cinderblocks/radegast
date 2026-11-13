@@ -160,6 +160,12 @@ namespace Radegast
             this.cbxFontSize = new System.Windows.Forms.ComboBox();
             this.cbxFont = new System.Windows.Forms.ComboBox();
             this.fontDialog1 = new System.Windows.Forms.FontDialog();
+            this.tbpAccessibility = new System.Windows.Forms.TabPage();
+            this.cbAnnounce = new System.Windows.Forms.CheckBox();
+            this.cbAnnounceChat = new System.Windows.Forms.CheckBox();
+            this.cbAnnounceIMs = new System.Windows.Forms.CheckBox();
+            this.cbAnnounceGroupIMs = new System.Windows.Forms.CheckBox();
+            this.cbAnnounceNotifications = new System.Windows.Forms.CheckBox();
             this.tcGraphics.SuspendLayout();
             this.tbpGeneral.SuspendLayout();
             this.cbHighLight.SuspendLayout();
@@ -176,6 +182,7 @@ namespace Radegast
             ((System.ComponentModel.ISupportInitialize)(this.pseudoHomeTolerance)).BeginInit();
             this.autoSit.SuspendLayout();
             this.tbpChat.SuspendLayout();
+            this.tbpAccessibility.SuspendLayout();
             this.SuspendLayout();
             // 
             // tcGraphics
@@ -185,6 +192,7 @@ namespace Radegast
             this.tcGraphics.Controls.Add(this.tbpGraphics);
             this.tcGraphics.Controls.Add(this.tbpBot);
             this.tcGraphics.Controls.Add(this.tbpChat);
+            this.tcGraphics.Controls.Add(this.tbpAccessibility);
             this.tcGraphics.Dock = System.Windows.Forms.DockStyle.Fill;
             this.tcGraphics.Location = new System.Drawing.Point(0, 0);
             this.tcGraphics.Multiline = true;
@@ -1165,6 +1173,66 @@ namespace Radegast
             this.tbpChat.TabIndex = 5;
             this.tbpChat.Text = "Chat";
             this.tbpChat.UseVisualStyleBackColor = true;
+            //
+            // tbpAccessibility
+            //
+            this.tbpAccessibility.Controls.Add(this.cbAnnounce);
+            this.tbpAccessibility.Controls.Add(this.cbAnnounceChat);
+            this.tbpAccessibility.Controls.Add(this.cbAnnounceIMs);
+            this.tbpAccessibility.Controls.Add(this.cbAnnounceGroupIMs);
+            this.tbpAccessibility.Controls.Add(this.cbAnnounceNotifications);
+            this.tbpAccessibility.Location = new System.Drawing.Point(4, 22);
+            this.tbpAccessibility.Name = "tbpAccessibility";
+            this.tbpAccessibility.Padding = new System.Windows.Forms.Padding(3);
+            this.tbpAccessibility.Size = new System.Drawing.Size(522, 489);
+            this.tbpAccessibility.TabIndex = 6;
+            this.tbpAccessibility.Text = "Accessibility";
+            this.tbpAccessibility.UseVisualStyleBackColor = true;
+            //
+            // cbAnnounce
+            //
+            this.cbAnnounce.AutoSize = true;
+            this.cbAnnounce.Location = new System.Drawing.Point(8, 10);
+            this.cbAnnounce.Name = "cbAnnounce";
+            this.cbAnnounce.TabIndex = 0;
+            this.cbAnnounce.Text = "Read incoming text out through my screen reader";
+            this.cbAnnounce.UseVisualStyleBackColor = true;
+            //
+            // cbAnnounceChat
+            //
+            this.cbAnnounceChat.AutoSize = true;
+            this.cbAnnounceChat.Location = new System.Drawing.Point(28, 33);
+            this.cbAnnounceChat.Name = "cbAnnounceChat";
+            this.cbAnnounceChat.TabIndex = 1;
+            this.cbAnnounceChat.Text = "Local chat";
+            this.cbAnnounceChat.UseVisualStyleBackColor = true;
+            //
+            // cbAnnounceIMs
+            //
+            this.cbAnnounceIMs.AutoSize = true;
+            this.cbAnnounceIMs.Location = new System.Drawing.Point(28, 56);
+            this.cbAnnounceIMs.Name = "cbAnnounceIMs";
+            this.cbAnnounceIMs.TabIndex = 2;
+            this.cbAnnounceIMs.Text = "Instant messages";
+            this.cbAnnounceIMs.UseVisualStyleBackColor = true;
+            //
+            // cbAnnounceGroupIMs
+            //
+            this.cbAnnounceGroupIMs.AutoSize = true;
+            this.cbAnnounceGroupIMs.Location = new System.Drawing.Point(28, 79);
+            this.cbAnnounceGroupIMs.Name = "cbAnnounceGroupIMs";
+            this.cbAnnounceGroupIMs.TabIndex = 3;
+            this.cbAnnounceGroupIMs.Text = "Group chat and conferences";
+            this.cbAnnounceGroupIMs.UseVisualStyleBackColor = true;
+            //
+            // cbAnnounceNotifications
+            //
+            this.cbAnnounceNotifications.AutoSize = true;
+            this.cbAnnounceNotifications.Location = new System.Drawing.Point(28, 102);
+            this.cbAnnounceNotifications.Name = "cbAnnounceNotifications";
+            this.cbAnnounceNotifications.TabIndex = 4;
+            this.cbAnnounceNotifications.Text = "Notifications, dialogs and status messages";
+            this.cbAnnounceNotifications.UseVisualStyleBackColor = true;
             // 
             // btnSave
             // 
@@ -1368,6 +1436,8 @@ namespace Radegast
             this.autoSit.PerformLayout();
             this.tbpChat.ResumeLayout(false);
             this.tbpChat.PerformLayout();
+            this.tbpAccessibility.ResumeLayout(false);
+            this.tbpAccessibility.PerformLayout();
             this.ResumeLayout(false);
 
         }
@@ -1474,5 +1544,11 @@ namespace Radegast
         public System.Windows.Forms.CheckBox cbAllowConferenceChatsFromFriends;
         public System.Windows.Forms.CheckBox cbLogIgnoredConferencesToChat;
         private System.Windows.Forms.CheckBox cbResolveURIsAsPlaintext;
+        private System.Windows.Forms.TabPage tbpAccessibility;
+        private System.Windows.Forms.CheckBox cbAnnounce;
+        private System.Windows.Forms.CheckBox cbAnnounceChat;
+        private System.Windows.Forms.CheckBox cbAnnounceIMs;
+        private System.Windows.Forms.CheckBox cbAnnounceGroupIMs;
+        private System.Windows.Forms.CheckBox cbAnnounceNotifications;
     }
 }

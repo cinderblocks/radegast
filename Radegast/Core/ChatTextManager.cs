@@ -130,6 +130,11 @@ namespace Radegast
         {
             ChatLineAdded?.Invoke(this, new ChatLineAddedArgs(item));
 
+            if (isNewMessage)
+            {
+                AnnounceToScreenReader(item);
+            }
+
             lock (SyncChat)
             {
                 instance.LogClientMessage("chat.txt", item.From + item.Text);
@@ -193,6 +198,34 @@ namespace Radegast
 
                 ProcessAndPrintText(item.Text, isNewMessage, true);
             }
+        }
+
+        private void AnnounceToScreenReader(ChatBufferItem item)
+        {
+            // Your own lines aren't read back to you
+            if (item.ID != UUID.Zero && item.ID == instance.Client.Self.AgentID) return;
+
+            string setting;
+            switch (item.Style)
+            {
+                case ChatBufferTextStyle.Normal:
+                case ChatBufferTextStyle.Emote:
+                case ChatBufferTextStyle.LindenChat:
+                case ChatBufferTextStyle.ObjectChat:
+                case ChatBufferTextStyle.OwnerSay:
+                    setting = ScreenReaderAnnouncer.ChatSetting;
+                    break;
+                case ChatBufferTextStyle.StatusBlue:
+                case ChatBufferTextStyle.StatusDarkBlue:
+                case ChatBufferTextStyle.Alert:
+                case ChatBufferTextStyle.Error:
+                    setting = ScreenReaderAnnouncer.NotificationSetting;
+                    break;
+                default:
+                    return;
+            }
+
+            instance.ScreenReader?.Announce(setting, SpeakableText(item.From + item.Text));
         }
 
         //Used only for non-public chat
