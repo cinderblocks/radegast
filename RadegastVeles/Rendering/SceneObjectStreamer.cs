@@ -587,6 +587,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _reconcileAttempts.Clear();
         _reconcileReported.Clear();
         _outOfRange.Clear();
+        _meshRetryAttempts.Clear();
         _debounceTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _fetchScheduler.Clear();
 
@@ -673,7 +674,33 @@ internal sealed class SceneObjectStreamer : IDisposable
         _requestedTexLod.TryRemove(sceneKey, out _);
         _lastRebuiltPose.TryRemove(sceneKey, out _);
         _lastBuildHadFlexi.TryRemove(sceneKey, out _);
+        _meshRetryAttempts.TryRemove(sceneKey, out _);
         _viewport.RemoveSceneObject(sceneKey);
+    }
+
+    // A mesh fetch can fail for reasons that pass: the region's capabilities are briefly
+    // unavailable around a region crossing, or the asset server times out. A linkset built with
+    // prims missing for that reason is rebuilt after a delay, a limited number of times.
+    private readonly ConcurrentDictionary<ulong, int> _meshRetryAttempts = new();
+    private const int MaxMeshRetries     = 3;
+    private const int MeshRetryDelayMs   = 10_000;
+
+    private void ScheduleMeshRetry(ulong sceneKey, bool meshesUnavailable)
+    {
+        if (!meshesUnavailable)
+        {
+            _meshRetryAttempts.TryRemove(sceneKey, out _);
+            return;
+        }
+
+        int attempt = _meshRetryAttempts.AddOrUpdate(sceneKey, 1, (_, n) => n + 1);
+        if (attempt > MaxMeshRetries) return;
+
+        _ = Task.Delay(MeshRetryDelayMs * attempt).ContinueWith(_ =>
+        {
+            if (!_disposed && _rendered.ContainsKey(sceneKey) && _meshRetryAttempts.ContainsKey(sceneKey))
+                EnqueueDirty(sceneKey);
+        }, TaskScheduler.Default);
     }
 
     private void DropOutOfRange(ulong sceneKey)
@@ -948,6 +975,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             var   lod     = LodForDistance(dist);
             int   texLod  = TextureLodLevelForDistance(dist);
 
+            int meshesUnavailable = 0;
             var submission = await _builder.BuildAsync(
                 prims, rootLocalId,
                 label:                 $"prim:{rootLocalId}",
@@ -955,6 +983,7 @@ internal sealed class SceneObjectStreamer : IDisposable
                 ct:                    token,
                 detailLevel:           lod,
                 textureResolutionLevel: texLod,
+                onMeshUnavailable:     () => Interlocked.Increment(ref meshesUnavailable),
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
@@ -1034,6 +1063,7 @@ internal sealed class SceneObjectStreamer : IDisposable
 
             _viewport.SubmitSceneObject(sceneKey, submission);
             _rendered[sceneKey] = 0;
+            ScheduleMeshRetry(sceneKey, Volatile.Read(ref meshesUnavailable) > 0);
             // Seeds the epsilon-gate baseline here too (not just for later rebuilds) so the very
             // first terse update after initial OnObjectUpdate doesn't immediately re-trigger a
             // redundant rebuild for a stationary object -- see OnTerseObjectUpdate's comment.

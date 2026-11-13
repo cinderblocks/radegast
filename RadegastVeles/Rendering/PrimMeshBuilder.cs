@@ -332,9 +332,10 @@ internal sealed class PrimMeshBuilder(GridClient client)
         bool                    isHud                  = false,
         DetailLevel             detailLevel            = DetailLevel.High,
         IProgress<SceneTexturePatch>? texturePatch     = null,
-        int                     textureResolutionLevel = -1)
+        int                     textureResolutionLevel = -1,
+        Action?                 onMeshUnavailable      = null)
     {
-        var (rawFaces, bMin, bMax, flexiPrims, animeshSkins) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel)
+        var (rawFaces, bMin, bMax, flexiPrims, animeshSkins) = await TessellateAsync(prims, rootLocalId, progress, ct, isHud, detailLevel, onMeshUnavailable)
                                                                    .ConfigureAwait(false);
 
         ct.ThrowIfCancellationRequested();
@@ -394,7 +395,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
         IProgress<string>?      progress,
         CancellationToken       ct,
         bool                    isHud       = false,
-        DetailLevel             detailLevel = DetailLevel.High)
+        DetailLevel             detailLevel = DetailLevel.High,
+        Action?                 onMeshUnavailable = null)
     {
         var faces        = new List<RawFace>();
         var flexiPrims   = new List<FlexiPrimInfo>();
@@ -425,6 +427,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                     $"PrimMeshBuilder: mesh unavailable for prim {prim.LocalID} " +
                     $"(sculpt={prim.Sculpt?.SculptTexture}), skipping -- object will be missing faces",
                     LogLevel.Warning);
+                onMeshUnavailable?.Invoke();
                 continue;
             }
 
