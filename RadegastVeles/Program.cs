@@ -131,11 +131,10 @@ internal static class Program
                 ExceptionType = BugSplat.ExceptionTypeId.DotNetStandard,
             };
             BugSplat.Attachments.Add(new FileInfo(logFilePath));
-
-            // Hook all unhandled exception sources
-            AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
-            TaskScheduler.UnobservedTaskException      += OnUnobservedTaskException;
         }
+
+        AppDomain.CurrentDomain.UnhandledException += OnUnhandledException;
+        TaskScheduler.UnobservedTaskException      += OnUnobservedTaskException;
 
         try
         {
@@ -143,6 +142,7 @@ internal static class Program
         }
         catch (Exception ex) when (!System.Diagnostics.Debugger.IsAttached)
         {
+            Logger.Critical("Unhandled exception on the UI thread; Veles is closing.", ex);
             VelesLogProvider.Flush();
             BugSplat?.Post(ex);
 #if !DEBUG
@@ -168,6 +168,7 @@ internal static class Program
     {
         if (e.ExceptionObject is Exception ex)
         {
+            Logger.Critical($"Unhandled exception (terminating: {e.IsTerminating}).", ex);
             VelesLogProvider.Flush();
             BugSplat?.Post(ex);
 #if !DEBUG
@@ -176,13 +177,13 @@ internal static class Program
         }
     }
 
+    // A background task failed and nothing awaited it. The process keeps running, so this is
+    // recorded and reported but is not presented to the user as a crash.
     private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
     {
-        BugSplat?.Post(e.Exception);
         e.SetObserved();
-#if !DEBUG
-        ShowCrashWindow(e.Exception);
-#endif
+        Logger.Error("A background task failed and its error was never observed.", e.Exception);
+        BugSplat?.Post(e.Exception);
     }
 
     private static void ShowCrashWindow(Exception ex)
