@@ -1350,6 +1350,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         {
             _countedAsLiveInstance = false;
             System.Threading.Interlocked.Decrement(ref s_liveInstanceCount);
+            UiThreadWatch.Release();
         }
         _attached = false;
         base.OnDetachedFromLogicalTree(e);
@@ -2466,6 +2467,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             if (!_countedAsLiveInstance)
             {
                 _countedAsLiveInstance = true;
+                UiThreadWatch.Acquire();
                 System.Threading.Interlocked.Increment(ref s_liveInstanceCount);
             }
             RequestRender();
@@ -4868,8 +4870,12 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     // What matters is how long a requested frame waited to start. When that exceeds
     // DelayedFrameThresholdMs, one line records where the time could have gone: the previous
     // frame's own duration and stage timings, and the garbage collector's pause time and
-    // collection counts since that frame started. A long wait with a short previous frame and
-    // no GC pause means the UI thread was busy with something other than rendering.
+    // collection counts since that frame started, and how long other work posted to the UI
+    // thread had to wait over the same period (see UiThreadWatch). A long wait with a short
+    // previous frame and no GC pause is then one of three things: one job held the UI thread
+    // (the highest-priority probe waited too), a run of jobs kept render-priority work back
+    // (only that probe waited), or the UI thread was free and the frame callback itself came
+    // late, as it does while the window is hidden or inactive.
     private const double DelayedFrameThresholdMs = 100.0;
     private const long   DelayedFrameLogIntervalMs = 500;
     private long     _renderRequestedTimestamp;
@@ -4893,6 +4899,10 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             if (waitedMs >= DelayedFrameThresholdMs && tick - _lastDelayedFrameLogTick >= DelayedFrameLogIntervalMs)
             {
                 _lastDelayedFrameLogTick = tick;
+                var (blockedMs, renderPriorityMs) = UiThreadWatch.LongestWaits(requested, now);
+                var window = TopLevel.GetTopLevel(this) as Window;
+                string windowState = window == null ? "unknown"
+                    : $"{(window.IsActive ? "active" : "inactive")}, {window.WindowState}";
                 LibreMetaverse.Logger.Debug(
                     $"[VkViewportControl] Frame started {waitedMs:F0}ms after it was requested. "
                     + $"Previous frame took {_lastFrameDurationMs:F1}ms "
@@ -4901,6 +4911,8 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
                     + $"Submit {MainPassSubmitWaitMs:F1} BeginDraw {BeginDrawMs:F1}). "
                     + $"GC since then: paused {(gcPause - _gcPauseAtFrameStart).TotalMilliseconds:F0}ms, "
                     + $"gen0 +{gen0 - _gen0AtFrameStart} gen1 +{gen1 - _gen1AtFrameStart} gen2 +{gen2 - _gen2AtFrameStart}. "
+                    + $"UI thread while waiting: top-priority work waited up to {blockedMs:F0}ms, "
+                    + $"render-priority work up to {renderPriorityMs:F0}ms. Window {windowState}. "
                     + DescribeMemory());
             }
         }
