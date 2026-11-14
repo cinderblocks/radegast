@@ -538,12 +538,9 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
         // Only update labels if this is the currently selected object.
         // Diagnostic logging (2026-09-05) on every bail-out below, kept -- see InspectObject's
         // own comment for why.
-        if (SelectedLocalId == 0)
-        {
-            LibreMetaverse.Logger.Debug(
-                $"[SceneViewerViewModel] OnObjectProperties: discarded, nothing selected (reply objectId={e.Properties.ObjectID})");
-            return;
-        }
+        // With nothing selected here, every reply belongs to another consumer (the Objects
+        // panel requests properties for each prim it lists), so it is not worth a log line.
+        if (SelectedLocalId == 0) return;
         var sim = _instance.Client.Network.CurrentSim;
         if (sim == null || e.Simulator != sim)
         {
