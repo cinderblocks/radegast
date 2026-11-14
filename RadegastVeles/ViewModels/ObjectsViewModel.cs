@@ -18,6 +18,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
@@ -38,6 +39,20 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
     private readonly object _refreshLock = new();
     private Timer? _objectUpdateTimer;
     private readonly object _timerLock = new();
+
+    // Number of panels currently showing this view model (the docked tab, a detached window).
+    // While it is zero the list is not maintained: no region scans, no property requests and
+    // no UI-thread updates. Touched on the UI thread only; read from network threads.
+    private int _visiblePanels;
+    private bool IsShown => Volatile.Read(ref _visiblePanels) > 0;
+
+    // When properties were last requested for a prim, by local ID, so that a prim which has
+    // not answered yet is not asked again on every refresh.
+    private readonly Dictionary<uint, long> _propertyRequestedAt = new();
+    private const long PropertyRequestRetryMs = 30_000;
+
+    private readonly ConcurrentQueue<Primitive.ObjectProperties> _pendingProperties = new();
+    private int _propertyDrainPosted;
 
     [ObservableProperty]
     private string _searchText = string.Empty;
@@ -204,8 +219,28 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
         var selfPos = Client.Self.SimPosition;
         _selfX = selfPos.X;
         _selfY = selfPos.Y;
-        FetchMapTile();
+    }
+
+    /// <summary>Called by a panel when it becomes visible; brings the list up to date.</summary>
+    public void PanelShown()
+    {
+        if (Interlocked.Increment(ref _visiblePanels) != 1) return;
+        var selfPos = Client.Self.SimPosition;
+        SelfX = selfPos.X;
+        SelfY = selfPos.Y;
+        if (ObjectMapTile == null) FetchMapTile();
         QueueRefresh();
+    }
+
+    /// <summary>Called by a panel when it is no longer visible.</summary>
+    public void PanelHidden()
+    {
+        if (Interlocked.Decrement(ref _visiblePanels) > 0) return;
+        Volatile.Write(ref _visiblePanels, 0);
+        lock (_refreshLock)
+        {
+            _refreshCts?.Cancel();
+        }
     }
 
     public override void Dispose()
@@ -598,6 +633,7 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     private void QueueRefresh()
     {
+        if (!IsShown) return;
         _ = RefreshObjectsAsync();
     }
 
@@ -704,11 +740,11 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
                         isGroupOwned
                     ));
 
-                    // Request properties if not yet fetched; track pending count
                     if (prim.Properties == null)
                     {
-                        Client.Objects.SelectObject(sim, prim.LocalID);
                         Interlocked.Increment(ref _pendingPropertiesCount);
+                        if (ShouldRequestProperties(prim.LocalID))
+                            Client.Objects.SelectObject(sim, prim.LocalID);
                     }
                 }
 
@@ -757,15 +793,21 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
                     }
                 }
 
-                // Re-sort in-place using Move to avoid clearing selection
+                // Re-sort in-place using Move to avoid clearing selection. Entries already in
+                // place cost one reference comparison; the search for a misplaced entry starts
+                // at its target slot, since everything before it is final.
                 var sorted = sortByName
                     ? Objects.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList()
                     : Objects.OrderBy(o => o.Distance).ToList();
                 for (int i = 0; i < sorted.Count; i++)
                 {
-                    int current = Objects.IndexOf(sorted[i]);
-                    if (current != i)
-                        Objects.Move(current, i);
+                    if (ReferenceEquals(Objects[i], sorted[i])) continue;
+                    for (int j = i + 1; j < Objects.Count; j++)
+                    {
+                        if (!ReferenceEquals(Objects[j], sorted[i])) continue;
+                        Objects.Move(j, i);
+                        break;
+                    }
                 }
 
                 // Restore selection if it still exists and was cleared by a move
@@ -803,8 +845,21 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     #region Network Events
 
+    private bool ShouldRequestProperties(uint localId)
+    {
+        long now = Environment.TickCount64;
+        lock (_propertyRequestedAt)
+        {
+            if (_propertyRequestedAt.TryGetValue(localId, out long at) && now - at < PropertyRequestRetryMs)
+                return false;
+            _propertyRequestedAt[localId] = now;
+            return true;
+        }
+    }
+
     private void Objects_ObjectUpdate(object? sender, PrimEventArgs e)
     {
+        if (!IsShown) return;
         lock (_timerLock)
         {
             // Leading-edge coalesce: only start a new timer if one isn't already pending.
@@ -827,6 +882,13 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     private void Objects_KillObjects(object? sender, KillObjectsEventArgs e)
     {
+        lock (_propertyRequestedAt)
+        {
+            foreach (var localId in e.ObjectLocalIDs)
+                _propertyRequestedAt.Remove(localId);
+        }
+        if (!IsShown) return;
+
         Dispatcher.UIThread.Post(() =>
         {
             foreach (var localId in e.ObjectLocalIDs)
@@ -848,63 +910,82 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
 
     private void Objects_ObjectProperties(object? sender, ObjectPropertiesEventArgs e)
     {
+        if (!IsShown) return;
+
         // Decrement pending counter (it was previously tracking objects with no properties)
         var wasPending = Interlocked.Decrement(ref _pendingPropertiesCount);
         if (wasPending < 0) Interlocked.Exchange(ref _pendingPropertiesCount, 0);
 
-        Dispatcher.UIThread.Post(() =>
+        // Replies arrive in bursts of hundreds; one UI-thread pass applies however many have
+        // queued up by the time it runs.
+        _pendingProperties.Enqueue(e.Properties);
+        if (Interlocked.Exchange(ref _propertyDrainPosted, 1) == 0)
+            Dispatcher.UIThread.Post(DrainPendingProperties, DispatcherPriority.Background);
+    }
+
+    private void DrainPendingProperties()
+    {
+        Volatile.Write(ref _propertyDrainPosted, 0);
+        PendingCount = Math.Max(0, _pendingPropertiesCount);
+
+        while (_pendingProperties.TryDequeue(out var props))
+            ApplyProperties(props);
+    }
+
+    private void ApplyProperties(Primitive.ObjectProperties props)
+    {
+        if (!_objectIndexById.TryGetValue(props.ObjectID, out int i)
+            || i >= Objects.Count || Objects[i].Id != props.ObjectID)
+            return; // not currently tracked (index stale or object no longer listed)
+
+        var old = Objects[i];
+        var ownerName = _instance.Names.Get(props.OwnerID);
+        var creatorName = _instance.Names.Get(props.CreatorID);
+
+        // Detect group-owned objects (OwnerID is Zero, GroupID is set, ObjectGroupOwned flag set)
+        var isGroupOwned = props.OwnerID == UUID.Zero &&
+                           props.GroupID != UUID.Zero &&
+                           (old.Flags & PrimFlags.ObjectGroupOwned) != 0;
+        var groupId = isGroupOwned ? props.GroupID : UUID.Zero;
+
+        // Kick off async group name resolution if needed
+        if (isGroupOwned && !_instance.TryGetCachedGroupName(groupId, out _))
+            Client.Groups.RequestGroupName(groupId);
+
+        Objects[i] = old with
         {
-            PendingCount = Math.Max(0, _pendingPropertiesCount);
+            Name = props.Name,
+            Description = props.Description ?? string.Empty,
+            OwnerName = isGroupOwned ? "(group)" : ownerName,
+            CreatorName = creatorName,
+            OwnerID = props.OwnerID,
+            CreatorID = props.CreatorID,
+            SaleType = props.SaleType,
+            SalePrice = props.SalePrice,
+            OwnerMask = props.Permissions.OwnerMask,
+            NextOwnerMask = props.Permissions.NextOwnerMask,
+            IsGroupOwned = isGroupOwned,
+            GroupID = groupId,
+        };
 
-            if (!_objectIndexById.TryGetValue(e.Properties.ObjectID, out int i)
-                || i >= Objects.Count || Objects[i].Id != e.Properties.ObjectID)
-                return; // not currently tracked (index stale or object no longer listed)
-
-            {
-                var old = Objects[i];
-                var ownerName = _instance.Names.Get(e.Properties.OwnerID);
-                var creatorName = _instance.Names.Get(e.Properties.CreatorID);
-
-                // Detect group-owned objects (OwnerID is Zero, GroupID is set, ObjectGroupOwned flag set)
-                var isGroupOwned = e.Properties.OwnerID == UUID.Zero &&
-                                   e.Properties.GroupID != UUID.Zero &&
-                                   (old.Flags & PrimFlags.ObjectGroupOwned) != 0;
-                var groupId = isGroupOwned ? e.Properties.GroupID : UUID.Zero;
-
-                // Kick off async group name resolution if needed
-                if (isGroupOwned && !_instance.TryGetCachedGroupName(groupId, out _))
-                    Client.Groups.RequestGroupName(groupId);
-
-                Objects[i] = old with
-                {
-                    Name = e.Properties.Name,
-                    Description = e.Properties.Description ?? string.Empty,
-                    OwnerName = isGroupOwned ? "(group)" : ownerName,
-                    CreatorName = creatorName,
-                    OwnerID = e.Properties.OwnerID,
-                    CreatorID = e.Properties.CreatorID,
-                    SaleType = e.Properties.SaleType,
-                    SalePrice = e.Properties.SalePrice,
-                    OwnerMask = e.Properties.Permissions.OwnerMask,
-                    NextOwnerMask = e.Properties.Permissions.NextOwnerMask,
-                    IsGroupOwned = isGroupOwned,
-                    GroupID = groupId,
-                };
-
-                if (SelectedObject?.Id == e.Properties.ObjectID)
-                {
-                    SelectedObject = Objects[i];
-                }
-            }
-        });
+        if (SelectedObject?.Id == props.ObjectID)
+        {
+            SelectedObject = Objects[i];
+        }
     }
 
     private void Network_SimChanged(object? sender, SimChangedEventArgs e)
     {
+        lock (_propertyRequestedAt)
+        {
+            _propertyRequestedAt.Clear();
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             MapEntries.Clear();
             ObjectMapTile = null;
+            if (!IsShown) return;
             FetchMapTile();
             QueueRefresh();
         });

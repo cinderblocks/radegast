@@ -17,6 +17,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -31,6 +32,33 @@ public partial class ObjectsPanel : UserControl
     public ObjectsPanel()
     {
         InitializeComponent();
+    }
+
+    private ObjectsViewModel? _shownVm;
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        DataContextChanged += OnDataContextChangedWhileAttached;
+        TrackShown(DataContext as ObjectsViewModel);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        DataContextChanged -= OnDataContextChangedWhileAttached;
+        TrackShown(null);
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnDataContextChangedWhileAttached(object? sender, System.EventArgs e)
+        => TrackShown(DataContext as ObjectsViewModel);
+
+    private void TrackShown(ObjectsViewModel? vm)
+    {
+        if (ReferenceEquals(vm, _shownVm)) return;
+        _shownVm?.PanelHidden();
+        _shownVm = vm;
+        _shownVm?.PanelShown();
     }
 
     protected override void OnLoaded(RoutedEventArgs e)
