@@ -832,11 +832,11 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            Logger.Warn("Refreshing the Objects list failed.", ex, Client);
             Dispatcher.UIThread.Post(() =>
             {
                 _objectCount = 0;
                 OnPropertyChanged(nameof(StatusText));
-                _ = ex; // surface error in debug
             });
         }
     }

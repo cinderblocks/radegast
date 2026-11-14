@@ -1908,7 +1908,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             if (!string.IsNullOrEmpty(cacheFile) && File.Exists(cacheFile))
             {
                 try { Inventory.RestoreFromDisk(cacheFile); }
-                catch { /* corrupt or missing cache — proceed with full fetch */ }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Could not read the inventory cache at {cacheFile}; loading the whole inventory from the grid.", ex, Client);
+                }
                 Dispatcher.UIThread.Post(() => { BuildTree(); });
             }
 
@@ -1964,7 +1967,11 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 await Task.WhenAll(tasks).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { throw; }
-            catch { /* individual folder failures handled by FolderUpdated event */ }
+            catch (Exception ex)
+            {
+                // A folder that failed stays queued and is requested again on the next pass.
+                Logger.Debug("An inventory folder request failed.", ex, Client);
+            }
 
             // Re-traverse to find any newly-discovered folders that need updating
             TraverseAndQueueFolders(rootNode);
@@ -1984,7 +1991,11 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         // Save to disk cache (background, non-blocking)
         var cacheFile = _instance.InventoryCacheFileName;
         if (!string.IsNullOrEmpty(cacheFile))
-            _ = Task.Run(() => { try { Inventory.SaveToDisk(cacheFile); } catch { } });
+            _ = Task.Run(() =>
+            {
+                try { Inventory.SaveToDisk(cacheFile); }
+                catch (Exception ex) { Logger.Warn($"Could not save the inventory cache to {cacheFile}.", ex, Client); }
+            });
 
         // Fetch library in the background after main inventory is ready
         _ = FetchLibraryFolders(token);
@@ -2033,7 +2044,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             await Task.WhenAll(tasks).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { throw; }
-        catch { }
+        catch (Exception ex)
+        {
+            Logger.Warn("Loading the library inventory failed; it may be incomplete.", ex, Client);
+        }
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {

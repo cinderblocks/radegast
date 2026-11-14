@@ -35,11 +35,22 @@ namespace Radegast.Veles.Core;
 public sealed class RadegastInstanceAvalonia : RadegastInstance
 {
     private bool _initialCapsFetched;
-    private System.Threading.Timer? _renderInfoTimer;
     private System.Threading.Timer? _viewerStatsTimer;
     private DateTime _loginTime;
     private int _regionsVisited;
     public event EventHandler<NotificationChatEventArgs>? NotificationInChat;
+
+    private float _sceneFrameRate;
+
+    /// <summary>
+    /// Frames per second the 3D scene view is currently drawing, or 0 while it is closed.
+    /// Reported to the grid in viewer statistics.
+    /// </summary>
+    internal float SceneFrameRate
+    {
+        get => System.Threading.Volatile.Read(ref _sceneFrameRate);
+        set => System.Threading.Volatile.Write(ref _sceneFrameRate, value);
+    }
 
     /// <summary>Per-account credentials store; set by the app after successful login.</summary>
     internal CredentialManager? CredentialManager { get; set; }
@@ -252,17 +263,10 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         // AvatarRenderInfo is region-scoped — only act on the sim we are actually entering.
         if (e.Simulator != Client.Network.CurrentSim) return;
 
-        // GET: populate Client.Self.AvatarRenderInfo with the region's current complexity data.
+        // Populates Client.Self.AvatarRenderInfo with the region's current complexity data.
+        // Render weights are reported by the scene view (AvatarRenderInfoReporter) while it
+        // is open; with no scene view there is nothing measured to report.
         _ = Task.Run(() => Client.Self.GetAvatarRenderInfoAsync());
-
-        // POST: report local render weights on a 60-second interval, matching SL C++ behaviour.
-        // Veles has no renderer, so we report weight=0 / tooComplex=false for self only.
-        _renderInfoTimer?.Dispose();
-        _renderInfoTimer = new System.Threading.Timer(
-            _ => _ = Task.Run(() => Client.Self.PostAvatarRenderInfoAsync(0, false)),
-            null,
-            TimeSpan.FromSeconds(60),
-            TimeSpan.FromSeconds(60));
     }
 
     private async Task SendViewerStatsAsync()
@@ -277,7 +281,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         var stats = new ViewerStatsMessage
         {
             SessionID         = Client.Self.SessionID,
-            AgentFPS          = 0f,
+            AgentFPS          = SceneFrameRate,
             AgentLanguage     = CultureInfo.CurrentCulture.Name,
             AgentMemoryUsed   = memKb,
             AgentPing         = sim.Stats.LastLag,
@@ -757,8 +761,6 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     {
         NoticeArchive.Dispose();
         PluginManager?.Dispose();
-        _renderInfoTimer?.Dispose();
-        _renderInfoTimer = null;
         _viewerStatsTimer?.Dispose();
         _viewerStatsTimer = null;
         Client.Self.ScriptDialog -= Self_ScriptDialog;
@@ -769,6 +771,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         NetCom.InstantMessageReceived -= NetCom_InstantMessageReceived;
         NetCom.AlertMessageReceived -= NetCom_AlertMessageReceived;
         Client.Friends.CallingCardOffered -= Friends_CallingCardOffered;
+        Client.Groups.GroupNamesReply -= Groups_GroupNamesReply;
         ChatLog.Dispose();
         base.CleanUp();
     }

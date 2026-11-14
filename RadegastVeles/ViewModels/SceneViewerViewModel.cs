@@ -1685,6 +1685,7 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
             _viewport.MouselookChanged -= OnMouselookChanged;
             _viewport.FrameUpdate      -= OnViewportFrame;
             _viewport.Stats.FrameCompleted -= OnFrameCompleted;
+            _instance.SceneFrameRate = 0f;
         }
 
         if (_nameTagService != null)
@@ -1813,6 +1814,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
     private void OnFrameCompleted(FrameStats stats)
     {
         if (_disposed) return;
+
+        _instance.SceneFrameRate = stats.IntervalAvgMs > 0 ? (float)(1000.0 / stats.IntervalAvgMs) : 0f;
 
         // Snapshot in-flight counters on the calling thread — all reads are O(1) atomic/lock-free.
         int buildQueue   = _buildScheduler?.QueueCount          ?? 0;
