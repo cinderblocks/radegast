@@ -447,11 +447,7 @@ public partial class AvatarProfileViewModel : InstanceViewModelBase, IDisposable
     private void OpenWebUrl()
     {
         if (string.IsNullOrWhiteSpace(WebUrl)) return;
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(WebUrl) { UseShellExecute = true });
-        }
-        catch { }
+        WebLink.TryOpen(WebUrl);
     }
 
     [RelayCommand]

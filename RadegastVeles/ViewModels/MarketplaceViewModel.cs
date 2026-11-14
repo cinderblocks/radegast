@@ -177,12 +177,7 @@ public partial class MarketplaceViewModel : ClientAwareViewModelBase
     {
         record ??= SelectedListing;
         if (string.IsNullOrEmpty(record?.EditUrl)) return;
-        try
-        {
-            System.Diagnostics.Process.Start(
-                new System.Diagnostics.ProcessStartInfo(record.EditUrl) { UseShellExecute = true });
-        }
-        catch { /* best-effort */ }
+        WebLink.TryOpen(record.EditUrl);
     }
 
     private bool CanOpenOnWeb(MarketplaceListingRecord? record)

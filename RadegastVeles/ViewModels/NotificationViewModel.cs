@@ -299,7 +299,7 @@ public class NotificationViewModel : ObservableObject
         {
             new("Open", () =>
             {
-                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+                Radegast.Veles.Core.WebLink.TryOpen(url);
                 vm.Dismiss();
             }),
             new("Ignore", () => vm.Dismiss())

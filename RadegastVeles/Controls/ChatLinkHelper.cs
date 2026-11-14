@@ -229,9 +229,5 @@ public static class ChatLinkHelper
         catch { /* ignore malformed URIs */ }
     }
 
-    private static void OpenUrl(string url)
-    {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { /* ignore */ }
-    }
+    private static void OpenUrl(string url) => WebLink.TryOpen(url);
 }
