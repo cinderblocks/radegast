@@ -5224,6 +5224,15 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             DrainPendingParticles(vk);
             ParticleDrainMs = _renderStopwatch.Elapsed.TotalMilliseconds;
 
+            // BeginDraw runs the reap ring's destroy callbacks, including those registered by
+            // this frame's own scene-object removals. The deformer dispatches just submitted
+            // can still be writing the buffers of an object removed this frame, so they must
+            // finish before anything is destroyed.
+            if (_reapRing.HasPendingDestroys)
+            {
+                _flexiDeformer?.WaitForPrevious();
+                _skinDeformer?.WaitForPrevious();
+            }
             using var draw = _swapchain.BeginDraw(pixelSize, out var image);
             BeginDrawMs = _renderStopwatch.Elapsed.TotalMilliseconds;
             SwapchainFreeCmdBuffersMs = _swapchain.LastFreeUsedCommandBuffersMs;

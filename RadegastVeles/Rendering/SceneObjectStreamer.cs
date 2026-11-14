@@ -1163,8 +1163,8 @@ internal sealed class SceneObjectStreamer : IDisposable
         return entries?.ToArray();
     }
 
-    private const int   MeshLodUpgradesPerSweep   = 20;
-    private const int   MeshLodDowngradesPerSweep = 10;
+    private const int   MeshLodUpgradesPerSweep   = 6;
+    private const int   MeshLodDowngradesPerSweep = 2;
     // An object drops to a coarser level only once it would still pick that level from this
     // fraction of its distance, so one standing near a threshold is not rebuilt back and forth.
     private const float MeshLodDowngradeMargin    = 0.8f;

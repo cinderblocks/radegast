@@ -115,6 +115,12 @@ internal sealed class VkFrameReapRing
         lock (_lock) _pendingDestroys[CurrentSlot].Add(destroy);
     }
 
+    /// <summary>True when <see cref="FreeUsed"/> would run at least one destroy callback.</summary>
+    public bool HasPendingDestroys
+    {
+        get { lock (_lock) return _pendingDestroys[CurrentSlot].Count > 0; }
+    }
+
     /// <summary>Waits on and frees every command buffer marked used into the current slot since
     /// it was last reaped, then runs and clears every pending destroy callback for that same
     /// slot (see <see cref="MarkPendingDestroy"/>) -- deliberately AFTER the buffer disposals,
