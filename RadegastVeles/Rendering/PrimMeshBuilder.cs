@@ -220,6 +220,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 // timeout/cancellation handling is needed here -- see its own try/catch in
                 // AssetManager.
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                await WaitForMeshCapabilityAsync(timeout.Token).ConfigureAwait(false);
                 var meshAsset = await client.Assets.RequestMeshAsync(id, timeout.Token).ConfigureAwait(false);
                 if (meshAsset == null)
                 {
@@ -232,8 +233,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 }
 
                 var mesh = DecodeMesh(prim, meshAsset, key.Lod);
-                if (mesh == null)
-                    Logger.Log($"PrimMeshBuilder: mesh asset {id} failed to decode (GenerateFacetedMeshMesh returned null)", LogLevel.Debug);
+                if (mesh == null && UndecodableMeshes.TryAdd(id, 0))
+                    Logger.Log($"PrimMeshBuilder: mesh asset {id} cannot be decoded and will not be requested again", LogLevel.Warning);
                 if (mesh != null)
                 {
                     // Detach the requesting prim before caching: a cached canonical must
@@ -259,6 +260,24 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 MeshFetchInflight.TryRemove(key, out _);
             }
         }))).Value;
+    }
+
+    // Mesh assets never change, so one that fails to decode is not fetched or decoded again.
+    private static readonly ConcurrentDictionary<UUID, byte> UndecodableMeshes = new();
+
+    private const int MeshCapabilityWaitMs = 20_000;
+    private const int MeshCapabilityPollMs = 250;
+
+    // RequestMeshAsync returns null at once while the region's capabilities are still being
+    // fetched, which is the case just after login, a teleport or a region crossing.
+    private async Task WaitForMeshCapabilityAsync(CancellationToken ct)
+    {
+        for (int waited = 0; waited < MeshCapabilityWaitMs; waited += MeshCapabilityPollMs)
+        {
+            if (client.Network.CurrentSim?.Caps?.GetMeshCapURI() != null) return;
+            try { await Task.Delay(MeshCapabilityPollMs, ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
     }
 
     /// <summary>
@@ -346,7 +365,8 @@ internal sealed class PrimMeshBuilder(GridClient client)
             if (sculpt.Type == SculptType.Mesh)
             {
                 var lod = MeshLodFor(prim, root, lodViewPosition);
-                if (!TryGetCachedMesh(sculpt.SculptTexture, lod, out _))
+                if (!UndecodableMeshes.ContainsKey(sculpt.SculptTexture)
+                    && !TryGetCachedMesh(sculpt.SculptTexture, lod, out _))
                     fetches.Add(FetchDecodedMeshAsync(prim, sculpt.SculptTexture, lod).WaitAsync(ct));
             }
             else
@@ -483,6 +503,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
             // ── Sculpt / Mesh / Parametric ────────────────────────────────
             var mesh = await GetPrimMeshAsync(prim, ct, detailLevel, MeshLodFor(prim, rootPrim, lodViewPosition)).ConfigureAwait(false);
+            if (mesh == null && prim.Sculpt is { Type: SculptType.Mesh } badSculpt
+                && UndecodableMeshes.ContainsKey(badSculpt.SculptTexture))
+                continue;
             if (mesh == null)
             {
                 // Silent before this: a failed mesh fetch/decode (timeout, bad asset, decode
@@ -662,6 +685,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
     private async Task<FacetedMesh?> DownloadMeshAsync(Primitive prim, CancellationToken ct, DetailLevel lod)
     {
         var meshId = prim.Sculpt!.SculptTexture;
+        if (UndecodableMeshes.ContainsKey(meshId)) return null;
 
         if (!TryGetCachedMesh(meshId, lod, out var canonical))
             canonical = (await FetchDecodedMeshAsync(prim, meshId, lod).WaitAsync(ct).ConfigureAwait(false))!;
