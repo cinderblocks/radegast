@@ -441,11 +441,14 @@ public partial class MapViewModel : ClientAwareViewModelBase
             var favFolderId = Client.Inventory.FindFolderForType(FolderType.Favorites);
             if (favFolderId == UUID.Zero) return;
 
-            List<InventoryBase> contents;
+            List<InventoryBase> contents = [];
             try
             {
-                contents = await Client.Inventory.RequestFolderContentsAsync(
-                    favFolderId, Client.Self.AgentID, false, true, InventorySortOrder.ByName);
+                if (await CapabilityWait.WaitForAsync(Client, "FetchInventoryDescendents2", 15_000))
+                {
+                    contents = await Client.Inventory.RequestFolderContentsAsync(
+                        favFolderId, Client.Self.AgentID, false, true, InventorySortOrder.ByName);
+                }
             }
             catch { return; }
 

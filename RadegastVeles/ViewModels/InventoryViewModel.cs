@@ -1891,6 +1891,9 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
     #endregion
 
+    private const string InventoryFetchCapability = "FetchInventoryDescendents2";
+    private const int InventoryCapabilityTimeoutMs = 30_000;
+
     private void StartInventoryTraversal()
     {
         _traversalCts?.Cancel();
@@ -1927,15 +1930,24 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         var rootNode = Inventory.RootNode;
         if (rootNode == null) return;
 
-        // Brief delay to let capabilities become available after login
-        await Task.Delay(2000, token).ConfigureAwait(false);
-
         _foldersNeedingUpdate.Clear();
         TraverseAndQueueFolders(rootNode);
 
         while (!_foldersNeedingUpdate.IsEmpty)
         {
             token.ThrowIfCancellationRequested();
+
+            // Without the capability every request in the pass fails at once and leaves its
+            // folder queued, so the pass would repeat without pause.
+            if (!await CapabilityWait.WaitForAsync(Client, InventoryFetchCapability, InventoryCapabilityTimeoutMs, token)
+                    .ConfigureAwait(false))
+            {
+                Logger.Warn($"Inventory was not loaded: the region did not offer {InventoryFetchCapability} " +
+                            $"within {InventoryCapabilityTimeoutMs / 1000} seconds.", Client);
+                Dispatcher.UIThread.Post(() =>
+                    StatusText = "Inventory could not be loaded from this region. Use Refresh to try again.");
+                return;
+            }
 
             var folderKeys = _foldersNeedingUpdate.Keys.ToList();
 
