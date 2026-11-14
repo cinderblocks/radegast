@@ -143,6 +143,7 @@ internal static class Program
         }
         catch (Exception ex) when (!System.Diagnostics.Debugger.IsAttached)
         {
+            VelesLogProvider.Flush();
             BugSplat?.Post(ex);
 #if !DEBUG
             ShowCrashWindow(ex);
@@ -167,6 +168,7 @@ internal static class Program
     {
         if (e.ExceptionObject is Exception ex)
         {
+            VelesLogProvider.Flush();
             BugSplat?.Post(ex);
 #if !DEBUG
             ShowCrashWindow(ex);

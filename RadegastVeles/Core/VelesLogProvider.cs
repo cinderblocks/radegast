@@ -18,7 +18,10 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Text;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 
 namespace Radegast.Veles.Core;
@@ -43,8 +46,25 @@ public sealed class VelesLogProvider : ILoggerProvider
     private static readonly object s_lock = new();
     private static EventHandler<VelesLogEventArgs>? s_logReceived;
 
+    // The log file is closed and renamed with this suffix once it reaches MaxLogFileBytes, so
+    // at most two files of that size exist: the current one and the one before it.
+    private const long MaxLogFileBytes = 8L * 1024 * 1024;
+    private const string PreviousLogSuffix = ".old";
+
+    // Entries waiting for the writer thread. When it falls this far behind, new entries are
+    // dropped and counted instead of blocking the thread that logged them.
+    private const int MaxQueuedEntries = 16384;
+
     private static StreamWriter? s_fileWriter;
+    private static long s_fileBytes;
     private static readonly object s_fileLock = new();
+
+    private static readonly BlockingCollection<VelesLogEntry> s_queue =
+        new(new ConcurrentQueue<VelesLogEntry>(), MaxQueuedEntries);
+    private static readonly ManualResetEventSlim s_idle = new(true);
+    private static int s_dropped;
+    private static int s_pending;
+    private static Thread? s_writerThread;
 
     public static event EventHandler<VelesLogEventArgs> LogReceived
     {
@@ -65,12 +85,37 @@ public sealed class VelesLogProvider : ILoggerProvider
         {
             s_filePath = filePath;
             s_fileWriter?.Dispose();
-            s_fileWriter = new StreamWriter(filePath, append: true)
+            s_fileWriter = null;
+            OpenLogFile(rotateIfLarge: true);
+            WriteLineToFile(string.Empty);
+            WriteLineToFile($"=== Veles Log Started {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+            s_fileWriter?.Flush();
+
+            if (s_writerThread == null)
             {
-                AutoFlush = true
-            };
-            s_fileWriter.WriteLine();
-            s_fileWriter.WriteLine($"=== Veles Log Started {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+                s_writerThread = new Thread(WriterLoop)
+                {
+                    IsBackground = true,
+                    Name = "VelesLogWriter"
+                };
+                s_writerThread.Start();
+                AppDomain.CurrentDomain.ProcessExit += (_, _) => Flush();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Blocks until every entry logged so far has been written to the file and flushed, or
+    /// the timeout passes. For use before the process exits or reports a crash.
+    /// </summary>
+    public static void Flush(int timeoutMs = 2000)
+    {
+        if (Thread.CurrentThread != s_writerThread)
+            s_idle.Wait(timeoutMs);
+        lock (s_fileLock)
+        {
+            try { s_fileWriter?.Flush(); }
+            catch { /* don't let file I/O failures break logging */ }
         }
     }
 
@@ -83,8 +128,95 @@ public sealed class VelesLogProvider : ILoggerProvider
             catch { /* swallow exceptions from handlers */ }
         }
 
-        WriteToConsoleAndDebug(entry);
-        WriteToFile(entry);
+        if (s_writerThread == null || s_queue.IsAddingCompleted)
+        {
+            WriteToConsoleAndDebug(entry);
+            WriteToFile(entry);
+            return;
+        }
+
+        Interlocked.Increment(ref s_pending);
+        s_idle.Reset();
+        bool queued;
+        try { queued = s_queue.TryAdd(entry); }
+        catch (InvalidOperationException) { queued = false; }
+        if (!queued)
+        {
+            Interlocked.Increment(ref s_dropped);
+            if (Interlocked.Decrement(ref s_pending) == 0) s_idle.Set();
+        }
+
+        // A critical entry is usually the last thing logged before the process dies.
+        if (entry.Level >= LogLevel.Critical) Flush();
+    }
+
+    private static void WriterLoop()
+    {
+        foreach (var entry in s_queue.GetConsumingEnumerable())
+        {
+            WriteToConsoleAndDebug(entry);
+            WriteToFile(entry);
+
+            int dropped = Interlocked.Exchange(ref s_dropped, 0);
+            if (dropped > 0)
+            {
+                lock (s_fileLock)
+                {
+                    WriteLineToFile($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{LogLevel.Warning,-11}] [VelesLog] " +
+                                    $"{dropped} log entries were dropped because the log writer fell behind.");
+                }
+            }
+
+            if (Interlocked.Decrement(ref s_pending) == 0)
+            {
+                lock (s_fileLock)
+                {
+                    try { s_fileWriter?.Flush(); }
+                    catch { /* don't let file I/O failures break logging */ }
+                }
+                if (Volatile.Read(ref s_pending) == 0) s_idle.Set();
+            }
+        }
+    }
+
+    // Caller holds s_fileLock.
+    private static void OpenLogFile(bool rotateIfLarge)
+    {
+        if (s_filePath == null) return;
+        try
+        {
+            if (rotateIfLarge)
+            {
+                var info = new FileInfo(s_filePath);
+                if (info.Exists && info.Length >= MaxLogFileBytes)
+                    File.Move(s_filePath, s_filePath + PreviousLogSuffix, overwrite: true);
+            }
+
+            s_fileWriter = new StreamWriter(s_filePath, append: true, new UTF8Encoding(false), 64 * 1024);
+            s_fileBytes = s_fileWriter.BaseStream.Length;
+        }
+        catch
+        {
+            s_fileWriter = null;
+        }
+    }
+
+    // Caller holds s_fileLock.
+    private static void WriteLineToFile(string line)
+    {
+        if (s_fileWriter == null) return;
+        try
+        {
+            s_fileWriter.WriteLine(line);
+            s_fileBytes += Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
+            if (s_fileBytes < MaxLogFileBytes) return;
+
+            s_fileWriter.Dispose();
+            s_fileWriter = null;
+            OpenLogFile(rotateIfLarge: true);
+            s_fileWriter?.WriteLine($"=== Veles Log Continued {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===");
+        }
+        catch { /* don't let file I/O failures break logging */ }
     }
 
     private static void WriteToConsoleAndDebug(VelesLogEntry entry)
@@ -164,16 +296,9 @@ public sealed class VelesLogProvider : ILoggerProvider
         lock (s_fileLock)
         {
             if (s_fileWriter == null) return;
-            try
-            {
-                var line = $"{entry.TimeStamp:yyyy-MM-dd HH:mm:ss.fff} [{entry.Level,-11}] [{entry.Category}] {entry.Message}";
-                s_fileWriter.WriteLine(line);
-                if (entry.Exception != null)
-                {
-                    s_fileWriter.WriteLine($"  Exception: {entry.Exception}");
-                }
-            }
-            catch { /* don't let file I/O failures break logging */ }
+            WriteLineToFile($"{entry.TimeStamp:yyyy-MM-dd HH:mm:ss.fff} [{entry.Level,-11}] [{entry.Category}] {entry.Message}");
+            if (entry.Exception != null)
+                WriteLineToFile($"  Exception: {entry.Exception}");
         }
     }
 
@@ -181,6 +306,11 @@ public sealed class VelesLogProvider : ILoggerProvider
 
     public void Dispose()
     {
+        s_queue.CompleteAdding();
+        var writer = s_writerThread;
+        if (writer != null && writer != Thread.CurrentThread)
+            writer.Join(TimeSpan.FromSeconds(3));
+
         lock (s_fileLock)
         {
             s_fileWriter?.Dispose();
