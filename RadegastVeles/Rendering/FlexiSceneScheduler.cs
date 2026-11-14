@@ -46,6 +46,7 @@ internal sealed class FlexiSceneScheduler : IDisposable
 {
     // Base rate matches a 60 Hz display, so nearby motion advances every frame.
     private const float SimTickRate = 1f / 60f;
+    private const float MaxStepSeconds = 0.2f;
 
     private readonly GridClient _client;
     // Animator → consecutive skipped ticks since its last real Tick() call.
@@ -132,11 +133,11 @@ internal sealed class FlexiSceneScheduler : IDisposable
                         // Catch-up dt: the physics forces (gravity/wind/tension impulses) are
                         // scaled by dt, so a throttled animator needs the elapsed time since its
                         // last real tick, not just this cycle's slice, or it would settle into a
-                        // visibly stiffer rest pose than an un-throttled one. Still clamped to
-                        // the same 0.1s stability bound TickAndUpload's own per-cycle dt uses.
+                        // visibly stiffer rest pose than an un-throttled one. Clamped to the
+                        // 0.2s step limit the SL viewer's flexi simulation uses.
                         try
                         {
-                            animator.Tick(Math.Min(dt * skipped, 0.1f));
+                            animator.Tick(Math.Min(dt * skipped, MaxStepSeconds));
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
                         {

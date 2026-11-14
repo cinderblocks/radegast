@@ -49,6 +49,7 @@ internal sealed class AvatarSceneScheduler : IDisposable
 {
     // Base rate matches a 60 Hz display, so nearby motion advances every frame.
     private const float SimTickRate = 1f / 60f;
+    private const float MaxCatchUpSeconds = 1f;
 
     private readonly GridClient _client;
     // Animator → consecutive skipped ticks since its last real Tick() call.
@@ -141,9 +142,9 @@ internal sealed class AvatarSceneScheduler : IDisposable
                             // Catch-up dt: the avatar animation player advances by dt, so a
                             // throttled animator needs the elapsed time since its last real
                             // tick, not just this cycle's slice, or its animations would
-                            // visibly slow down rather than just update less often. Same
-                            // reasoning and clamp as FlexiSceneScheduler's own catch-up dt.
-                            animator.Tick(Math.Min(dt * skipped, 0.1f));
+                            // visibly slow down rather than just update less often. The bound
+                            // must stay above the longest throttled interval (16 ticks).
+                            animator.Tick(Math.Min(dt * skipped, MaxCatchUpSeconds));
                         }
                         catch (Exception ex)
                         {
