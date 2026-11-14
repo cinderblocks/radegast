@@ -1775,11 +1775,12 @@ internal sealed class PrimMeshBuilder(GridClient client)
 
             var tOrth = t - n * Vector3.Dot(n, t);
             float len  = tOrth.Length();
-            if (len < 1e-6f) continue; // degenerate — leave as zero (fallback to screen-space)
+            // Degenerate or not a number (a mesh can carry NaN normals or texture
+            // coordinates): leave as zero, which falls back to screen-space tangents.
+            if (!(len >= 1e-6f)) continue;
             tOrth /= len;
 
-            float w = MathF.Sign(Vector3.Dot(Vector3.Cross(n, tOrth), b));
-            if (w == 0f) w = 1f;
+            float w = Vector3.Dot(Vector3.Cross(n, tOrth), b) < 0f ? -1f : 1f;
 
             verts[o + 8]  = tOrth.X;
             verts[o + 9]  = tOrth.Y;
