@@ -110,6 +110,11 @@ internal sealed class SceneObjectStreamer : IDisposable
     // on object removal, mirroring _textureLodLevel's own cleanup sites.
     private readonly ConcurrentDictionary<ulong, int> _requestedTexLod = new();
 
+    // Per rendered object, the level of detail each of its mesh prims was built at, with the
+    // position (in the object's own region) and size that level was chosen from.
+    private readonly record struct MeshLodEntry(Vector3 Position, Vector3 Scale, DetailLevel Built);
+    private readonly ConcurrentDictionary<ulong, MeshLodEntry[]> _meshLod = new();
+
     // Reverse parent index: rootSceneKey → set of child scene keys.
     private readonly ConcurrentDictionary<ulong, ConcurrentDictionary<ulong, byte>> _childrenByParent = new();
 
@@ -250,6 +255,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _lastBuildHadFlexi.TryRemove(sceneKey, out _);
         _textureLodLevel.TryRemove(sceneKey, out _);
         _requestedTexLod.TryRemove(sceneKey, out _);
+        _meshLod.TryRemove(sceneKey, out _);
         EnqueueDirty(sceneKey);
     }
 
@@ -592,6 +598,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _rendered.Clear();
         _textureLodLevel.Clear();
         _requestedTexLod.Clear();
+        _meshLod.Clear();
         _childrenByParent.Clear();
         _neighborIndex.Clear();
         _reconcileAttempts.Clear();
@@ -682,6 +689,7 @@ internal sealed class SceneObjectStreamer : IDisposable
         _rendered.TryRemove(sceneKey, out _);
         _textureLodLevel.TryRemove(sceneKey, out _);
         _requestedTexLod.TryRemove(sceneKey, out _);
+        _meshLod.TryRemove(sceneKey, out _);
         _lastRebuiltPose.TryRemove(sceneKey, out _);
         _lastBuildHadFlexi.TryRemove(sceneKey, out _);
         _meshRetryAttempts.TryRemove(sceneKey, out _);
@@ -920,7 +928,8 @@ internal sealed class SceneObjectStreamer : IDisposable
                 // prefetch for them is merely missed — the build path downloads on miss).
                 var prims = CollectLinkset(sim, LocalIdForSceneKey(sceneKey));
                 if (prims is { Count: > 0 })
-                    await _builder.PrefetchLinksetAssetsAsync(prims, token).ConfigureAwait(false);
+                    await _builder.PrefetchLinksetAssetsAsync(prims, token,
+                        LocalIdForSceneKey(sceneKey), LodViewPosition(sim)).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -984,6 +993,8 @@ internal sealed class SceneObjectStreamer : IDisposable
             float dist    = Vector3.Distance(worldPos, avatarWorldPos);
             var   lod     = LodForDistance(dist);
             int   texLod  = TextureLodLevelForDistance(dist);
+            var   lodViewPos = LodViewPosition(sim);
+            var   meshLods   = CollectMeshLods(prims, rootPrimForLod, lodViewPos);
 
             int meshesUnavailable = 0;
             var submission = await _builder.BuildAsync(
@@ -994,6 +1005,7 @@ internal sealed class SceneObjectStreamer : IDisposable
                 detailLevel:           lod,
                 textureResolutionLevel: texLod,
                 onMeshUnavailable:     () => Interlocked.Increment(ref meshesUnavailable),
+                lodViewPosition:       lodViewPos,
                 texturePatch: new Progress<SceneTexturePatch>(patch =>
                 {
                     if (token.IsCancellationRequested)
@@ -1073,6 +1085,8 @@ internal sealed class SceneObjectStreamer : IDisposable
 
             _viewport.SubmitSceneObject(sceneKey, submission);
             _rendered[sceneKey] = 0;
+            if (meshLods != null) _meshLod[sceneKey] = meshLods;
+            else _meshLod.TryRemove(sceneKey, out _);
             ScheduleMeshRetry(sceneKey, Volatile.Read(ref meshesUnavailable) > 0);
             // Seeds the epsilon-gate baseline here too (not just for later rebuilds) so the very
             // first terse update after initial OnObjectUpdate doesn't immediately re-trigger a
@@ -1117,6 +1131,75 @@ internal sealed class SceneObjectStreamer : IDisposable
             // for this key start a fresh attempt instead of deferring forever. See
             // MarkAttemptCompleted's own comment for why this is reference-equality-guarded.
             MarkAttemptCompleted(sceneKey, attempt);
+        }
+    }
+
+    // The viewer's position in `sim`'s own coordinates, or null while it is unknown.
+    private Vector3? LodViewPosition(Simulator sim)
+    {
+        var avatarPos = _client.Self.SimPosition;
+        if (avatarPos == OmVector3.Zero) return null;
+        var off = RegionOffset(sim, _client.Network.CurrentSim);
+        return new Vector3(avatarPos.X - off.X, avatarPos.Y - off.Y, avatarPos.Z);
+    }
+
+    private static MeshLodEntry[]? CollectMeshLods(List<Primitive> prims, Primitive root, Vector3? viewPos)
+    {
+        List<MeshLodEntry>? entries = null;
+        var rootPos = new Vector3(root.Position.X, root.Position.Y, root.Position.Z);
+        var rootRot = new Quaternion(root.Rotation.X, root.Rotation.Y, root.Rotation.Z, root.Rotation.W);
+        foreach (var prim in prims)
+        {
+            if (prim.Sculpt is not { Type: SculptType.Mesh } sculpt || sculpt.SculptTexture == UUID.Zero) continue;
+            var pos = rootPos;
+            if (prim.LocalID != root.LocalID)
+                pos += Vector3.Transform(new Vector3(prim.Position.X, prim.Position.Y, prim.Position.Z), rootRot);
+            var scale = new Vector3(prim.Scale.X, prim.Scale.Y, prim.Scale.Z);
+            var built = viewPos is { } v
+                ? PrimMeshBuilder.MeshLodFor(scale, Vector3.Distance(pos, v))
+                : DetailLevel.Highest;
+            (entries ??= new List<MeshLodEntry>()).Add(new MeshLodEntry(pos, scale, built));
+        }
+        return entries?.ToArray();
+    }
+
+    private const int   MeshLodUpgradesPerSweep   = 20;
+    private const int   MeshLodDowngradesPerSweep = 10;
+    // An object drops to a coarser level only once it would still pick that level from this
+    // fraction of its distance, so one standing near a threshold is not rebuilt back and forth.
+    private const float MeshLodDowngradeMargin    = 0.8f;
+
+    // Rebuilds objects whose mesh prims now call for a different level of detail than they
+    // were built at.
+    private void CheckMeshLodChanges()
+    {
+        if (_disposed) return;
+        int upgrades = 0, downgrades = 0;
+        foreach (var (sceneKey, entries) in _meshLod)
+        {
+            if (upgrades >= MeshLodUpgradesPerSweep && downgrades >= MeshLodDowngradesPerSweep) break;
+            if (!_rendered.ContainsKey(sceneKey) || _inflight.ContainsKey(sceneKey)) continue;
+            var sim = SimForSceneKey(sceneKey);
+            if (sim == null || LodViewPosition(sim) is not { } viewPos) continue;
+
+            bool upgrade = false, downgrade = false;
+            foreach (var e in entries)
+            {
+                float dist = Vector3.Distance(e.Position, viewPos);
+                if (PrimMeshBuilder.MeshLodFor(e.Scale, dist) > e.Built) { upgrade = true; break; }
+                if (PrimMeshBuilder.MeshLodFor(e.Scale, dist * MeshLodDowngradeMargin) < e.Built) downgrade = true;
+            }
+
+            if (upgrade && upgrades < MeshLodUpgradesPerSweep)
+            {
+                upgrades++;
+                EnqueueDirty(sceneKey);
+            }
+            else if (!upgrade && downgrade && downgrades < MeshLodDowngradesPerSweep)
+            {
+                downgrades++;
+                EnqueueDirty(sceneKey);
+            }
         }
     }
 
@@ -1234,6 +1317,7 @@ internal sealed class SceneObjectStreamer : IDisposable
             ReconcileSweep(currentSim, avatarPos, now);
             // Frees the geometry and textures of objects the avatar has left behind.
             CullBeyond(_maxStreamRadius * CullHysteresis);
+            CheckMeshLodChanges();
         }
         finally
         {
