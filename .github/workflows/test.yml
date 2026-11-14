@@ -64,7 +64,7 @@ jobs:
           if-no-files-found: warn
 
   test:
-    name: Test (Radegast.Core)
+    name: Test (Radegast.Core, Veles)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -80,6 +80,9 @@ jobs:
 
       - name: Run tests
         run: dotnet test Radegast.Core.Tests/Radegast.Core.Tests.csproj --framework net10.0
+
+      - name: Run Veles tests
+        run: dotnet test RadegastVeles.Tests/RadegastVeles.Tests.csproj
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

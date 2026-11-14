@@ -44,10 +44,14 @@ public sealed class CredentialManager : IDisposable
     private readonly byte[] _key;
 
     public CredentialManager()
-    {
-        var dataDir = Path.Combine(
+        : this(Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "RadegastVeles");
+            "RadegastVeles"))
+    {
+    }
+
+    internal CredentialManager(string dataDir)
+    {
         Directory.CreateDirectory(dataDir);
 
         _storeFilePath = Path.Combine(dataDir, StoreFileName);
