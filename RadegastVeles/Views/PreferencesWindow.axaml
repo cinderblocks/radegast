@@ -732,6 +732,18 @@
                                            Text="{Binding TextureDiskCacheMaxFiles, StringFormat='{}{0:N0}'}"
                                            VerticalAlignment="Center" HorizontalAlignment="Right" />
                             </Grid>
+                            <Grid ColumnDefinitions="180,*,60" IsEnabled="{Binding !LowMemoryModeEnabled}">
+                                <TextBlock Grid.Column="0" Text="Max decoded size (MB)" VerticalAlignment="Center"
+                                           ToolTip.Tip="Disk space for textures stored ready to draw. These are much larger than the downloaded files counted above." />
+                                <Slider Grid.Column="1"
+                                        Minimum="256" Maximum="16384"
+                                        TickFrequency="256" IsSnapToTickEnabled="True"
+                                        Value="{Binding TexturePixelCacheMaxMb}"
+                                        AutomationProperties.Name="Maximum size of decoded textures on disk, in megabytes" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding TexturePixelCacheMaxMb, StringFormat='{}{0:N0}'}"
+                                           VerticalAlignment="Center" HorizontalAlignment="Right" />
+                            </Grid>
                         </StackPanel>
 
                         <Separator />

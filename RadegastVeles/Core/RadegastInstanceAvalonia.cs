@@ -153,7 +153,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <see cref="LowMemoryModeEnabled"/> is on.
     /// </summary>
     internal void ApplyCacheSettings(
-        int assetCacheMaxSizeMb, int skBitmapCacheCap, int textureBitmapCacheCapacity, int textureDiskCacheMaxFiles)
+        int assetCacheMaxSizeMb, int skBitmapCacheCap, int textureBitmapCacheCapacity, int textureDiskCacheMaxFiles,
+        int texturePixelCacheMaxMb)
     {
         bool low = LowMemoryModeEnabled;
         Client.Settings.AssetCache.MaxSize =
@@ -164,6 +165,8 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
             low ? LowMemoryModePreset.TextureBitmapCacheCapacity : textureBitmapCacheCapacity;
         TextureDiskCache.MaxCachedFiles =
             low ? LowMemoryModePreset.TextureDiskCacheMaxFiles : textureDiskCacheMaxFiles;
+        TextureDiskCache.MaxPixelCacheBytes =
+            (long)(low ? LowMemoryModePreset.TexturePixelCacheMaxMb : texturePixelCacheMaxMb) * 1024 * 1024;
         Rendering.PrimMeshBuilder.MeshCacheMaxVertices = low
             ? LowMemoryModePreset.MeshDecodeCacheMaxVertices
             : Rendering.PrimMeshBuilder.DefaultMeshCacheMaxVertices;
@@ -203,7 +206,10 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
             ? GlobalSettings["texture_bitmap_cache_capacity"].AsInteger() : 2500;
         var textureDiskCacheMaxFiles = GlobalSettings["texture_disk_cache_max_files"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? GlobalSettings["texture_disk_cache_max_files"].AsInteger() : 8192;
-        ApplyCacheSettings(assetCacheMaxSizeMb, skBitmapCacheCap, textureBitmapCacheCapacity, textureDiskCacheMaxFiles);
+        var texturePixelCacheMaxMb = GlobalSettings["texture_pixel_cache_max_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
+            ? GlobalSettings["texture_pixel_cache_max_mb"].AsInteger() : TextureDiskCache.DefaultMaxPixelCacheMb;
+        ApplyCacheSettings(assetCacheMaxSizeMb, skBitmapCacheCap, textureBitmapCacheCapacity, textureDiskCacheMaxFiles,
+            texturePixelCacheMaxMb);
 
         client.Self.ScriptDialog += Self_ScriptDialog;
         client.Self.ScriptQuestion += Self_ScriptQuestion;

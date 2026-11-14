@@ -121,7 +121,9 @@ internal static class TextureDiskCache
         set => _maxCachedFiles = Math.Max(64, value);
     }
 
-    private static long _maxPixelCacheBytes = 3L * 1024 * 1024 * 1024;
+    public const int DefaultMaxPixelCacheMb = 3072;
+
+    private static long _maxPixelCacheBytes = DefaultMaxPixelCacheMb * 1024L * 1024L;
 
     /// <summary>
     /// Maximum total size, in bytes, of all <c>.ktx2</c> pixel-cache files kept on disk
@@ -588,10 +590,44 @@ internal static class TextureDiskCache
     private const int EvictionCheckInterval = 64;
     private static int _putsSinceEvictionCheck;
 
+    // A write that is interrupted (crash, kill, power loss) leaves its "<name>.<guid>.tmp"
+    // file behind, and nothing else ever reads or replaces it. Files this old cannot belong
+    // to a write still in progress.
+    private static readonly TimeSpan StaleTempFileAge = TimeSpan.FromMinutes(10);
+    private static readonly long TempSweepIntervalMs = (long)TimeSpan.FromMinutes(30).TotalMilliseconds;
+    private static long _lastTempSweepTick = long.MinValue;
+
+    private static void SweepStaleTempFiles()
+    {
+        long now = Environment.TickCount64;
+        long last = Interlocked.Read(ref _lastTempSweepTick);
+        if (last != long.MinValue && now - last < TempSweepIntervalMs) return;
+        if (Interlocked.CompareExchange(ref _lastTempSweepTick, now, last) != last) return;
+
+        try
+        {
+            var di = new DirectoryInfo(_cacheDir);
+            if (!di.Exists) return;
+            var cutoff = DateTime.UtcNow - StaleTempFileAge;
+            foreach (var f in di.EnumerateFiles("*.tmp"))
+            {
+                if (f.LastWriteTimeUtc >= cutoff) continue;
+                try { f.Delete(); }
+                catch (Exception ex) { Logger.Debug($"TextureDiskCache: failed to delete stale temp file '{f.Name}'.", ex); }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug("TextureDiskCache: stale temp file sweep failed.", ex);
+        }
+    }
+
     private static void EvictIfNeeded()
     {
         if (Interlocked.Increment(ref _putsSinceEvictionCheck) < EvictionCheckInterval) return;
         Interlocked.Exchange(ref _putsSinceEvictionCheck, 0);
+
+        SweepStaleTempFiles();
 
         try
         {
@@ -622,6 +658,8 @@ internal static class TextureDiskCache
     {
         if (Interlocked.Increment(ref _pixelPutsSinceEvictionCheck) < PixelEvictionCheckInterval) return;
         Interlocked.Exchange(ref _pixelPutsSinceEvictionCheck, 0);
+
+        SweepStaleTempFiles();
 
         try
         {

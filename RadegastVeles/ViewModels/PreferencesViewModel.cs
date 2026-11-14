@@ -102,8 +102,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
     private string _textureDiskCacheDir = string.Empty;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(TextureDiskCacheSizeText))]
     private int _textureDiskCacheMaxFiles = 8192;
+
+    [ObservableProperty]
+    private int _texturePixelCacheMaxMb = TextureDiskCache.DefaultMaxPixelCacheMb;
 
     [ObservableProperty]
     private string _textureDiskCacheStatusText = string.Empty;
@@ -660,6 +662,8 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
             ? s["texture_disk_cache_dir"].AsString() : TextureDiskCache.CacheDir;
         TextureDiskCacheMaxFiles = s["texture_disk_cache_max_files"].Type != OSDType.Unknown
             ? s["texture_disk_cache_max_files"].AsInteger() : 8192;
+        TexturePixelCacheMaxMb = s["texture_pixel_cache_max_mb"].Type != OSDType.Unknown
+            ? s["texture_pixel_cache_max_mb"].AsInteger() : TextureDiskCache.DefaultMaxPixelCacheMb;
 
         // Apply disk cache config immediately so downloads benefit from the stored settings.
         TextureDiskCache.Enabled = TextureDiskCacheEnabled;
@@ -670,9 +674,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         TextureBitmapCacheCapacity = s["texture_bitmap_cache_capacity"].Type != OSDType.Unknown
             ? s["texture_bitmap_cache_capacity"].AsInteger() : 2500;
 
-        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles,
-        // substituting the Low Memory Mode preset for these four values while it's enabled.
-        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles);
+        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles/MaxPixelCacheBytes,
+        // substituting the Low Memory Mode preset for these values while it's enabled.
+        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles,
+            TexturePixelCacheMaxMb);
 
         SoundSystemAvailable = _media.SoundSystemAvailable;
         SoundSystemStatus = _media.SoundSystemStatus;
@@ -821,6 +826,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Texture disk cache
         s["texture_disk_cache_enabled"]   = OSD.FromBoolean(TextureDiskCacheEnabled);
         s["texture_disk_cache_max_files"] = OSD.FromInteger(TextureDiskCacheMaxFiles);
+        s["texture_pixel_cache_max_mb"]   = OSD.FromInteger(TexturePixelCacheMaxMb);
         TextureDiskCache.Enabled = TextureDiskCacheEnabled;
         if (!string.IsNullOrWhiteSpace(TextureDiskCacheDir))
         {
@@ -835,9 +841,10 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
         // Bitmap memory cache
         s["texture_bitmap_cache_capacity"] = OSD.FromInteger(TextureBitmapCacheCapacity);
 
-        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles,
-        // substituting the Low Memory Mode preset for these four values while it's enabled.
-        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles);
+        // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles/MaxPixelCacheBytes,
+        // substituting the Low Memory Mode preset for these values while it's enabled.
+        _instance.ApplyCacheSettings(AssetCacheMaxSizeMb, SkBitmapCacheCap, TextureBitmapCacheCapacity, TextureDiskCacheMaxFiles,
+            TexturePixelCacheMaxMb);
 
         // Push audio changes to MediaViewModel; it will persist them to GlobalSettings
         _media.MasterVolume = MasterVolume;
