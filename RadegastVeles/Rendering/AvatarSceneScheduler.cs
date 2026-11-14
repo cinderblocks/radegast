@@ -28,7 +28,7 @@ using Vector3 = System.Numerics.Vector3;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Drives every scene-viewer <see cref="SceneAvatarAnimator"/> from one shared ~60 Hz timer.
+/// Drives every scene-viewer <see cref="SceneAvatarAnimator"/> from one shared loop that runs once per rendered frame.
 /// Mirrors <see cref="FlexiSceneScheduler"/>: a busy region can have dozens of avatars, and
 /// one timer/task per avatar is unnecessary overhead that scales with avatar count for no
 /// benefit.
@@ -47,8 +47,10 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class AvatarSceneScheduler : IDisposable
 {
-    // Base rate matches a 60 Hz display, so nearby motion advances every frame.
-    private const float SimTickRate = 1f / 60f;
+    // Animators tick once per rendered frame, so a pose never repeats or skips a frame. This
+    // is the interval used while no frames are being rendered.
+    private const int IdleTickMs = 50;
+    private readonly FramePulse _pulse;
     private const float MaxCatchUpSeconds = 1f;
 
     private readonly GridClient _client;
@@ -63,7 +65,11 @@ internal sealed class AvatarSceneScheduler : IDisposable
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
-    public AvatarSceneScheduler(GridClient client) => _client = client;
+    public AvatarSceneScheduler(GridClient client, ISceneViewport viewport)
+    {
+        _client = client;
+        _pulse  = new FramePulse(viewport);
+    }
 
     public void Register(SceneAvatarAnimator animator) => _registered[animator] = 0;
 
@@ -82,6 +88,7 @@ internal sealed class AvatarSceneScheduler : IDisposable
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+        _pulse.Dispose();
         _registered.Clear();
     }
 
@@ -100,14 +107,14 @@ internal sealed class AvatarSceneScheduler : IDisposable
 
     private async Task RunAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(SimTickRate));
         var sw   = Stopwatch.StartNew();
         float prev = 0f;
 
         try
         {
-            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            while (true)
             {
+                await _pulse.WaitAsync(IdleTickMs, ct).ConfigureAwait(false);
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;

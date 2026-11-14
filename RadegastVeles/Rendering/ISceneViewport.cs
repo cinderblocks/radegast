@@ -79,6 +79,11 @@ public interface ISceneViewport
     /// (interpolated transforms, camera follow) and call <see cref="RequestRender"/> to keep
     /// frames coming while that state is still changing.</summary>
     event Action? FrameUpdate;
+
+    /// <summary>Raised on the UI thread once per rendered frame, after that frame's skinning
+    /// and flexi work has been handed to the GPU. Work queued from here on is picked up by the
+    /// next frame.</summary>
+    event Action? DeformersDispatched;
     event Action<uint, int, FaceHitInfo>? FaceClicked;
     /// <summary>Plain right-click (select-for-menu, no touch) -- see
     /// <c>VkViewportControl.ObjectRightClicked</c>'s own doc comment.</summary>

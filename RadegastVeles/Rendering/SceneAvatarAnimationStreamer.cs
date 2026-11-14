@@ -60,7 +60,7 @@ internal sealed class SceneAvatarAnimationStreamer : IDisposable
         _client         = client;
         _viewport       = viewport;
         _avatarStreamer = avatarStreamer;
-        _scheduler      = new AvatarSceneScheduler(client);
+        _scheduler      = new AvatarSceneScheduler(client, viewport);
         _scheduler.Start();
 
         _avatarStreamer.AvatarBuilt          += OnAvatarBuilt;

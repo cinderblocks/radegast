@@ -53,6 +53,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// for the subscribe-before-fire race check).</summary>
     public event Action? SceneReset;
     public event Action? FrameUpdate;
+    public event Action? DeformersDispatched;
     private bool _loggedFrameUpdateError;
 
     /// <summary>See <see cref="ISceneViewport.SceneObjectUploadFailed"/>. Raised synchronously
@@ -1386,11 +1387,22 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// </summary>
     public void SetSelectedObject(uint primLocalId) => _selectedOutlineLocalId = primLocalId;
 
+    private int _renderRequestPosted;
+    private Action? _postedRenderRequestAction;
+    private Action _postedRenderRequest => _postedRenderRequestAction ??= () =>
+    {
+        System.Threading.Volatile.Write(ref _renderRequestPosted, 0);
+        RequestRender();
+    };
+
     public void RequestRender()
     {
         if (!Avalonia.Threading.Dispatcher.UIThread.CheckAccess())
         {
-            Avalonia.Threading.Dispatcher.UIThread.Post(RequestRender);
+            // Background threads ask for a frame many times per tick; one queued hop to the
+            // UI thread serves all of them.
+            if (System.Threading.Interlocked.Exchange(ref _renderRequestPosted, 1) == 0)
+                Avalonia.Threading.Dispatcher.UIThread.Post(_postedRenderRequest);
             return;
         }
         // _renderDisabledAfterFailure: RenderFrame itself already no-ops immediately once this
@@ -1942,13 +1954,23 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// <c>AvatarViewerViewModel.AnimTick</c>, wired as part of replacing their CPU-only fallback
     /// with real GPU compute dispatch. Thread-safe -- no-op when compute is unavailable on this
     /// device.</summary>
-    public void ScheduleSkinCompute(VkSkinComputeJob job) => _skinDeformer?.Enqueue(job);
+    public void ScheduleSkinCompute(VkSkinComputeJob job)
+    {
+        if (_skinDeformer == null) return;
+        _skinDeformer.Enqueue(job);
+        RequestRender();
+    }
 
     /// <summary>Part of both <see cref="ISceneViewport"/> and <see cref="ISingleObjectViewport"/>:
     /// real consumers are <c>FlexiPrimAnimator.TickAndUpload</c>'s scene-object and AvatarViewer
     /// GPU paths. Thread-safe, no-op when <see cref="_flexiDeformer"/> is unavailable
     /// (best-effort init, same posture as <see cref="_skinDeformer"/>).</summary>
-    public void ScheduleFlexiCompute(VkFlexiComputeJob job) => _flexiDeformer?.Enqueue(job);
+    public void ScheduleFlexiCompute(VkFlexiComputeJob job)
+    {
+        if (_flexiDeformer == null) return;
+        _flexiDeformer.Enqueue(job);
+        RequestRender();
+    }
 
     /// <summary>
     /// Submit (or, with <see langword="null"/>, remove) a particle emitter's current snapshot,
@@ -5215,6 +5237,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
             _deformerStopwatch.Restart();
             _skinDeformer?.DispatchPending();
             SkinDispatchMs = _deformerStopwatch.Elapsed.TotalMilliseconds;
+            DeformersDispatched?.Invoke();
 
             _renderStopwatch.Restart();
 

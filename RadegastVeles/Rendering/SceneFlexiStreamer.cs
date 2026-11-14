@@ -60,7 +60,7 @@ internal sealed class SceneFlexiStreamer : IDisposable
         _client        = client;
         _viewport      = viewport;
         _objectStreamer = objectStreamer;
-        _scheduler     = new FlexiSceneScheduler(client);
+        _scheduler     = new FlexiSceneScheduler(client, viewport);
         _scheduler.Start();
 
         _objectStreamer.ObjectBuilt += OnObjectBuilt;

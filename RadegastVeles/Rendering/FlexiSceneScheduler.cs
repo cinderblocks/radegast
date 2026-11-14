@@ -28,7 +28,7 @@ using Vector3 = System.Numerics.Vector3;
 namespace Radegast.Veles.Rendering;
 
 /// <summary>
-/// Drives every scene-viewer <see cref="FlexiPrimAnimator"/> from one shared ~60 Hz timer
+/// Drives every scene-viewer <see cref="FlexiPrimAnimator"/> from one shared loop that runs once per rendered frame
 /// instead of each animator owning its own <see cref="PeriodicTimer"/> and background
 /// <see cref="Task"/>. A busy sim can easily have dozens of flexi objects (grass, trees,
 /// flexi attachments on nearby avatars) — one timer/task per object is unnecessary
@@ -44,8 +44,10 @@ namespace Radegast.Veles.Rendering;
 /// </summary>
 internal sealed class FlexiSceneScheduler : IDisposable
 {
-    // Base rate matches a 60 Hz display, so nearby motion advances every frame.
-    private const float SimTickRate = 1f / 60f;
+    // Animators tick once per rendered frame, so a shape never repeats or skips a frame. This
+    // is the interval used while no frames are being rendered.
+    private const int IdleTickMs = 50;
+    private readonly FramePulse _pulse;
     private const float MaxStepSeconds = 0.2f;
 
     private readonly GridClient _client;
@@ -56,7 +58,11 @@ internal sealed class FlexiSceneScheduler : IDisposable
     private bool _disposed;
     private bool _loggedTickError;
 
-    public FlexiSceneScheduler(GridClient client) => _client = client;
+    public FlexiSceneScheduler(GridClient client, ISceneViewport viewport)
+    {
+        _client = client;
+        _pulse  = new FramePulse(viewport);
+    }
 
     public void Register(FlexiPrimAnimator animator) => _registered[animator] = 0;
 
@@ -75,6 +81,7 @@ internal sealed class FlexiSceneScheduler : IDisposable
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+        _pulse.Dispose();
         _registered.Clear();
     }
 
@@ -94,14 +101,14 @@ internal sealed class FlexiSceneScheduler : IDisposable
 
     private async Task RunAsync(CancellationToken ct)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(SimTickRate));
         var sw   = Stopwatch.StartNew();
         float prev = 0f;
 
         try
         {
-            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            while (true)
             {
+                await _pulse.WaitAsync(IdleTickMs, ct).ConfigureAwait(false);
                 float now = (float)sw.Elapsed.TotalSeconds;
                 float dt  = Math.Min(now - prev, 0.1f);
                 prev = now;
