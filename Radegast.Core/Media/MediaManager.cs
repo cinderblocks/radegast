@@ -1731,12 +1731,12 @@ namespace Radegast.Media
                     cached.AccessCount++;
                     
                     CacheHits++;
-                    Logger.Debug($"Cache HIT for sound {soundId}");
+                    Logger.Trace($"Cache HIT for sound {soundId}");
                     return cached.Data;
                 }
 
                 CacheMisses++;
-                Logger.Debug($"Cache MISS for sound {soundId}");
+                Logger.Trace($"Cache MISS for sound {soundId}");
                 return null;
             }
         }
