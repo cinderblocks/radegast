@@ -569,6 +569,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
 
     private void AddMessage(IMSession session, ChatLine line)
     {
+        ChatLine.TrimOldest(session.Messages);
         MaybeInsertDateSeparator(session.Messages, line);
         session.Messages.Add(line);
         if (_instance.ChatLog.IsEnabled)
