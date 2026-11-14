@@ -36,6 +36,8 @@ public sealed class CredentialManager : IDisposable
     private const int KeySize = 32;   // AES-256
     private const int NonceSize = 12; // 96-bit nonce for AES-GCM
     private const int TagSize = 16;   // 128-bit authentication tag
+    private const string UnreadableSuffix = ".unreadable";
+    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
     private readonly string _storeFilePath;
     private readonly string _keyFilePath;
@@ -64,7 +66,10 @@ public sealed class CredentialManager : IDisposable
                 var encoded = File.ReadAllText(_keyFilePath).Trim();
                 var keyBytes = Convert.FromBase64String(encoded);
                 if (keyBytes.Length == KeySize)
+                {
+                    RestrictToOwner(_keyFilePath);
                     return keyBytes;
+                }
             }
             catch (Exception ex)
             {
@@ -74,7 +79,7 @@ public sealed class CredentialManager : IDisposable
         }
 
         var key = RandomNumberGenerator.GetBytes(KeySize);
-        File.WriteAllText(_keyFilePath, Convert.ToBase64String(key));
+        WriteOwnerOnly(_keyFilePath, Convert.ToBase64String(key));
         return key;
     }
 
@@ -85,16 +90,21 @@ public sealed class CredentialManager : IDisposable
             try
             {
                 LoadAllSecrets();
+                RestrictToOwner(_storeFilePath);
                 return;
             }
             catch (Exception ex)
             {
+                var setAside = _storeFilePath + UnreadableSuffix;
                 Logger.Warn($"CredentialManager: credential store at {_storeFilePath} is unreadable " +
-                            "(corrupted or key mismatch); recreating it. Saved accounts/passwords are lost.", ex);
+                            $"(corrupted or key mismatch); starting a new one. The old file is kept as {setAside}.", ex);
+                try { File.Move(_storeFilePath, setAside, overwrite: true); }
+                catch (Exception moveEx)
+                {
+                    Logger.Warn($"CredentialManager: could not set aside the unreadable store as {setAside}.", moveEx);
+                }
             }
         }
-
-        if (File.Exists(_storeFilePath)) File.Delete(_storeFilePath);
 
         SaveAllSecrets(new Dictionary<string, string> { [AccountListKey] = "[]" });
     }
@@ -133,7 +143,56 @@ public sealed class CredentialManager : IDisposable
             Tag = Convert.ToBase64String(tag),
             Ciphertext = Convert.ToBase64String(ciphertext)
         };
-        File.WriteAllText(_storeFilePath, JsonSerializer.Serialize(envelope));
+        WriteOwnerOnly(_storeFilePath, JsonSerializer.Serialize(envelope));
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="path"/> with <paramref name="contents"/> in one step, so an
+    /// interrupted save leaves the previous file intact. On Unix the file is readable and
+    /// writable by its owner only.
+    /// </summary>
+    private static void WriteOwnerOnly(string path, string contents)
+    {
+        var tmp = path + ".tmp";
+        var options = new FileStreamOptions
+        {
+            Mode = FileMode.Create,
+            Access = FileAccess.Write,
+            Share = FileShare.None
+        };
+        if (!OperatingSystem.IsWindows())
+            options.UnixCreateMode = OwnerOnly;
+
+        try
+        {
+            using (var stream = new FileStream(tmp, options))
+            {
+                var bytes = Encoding.UTF8.GetBytes(contents);
+                stream.Write(bytes, 0, bytes.Length);
+                stream.Flush(flushToDisk: true);
+            }
+            RestrictToOwner(tmp);
+            File.Move(tmp, path, overwrite: true);
+        }
+        catch
+        {
+            try { File.Delete(tmp); } catch { /* best effort */ }
+            throw;
+        }
+    }
+
+    private static void RestrictToOwner(string path)
+    {
+        if (OperatingSystem.IsWindows()) return;
+        try
+        {
+            if (File.GetUnixFileMode(path) != OwnerOnly)
+                File.SetUnixFileMode(path, OwnerOnly);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"CredentialManager: could not restrict access to {path}.", ex);
+        }
     }
 
     public List<SavedAccount> GetSavedAccounts()
