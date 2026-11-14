@@ -1849,7 +1849,8 @@ public partial class SceneViewerViewModel : ObservableObject, IDisposable
                    // Frame-interval variance (plan Step 3) -- the metric that actually answers
                    // "is it choppy," since CPU/GPU ms alone can drop once frame-in-flight
                    // pipelining (Step 6) lands whether or not real frame pacing improves.
-                   $"  Interval max:{stats.IntervalMaxMs:F1}ms p99:{stats.IntervalP99Ms:F1}ms" +
+                   $"  Interval max:{stats.IntervalMaxMs:F1}ms p99:{stats.IntervalP99Ms:F1}ms avg:{stats.IntervalAvgMs:F1}ms" +
+                   $" (1x:{stats.IntervalsOneRefresh} 2x:{stats.IntervalsTwoRefreshes} 3x:{stats.IntervalsThreeRefreshes} more:{stats.IntervalsLonger})" +
                    $"\nDraws {stats.DrawCalls}  Tris {stats.Triangles:#,0}" +
                    $"\nFaces {stats.FacesSubmitted}  Culled {stats.FacesCulled}  ObjOccluded {stats.ObjectsOcclusionCulled}" +
                    $"\nBuild Q:{buildQueue}  Obj:{objBuilds}  Av:{avBuilds}" +

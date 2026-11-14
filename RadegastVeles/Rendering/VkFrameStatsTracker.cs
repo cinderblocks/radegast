@@ -245,9 +245,22 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
                 gpuMs = (raw[1] - raw[0]) * _timestampPeriodNs / 1_000_000.0;
         }
 
-        double intervalMaxMs = 0, intervalP99Ms = 0;
+        double intervalMaxMs = 0, intervalP99Ms = 0, intervalAvgMs = 0;
+        int oneRefresh = 0, twoRefreshes = 0, threeRefreshes = 0, longer = 0;
         if (_intervalCount > 0)
         {
+            double sum = 0;
+            for (int i = 0; i < _intervalCount; i++)
+            {
+                double ms = _intervalWindow[i];
+                sum += ms;
+                if (ms <= 21.0) oneRefresh++;
+                else if (ms <= 38.0) twoRefreshes++;
+                else if (ms <= 55.0) threeRefreshes++;
+                else longer++;
+            }
+            intervalAvgMs = sum / _intervalCount;
+
             Array.Copy(_intervalWindow, _intervalScratch, _intervalCount);
             Array.Sort(_intervalScratch, 0, _intervalCount);
             intervalMaxMs = _intervalScratch[_intervalCount - 1];
@@ -264,7 +277,12 @@ public sealed unsafe class VkFrameStatsTracker : IFrameStatsTracker, IDisposable
             FacesCulled: _facesCulledBuf[slot],
             IntervalMaxMs: intervalMaxMs,
             IntervalP99Ms: intervalP99Ms,
-            ObjectsOcclusionCulled: _objectsOcclusionCulled);
+            ObjectsOcclusionCulled: _objectsOcclusionCulled,
+            IntervalAvgMs: intervalAvgMs,
+            IntervalsOneRefresh: oneRefresh,
+            IntervalsTwoRefreshes: twoRefreshes,
+            IntervalsThreeRefreshes: threeRefreshes,
+            IntervalsLonger: longer);
         Last = stats;
         FrameCompleted?.Invoke(stats);
     }

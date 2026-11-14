@@ -28,6 +28,12 @@ namespace Radegast.Veles.Rendering;
 /// <param name="IntervalP99Ms">99th-percentile frame interval over the same window -- less
 /// sensitive to a single one-off spike than <see cref="IntervalMaxMs"/>, so a sustained
 /// choppiness regression shows up here even when the max is dominated by one rare outlier.</param>
+/// <param name="IntervalAvgMs">Mean frame interval over the same window.</param>
+/// <param name="IntervalsOneRefresh">Frames in the window that arrived within one 60 Hz
+/// refresh of the previous one (up to 21 ms).</param>
+/// <param name="IntervalsTwoRefreshes">Frames that took two refreshes (21 to 38 ms).</param>
+/// <param name="IntervalsThreeRefreshes">Frames that took three refreshes (38 to 55 ms).</param>
+/// <param name="IntervalsLonger">Frames that took longer than three refreshes.</param>
 /// <param name="ObjectsOcclusionCulled">Count of scene objects newly marked occluded by the most
 /// recent occlusion-query readback cycle (see <c>VkViewportControl.ReadOcclusionResults</c>) --
 /// not a running total (the durable running state is <c>_occludedSceneKeys</c> itself), just this
@@ -41,7 +47,12 @@ public readonly record struct FrameStats(
     int    FacesCulled,
     double IntervalMaxMs,
     double IntervalP99Ms,
-    int    ObjectsOcclusionCulled = 0);
+    int    ObjectsOcclusionCulled = 0,
+    double IntervalAvgMs = 0,
+    int    IntervalsOneRefresh = 0,
+    int    IntervalsTwoRefreshes = 0,
+    int    IntervalsThreeRefreshes = 0,
+    int    IntervalsLonger = 0);
 
 public interface IFrameStatsTracker
 {
