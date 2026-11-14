@@ -506,21 +506,31 @@ internal sealed class SceneObjectStreamer : IDisposable
     /// Immediately removes any rendered objects that now lie outside the current
     /// <see cref="DrawDistance"/>.
     /// </summary>
-    public void CullBeyondDrawDistance()
+    public void CullBeyondDrawDistance() => CullBeyond(_maxStreamRadius);
+
+    // Objects are admitted within the stream radius and, as the avatar moves away, removed once
+    // they are this much farther out. The gap keeps an object near the edge from being rebuilt
+    // and removed repeatedly.
+    private const float CullHysteresis = 1.25f;
+
+    private void CullBeyond(float radius)
     {
         if (_disposed) return;
         var avatarPos  = _client.Self.SimPosition;
         var currentSim = _client.Network.CurrentSim;
         if (currentSim == null) return;
+        // The agent's position reads as zero until its first update; culling against that
+        // would remove the whole scene.
+        if (avatarPos == OmVector3.Zero) return;
 
-        foreach (var sceneKey in _rendered.Keys)
+        foreach (var (sceneKey, _) in _rendered)
         {
             var sim         = SimForSceneKey(sceneKey) ?? currentSim;
             var rootLocalId = LocalIdForSceneKey(sceneKey);
             var objs        = sim.ObjectsPrimitives;
             if (objs == null || !objs.TryGetValue(rootLocalId, out var root)) continue;
             var worldPos = ApplyRegionOffset(new Vector3(root.Position.X, root.Position.Y, root.Position.Z), sim, currentSim);
-            if (!IsWithinRadius(worldPos, avatarPos, _maxStreamRadius))
+            if (!IsWithinRadius(worldPos, avatarPos, radius))
                 DropOutOfRange(sceneKey);
         }
     }
@@ -1222,6 +1232,8 @@ internal sealed class SceneObjectStreamer : IDisposable
             _lastReconcileTick      = now;
             _lastReconcileAvatarPos = avatarPos;
             ReconcileSweep(currentSim, avatarPos, now);
+            // Frees the geometry and textures of objects the avatar has left behind.
+            CullBeyond(_maxStreamRadius * CullHysteresis);
         }
         finally
         {
