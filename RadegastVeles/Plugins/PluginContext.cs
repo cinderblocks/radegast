@@ -144,10 +144,17 @@ internal sealed class PluginContext : IPluginContext
         return topLevel.StorageProvider.SaveFilePickerAsync(options);
     }
 
-    private static TopLevel? GetMainTopLevel()
+    /// <summary>The window of the account this plugin instance belongs to.</summary>
+    private TopLevel? GetMainTopLevel()
     {
-        if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
-            return TopLevel.GetTopLevel(desktop.MainWindow);
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
+            return null;
+
+        foreach (var window in desktop.Windows)
+        {
+            if (window is Views.MainWindow main && main.BelongsTo(_instance))
+                return main;
+        }
         return null;
     }
 

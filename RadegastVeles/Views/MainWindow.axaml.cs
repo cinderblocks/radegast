@@ -66,6 +66,9 @@ public partial class MainWindow : Window
 
     public MainWindow() { InitializeComponent(); _session = null!; _vm = null!; }
 
+    internal bool BelongsTo(RadegastInstanceAvalonia instance) =>
+        _session != null && ReferenceEquals(_session.Instance, instance);
+
     public MainWindow(AgentSession session)
     {
         _session = session;
