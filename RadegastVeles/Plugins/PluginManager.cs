@@ -23,6 +23,8 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
 using Microsoft.Extensions.Logging;
 using LibreMetaverse;
 using Radegast.Veles.Core;
@@ -110,6 +112,11 @@ public sealed class PluginManager : IDisposable
                 continue;
             }
 
+            // A plugin's own dependencies sit beside it; only an assembly built against the
+            // plugin API can contain a plugin, and that can be read without loading it.
+            if (!ReferencesPluginApi(file))
+                continue;
+
             try
             {
                 LoadPlugin(file);
@@ -118,6 +125,35 @@ public sealed class PluginManager : IDisposable
             {
                 Logger.Log($"Failed to load plugin from {file}: {ex.Message}", LogLevel.Warning);
             }
+        }
+    }
+
+    private const string PluginApiAssemblyName = "Radegast.Veles.PluginApi";
+
+    /// <summary>
+    /// True if the file is a managed assembly that references the plugin API. Reads only the
+    /// assembly's metadata; nothing is loaded or run.
+    /// </summary>
+    internal static bool ReferencesPluginApi(string assemblyPath)
+    {
+        try
+        {
+            using var stream = File.OpenRead(assemblyPath);
+            using var pe = new PEReader(stream);
+            if (!pe.HasMetadata) return false;
+
+            var metadata = pe.GetMetadataReader();
+            foreach (var handle in metadata.AssemblyReferences)
+            {
+                var name = metadata.GetString(metadata.GetAssemblyReference(handle).Name);
+                if (string.Equals(name, PluginApiAssemblyName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+        catch (Exception ex) when (ex is BadImageFormatException or IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 
@@ -158,15 +194,24 @@ public sealed class PluginManager : IDisposable
         Type? pluginType = null;
         VelesPluginAttribute? attribute = null;
 
-        foreach (var type in assembly.GetExportedTypes())
+        try
         {
-            var attr = type.GetCustomAttribute<VelesPluginAttribute>();
-            if (attr != null && typeof(IVelesPlugin).IsAssignableFrom(type))
+            foreach (var type in assembly.GetExportedTypes())
             {
-                pluginType = type;
-                attribute = attr;
-                break;
+                var attr = type.GetCustomAttribute<VelesPluginAttribute>();
+                if (attr != null && typeof(IVelesPlugin).IsAssignableFrom(type))
+                {
+                    pluginType = type;
+                    attribute = attr;
+                    break;
+                }
             }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"Could not read the types in {fullPath}: {ex.Message}", LogLevel.Warning);
+            loadContext.Unload();
+            return null;
         }
 
         if (pluginType == null || attribute == null)
