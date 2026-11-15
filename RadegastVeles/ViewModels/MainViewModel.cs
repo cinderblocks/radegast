@@ -179,6 +179,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.IMRequested += Instance_IMRequested;
         _instance.GroupIMRequested += Instance_GroupIMRequested;
         _instance.ShowOnMapRequested += Instance_ShowOnMapRequested;
+        _instance.ShowLandmarkOnMapRequested += Instance_ShowLandmarkOnMapRequested;
         _instance.NotificationReceived += Instance_NotificationReceived;
         IM.NavigateToSessionRequested += OnIMNavigateRequested;
 
@@ -192,6 +193,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _instance.IMRequested -= Instance_IMRequested;
         _instance.GroupIMRequested -= Instance_GroupIMRequested;
         _instance.ShowOnMapRequested -= Instance_ShowOnMapRequested;
+        _instance.ShowLandmarkOnMapRequested -= Instance_ShowLandmarkOnMapRequested;
         _instance.NotificationReceived -= Instance_NotificationReceived;
         _instance.LowMemoryModeChanged -= Instance_LowMemoryModeChanged;
         IM.NavigateToSessionRequested -= OnIMNavigateRequested;
@@ -255,6 +257,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             ShowTab(2);
             Map.ShowFriendOnMap(agentId);
+        });
+    }
+
+    private void Instance_ShowLandmarkOnMapRequested(string name, LibreMetaverse.UUID assetId)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            ShowTab(2);
+            // The map control subscribes to centering requests when its tab first loads.
+            Avalonia.Threading.Dispatcher.UIThread.Post(
+                () => Map.ShowLandmark(name, assetId),
+                Avalonia.Threading.DispatcherPriority.Background);
         });
     }
 

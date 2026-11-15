@@ -79,6 +79,13 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     public void ShowOnMap(UUID agentId)
         => ShowOnMapRequested?.Invoke(this, agentId);
 
+    /// <summary>Raised to show a landmark on the world map: landmark name and asset id.</summary>
+    public event Action<string, UUID>? ShowLandmarkOnMapRequested;
+
+    /// <summary>Navigate to the World Map tab and center it on the given landmark.</summary>
+    public void ShowLandmarkOnMap(string name, UUID assetId)
+        => ShowLandmarkOnMapRequested?.Invoke(name, assetId);
+
     /// <summary>Open the group picker and call <paramref name="onSelected"/> with the chosen group.</summary>
     public void ShowGroupPicker(string title, Action<GroupPickerEntry> onSelected)
     {

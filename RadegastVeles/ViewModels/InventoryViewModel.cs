@@ -932,44 +932,13 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         });
     }
 
-    /// <summary>
-    /// Opens the landmark location in the default browser via a secondlife:// SLURL,
-    /// which the SL viewer or a mapping site can handle.
-    /// </summary>
+    /// <summary>Shows the selected landmark on the World Map tab.</summary>
     [RelayCommand]
     private void ShowLandmarkOnMap()
     {
         if (SelectedNode == null || SelectedNode.IsFolder) return;
         if (!Inventory.TryGetValue<InventoryLandmark>(SelectedNode.ItemId, out var lm)) return;
-
-        _ = Task.Run(async () =>
-        {
-            var asset = await Client.Assets.RequestAssetAsync(lm!.AssetUUID, AssetType.Landmark, true);
-            if (asset is not AssetLandmark decoded) return;
-            decoded.Decode();
-
-            Client.Grid.RegionHandleReply += HandleMapRegionReply;
-            Client.Grid.RequestRegionHandle(decoded.RegionID);
-
-            void HandleMapRegionReply(object? sender, RegionHandleReplyEventArgs e)
-            {
-                if (e.RegionID != decoded.RegionID) return;
-                Client.Grid.RegionHandleReply -= HandleMapRegionReply;
-
-                string regionName = "Unknown";
-                if (Client.Grid.RegionsByHandleReadOnly.TryGetValue(e.RegionHandle, out var region))
-                    regionName = region.Name;
-
-                var pos = decoded.Position;
-                var slurl = $"secondlife://{Uri.EscapeDataString(regionName)}/{(int)pos.X}/{(int)pos.Y}/{(int)pos.Z}";
-
-                Dispatcher.UIThread.Post(() =>
-                {
-                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(slurl) { UseShellExecute = true }); }
-                    catch { _instance.ShowNotificationInChat($"Could not open map: {slurl}"); }
-                });
-            }
-        });
+        _instance.ShowLandmarkOnMap(lm.Name, lm.AssetUUID);
     }
 
     // ── Gestures ─────────────────────────────────────────────────────────────

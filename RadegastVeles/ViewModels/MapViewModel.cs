@@ -400,31 +400,44 @@ public partial class MapViewModel : ClientAwareViewModelBase
 
     partial void OnSelectedFavoriteChanged(FavoriteLandmarkEntry? value)
     {
-        if (value == null || !Active) return;
+        if (value == null) return;
+        ShowLandmark(value.Name, value.AssetUUID);
+    }
+
+    /// <summary>
+    /// Centers the map on a landmark's location and makes it the teleport target.
+    /// Must be called on the UI thread.
+    /// </summary>
+    public void ShowLandmark(string name, UUID assetId)
+    {
+        if (!Active) return;
 
         // If already resolved, navigate immediately
         lock (_resolvedFavoritePositions)
         {
-            if (_resolvedFavoritePositions.TryGetValue(value.AssetUUID, out var pos))
+            if (_resolvedFavoritePositions.TryGetValue(assetId, out var pos))
             {
                 RegionSearch = pos.RegionName;
                 CoordX = pos.X;
                 CoordY = pos.Y;
                 CoordZ = pos.Z;
                 CanTeleport = true;
-                StatusText = $"Ready for {value.Name}";
+                StatusText = $"Ready for {name}";
                 GotoRegion(pos.RegionName, pos.X, pos.Y);
                 return;
             }
         }
 
         // Decode the landmark asset to find the region
-        StatusText = $"Locating {value.Name}...";
-        var capturedEntry = value;
+        StatusText = $"Locating {name}...";
         _ = Task.Run(async () =>
         {
-            var asset = await Client.Assets.RequestAssetAsync(value.AssetUUID, AssetType.Landmark, true);
-            if (asset is not AssetLandmark la || !la.Decode()) return;
+            var asset = await Client.Assets.RequestAssetAsync(assetId, AssetType.Landmark, true);
+            if (asset is not AssetLandmark la || !la.Decode())
+            {
+                Dispatcher.UIThread.Post(() => StatusText = $"Could not read the landmark {name}.");
+                return;
+            }
             var localPos = la.Position;
             lock (_navPendingByRegionId)
                 _navPendingByRegionId[la.RegionID] = ((int)localPos.X, (int)localPos.Y, (int)localPos.Z);
