@@ -37,6 +37,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     private bool Active => Client.Network.Connected;
 
     private readonly Dictionary<string, ulong> _regionHandles = new();
+    private readonly Dictionary<(uint X, uint Y), MapRegionEntry> _regionsByCell = new();
     private readonly HashSet<string> _requestedBlocks = new();
     private ulong _targetRegionHandle;
 #pragma warning disable CS0414
@@ -368,8 +369,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     public void SetMapTarget(uint regionGridX, uint regionGridY, uint localX, uint localY)
     {
         if (!Active) return;
-        var region = MapRegions.FirstOrDefault(r => r.GridX == regionGridX && r.GridY == regionGridY);
-        if (region != null)
+        if (_regionsByCell.TryGetValue((regionGridX, regionGridY), out var region))
         {
             RegionSearch = region.Name;
         }
@@ -381,8 +381,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     public void TeleportToPosition(uint regionGridX, uint regionGridY, uint localX, uint localY)
     {
         if (!Active) return;
-        var region = MapRegions.FirstOrDefault(r => r.GridX == regionGridX && r.GridY == regionGridY);
-        if (region == null)
+        if (!_regionsByCell.TryGetValue((regionGridX, regionGridY), out var region))
         {
             StatusText = "Unknown region — click a known region to teleport.";
             return;
@@ -697,14 +696,15 @@ public partial class MapViewModel : ClientAwareViewModelBase
             uint ry = (uint)e.Region.Y;
             if (e.Region.Access != SimAccess.NonExistent)
             {
-                var existing = MapRegions.FirstOrDefault(r => r.Handle == e.Region.RegionHandle);
-                if (existing == null)
+                if (!_regionsByCell.ContainsKey((rx, ry)))
                 {
-                    MapRegions.Add(new MapRegionEntry(
+                    var entry = new MapRegionEntry(
                         e.Region.RegionHandle,
                         e.Region.Name,
                         rx, ry,
-                        e.Region.Access));
+                        e.Region.Access);
+                    _regionsByCell[(rx, ry)] = entry;
+                    MapRegions.Add(entry);
                 }
             }
 
