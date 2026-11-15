@@ -45,6 +45,8 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _traversalCts;
     private readonly ConcurrentDictionary<UUID, int> _foldersNeedingUpdate = new();
+    private const int MaxFolderFetchAttempts = 4;
+    private const int FolderRetryDelayMs = 2000;
 
     // Debounce inventory tree refresh: collect dirty folders and flush once per burst.
     private readonly ConcurrentDictionary<UUID, byte> _pendingItemFolders = new();
@@ -1859,14 +1861,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         }
         else
         {
-            // Increment retry count; traversal loop will retry
-            if (_foldersNeedingUpdate.TryGetValue(e.FolderID, out var retries))
-            {
-                if (retries > 3)
-                    _foldersNeedingUpdate.TryRemove(e.FolderID, out _);
-                else
-                    _foldersNeedingUpdate.TryUpdate(e.FolderID, retries + 1, retries);
-            }
+            // The folder stays queued; the load loop requests it again and counts the attempts.
             return;
         }
 
@@ -1949,6 +1944,9 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         _foldersNeedingUpdate.Clear();
         TraverseAndQueueFolders(rootNode);
 
+        var attempts = new Dictionary<UUID, int>();
+        var abandoned = new HashSet<UUID>();
+
         while (!_foldersNeedingUpdate.IsEmpty)
         {
             token.ThrowIfCancellationRequested();
@@ -1965,7 +1963,25 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 return;
             }
 
-            var folderKeys = _foldersNeedingUpdate.Keys.ToList();
+            var folderKeys = new List<UUID>();
+            bool retrying = false;
+            foreach (var folderId in _foldersNeedingUpdate.Keys)
+            {
+                attempts.TryGetValue(folderId, out var made);
+                if (made >= MaxFolderFetchAttempts)
+                {
+                    _foldersNeedingUpdate.TryRemove(folderId, out _);
+                    abandoned.Add(folderId);
+                    continue;
+                }
+                if (made > 0) retrying = true;
+                attempts[folderId] = made + 1;
+                folderKeys.Add(folderId);
+            }
+            if (folderKeys.Count == 0) continue;
+
+            if (retrying)
+                await Task.Delay(FolderRetryDelayMs, token).ConfigureAwait(false);
 
             Dispatcher.UIThread.Post(() =>
                 StatusText = $"Loading inventory... {folderKeys.Count} folders remaining");
@@ -1988,6 +2004,8 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
             // Re-traverse to find any newly-discovered folders that need updating
             TraverseAndQueueFolders(rootNode);
+            foreach (var folderId in abandoned)
+                _foldersNeedingUpdate.TryRemove(folderId, out _);
 
             // Individual folder updates are already handled by Inventory_FolderUpdated → RefreshFolderNode
             // No need for a full RebuildTree here; it would collapse user-expanded folders
@@ -1997,9 +2015,15 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         {
             RebuildTree();
             int itemCount = CountItems(Inventory.RootNode);
-            StatusText = $"Inventory ({itemCount} items)";
+            StatusText = abandoned.Count == 0
+                ? $"Inventory ({itemCount} items)"
+                : $"Inventory ({itemCount} items, {abandoned.Count} folders could not be loaded)";
             _inventoryLoaded = true;
         });
+
+        if (abandoned.Count > 0)
+            Logger.Warn($"{abandoned.Count} inventory folders could not be loaded after " +
+                        $"{MaxFolderFetchAttempts} attempts each: {string.Join(", ", abandoned.Take(10))}", Client);
 
         // Save to disk cache (background, non-blocking)
         var cacheFile = _instance.InventoryCacheFileName;
