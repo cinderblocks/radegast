@@ -24,18 +24,19 @@ namespace Radegast.Veles.Core;
 public enum InventoryClipboardMode { None, Cut, Copy }
 
 /// <summary>
-/// Application-wide inventory clipboard for cut/copy/paste operations.
+/// Inventory clipboard for cut/copy/paste operations. Each logged-in account has its own,
+/// since an inventory id means nothing in another account's inventory.
 /// </summary>
-public static class InventoryClipboard
+public sealed class InventoryClipboard
 {
-    public static InventoryClipboardMode Mode { get; private set; } = InventoryClipboardMode.None;
-    public static UUID ItemId  { get; private set; } = UUID.Zero;
-    public static string ItemName { get; private set; } = string.Empty;
-    public static bool IsFolder { get; private set; }
+    public InventoryClipboardMode Mode { get; private set; } = InventoryClipboardMode.None;
+    public UUID ItemId  { get; private set; } = UUID.Zero;
+    public string ItemName { get; private set; } = string.Empty;
+    public bool IsFolder { get; private set; }
 
-    public static bool HasContent => Mode != InventoryClipboardMode.None && ItemId != UUID.Zero;
+    public bool HasContent => Mode != InventoryClipboardMode.None && ItemId != UUID.Zero;
 
-    public static void Cut(UUID id, string name, bool isFolder)
+    public void Cut(UUID id, string name, bool isFolder)
     {
         Mode = InventoryClipboardMode.Cut;
         ItemId = id;
@@ -43,7 +44,7 @@ public static class InventoryClipboard
         IsFolder = isFolder;
     }
 
-    public static void Copy(UUID id, string name, bool isFolder)
+    public void Copy(UUID id, string name, bool isFolder)
     {
         Mode = InventoryClipboardMode.Copy;
         ItemId = id;
@@ -51,7 +52,7 @@ public static class InventoryClipboard
         IsFolder = isFolder;
     }
 
-    public static void Clear()
+    public void Clear()
     {
         Mode = InventoryClipboardMode.None;
         ItemId = UUID.Zero;

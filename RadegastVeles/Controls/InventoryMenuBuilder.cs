@@ -24,7 +24,6 @@ using Avalonia.Controls;
 using LibreMetaverse;
 using LibreMetaverse.Marketplace;
 using Radegast.Veles.ViewModels;
-using InvClipboard = Radegast.Veles.Core.InventoryClipboard;
 
 namespace Radegast.Veles.Controls;
 
@@ -135,7 +134,7 @@ public static class InventoryMenuBuilder
             Add(menu, "New Notecard", () => vm.CreateNotecardCommand.Execute(null));
             Add(menu, "New Script",   () => vm.CreateScriptCommand.Execute(null));
             Sep(menu);
-            if (InvClipboard.HasContent)
+            if (vm.ItemClipboard.HasContent)
                 Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
             TrimSep(menu);
             return;
@@ -187,9 +186,9 @@ public static class InventoryMenuBuilder
         // Clipboard — protected and root system folders cannot be cut; folder Copy is not server-supported
         if (!isLocked)
             Add(menu, "Cut\tCtrl+X", () => vm.CutItemCommand.Execute(null));
-        if (InvClipboard.HasContent)
+        if (vm.ItemClipboard.HasContent)
             Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
-        if (InvClipboard.HasContent && !InvClipboard.IsFolder)
+        if (vm.ItemClipboard.HasContent && !vm.ItemClipboard.IsFolder)
             Add(menu, "Paste as Link", () => vm.PasteLinkItemCommand.Execute(null));
         Sep(menu);
 
@@ -283,9 +282,9 @@ public static class InventoryMenuBuilder
         Add(menu, "Cut\tCtrl+X",   () => vm.CutItemCommand.Execute(null));
         if (vm.CanCopyItem(node))
             Add(menu, "Copy\tCtrl+C",  () => vm.CopyItemCommand.Execute(null));
-        if (InvClipboard.HasContent)
+        if (vm.ItemClipboard.HasContent)
             Add(menu, "Paste\tCtrl+V", () => vm.PasteItemCommand.Execute(null));
-        if (InvClipboard.HasContent && !InvClipboard.IsFolder)
+        if (vm.ItemClipboard.HasContent && !vm.ItemClipboard.IsFolder)
             Add(menu, "Paste as Link", () => vm.PasteLinkItemCommand.Execute(null));
         Sep(menu);
 

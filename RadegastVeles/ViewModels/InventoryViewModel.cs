@@ -57,6 +57,9 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     // The server always pushes COF/outfit updates post-teleport that look like new items.
     private volatile int _teleportSuppressUntilTicks; // Environment.TickCount value
     private readonly Dictionary<UUID, InvTreeNode> _nodeCache = new();
+
+    /// <summary>This account's cut/copy clipboard.</summary>
+    public InvClipboard ItemClipboard => _instance.ItemClipboard;
     private Dictionary<UUID, string> _wornSlots = [];
     private readonly ConcurrentDictionary<uint, UUID> _attachmentObjects = new();
 
@@ -1147,7 +1150,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat($"Cannot cut the '{SelectedNode.Name}' system folder.");
             return;
         }
-        InvClipboard.Cut(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
+        ItemClipboard.Cut(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
         VelesNotificationService.Show("Inventory", $"Cut: {SelectedNode.Name}");
     }
 
@@ -1160,7 +1163,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat($"'{SelectedNode.Name}' cannot be copied (no-copy permissions).");
             return;
         }
-        InvClipboard.Copy(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
+        ItemClipboard.Copy(SelectedNode.ItemId, SelectedNode.Name, SelectedNode.IsFolder);
         VelesNotificationService.Show("Inventory", $"Copied: {SelectedNode.Name}");
     }
 
@@ -1189,7 +1192,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     [RelayCommand]
     private async Task PasteItem()
     {
-        if (!InvClipboard.HasContent) return;
+        if (!ItemClipboard.HasContent) return;
 
         // Destination: selected folder, or parent of selected item
         var destNode = SelectedNode;
@@ -1197,20 +1200,20 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         if (!destNode.IsFolder) destNode = destNode.Parent;
         if (destNode == null) return;
 
-        if (!CanAcceptInFolder(destNode, InvClipboard.ItemId, InvClipboard.IsFolder))
+        if (!CanAcceptInFolder(destNode, ItemClipboard.ItemId, ItemClipboard.IsFolder))
         {
-            _instance.ShowNotificationInChat($"Cannot paste '{InvClipboard.ItemName}' into '{destNode.Name}'.");
+            _instance.ShowNotificationInChat($"Cannot paste '{ItemClipboard.ItemName}' into '{destNode.Name}'.");
             return;
         }
 
         if (!Inventory.TryGetValue<InventoryFolder>(destNode.ItemId, out var destFolder)) return;
 
-        if (InvClipboard.Mode == InvClipboardMode.Cut)
+        if (ItemClipboard.Mode == InvClipboardMode.Cut)
         {
-            var movedId   = InvClipboard.ItemId;
-            var movedName = InvClipboard.ItemName;   // capture before Clear()
-            var isFolder  = InvClipboard.IsFolder;
-            InvClipboard.Clear();
+            var movedId   = ItemClipboard.ItemId;
+            var movedName = ItemClipboard.ItemName;   // capture before Clear()
+            var isFolder  = ItemClipboard.IsFolder;
+            ItemClipboard.Clear();
 
             try
             {
@@ -1245,12 +1248,12 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 _instance.ShowNotificationInChat($"Failed to move {movedName}: {ex.Message}");
             }
         }
-        else if (InvClipboard.Mode == InvClipboardMode.Copy)
+        else if (ItemClipboard.Mode == InvClipboardMode.Copy)
         {
-            if (InvClipboard.IsFolder)
+            if (ItemClipboard.IsFolder)
             {
-                var srcFolderId = InvClipboard.ItemId;
-                var srcFolderName = InvClipboard.ItemName;
+                var srcFolderId = ItemClipboard.ItemId;
+                var srcFolderName = ItemClipboard.ItemName;
                 var destFolderId = destFolder.UUID;
                 _ = Task.Run(async () =>
                 {
@@ -1266,10 +1269,14 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 });
             }
             else
+            {
+                var copiedId   = ItemClipboard.ItemId;
+                var copiedName = ItemClipboard.ItemName;
                 _ = Task.Run(async () =>
                     await Client.Inventory.RequestCopyItemAsync(
-                        InvClipboard.ItemId, destFolder.UUID,
-                        InvClipboard.ItemName, Client.Self.AgentID));
+                        copiedId, destFolder.UUID,
+                        copiedName, Client.Self.AgentID));
+            }
         }
     }
 
@@ -1298,21 +1305,21 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     [RelayCommand]
     private void PasteLinkItem()
     {
-        if (!InvClipboard.HasContent || InvClipboard.IsFolder) return;
+        if (!ItemClipboard.HasContent || ItemClipboard.IsFolder) return;
 
         var destNode = SelectedNode;
         if (destNode == null) return;
         if (!destNode.IsFolder) destNode = destNode.Parent;
         if (destNode == null) return;
 
-        if (!CanAcceptInFolder(destNode, InvClipboard.ItemId, false, asLink: true))
+        if (!CanAcceptInFolder(destNode, ItemClipboard.ItemId, false, asLink: true))
         {
             _instance.ShowNotificationInChat($"Cannot create a link in '{destNode.Name}'.");
             return;
         }
 
         if (!Inventory.TryGetValue<InventoryFolder>(destNode.ItemId, out var destFolder)) return;
-        if (!Inventory.TryGetValue<InventoryItem>(InvClipboard.ItemId, out var srcItem)) return;
+        if (!Inventory.TryGetValue<InventoryItem>(ItemClipboard.ItemId, out var srcItem)) return;
 
         _ = Task.Run(async () =>
         {

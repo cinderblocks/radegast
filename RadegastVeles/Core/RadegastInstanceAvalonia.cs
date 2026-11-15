@@ -128,6 +128,9 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
     /// <summary>The active voice session manager (set by MainViewModel after login).</summary>
     public VoiceViewModel? Voice { get; internal set; }
 
+    /// <summary>This account's inventory cut/copy clipboard.</summary>
+    public InventoryClipboard ItemClipboard { get; } = new();
+
     /// <summary>The active media / audio manager (set by MainViewModel after login).</summary>
     public MediaViewModel? Media { get; internal set; }
 
