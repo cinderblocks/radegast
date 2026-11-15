@@ -1289,7 +1289,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     private async Task CopyFolderRecursiveAsync(UUID sourceFolderId, UUID destParentId, string folderName)
     {
         var newFolderId = Client.Inventory.CreateFolder(destParentId, folderName, FolderType.None);
-        await Task.Delay(500).ConfigureAwait(false);
+        await WaitForFolderOnServerAsync(destParentId, newFolderId).ConfigureAwait(false);
 
         if (!Inventory.TryGetValue<InventoryFolder>(sourceFolderId, out var sourceFolder)) return;
 
@@ -1300,6 +1300,36 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             else
                 await Client.Inventory.RequestCopyItemAsync(child.UUID, newFolderId, child.Name, child.OwnerID);
         }
+    }
+
+    private const int NewFolderConfirmAttempts   = 10;
+    private const int NewFolderConfirmIntervalMs = 400;
+
+    /// <summary>
+    /// Creating a folder gets no reply from the server, so this asks for the parent's contents
+    /// until the new folder is listed. Returns false if it never appeared; callers carry on
+    /// regardless, as a grid without the inventory capability cannot confirm at all.
+    /// </summary>
+    private async Task<bool> WaitForFolderOnServerAsync(UUID parentId, UUID folderId)
+    {
+        for (int attempt = 0; attempt < NewFolderConfirmAttempts; attempt++)
+        {
+            await Task.Delay(NewFolderConfirmIntervalMs).ConfigureAwait(false);
+            try
+            {
+                var contents = await Client.Inventory.RequestFolderContentsAsync(
+                    parentId, Client.Self.AgentID, true, true, InventorySortOrder.ByName).ConfigureAwait(false);
+                if (contents.Any(c => c.UUID == folderId)) return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"Could not check whether new folder {folderId} exists yet.", ex, Client);
+            }
+        }
+
+        Logger.Warn($"The grid did not list new folder {folderId} within " +
+                    $"{NewFolderConfirmAttempts * NewFolderConfirmIntervalMs / 1000} seconds; continuing anyway.", Client);
+        return false;
     }
 
     [RelayCommand]
@@ -1654,7 +1684,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             VelesNotificationService.Show("Outfit", "Failed to create outfit folder.");
             return;
         }
-        await Task.Delay(500).ConfigureAwait(false);
+        await WaitForFolderOnServerAsync(myOutfitsId, newFolderId).ConfigureAwait(false);
         var links = await cof.GetCurrentOutfitLinksAsync().ConfigureAwait(false);
         foreach (var link in links)
         {
