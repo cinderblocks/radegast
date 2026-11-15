@@ -565,6 +565,48 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         StatusText = "Disconnected";
         IsConnecting = false;
         HasConnectionError = false;
+        _rejoinAfterLogin = false;
+    }
+
+    // ── Grid connection ───────────────────────────────────────────────────
+
+    private const string VoiceSignalingCapability = "VoiceSignalingRequest";
+    private const int VoiceCapabilityTimeoutMs = 30_000;
+
+    // Nearby voice was on when the grid connection dropped, so it is rejoined after the next login.
+    private bool _rejoinAfterLogin;
+
+    /// <summary>
+    /// Voice runs on its own connection and would otherwise keep the microphone live while the
+    /// viewer is disconnected from the grid.
+    /// </summary>
+    private void OnGridDisconnected(object? sender, DisconnectedEventArgs e)
+    {
+        if (_voice == null || (!IsConnected && !IsConnecting)) return;
+
+        bool nearbyVoiceWasOn = _voice.Connected || IsConnecting;
+        Disconnect();
+        _rejoinAfterLogin = nearbyVoiceWasOn;
+        StatusText = "Left voice: disconnected from the grid";
+    }
+
+    private async void OnGridConnected(object? sender, EventArgs e)
+    {
+        if (!_rejoinAfterLogin) return;
+        _rejoinAfterLogin = false;
+
+        try
+        {
+            if (!await CapabilityWait.WaitForAsync(_instance.Client, VoiceSignalingCapability,
+                    VoiceCapabilityTimeoutMs, default))
+                return;
+            if (_voice == null || !VoiceEnabled || IsConnected || IsConnecting) return;
+            await Connect();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn("Could not rejoin voice after reconnecting to the grid.", ex);
+        }
     }
 
     private void WireEvents()
@@ -591,6 +633,8 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.OnReprovisionFailed          += OnReprovisionFailed;
         _voice.AudioDevice.OnAudioSourceEncodedSample += OnEncodedSampleReceived;
         _instance.Names.NameUpdated += OnNamesUpdated;
+        _instance.NetCom.ClientDisconnected += OnGridDisconnected;
+        _instance.NetCom.ClientConnected    += OnGridConnected;
     }
 
     private void UnwireEvents()
@@ -617,6 +661,8 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         _voice.OnReprovisionFailed          -= OnReprovisionFailed;
         _voice.AudioDevice.OnAudioSourceEncodedSample -= OnEncodedSampleReceived;
         _instance.Names.NameUpdated -= OnNamesUpdated;
+        _instance.NetCom.ClientDisconnected -= OnGridDisconnected;
+        _instance.NetCom.ClientConnected    -= OnGridConnected;
     }
 
     // ── Event handlers ────────────────────────────────────────────────────
