@@ -37,6 +37,24 @@ internal static class Program
 {
     internal static BugSplat? BugSplat { get; private set; }
 
+#if DEBUG
+    private const LogLevel DefaultLogLevel = LogLevel.Debug;
+#else
+    private const LogLevel DefaultLogLevel = LogLevel.Information;
+#endif
+
+    /// <summary>
+    /// The lowest level that is logged: Debug in debug builds, Information in release builds.
+    /// VELES_LOG_LEVEL overrides it with any <see cref="LogLevel"/> name, e.g. "Debug" or "Warning".
+    /// </summary>
+    private static LogLevel ResolveLogLevel()
+    {
+        var requested = Environment.GetEnvironmentVariable("VELES_LOG_LEVEL");
+        return Enum.TryParse<LogLevel>(requested, ignoreCase: true, out var level) && Enum.IsDefined(level)
+            ? level
+            : DefaultLogLevel;
+    }
+
     // Baked in at build time via the BugsplatDatabase MSBuild property (see RadegastVeles.csproj).
     private static string? BugsplatDatabase =>
         Assembly.GetExecutingAssembly()
@@ -71,7 +89,7 @@ internal static class Program
 
         var loggerFactory = LoggerFactory.Create(builder =>
         {
-            builder.SetMinimumLevel(LogLevel.Debug);
+            builder.SetMinimumLevel(ResolveLogLevel());
             builder.AddProvider(new VelesLogProvider());
             builder.AddProvider(new SeedCapsRetryGuard());
         });
