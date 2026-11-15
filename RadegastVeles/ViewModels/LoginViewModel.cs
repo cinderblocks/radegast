@@ -38,6 +38,7 @@ public partial class LoginViewModel : ObservableObject
 {
     private RadegastInstanceAvalonia? _instance;
     private readonly CredentialManager _credentialManager;
+    private readonly LaunchOptions? _launchOptions;
 
     public event EventHandler<AgentLoginSucceededEventArgs>? LoginSucceeded;
 
@@ -132,8 +133,9 @@ public partial class LoginViewModel : ObservableObject
         IsCustomLocation = value.Kind == LoginLocationKind.Custom;
     }
 
-    public LoginViewModel(CredentialManager credentialManager)
+    public LoginViewModel(CredentialManager credentialManager, LaunchOptions? launchOptions = null)
     {
+        _launchOptions = launchOptions is { HasLoginOptions: true } ? launchOptions : null;
         _credentialManager = credentialManager;
 
         EnsureInstance();
@@ -158,6 +160,8 @@ public partial class LoginViewModel : ObservableObject
         // Restore previously saved start-location selection
         var (savedIdx, savedCustom) = _credentialManager.LoadLoginPreferences();
         RestoreLocationPreference(savedIdx, savedCustom);
+
+        if (_launchOptions != null) ApplyLaunchOptions(_launchOptions);
 
         // Fire-and-forget: populates the sidebar info panel. Each fetch is independent
         // and marshals its own result back to the UI thread, so a slow/failed one never
@@ -244,6 +248,88 @@ public partial class LoginViewModel : ObservableObject
     private void OpenUpdatePage()
     {
         AboutWindow.OpenUrl("https://radegast.life/");
+    }
+
+    /// <summary>
+    /// Fills the form from the command line, on top of the remembered account and location.
+    /// </summary>
+    private void ApplyLaunchOptions(LaunchOptions options)
+    {
+        string? problem = null;
+
+        if (options.Username is { Length: > 0 } username)
+        {
+            var saved = SavedAccounts.FirstOrDefault(a =>
+                LaunchOptions.SameAccountName(a.Username, username)
+                && (options.Grid == null || string.Equals(a.GridId, options.Grid, StringComparison.OrdinalIgnoreCase)));
+            if (saved != null)
+            {
+                SelectedSavedAccount = saved;
+            }
+            else
+            {
+                // Not a remembered account, so nothing remembered applies to it.
+                SelectedSavedAccount = null;
+                Username = username;
+                Password = string.Empty;
+                RememberCredentials = false;
+            }
+        }
+
+        if (options.LoginUri is { Length: > 0 } loginUri)
+        {
+            SelectedGrid = Grids.First(g => g.ID == "custom");
+            CustomLoginUri = loginUri;
+        }
+        else if (options.Grid is { Length: > 0 } gridId)
+        {
+            var grid = Grids.FirstOrDefault(g => string.Equals(g.ID, gridId, StringComparison.OrdinalIgnoreCase));
+            if (grid != null) SelectedGrid = grid;
+            else problem = $"Grid \"{gridId}\" given with --grid was not found. Use --list-grids to see the ids.";
+        }
+
+        if (!string.IsNullOrEmpty(options.Password)) Password = options.Password;
+
+        if (options.Location is { Length: > 0 } location)
+        {
+            if (location.Equals("home", StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedLocationItem = LocationItems[0];
+            }
+            else if (location.Equals("last", StringComparison.OrdinalIgnoreCase))
+            {
+                SelectedLocationItem = LocationItems[1];
+            }
+            else
+            {
+                var favorite = LocationItems.FirstOrDefault(i =>
+                    i.Kind == LoginLocationKind.Favorite
+                    && string.Equals(i.Name, location, StringComparison.OrdinalIgnoreCase));
+                if (favorite != null)
+                {
+                    SelectedLocationItem = favorite;
+                }
+                else
+                {
+                    SelectedLocationItem = LocationItems[^1];
+                    CustomLocation = location;
+                }
+            }
+        }
+
+        if (problem != null)
+        {
+            StatusText = problem;
+            return;
+        }
+
+        if (!options.AutoLogin) return;
+        if (string.IsNullOrWhiteSpace(Username))
+            StatusText = "--auto-login needs an account: give --username, or log in once and save it.";
+        else if (string.IsNullOrWhiteSpace(Password))
+            StatusText = $"--auto-login found no saved password for {Username}. Enter it, or use --password-stdin.";
+        else
+            Login();
     }
 
     private void EnsureInstance()

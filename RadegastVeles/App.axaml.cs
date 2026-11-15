@@ -51,6 +51,7 @@ public class App : Application
     private NativeMenu? _dockMenu;
     private bool _shuttingDown;
     private AppCommandChannel? _commandChannel;
+    private bool _launchOptionsUsed;
 
     public override void Initialize()
     {
@@ -114,7 +115,10 @@ public class App : Application
             return;
         }
 
-        _loginWindow = new LoginWindow(_credentialManager);
+        // The command line's login options fill in the first login window only.
+        var launchOptions = _launchOptionsUsed ? null : Program.LaunchOptions;
+        _launchOptionsUsed = true;
+        _loginWindow = new LoginWindow(_credentialManager, launchOptions);
         _loginWindow.LoginSucceeded += OnLoginSucceeded;
         _loginWindow.Show();
     }

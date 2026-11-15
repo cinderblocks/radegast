@@ -36,10 +36,10 @@ public partial class LoginWindow : Window
 
     public LoginWindow() { InitializeComponent(); _vm = null!; }
 
-    public LoginWindow(CredentialManager credentialManager)
+    public LoginWindow(CredentialManager credentialManager, LaunchOptions? launchOptions = null)
     {
         InitializeComponent();
-        _vm = new LoginViewModel(credentialManager);
+        _vm = new LoginViewModel(credentialManager, launchOptions);
         _vm.LoginSucceeded += OnLoginSucceeded;
         DataContext = _vm;
     }

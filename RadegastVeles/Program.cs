@@ -22,6 +22,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Avalonia;
 using BugSplatDotNetStandard;
@@ -70,9 +71,63 @@ internal static class Program
     /// </summary>
     internal static AppCommand? StartupCommand { get; private set; }
 
+    /// <summary>The options this copy was started with.</summary>
+    internal static LaunchOptions LaunchOptions { get; private set; } = LaunchOptions.Parse([]);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool AttachConsole(int processId);
+
+    /// <summary>
+    /// Handles the options that print something and exit. Returns true if the program is done.
+    /// </summary>
+    private static bool RunConsoleOptions(LaunchOptions options)
+    {
+        if (!options.ShowHelp && !options.ShowVersion && !options.ListGrids && options.Errors.Count == 0)
+            return false;
+
+        // A Windows GUI program has no console of its own; borrow the one it was started from.
+        if (OperatingSystem.IsWindows() && AttachConsole(-1))
+        {
+            Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true });
+            Console.SetError(new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+        }
+
+        foreach (var error in options.Errors)
+            Console.Error.WriteLine(error);
+
+        if (options.ShowHelp)
+        {
+            Console.WriteLine(LaunchOptions.HelpText);
+            return true;
+        }
+        if (options.ShowVersion)
+        {
+            Console.WriteLine("Radegast Veles " + (Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "unknown"));
+            return true;
+        }
+        if (options.ListGrids)
+        {
+            Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+            var grids = new GridManager();
+            grids.LoadGrids();
+            Console.WriteLine($"{"Grid ID",-25} Grid Name");
+            foreach (var grid in grids.Grids)
+                Console.WriteLine($"{grid.ID,-25} {grid.Name}");
+            return true;
+        }
+
+        Console.Error.WriteLine("Run with --help for the list of options.");
+        return false;
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
+        var options = LaunchOptions.Parse(args);
+        if (RunConsoleOptions(options)) return;
+        if (options.PasswordFromStandardInput) options.SupplyPassword(Console.In.ReadLine());
+        LaunchOptions = options;
+
         if (AppCommand.TryParse(args, out var command))
         {
             if (AppCommandChannel.TrySend(AppCommandChannel.DefaultEndpoint(), command)) return;

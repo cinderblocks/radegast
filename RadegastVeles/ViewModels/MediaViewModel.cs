@@ -159,8 +159,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
 
         _configTimer = new Timer(SaveConfig, null, Timeout.Infinite, Timeout.Infinite);
 
-        // Initialize FMOD
-        Manager.Initialize();
+        if (!Program.LaunchOptions.NoSound) Manager.Initialize();
 
         SoundSystemAvailable = Manager.SoundSystemAvailable;
         UpdateSoundSystemStatus();
@@ -373,6 +372,7 @@ public partial class MediaViewModel : InstanceViewModelBase, IDisposable
     [RelayCommand]
     private void RetryInitialize()
     {
+        // Asking for a retry is an explicit request for sound, so it overrides --no-sound.
         Manager.Initialize();
         SoundSystemAvailable = Manager.SoundSystemAvailable;
         UpdateSoundSystemStatus();
