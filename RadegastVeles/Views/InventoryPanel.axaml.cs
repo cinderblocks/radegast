@@ -59,6 +59,7 @@ public partial class InventoryPanel : UserControl
 
         // Give ViewModel access to the system clipboard
         _vm.TopLevel = TopLevel.GetTopLevel(this)?.Clipboard;
+        _vm.ConfirmAsync = ConfirmAsync;
 
         var searchBox = this.FindControl<TextBox>("TxtInvSearch");
         if (searchBox != null)
@@ -125,6 +126,7 @@ public partial class InventoryPanel : UserControl
             _vm.EditorRequested     -= OnEditorRequested;
             _vm.PropertiesRequested -= OnPropertiesRequested;
             _vm.SaveCurrentOutfitRequested -= OnSaveCurrentOutfitRequested;
+            _vm.ConfirmAsync = null;
         }
 
         _outfitWindow?.Close();
@@ -281,6 +283,14 @@ public partial class InventoryPanel : UserControl
 
         if (!string.IsNullOrWhiteSpace(dialog.Result))
             await _vm.CommitRenameAsync(dialog.Result);
+    }
+
+    private async Task<bool> ConfirmAsync(string title, string message, string confirmText)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window parentWindow) return false;
+        var dialog = new ConfirmDialog(title, message, confirmText);
+        await dialog.ShowDialog(parentWindow);
+        return dialog.Confirmed;
     }
 
     // ── Filter ───────────────────────────────────────────────────────────────

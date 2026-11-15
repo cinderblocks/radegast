@@ -1056,9 +1056,22 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
     // ── Trash ────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Asks the user to confirm a destructive action: title, message, confirm button text.
+    /// Set by the view. While unset, actions that need confirmation do not run.
+    /// </summary>
+    public Func<string, string, string, Task<bool>>? ConfirmAsync { get; set; }
+
     [RelayCommand]
     private async Task EmptyTrash()
     {
+        if (ConfirmAsync == null) return;
+        if (!await ConfirmAsync(
+                "Empty Trash",
+                "Permanently delete everything in the Trash? This cannot be undone.",
+                "Empty Trash"))
+            return;
+
         var trashId = Client.Inventory.FindFolderForType(FolderType.Trash);
         await Client.Inventory.EmptyTrashAsync();
         if (_nodeCache.TryGetValue(trashId, out var trashNode))
