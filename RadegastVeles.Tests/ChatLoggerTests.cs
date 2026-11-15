@@ -130,9 +130,46 @@ public class ChatLoggerTests
         var first = Read(0, 2, out _);
         var second = Read(first.Length, 2, out var hasMore);
 
-        Assert.That(first, Is.EqualTo(new[] { "Someone: old 3 first line", "Someone: old 4" }));
+        Assert.That(first, Is.EqualTo(new[] { "Someone: old 3 first line\nsecond line of old 3", "Someone: old 4" }));
         Assert.That(second, Is.EqualTo(new[] { "Someone: old 1", "Someone: old 2" }));
         Assert.That(hasMore, Is.False);
+    }
+
+    [Test]
+    public void MultiLineMessage_IsReturnedWhole()
+    {
+        File.WriteAllLines(LogPath,
+        [
+            "[2026/01/01 9:01] Someone: line one",
+            "line two",
+            "",
+            "line four",
+            "",
+            "[2026/01/01 9:02] Someone: after",
+        ]);
+
+        var lines = Read(0, 10, out _);
+
+        Assert.That(lines, Is.EqualTo(new[] { "Someone: line one\nline two\n\nline four", "Someone: after" }));
+    }
+
+    [Test]
+    public void MultiLineMessage_SplitAcrossChunks_KeepsItsLines()
+    {
+        File.WriteAllLines(LogPath,
+        [
+            "[2026/01/01 9:01] Someone: first",
+            "more of first",
+            "[2026/01/01 9:02] Someone: second",
+            "more of second",
+        ]);
+
+        var newest = Read(0, 1, out var hasMore);
+        var older = Read(1, 1, out _);
+
+        Assert.That(newest, Is.EqualTo(new[] { "Someone: second\nmore of second" }));
+        Assert.That(hasMore, Is.True);
+        Assert.That(older, Is.EqualTo(new[] { "Someone: first\nmore of first" }));
     }
 
     [Test]

@@ -122,18 +122,32 @@ public sealed class ChatLogger : IDisposable
 
         skip += _linesWrittenThisSession.GetValueOrDefault(path);
 
-        // Work from the end: skip the last `skip` message lines, then take `take`
+        // Work from the end: skip the last `skip` messages, then take `take`. A line that does
+        // not start a message continues the message above it, so those met on the way up are
+        // held until that message is reached. Only messages are counted, here and in the
+        // caller's offset.
         var collected = new List<(DateTime ts, string text)>();
+        var continuation = new List<string>();
         int skipped = 0;
         int lastConsumedIdx = -1;
         for (int i = allLines.Length - 1; i >= 0 && collected.Count < take; i--)
         {
-            // Only lines that parse as messages are counted, here and in the caller's offset;
-            // the continuation lines of a multi-line message are not.
-            if (!TryParseLine(allLines[i], out var ts, out var text)) continue;
-            if (skipped < skip) { skipped++; continue; }
-            collected.Add((ts, text));
-            lastConsumedIdx = i;
+            if (!TryParseLine(allLines[i], out var ts, out var text))
+            {
+                continuation.Add(allLines[i]);
+                continue;
+            }
+
+            if (skipped < skip)
+            {
+                skipped++;
+            }
+            else
+            {
+                collected.Add((ts, AppendContinuation(text, continuation)));
+                lastConsumedIdx = i;
+            }
+            continuation.Clear();
         }
 
         // Check whether older valid lines exist before what we consumed
@@ -189,6 +203,22 @@ public sealed class ChatLogger : IDisposable
             return false;
         text = m.Groups[2].Value;
         return true;
+    }
+
+    /// <summary>
+    /// Joins a message's first line with its later lines, given bottom-up as they were read.
+    /// Blank lines at the end are dropped.
+    /// </summary>
+    private static string AppendContinuation(string firstLine, List<string> linesBottomUp)
+    {
+        int first = 0;
+        while (first < linesBottomUp.Count && string.IsNullOrWhiteSpace(linesBottomUp[first])) first++;
+        if (first == linesBottomUp.Count) return firstLine;
+
+        var sb = new System.Text.StringBuilder(firstLine);
+        for (int i = linesBottomUp.Count - 1; i >= first; i--)
+            sb.Append('\n').Append(linesBottomUp[i]);
+        return sb.ToString();
     }
 
     private static int CountMessageLines(string text)
