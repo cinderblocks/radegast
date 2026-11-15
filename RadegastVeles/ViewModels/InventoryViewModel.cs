@@ -249,7 +249,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         // Add Library root immediately below My Inventory
         AddLibraryNode();
 
-        int itemCount = CountItems(Inventory.RootNode);
+        int itemCount = CountTreeItems();
         StatusText = $"Inventory ({itemCount} items)";
     }
 
@@ -264,28 +264,46 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         }
     }
 
-    private int CountItems(InventoryNode? node)
+    /// <summary>Items in the user's own inventory tree, excluding folders and the library.</summary>
+    private int CountTreeItems()
     {
-        if (node == null) return 0;
-        int count = node.Data is InventoryItem ? 1 : 0;
-        if (node.Nodes == null) return count;
-
-        List<InventoryNode> children;
-        try
+        int count = 0;
+        foreach (var node in _nodeCache.Values)
         {
-            children = node.Nodes.Values.ToList();
-        }
-        catch (Exception)
-        {
-            // Dictionary was modified concurrently; skip this subtree count
-            return count;
-        }
-
-        foreach (var child in children)
-        {
-            count += CountItems(child);
+            if (!node.IsFolder && !node.IsLibrary) count++;
         }
         return count;
+    }
+
+    /// <summary>Rebuilds only the library branch, keeping which of its folders were expanded.</summary>
+    private void RebuildLibraryNode()
+    {
+        var expandedIds = new HashSet<UUID>();
+        for (int i = RootNodes.Count - 1; i >= 0; i--)
+        {
+            var node = RootNodes[i];
+            if (!node.IsLibrary) continue;
+
+            CollectExpanded(node, expandedIds);
+            _nodeCache.Remove(node.ItemId);
+            RemoveChildrenFromCache(node);
+            RootNodes.RemoveAt(i);
+        }
+
+        AddLibraryNode();
+
+        foreach (var id in expandedIds)
+        {
+            if (_nodeCache.TryGetValue(id, out var n))
+                n.IsExpanded = true;
+        }
+    }
+
+    private static void CollectExpanded(InvTreeNode node, HashSet<UUID> expandedIds)
+    {
+        if (node.IsExpanded) expandedIds.Add(node.ItemId);
+        foreach (var child in node.Children)
+            CollectExpanded(child, expandedIds);
     }
 
     private InvTreeNode CreateNode(InventoryBase item, bool isLibrary = false)
@@ -315,7 +333,8 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             TypeName = GetInventoryTypeName(item),
             IsWorn = isWorn,
             WornSlot = wornSlot,
-            IsLink = isLink
+            IsLink = isLink,
+            LinkTargetId = linkedId
         };
 
         _nodeCache[item.UUID] = node;
@@ -675,7 +694,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
                 // Remove from current parent and refresh trash
                 node.Parent?.Children.Remove(node);
-                RefreshFolderNode(RootNodes, trashId);
+                RefreshFolderNode(trashId);
             }
             catch (Exception ex)
             {
@@ -1088,7 +1107,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _nodeCache.Remove(child.ItemId);
             folder.Children.Remove(child);
         }
-        RefreshFolderNode(RootNodes, trashId);
+        RefreshFolderNode(trashId);
         _instance.ShowNotificationInChat($"Emptied folder {folder.Name}.");
     }
 
@@ -1108,7 +1127,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 await Client.Inventory.MoveItemAsync(node.ItemId, lostFoundId, item.Name);
             }
             node.Parent?.Children.Remove(node);
-            RefreshFolderNode(RootNodes, lostFoundId);
+            RefreshFolderNode(lostFoundId);
             _instance.ShowNotificationInChat($"Restored {node.Name} to Lost and Found.");
         }
         catch (Exception ex)
@@ -1217,7 +1236,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 }
                 else
                 {
-                    RefreshFolderNode(RootNodes, destFolder.UUID);
+                    RefreshFolderNode(destFolder.UUID);
                 }
                 _instance.ShowNotificationInChat($"Moved {movedName} to {destFolder.Name}");
             }
@@ -1839,7 +1858,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             return;
         }
 
-        Dispatcher.UIThread.Post(() => RefreshFolderNode(RootNodes, e.FolderID));
+        Dispatcher.UIThread.Post(() => RefreshFolderNode(e.FolderID));
 
         // When the COF folder changes (e.g. after an attachment is removed), the
         // worn-state cache must be rebuilt so context menus show "Wear" not "Take Off".
@@ -1988,7 +2007,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             RebuildTree();
-            int itemCount = CountItems(Inventory.RootNode);
+            int itemCount = CountTreeItems();
             StatusText = abandoned.Count == 0
                 ? $"Inventory ({itemCount} items)"
                 : $"Inventory ({itemCount} items, {abandoned.Count} folders could not be loaded)";
@@ -2062,8 +2081,8 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
 
         await Dispatcher.UIThread.InvokeAsync(() =>
         {
-            RebuildTree();
-            StatusText = $"Inventory ({CountItems(Inventory.RootNode)} items)";
+            RebuildLibraryNode();
+            StatusText = $"Inventory ({CountTreeItems()} items)";
         });
     }
 
@@ -2141,21 +2160,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         return null;
     }
 
-    private void RefreshFolderNode(ObservableCollection<InvTreeNode> nodes, UUID folderId)
+    private void RefreshFolderNode(UUID folderId)
     {
-        foreach (var node in nodes)
-        {
-            if (node.ItemId == folderId && node.IsFolder)
-            {
-                MergeFolderChildren(node);
-                return;
-            }
-
-            if (node.Children.Count > 0)
-            {
-                RefreshFolderNode(node.Children, folderId);
-            }
-        }
+        if (_nodeCache.TryGetValue(folderId, out var node) && node.IsFolder)
+            MergeFolderChildren(node);
     }
 
     private void MergeFolderChildren(InvTreeNode folder)
@@ -2191,10 +2199,14 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                     existing.Name = newName;
                     existing.NotifyNameChanged();
                 }
-                // Move to the correct sorted position if necessary.
-                int curIdx = folder.Children.IndexOf(existing);
-                if (curIdx != targetIdx && curIdx >= 0)
-                    folder.Children.Move(curIdx, targetIdx);
+                // Move to the correct sorted position if necessary. Most children are already
+                // in place, so the search is only made for one that is not.
+                if (targetIdx >= folder.Children.Count || !ReferenceEquals(folder.Children[targetIdx], existing))
+                {
+                    int curIdx = folder.Children.IndexOf(existing);
+                    if (curIdx != targetIdx && curIdx >= 0)
+                        folder.Children.Move(curIdx, targetIdx);
+                }
             }
             else
             {
@@ -2327,9 +2339,9 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             foreach (var folderId in folders)
-                RefreshFolderNode(RootNodes, folderId);
+                RefreshFolderNode(folderId);
 
-            StatusText = $"Inventory ({CountItems(Inventory.RootNode)} items)";
+            StatusText = $"Inventory ({CountTreeItems()} items)";
         });
     }
 
@@ -2437,7 +2449,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             }
         }
 
-        int itemCount = CountItems(Inventory.RootNode);
+        int itemCount = CountTreeItems();
         StatusText = $"Inventory ({itemCount} items)";
     }
 
@@ -2578,6 +2590,11 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                         ? prim.PrimData.AttachmentPoint.ToString()
                         : "Attached";
 
+                // Attachments send updates continuously; only a new or changed slot needs applying.
+                if (_wornSlots.TryGetValue(inventoryId, out var knownSlot) && knownSlot == pointStr
+                    && (!_nodeCache.TryGetValue(inventoryId, out var knownNode) || knownNode.IsWorn))
+                    return;
+
                 // Use assignment (not TryAdd) so stale slot labels are always overwritten.
                 _wornSlots[inventoryId] = pointStr;
                 if (_nodeCache.TryGetValue(inventoryId, out var node))
@@ -2605,9 +2622,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 // (e.g. links in sub-folders that the user has created themselves).
                 foreach (var kv in _nodeCache)
                 {
-                    if (!kv.Value.IsLink) continue;
-                    if (Inventory.TryGetValue<InventoryItem>(kv.Key, out var possibleLink)
-                        && possibleLink.AssetUUID == effectiveId)
+                    if (kv.Value.IsLink && kv.Value.LinkTargetId == effectiveId)
                     {
                         _wornSlots[kv.Key] = pointStr;
                         kv.Value.IsWorn   = true;
@@ -2659,9 +2674,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
                 // Clear any other cached links resolving to the same underlying item.
                 foreach (var kv in _nodeCache)
                 {
-                    if (!kv.Value.IsLink) continue;
-                    if (Inventory.TryGetValue<InventoryItem>(kv.Key, out var possibleLink)
-                        && possibleLink.AssetUUID == effectiveId)
+                    if (kv.Value.IsLink && kv.Value.LinkTargetId == effectiveId)
                     {
                         _wornSlots.Remove(kv.Key);
                         kv.Value.IsWorn   = false;
@@ -2714,7 +2727,7 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
         SearchResults.Clear();
         HasActiveFilter = false;
         IsSearching     = false;
-        int itemCount = CountItems(Inventory.RootNode);
+        int itemCount = CountTreeItems();
         StatusText = $"Inventory ({itemCount} items)";
     }
 
@@ -2763,6 +2776,8 @@ public class InvTreeNode : ObservableObject
     public FolderType FolderKind { get; set; } = FolderType.None;
     public MarketplaceFolderRole MarketplaceRole { get; set; } = MarketplaceFolderRole.None;
     public bool IsLibrary { get; set; }
+    /// <summary>For a link, the id of the item or folder it points to.</summary>
+    public UUID LinkTargetId { get; set; }
     public InvTreeNode? Parent { get; set; }
 
     public ObservableCollection<InvTreeNode> Children { get; } = [];
