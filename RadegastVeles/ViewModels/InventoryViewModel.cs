@@ -1032,9 +1032,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat("Cannot create items in this folder.");
             return;
         }
+        var folderId = SelectedNode.ItemId;
         _ = Task.Run(async () =>
             await Client.Inventory.CreateItemAsync(
-                SelectedNode.ItemId, "New Notecard", string.Empty,
+                folderId, "New Notecard", string.Empty,
                 AssetType.Notecard, UUID.Random(), InventoryType.Notecard,
                 PermissionMask.All));
     }
@@ -1049,9 +1050,10 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             _instance.ShowNotificationInChat("Cannot create items in this folder.");
             return;
         }
+        var folderId = SelectedNode.ItemId;
         _ = Task.Run(async () =>
             await Client.Inventory.CreateItemAsync(
-                SelectedNode.ItemId, "New Script", string.Empty,
+                folderId, "New Script", string.Empty,
                 AssetType.LSLText, UUID.Random(), InventoryType.LSL,
                 PermissionMask.All));
     }
@@ -1087,13 +1089,14 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
     [RelayCommand]
     private async Task EmptyFolder()
     {
-        if (SelectedNode == null || !SelectedNode.IsFolder) return;
-        if (IsProtectedFolder(SelectedNode))
+        var folder = SelectedNode;
+        if (folder == null || !folder.IsFolder) return;
+        if (IsProtectedFolder(folder))
         {
-            _instance.ShowNotificationInChat($"Cannot empty the '{SelectedNode.Name}' system folder.");
+            _instance.ShowNotificationInChat($"Cannot empty the '{folder.Name}' system folder.");
             return;
         }
-        var children = SelectedNode.Children.ToList();
+        var children = folder.Children.ToList();
         var trashId = Client.Inventory.FindFolderForType(FolderType.Trash);
         foreach (var child in children)
         {
@@ -1112,10 +1115,12 @@ public partial class InventoryViewModel : ClientAwareViewModelBase
             }
         }
         foreach (var child in children)
+        {
             _nodeCache.Remove(child.ItemId);
-        SelectedNode.Children.Clear();
+            folder.Children.Remove(child);
+        }
         RefreshFolderNode(RootNodes, trashId);
-        _instance.ShowNotificationInChat($"Emptied folder {SelectedNode.Name}.");
+        _instance.ShowNotificationInChat($"Emptied folder {folder.Name}.");
     }
 
     [RelayCommand]
