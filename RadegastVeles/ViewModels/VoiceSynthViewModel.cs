@@ -104,8 +104,7 @@ public sealed partial class VoiceSynthViewModel : ObservableObject, IDisposable
         _instance = instance;
         _voiceVm  = voiceVm;
 
-        var logFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(_ => { });
-        _service = new VoiceSynthService(logFactory.CreateLogger<VoiceSynthService>());
+        _service = new VoiceSynthService(Program.LogFactory.CreateLogger<VoiceSynthService>());
         _service.ReadyChanged += OnServiceReadyChanged;
 
         LoadSettings();

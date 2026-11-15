@@ -26,6 +26,7 @@ using System.Threading.Tasks;
 using Avalonia;
 using BugSplatDotNetStandard;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using LibreMetaverse;
 using Radegast.Core;
 using Radegast.Veles.Core;
@@ -41,6 +42,9 @@ internal static class Program
         Assembly.GetExecutingAssembly()
             .GetCustomAttributes<AssemblyMetadataAttribute>()
             .FirstOrDefault(a => a.Key == "BugsplatDatabase")?.Value;
+
+    /// <summary>The application's logger factory, for components that take an <see cref="ILogger"/>.</summary>
+    public static ILoggerFactory LogFactory { get; private set; } = NullLoggerFactory.Instance;
 
     [STAThread]
     public static void Main(string[] args)
@@ -72,6 +76,7 @@ internal static class Program
             builder.AddProvider(new SeedCapsRetryGuard());
         });
         Logger.SetLoggerFactory(loggerFactory, "RadegastVeles");
+        LogFactory = loggerFactory;
 
         // On .NET 8+ CoreJ2K no longer discovers image-creator plugins by reflection; each
         // plugin assembly (CoreJ2K.Skia, CoreJ2K.Avalonia) instead self-registers via a
