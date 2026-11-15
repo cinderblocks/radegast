@@ -46,6 +46,11 @@ public class App : Application
     // menu is declared in App.axaml and we mutate that same instance's Items from here on.
     private NativeMenu? _trayMenu;
 
+    // The macOS Dock icon's menu. One instance, set once and then only its Items change, for
+    // the same reason as _trayMenu. The Dock appends its own Quit item below these.
+    private NativeMenu? _dockMenu;
+    private bool _shuttingDown;
+
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
@@ -63,7 +68,29 @@ public class App : Application
             {
                 _trayIcon = icons[0];
                 _trayIcon.Clicked += (_, _) => TrayClick();
-                RebuildTrayMenu();
+            }
+
+            if (OperatingSystem.IsMacOS())
+            {
+                _dockMenu = new NativeMenu();
+                NativeDock.SetMenu(this, _dockMenu);
+            }
+            RebuildMenus();
+
+            // A quit that comes from the system (the Dock's Quit item, Cmd+Q, logout) closes
+            // every window; main windows otherwise hide instead of closing, which would cancel it.
+            desktop.ShutdownRequested += (_, _) => CloseEverything();
+
+            // Clicking the Dock icon while every window is hidden brings one back.
+            if (this.TryGetFeature<IActivatableLifetime>() is { } activatable)
+            {
+                activatable.Activated += (_, e) =>
+                {
+                    if (e.Kind != ActivationKind.Reopen || _shuttingDown) return;
+                    bool anyVisible = _loginWindow is { IsVisible: true }
+                                      || _agentWindows.Values.Any(w => w.IsVisible);
+                    if (!anyVisible) TrayClick();
+                };
             }
 
             VelesUpdateManager.Start();
@@ -104,7 +131,7 @@ public class App : Application
         mainWindow.Show();
         mainWindow.Activate();
 
-        RebuildTrayMenu();
+        RebuildMenus();
     }
 
     private void OnLogoutRequested(AgentSession session)
@@ -116,7 +143,7 @@ public class App : Application
         }
 
         _sessionManager.RemoveSession(session);
-        RebuildTrayMenu();
+        RebuildMenus();
 
         if (_sessionManager.Sessions.Count == 0)
         {
@@ -138,13 +165,23 @@ public class App : Application
         }
     }
 
-    private void RebuildTrayMenu()
+    private void RebuildMenus()
     {
+        if (_dockMenu != null) FillAppMenu(_dockMenu, includeExit: false);
+
         if (_trayIcon == null) return;
 
         // Fall back to a fresh menu only if the XAML-declared one is missing (pre-12.1 behaviour).
         var trayMenu = _trayMenu ??= _trayIcon.Menu ?? new NativeMenu();
-        trayMenu.Items.Clear();
+        FillAppMenu(trayMenu, includeExit: true);
+
+        if (!ReferenceEquals(_trayIcon.Menu, trayMenu))
+            _trayIcon.Menu = trayMenu;
+    }
+
+    private void FillAppMenu(NativeMenu menu, bool includeExit)
+    {
+        menu.Items.Clear();
 
         foreach (var session in _sessionManager.Sessions)
         {
@@ -160,37 +197,39 @@ public class App : Application
                     w.Activate();
                 }
             };
-            trayMenu.Items.Add(showItem);
+            menu.Items.Add(showItem);
 
             var logoutItem = new NativeMenuItem($"Logout {agentName}");
             logoutItem.Click += (_, _) => OnLogoutRequested(capturedSession);
-            trayMenu.Items.Add(logoutItem);
+            menu.Items.Add(logoutItem);
 
-            trayMenu.Items.Add(new NativeMenuItemSeparator());
+            menu.Items.Add(new NativeMenuItemSeparator());
         }
 
         var loginItem = new NativeMenuItem("New Login");
         loginItem.Click += (_, _) => ShowLogin();
-        trayMenu.Items.Add(loginItem);
+        menu.Items.Add(loginItem);
 
-        trayMenu.Items.Add(new NativeMenuItemSeparator());
+        menu.Items.Add(new NativeMenuItemSeparator());
 
         var checkForUpdatesItem = new NativeMenuItem("Check for Updates...");
         checkForUpdatesItem.Click += (_, _) => VelesUpdateManager.CheckForUpdatesAtUserRequest();
-        trayMenu.Items.Add(checkForUpdatesItem);
+        menu.Items.Add(checkForUpdatesItem);
 
-        trayMenu.Items.Add(new NativeMenuItemSeparator());
+        if (!includeExit) return;
+
+        menu.Items.Add(new NativeMenuItemSeparator());
 
         var exitItem = new NativeMenuItem("Exit");
         exitItem.Click += (_, _) => Exit();
-        trayMenu.Items.Add(exitItem);
-
-        if (!ReferenceEquals(_trayIcon.Menu, trayMenu))
-            _trayIcon.Menu = trayMenu;
+        menu.Items.Add(exitItem);
     }
 
-    private void Exit()
+    private void CloseEverything()
     {
+        if (_shuttingDown) return;
+        _shuttingDown = true;
+
         foreach (var window in _agentWindows.Values.ToArray())
         {
             window.ForceClose();
@@ -199,6 +238,11 @@ public class App : Application
 
         _loginWindow?.Close();
         _sessionManager.Dispose();
+    }
+
+    private void Exit()
+    {
+        CloseEverything();
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
