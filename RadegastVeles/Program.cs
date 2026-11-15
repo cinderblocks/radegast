@@ -64,9 +64,23 @@ internal static class Program
     /// <summary>The application's logger factory, for components that take an <see cref="ILogger"/>.</summary>
     public static ILoggerFactory LogFactory { get; private set; } = NullLoggerFactory.Instance;
 
+    /// <summary>
+    /// A command from the command line that no running copy took, to be carried out by this
+    /// copy once it has started.
+    /// </summary>
+    internal static AppCommand? StartupCommand { get; private set; }
+
     [STAThread]
     public static void Main(string[] args)
     {
+        if (AppCommand.TryParse(args, out var command))
+        {
+            if (AppCommandChannel.TrySend(AppCommandChannel.DefaultEndpoint(), command)) return;
+            // With no running copy there is nothing to exit or log out; the rest start the program.
+            if (command.Kind is AppCommandKind.Exit or AppCommandKind.LogoutSession) return;
+            StartupCommand = command;
+        }
+
         // Legacy Radegast (Radegast/Program.cs) does the same for the same reason: several
         // pieces of shared code (LibreMetaverse.LslTools' LslSyntax, shader_data lookups, etc.)
         // resolve their own asset paths relative to the current working directory rather than

@@ -50,6 +50,7 @@ public class App : Application
     // the same reason as _trayMenu. The Dock appends its own Quit item below these.
     private NativeMenu? _dockMenu;
     private bool _shuttingDown;
+    private AppCommandChannel? _commandChannel;
 
     public override void Initialize()
     {
@@ -95,7 +96,11 @@ public class App : Application
 
             VelesUpdateManager.Start();
 
+            _commandChannel = AppCommandChannel.TryListen(AppCommandChannel.DefaultEndpoint(),
+                command => Avalonia.Threading.Dispatcher.UIThread.Post(() => RunCommand(command)));
+
             ShowLogin();
+            if (Program.StartupCommand is { } startupCommand) RunCommand(startupCommand);
         }
 
         base.OnFrameworkInitializationCompleted();
@@ -165,9 +170,71 @@ public class App : Application
         }
     }
 
+    private void RunCommand(AppCommand command)
+    {
+        if (_shuttingDown) return;
+
+        switch (command.Kind)
+        {
+            case AppCommandKind.NewLogin:
+                ShowLogin();
+                break;
+            case AppCommandKind.CheckForUpdates:
+                VelesUpdateManager.CheckForUpdatesAtUserRequest();
+                break;
+            case AppCommandKind.Exit:
+                Exit();
+                break;
+            case AppCommandKind.ShowSession:
+                if (_agentWindows.TryGetValue(command.SessionId, out var window))
+                {
+                    window.Show();
+                    window.Activate();
+                }
+                else
+                {
+                    TrayClick();
+                }
+                break;
+            case AppCommandKind.LogoutSession:
+                var session = _sessionManager.Sessions.FirstOrDefault(s => s.Id == command.SessionId);
+                if (session != null) OnLogoutRequested(session);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The tasks on the Windows taskbar button: the same entries as the tray menu. With
+    /// <paramref name="includeSessions"/> false only the entries that make sense while the
+    /// program is not running remain.
+    /// </summary>
+    private List<(string Title, AppCommand Command)?> BuildTaskList(bool includeSessions)
+    {
+        var tasks = new List<(string Title, AppCommand Command)?>();
+        if (includeSessions)
+        {
+            foreach (var session in _sessionManager.Sessions)
+            {
+                tasks.Add(($"Show {session.AgentName}", new AppCommand(AppCommandKind.ShowSession, session.Id)));
+                tasks.Add(($"Logout {session.AgentName}", new AppCommand(AppCommandKind.LogoutSession, session.Id)));
+            }
+            if (tasks.Count > 0) tasks.Add(null);
+        }
+
+        tasks.Add(("New Login", new AppCommand(AppCommandKind.NewLogin)));
+        tasks.Add(("Check for Updates...", new AppCommand(AppCommandKind.CheckForUpdates)));
+        if (includeSessions)
+        {
+            tasks.Add(null);
+            tasks.Add(("Exit", new AppCommand(AppCommandKind.Exit)));
+        }
+        return tasks;
+    }
+
     private void RebuildMenus()
     {
         if (_dockMenu != null) FillAppMenu(_dockMenu, includeExit: false);
+        if (OperatingSystem.IsWindows()) WindowsJumpList.SetTasks(BuildTaskList(includeSessions: true));
 
         if (_trayIcon == null) return;
 
@@ -238,6 +305,11 @@ public class App : Application
 
         _loginWindow?.Close();
         _sessionManager.Dispose();
+
+        _commandChannel?.Dispose();
+        _commandChannel = null;
+        // The task list outlives the process, so leave one that works without it.
+        if (OperatingSystem.IsWindows()) WindowsJumpList.SetTasks(BuildTaskList(includeSessions: false));
     }
 
     private void Exit()

@@ -6,3 +6,16 @@ Icon=life.radegast.RadegastVeles
 Type=Application
 Categories=Network;
 StartupNotify=true
+Actions=new-login;check-updates;exit;
+
+[Desktop Action new-login]
+Name=New Login
+Exec=RadegastVeles --new-login
+
+[Desktop Action check-updates]
+Name=Check for Updates
+Exec=RadegastVeles --check-updates
+
+[Desktop Action exit]
+Name=Exit
+Exec=RadegastVeles --exit
