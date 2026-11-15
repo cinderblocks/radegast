@@ -78,6 +78,39 @@ internal sealed class PluginContext : IPluginContext
         _instance = instance;
         _manager = manager;
         _pluginId = pluginId;
+        _instance.ClientChanged += Instance_ClientChanged;
+    }
+
+    private void Instance_ClientChanged(object? sender, ClientChangedEventArgs e)
+    {
+        UnsubscribeBridged(e.OldClient);
+        SubscribeBridged(e.Client);
+    }
+
+    private void SubscribeBridged(GridClient client)
+    {
+        if (_chatReceived != null)     client.Self.ChatFromSimulator  += OnChat;
+        if (_imReceived != null)       client.Self.IM                 += OnIM;
+        if (_connected != null)        client.Network.SimConnected    += OnSimConnected;
+        if (_disconnected != null)     client.Network.Disconnected    += OnDisconnected;
+        if (_objectUpdated != null)    client.Objects.ObjectUpdate    += OnObjectUpdated;
+        if (_teleportProgress != null) client.Self.TeleportProgress   += OnTeleportProgress;
+        if (_friendOnline != null)     client.Friends.FriendOnline    += OnFriendOnline;
+        if (_friendOffline != null)    client.Friends.FriendOffline   += OnFriendOffline;
+        if (_groupChatJoined != null)  client.Self.GroupChatJoined    += OnGroupChatJoined;
+    }
+
+    private void UnsubscribeBridged(GridClient client)
+    {
+        if (_chatReceived != null)     client.Self.ChatFromSimulator  -= OnChat;
+        if (_imReceived != null)       client.Self.IM                 -= OnIM;
+        if (_connected != null)        client.Network.SimConnected    -= OnSimConnected;
+        if (_disconnected != null)     client.Network.Disconnected    -= OnDisconnected;
+        if (_objectUpdated != null)    client.Objects.ObjectUpdate    -= OnObjectUpdated;
+        if (_teleportProgress != null) client.Self.TeleportProgress   -= OnTeleportProgress;
+        if (_friendOnline != null)     client.Friends.FriendOnline    -= OnFriendOnline;
+        if (_friendOffline != null)    client.Friends.FriendOffline   -= OnFriendOffline;
+        if (_groupChatJoined != null)  client.Self.GroupChatJoined    -= OnGroupChatJoined;
     }
 
     // ── Commands ────────────────────────────────────────────────────
@@ -396,25 +429,8 @@ internal sealed class PluginContext : IPluginContext
     /// </summary>
     internal void CleanUp()
     {
-        // Unsubscribe bridged events
-        if (_chatReceived != null)
-            _instance.Client.Self.ChatFromSimulator -= OnChat;
-        if (_imReceived != null)
-            _instance.Client.Self.IM -= OnIM;
-        if (_connected != null)
-            _instance.Client.Network.SimConnected -= OnSimConnected;
-        if (_disconnected != null)
-            _instance.Client.Network.Disconnected -= OnDisconnected;
-        if (_objectUpdated != null)
-            _instance.Client.Objects.ObjectUpdate -= OnObjectUpdated;
-        if (_teleportProgress != null)
-            _instance.Client.Self.TeleportProgress -= OnTeleportProgress;
-        if (_friendOnline != null)
-            _instance.Client.Friends.FriendOnline -= OnFriendOnline;
-        if (_friendOffline != null)
-            _instance.Client.Friends.FriendOffline -= OnFriendOffline;
-        if (_groupChatJoined != null)
-            _instance.Client.Self.GroupChatJoined -= OnGroupChatJoined;
+        _instance.ClientChanged -= Instance_ClientChanged;
+        UnsubscribeBridged(_instance.Client);
 
         _chatReceived = null;
         _imReceived = null;
