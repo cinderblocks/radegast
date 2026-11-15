@@ -332,15 +332,11 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
     // ── Public API used by other ViewModels ───────────────────────────────
 
     /// <summary>
-    /// Called once after login. If <see cref="AutoConnect"/> is enabled and voice is
-    /// available, automatically joins parcel voice so the user does not have to press
-    /// "Join Voice" manually.
+    /// Called once after login. If <see cref="AutoConnect"/> is enabled, joins parcel voice
+    /// as soon as the region offers it.
     /// </summary>
-    internal async Task TryAutoConnectAsync()
-    {
-        if (AutoConnect && VoiceEnabled && IsAvailable && !IsConnected)
-            await Connect();
-    }
+    internal Task TryAutoConnectAsync()
+        => AutoConnect ? JoinWhenVoiceIsReadyAsync() : Task.CompletedTask;
 
     internal async Task JoinGroupVoiceAsync(UUID groupId)
     {
@@ -590,22 +586,31 @@ public partial class VoiceViewModel : InstanceViewModelBase, IDisposable
         StatusText = "Left voice: disconnected from the grid";
     }
 
-    private async void OnGridConnected(object? sender, EventArgs e)
+    private void OnGridConnected(object? sender, EventArgs e)
     {
-        if (!_rejoinAfterLogin) return;
+        bool rejoin = _rejoinAfterLogin;
         _rejoinAfterLogin = false;
+        if (rejoin || AutoConnect)
+            _ = JoinWhenVoiceIsReadyAsync();
+    }
 
+    /// <summary>
+    /// Joins nearby voice once the region offers the voice capability, which arrives a moment
+    /// after login. Must be called on the UI thread.
+    /// </summary>
+    private async Task JoinWhenVoiceIsReadyAsync()
+    {
         try
         {
             if (!await CapabilityWait.WaitForAsync(_instance.Client, VoiceSignalingCapability,
                     VoiceCapabilityTimeoutMs, default))
                 return;
-            if (_voice == null || !VoiceEnabled || IsConnected || IsConnecting) return;
+            if (_voice == null || !VoiceEnabled || !IsAvailable || IsConnected || IsConnecting) return;
             await Connect();
         }
         catch (Exception ex)
         {
-            Logger.Warn("Could not rejoin voice after reconnecting to the grid.", ex);
+            Logger.Warn("Could not join voice automatically.", ex);
         }
     }
 
