@@ -44,6 +44,11 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
     private OfflineTts? _tts;
     private readonly object _ttsLock = new();
 
+    // The engine the worker is generating with. Disposing a native engine during Generate
+    // crashes the process, so an engine retired while busy is disposed by the worker instead.
+    private OfflineTts? _busyEngine;
+    private bool _disposeBusyEngine;
+
     // ── Speak queue ──────────────────────────────────────────────────────
     private readonly BlockingCollection<string> _queue = new(boundedCapacity: 32);
     private readonly CancellationTokenSource _cts = new();
@@ -132,8 +137,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
     {
         lock (_ttsLock)
         {
-            _tts?.Dispose();
-            _tts = null;
+            RetireEngineLocked();
             IsReady = false;
         }
         ReadyChanged?.Invoke(false);
@@ -154,8 +158,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
         {
             try
             {
-                _tts?.Dispose();
-                _tts = null;
+                RetireEngineLocked();
                 IsReady = false;
 
                 if (!NativeRuntimeAvailable)
@@ -243,8 +246,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
             catch (Exception ex)
             {
                 _log.LogError(ex, "VoiceSynth: failed to load model from {Dir}", ModelDirectory);
-                _tts?.Dispose();
-                _tts = null;
+                RetireEngineLocked();
                 IsReady = false;
             }
         }
@@ -266,16 +268,49 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
             }
         }
         catch (OperationCanceledException) { }
+        catch (ObjectDisposedException) { }
+    }
+
+    /// <summary>Disposes the current engine, or leaves that to the worker if it is generating with it.</summary>
+    private void RetireEngineLocked()
+    {
+        var engine = _tts;
+        _tts = null;
+        if (engine == null) return;
+
+        if (ReferenceEquals(engine, _busyEngine))
+            _disposeBusyEngine = true;
+        else
+            engine.Dispose();
     }
 
     private async Task SynthesizeAndEmitAsync(string text)
     {
         OfflineTts? engine;
         lock (_ttsLock)
+        {
             engine = _tts;
+            _busyEngine = engine;
+        }
         if (engine == null) return;
 
-        var audio = engine.Generate(text, Speed, SpeakerId);
+        OfflineTtsGeneratedAudio audio;
+        try
+        {
+            audio = engine.Generate(text, Speed, SpeakerId);
+        }
+        finally
+        {
+            lock (_ttsLock)
+            {
+                _busyEngine = null;
+                if (_disposeBusyEngine)
+                {
+                    _disposeBusyEngine = false;
+                    engine.Dispose();
+                }
+            }
+        }
         if (audio.NumSamples <= 0) return;
 
         var audio2 = _attachedAudio;
@@ -313,7 +348,7 @@ public sealed class VoiceSynthService : IVoiceSynthService, IDisposable
         _cts.Cancel();
         _queue.CompleteAdding();
         try { _workerTask.Wait(TimeSpan.FromSeconds(2)); } catch { }
-        lock (_ttsLock) { _tts?.Dispose(); _tts = null; }
+        lock (_ttsLock) { RetireEngineLocked(); }
         _cts.Dispose();
         _queue.Dispose();
     }
