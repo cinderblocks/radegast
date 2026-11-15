@@ -1285,14 +1285,17 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
         gridX /= 256;
         gridY /= 256;
 
-        var cached = MapTileCache.GetTile(gridX, gridY);
+        var server = MapTileCache.ServerFor(_instance);
+        if (server == null) { MinimapTile = null; return; }
+
+        var cached = MapTileCache.GetTile(server, gridX, gridY);
         if (cached != null)
         {
             MinimapTile = cached;
             return;
         }
 
-        MapTileCache.RequestTile(gridX, gridY, () => MinimapTile = MapTileCache.GetTile(gridX, gridY));
+        MapTileCache.RequestTile(server, gridX, gridY, () => MinimapTile = MapTileCache.GetTile(server, gridX, gridY));
     }
 
     #endregion

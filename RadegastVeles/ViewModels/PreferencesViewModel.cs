@@ -672,7 +672,7 @@ public partial class PreferencesViewModel : ObservableObject, IDisposable
 
         // Bitmap memory cache
         TextureBitmapCacheCapacity = s["texture_bitmap_cache_capacity"].Type != OSDType.Unknown
-            ? s["texture_bitmap_cache_capacity"].AsInteger() : 2500;
+            ? s["texture_bitmap_cache_capacity"].AsInteger() : MapTileCache.DefaultCacheCapacity;
 
         // Pushes SkBitmapCacheCap/AssetCache.MaxSize/TextureBitmapCacheCapacity/TextureDiskCache.MaxCachedFiles/MaxPixelCacheBytes,
         // substituting the Low Memory Mode preset for these values while it's enabled.

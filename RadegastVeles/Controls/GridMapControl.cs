@@ -50,6 +50,9 @@ public class GridMapControl : Control
     public static readonly StyledProperty<MapSelfEntry?> SelfEntryProperty =
         AvaloniaProperty.Register<GridMapControl, MapSelfEntry?>(nameof(SelfEntry));
 
+    public static readonly StyledProperty<string?> MapServerUrlProperty =
+        AvaloniaProperty.Register<GridMapControl, string?>(nameof(MapServerUrl));
+
     public static readonly StyledProperty<double> ZoomProperty =
         AvaloniaProperty.Register<GridMapControl, double>(nameof(Zoom), 1.0);
 
@@ -69,6 +72,13 @@ public class GridMapControl : Control
     {
         get => GetValue(SelfEntryProperty);
         set => SetValue(SelfEntryProperty, value);
+    }
+
+    /// <summary>Tile server to draw map images from; without one, known regions are drawn as plain squares.</summary>
+    public string? MapServerUrl
+    {
+        get => GetValue(MapServerUrlProperty);
+        set => SetValue(MapServerUrlProperty, value);
     }
 
     public double Zoom
@@ -95,6 +105,11 @@ public class GridMapControl : Control
     private double _dragStartCenterX;
     private double _dragStartCenterY;
     private int _lastPressClickCount;
+
+    // Regions of the bound collection by grid cell. Additions are applied as they arrive;
+    // any other change marks it stale and it is rebuilt on the next paint.
+    private readonly Dictionary<(uint, uint), MapRegionEntry> _regionLookup = new();
+    private bool _regionLookupStale = true;
 
     // Visible range tracking (for map block requests)
     private (int, int, int, int) _lastVisibleRange;
@@ -135,7 +150,8 @@ public class GridMapControl : Control
 
     static GridMapControl()
     {
-        AffectsRender<GridMapControl>(RegionsProperty, AvatarsProperty, ZoomProperty, SelfEntryProperty);
+        AffectsRender<GridMapControl>(RegionsProperty, AvatarsProperty, ZoomProperty, SelfEntryProperty,
+            MapServerUrlProperty);
     }
 
     public GridMapControl()
@@ -195,9 +211,10 @@ public class GridMapControl : Control
         if (change.Property == RegionsProperty)
         {
             if (change.OldValue is ObservableCollection<MapRegionEntry> oldC)
-                oldC.CollectionChanged -= OnCollectionChanged;
+                oldC.CollectionChanged -= OnRegionsChanged;
             if (change.NewValue is ObservableCollection<MapRegionEntry> newC)
-                newC.CollectionChanged += OnCollectionChanged;
+                newC.CollectionChanged += OnRegionsChanged;
+            _regionLookupStale = true;
             InvalidateVisual();
         }
         else if (change.Property == AvatarsProperty)
@@ -215,6 +232,68 @@ public class GridMapControl : Control
     }
 
     private void OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => ScheduleRepaint();
+
+    private void OnRegionsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewItems != null && !_regionLookupStale)
+        {
+            foreach (var item in e.NewItems)
+            {
+                if (item is MapRegionEntry r)
+                    _regionLookup[(r.GridX, r.GridY)] = r;
+            }
+        }
+        else
+        {
+            _regionLookupStale = true;
+        }
+        ScheduleRepaint();
+    }
+
+    private Dictionary<(uint, uint), MapRegionEntry> GetRegionLookup()
+    {
+        if (_regionLookupStale)
+        {
+            _regionLookup.Clear();
+            var regions = Regions;
+            if (regions != null)
+            {
+                foreach (var r in regions)
+                    _regionLookup[(r.GridX, r.GridY)] = r;
+            }
+            _regionLookupStale = false;
+        }
+        return _regionLookup;
+    }
+
+    /// <summary>
+    /// Draws the tile at (<paramref name="tx"/>, <paramref name="ty"/>) from the part of a cached
+    /// coarser tile that covers it, so the map is not blank while the wanted level downloads.
+    /// </summary>
+    private static bool DrawFromCoarserTile(DrawingContext ctx, string server, int level, uint tx, uint ty, Rect dest)
+    {
+        int span = MapTileCache.TileSpan(level);
+        for (int coarser = level + 1; coarser <= MapTileCache.MaxLevel; coarser++)
+        {
+            uint px = MapTileCache.TileOrigin(tx, coarser);
+            uint py = MapTileCache.TileOrigin(ty, coarser);
+            var parent = MapTileCache.GetTile(server, coarser, px, py);
+            if (parent == null) continue;
+
+            int parentSpan = MapTileCache.TileSpan(coarser);
+            double texelsPerRegionX = parent.PixelSize.Width / (double)parentSpan;
+            double texelsPerRegionY = parent.PixelSize.Height / (double)parentSpan;
+            // Tile images have north at the top, so rows count down from the parent's north edge.
+            var source = new Rect(
+                (tx - px) * texelsPerRegionX,
+                (parentSpan - (ty - py) - span) * texelsPerRegionY,
+                span * texelsPerRegionX,
+                span * texelsPerRegionY);
+            ctx.DrawImage(parent, source, dest);
+            return true;
+        }
+        return false;
+    }
 
     #region Input Handling
 
@@ -394,48 +473,62 @@ public class GridMapControl : Control
             ctx.DrawLine(GridLinePen, new Point(0, sy), new Point(w, sy));
         }
 
-        // Build region lookup from bound Regions collection
         var typeface = new Typeface("Inter", FontStyle.Normal, FontWeight.Normal);
-        var regions = Regions;
-        Dictionary<(uint, uint), MapRegionEntry>? regionLookup = null;
-        if (regions != null)
-        {
-            regionLookup = new Dictionary<(uint, uint), MapRegionEntry>();
-            foreach (var r in regions)
-                regionLookup[(r.GridX, r.GridY)] = r;
-        }
+        var regionLookup = GetRegionLookup();
 
-        // Draw tiles for ALL visible grid cells (not just known regions)
-        bool fetchTiles = pxPerReg >= 8;
+        // Tiles cover every visible grid cell, not just known regions. The level is chosen so
+        // the number of tiles on screen stays roughly constant however far out the view is.
+        string? server = MapServerUrl;
+        bool drawTiles = server != null && pxPerReg >= 8;
 
-        for (int gy = Math.Max(0, minGY); gy <= maxGY; gy++)
+        if (drawTiles)
         {
-            for (int gx = Math.Max(0, minGX); gx <= maxGX; gx++)
+            int level = MapTileCache.LevelFor(pxPerReg);
+            int span = MapTileCache.TileSpan(level);
+            uint firstX = MapTileCache.TileOrigin((uint)Math.Max(0, minGX), level);
+            uint firstY = MapTileCache.TileOrigin((uint)Math.Max(0, minGY), level);
+
+            for (long ty = firstY; ty <= maxGY; ty += span)
             {
-                double sx = (gx - _centerGridX) * pxPerReg + w / 2;
-                double sy = (_centerGridY - gy - 1) * pxPerReg + h / 2;
-                var rect = new Rect(sx, sy, pxPerReg, pxPerReg);
-
-                if (fetchTiles)
+                for (long tx = firstX; tx <= maxGX; tx += span)
                 {
-                    var tile = MapTileCache.GetTile((uint)gx, (uint)gy);
+                    var rect = new Rect(
+                        (tx - _centerGridX) * pxPerReg + w / 2,
+                        (_centerGridY - ty - span) * pxPerReg + h / 2,
+                        span * pxPerReg,
+                        span * pxPerReg);
+
+                    var tile = MapTileCache.GetTile(server!, level, (uint)tx, (uint)ty);
                     if (tile != null)
                     {
                         ctx.DrawImage(tile, new Rect(0, 0, tile.PixelSize.Width, tile.PixelSize.Height), rect);
                     }
                     else
                     {
-                        MapTileCache.RequestTile((uint)gx, (uint)gy, ScheduleRepaint);
+                        DrawFromCoarserTile(ctx, server!, level, (uint)tx, (uint)ty, rect);
+                        MapTileCache.RequestTile(server!, level, (uint)tx, (uint)ty, ScheduleRepaint);
                     }
                 }
-                else if (regionLookup != null && regionLookup.ContainsKey(((uint)gx, (uint)gy)))
-                {
-                    ctx.DrawRectangle(RegionFillBrush, new Pen(RegionBorderBrush, 0.5), rect);
-                }
+            }
+        }
+
+        bool drawLabels = pxPerReg >= 32;
+        var regionBorderPen = new Pen(RegionBorderBrush, 0.5);
+
+        for (int gy = Math.Max(0, minGY); (!drawTiles || drawLabels) && gy <= maxGY; gy++)
+        {
+            for (int gx = Math.Max(0, minGX); gx <= maxGX; gx++)
+            {
+                if (!regionLookup.TryGetValue(((uint)gx, (uint)gy), out var entry)) continue;
+
+                double sx = (gx - _centerGridX) * pxPerReg + w / 2;
+                double sy = (_centerGridY - gy - 1) * pxPerReg + h / 2;
+
+                if (!drawTiles)
+                    ctx.DrawRectangle(RegionFillBrush, regionBorderPen, new Rect(sx, sy, pxPerReg, pxPerReg));
 
                 // Region name + maturity label (only if large enough to read)
-                if (pxPerReg >= 32 && regionLookup != null
-                    && regionLookup.TryGetValue(((uint)gx, (uint)gy), out var entry))
+                if (drawLabels)
                 {
                     string maturity = entry.Access switch
                     {

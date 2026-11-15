@@ -221,7 +221,7 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
         var skBitmapCacheCap = GlobalSettings["sk_bitmap_cache_cap"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? GlobalSettings["sk_bitmap_cache_cap"].AsInteger() : GridTextureHelper.RecommendSkBitmapCacheCap();
         var textureBitmapCacheCapacity = GlobalSettings["texture_bitmap_cache_capacity"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
-            ? GlobalSettings["texture_bitmap_cache_capacity"].AsInteger() : 2500;
+            ? GlobalSettings["texture_bitmap_cache_capacity"].AsInteger() : MapTileCache.DefaultCacheCapacity;
         var textureDiskCacheMaxFiles = GlobalSettings["texture_disk_cache_max_files"].Type != LibreMetaverse.StructuredData.OSDType.Unknown
             ? GlobalSettings["texture_disk_cache_max_files"].AsInteger() : 8192;
         var texturePixelCacheMaxMb = GlobalSettings["texture_pixel_cache_max_mb"].Type != LibreMetaverse.StructuredData.OSDType.Unknown

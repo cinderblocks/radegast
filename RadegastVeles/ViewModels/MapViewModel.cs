@@ -101,6 +101,12 @@ public partial class MapViewModel : ClientAwareViewModelBase
 
     // Map data exposed for the grid map control
     public ObservableCollection<MapRegionEntry> MapRegions { get; } = [];
+
+    /// <summary>Tile server of the grid this session is on, or null if it has none.</summary>
+    [ObservableProperty]
+    private string? _mapServerUrl;
+
+    private void UpdateMapServerUrl() => MapServerUrl = MapTileCache.ServerFor(_instance);
     public ObservableCollection<MapAvatarEntry> MapAvatars { get; } = [];
 
     /// <summary>
@@ -111,6 +117,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     public MapViewModel(RadegastInstanceAvalonia instance) : base(instance)
     {
         RegisterClientEvents(Client);
+        UpdateMapServerUrl();
 
         // Initial location and favorites
         if (Client.Network.CurrentSim != null)
@@ -245,6 +252,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     {
         if (!Active || Client.Network.CurrentSim == null) return;
         MapAvatars.Clear();
+        UpdateMapServerUrl();
         // Request map items (avatar locations) around current position
         Client.Grid.RequestMapItems(
             Client.Network.CurrentSim.Handle,
@@ -259,6 +267,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     public void RequestMapBlocksForRange(ushort minX, ushort minY, ushort maxX, ushort maxY)
     {
         if (!Active) return;
+        UpdateMapServerUrl();
         string block = $"{minX},{minY},{maxX},{maxY}";
         lock (_requestedBlocks)
         {
@@ -791,6 +800,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
         Dispatcher.UIThread.Post(() =>
         {
             if (Client.Network.CurrentSim == null) return;
+            UpdateMapServerUrl();
             var simName = Client.Network.CurrentSim.Name;
             var pos = Client.Self.SimPosition;
             StatusText = $"Now in {simName}";

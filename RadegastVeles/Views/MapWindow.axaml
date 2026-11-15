@@ -22,6 +22,7 @@
                                   x:Name="MapControl"
                                   Regions="{Binding MapRegions}"
                                   Avatars="{Binding MapAvatars}"
+                                  MapServerUrl="{Binding MapServerUrl}"
                                   AutomationProperties.Name="Interactive world map" />
 
         <!-- Splitter -->

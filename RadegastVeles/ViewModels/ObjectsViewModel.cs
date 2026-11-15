@@ -1055,9 +1055,11 @@ public partial class ObjectsViewModel : ClientAwareViewModelBase
         Utils.LongToUInts(sim.Handle, out var gridX, out var gridY);
         gridX /= 256;
         gridY /= 256;
-        var cached = MapTileCache.GetTile(gridX, gridY);
+        var server = MapTileCache.ServerFor(_instance);
+        if (server == null) { ObjectMapTile = null; return; }
+        var cached = MapTileCache.GetTile(server, gridX, gridY);
         if (cached != null) { ObjectMapTile = cached; return; }
-        MapTileCache.RequestTile(gridX, gridY, () => ObjectMapTile = MapTileCache.GetTile(gridX, gridY));
+        MapTileCache.RequestTile(server, gridX, gridY, () => ObjectMapTile = MapTileCache.GetTile(server, gridX, gridY));
     }
 
     private void RebuildMapEntries()
