@@ -28,6 +28,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using LibreMetaverse;
 using SharpCompress.Readers;
 
 namespace Radegast.Veles.ViewModels;
@@ -197,77 +198,51 @@ public sealed partial class PiperVoiceDownloaderViewModel : ObservableObject, ID
         StatusText = $"Downloading {voice.AssetName}…";
         DownloadedPath = string.Empty;
 
+        // A name of our own choosing: the asset name comes from the release listing.
+        string tmpFile = Path.Combine(Path.GetTempPath(), $"veles-voice-{Guid.NewGuid():N}.tar.bz2");
+        var token = _downloadCts.Token;
+
         try
         {
+            if (!Uri.TryCreate(voice.DownloadUrl, UriKind.Absolute, out var downloadUri)
+                || downloadUri.Scheme != Uri.UriSchemeHttps)
+                throw new InvalidOperationException("The voice list gave a download address that is not https.");
+
             Directory.CreateDirectory(targetDirectory);
-            string tmpFile = Path.Combine(Path.GetTempPath(), voice.AssetName);
 
             // ── Download ──────────────────────────────────────────────────
-            using (var response = await _http.GetAsync(voice.DownloadUrl,
-                       HttpCompletionOption.ResponseHeadersRead, _downloadCts.Token))
+            using (var response = await _http.GetAsync(downloadUri,
+                       HttpCompletionOption.ResponseHeadersRead, token))
             {
                 response.EnsureSuccessStatusCode();
                 long total = response.Content.Headers.ContentLength ?? voice.SizeBytes;
+                if (total > MaxArchiveBytes)
+                    throw new InvalidOperationException("The voice archive is larger than expected.");
 
-                await using var src  = await response.Content.ReadAsStreamAsync(_downloadCts.Token);
+                await using var src  = await response.Content.ReadAsStreamAsync(token);
                 await using var dest = File.Create(tmpFile);
 
                 var buffer = new byte[81920];
                 long done  = 0;
                 int  read;
-                while ((read = await src.ReadAsync(buffer, _downloadCts.Token)) > 0)
+                while ((read = await src.ReadAsync(buffer, token)) > 0)
                 {
-                    await dest.WriteAsync(buffer.AsMemory(0, read), _downloadCts.Token);
+                    await dest.WriteAsync(buffer.AsMemory(0, read), token);
                     done += read;
+                    if (done > MaxArchiveBytes)
+                        throw new InvalidOperationException("The voice archive is larger than expected.");
                     Progress = total > 0 ? done * 50.0 / total : 0; // first 50% = download
                 }
             }
 
             // ── Extract .tar.bz2 ─────────────────────────────────────────
             StatusText = $"Extracting {voice.AssetName}…";
-            string destDir = await Task.Run(() =>
-            {
-                string? topDir = null;
-                using var fileStream = File.OpenRead(tmpFile);
-                using var reader     = ReaderFactory.Open(fileStream);
+            var extractProgress = new Progress<double>(fraction => Progress = 50 + fraction * 50);
+            await Task.Run(() => ExtractArchive(tmpFile, targetDirectory, extractProgress, token), token);
 
-                long total   = new FileInfo(tmpFile).Length;
-                long read    = 0;
-
-                while (reader.MoveToNextEntry())
-                {
-                    if (reader.Entry.IsDirectory) continue;
-
-                    string entryKey = reader.Entry.Key ?? "";
-                    // Strip the top-level folder prefix (vits-piper-xxx/)
-                    int slash = entryKey.IndexOf('/');
-                    string relative = slash >= 0 ? entryKey[(slash + 1)..] : entryKey;
-
-                    if (topDir == null && slash >= 0)
-                        topDir = entryKey[..slash];
-
-                    if (string.IsNullOrEmpty(relative)) continue;
-
-                    string outPath = Path.Combine(targetDirectory, relative);
-                    string? dir    = Path.GetDirectoryName(outPath);
-                    if (dir != null) Directory.CreateDirectory(dir);
-
-                    using var entryStream = reader.OpenEntryStream();
-                    using var outFile     = File.Create(outPath);
-                    entryStream.CopyTo(outFile);
-
-                    read += reader.Entry.CompressedSize;
-                    Progress = 50 + (total > 0 ? read * 50.0 / total : 0);
-                }
-
-                return targetDirectory;
-            }, _downloadCts.Token);
-
-            try { File.Delete(tmpFile); } catch { /* best-effort */ }
-
-            DownloadedPath = destDir;
+            DownloadedPath = targetDirectory;
             Progress       = 100;
-            StatusText     = $"Done — saved to {destDir}";
+            StatusText     = $"Done — saved to {targetDirectory}";
         }
         catch (OperationCanceledException)
         {
@@ -280,10 +255,85 @@ public sealed partial class PiperVoiceDownloaderViewModel : ObservableObject, ID
         }
         finally
         {
+            try { File.Delete(tmpFile); }
+            catch (Exception ex) { Logger.Debug($"Could not delete the temporary voice archive {tmpFile}.", ex); }
+
             IsDownloading = false;
             _downloadCts?.Dispose();
             _downloadCts  = null;
         }
+    }
+
+    // Voice archives are 20-120 MB and unpack to a few hundred; these bounds only stop a
+    // runaway download or archive from filling the disk.
+    private const long MaxArchiveBytes   = 1L * 1024 * 1024 * 1024;
+    private const long MaxExtractedBytes = 4L * 1024 * 1024 * 1024;
+
+    /// <summary>
+    /// Unpacks the archive into <paramref name="targetDirectory"/> without its top-level folder.
+    /// Entries that would land outside the target directory are refused.
+    /// </summary>
+    internal static void ExtractArchive(string archivePath, string targetDirectory,
+        IProgress<double>? progress, CancellationToken token)
+    {
+        using var fileStream = File.OpenRead(archivePath);
+        using var reader     = ReaderFactory.Open(fileStream);
+
+        long archiveBytes = fileStream.Length;
+        long written      = 0;
+        var buffer        = new byte[81920];
+
+        while (reader.MoveToNextEntry())
+        {
+            token.ThrowIfCancellationRequested();
+            if (reader.Entry.IsDirectory) continue;
+
+            string entryKey = (reader.Entry.Key ?? "").Replace('\\', '/');
+            // Strip the top-level folder prefix (vits-piper-xxx/)
+            int slash = entryKey.IndexOf('/');
+            string relative = slash >= 0 ? entryKey[(slash + 1)..] : entryKey;
+            if (string.IsNullOrEmpty(relative)) continue;
+
+            string outPath = ResolveEntryPath(targetDirectory, relative)
+                ?? throw new InvalidDataException(
+                    $"The voice archive contains an entry outside its own folder: {entryKey}");
+
+            string? dir = Path.GetDirectoryName(outPath);
+            if (dir != null) Directory.CreateDirectory(dir);
+
+            using (var entryStream = reader.OpenEntryStream())
+            using (var outFile = File.Create(outPath))
+            {
+                int read;
+                while ((read = entryStream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    token.ThrowIfCancellationRequested();
+                    written += read;
+                    if (written > MaxExtractedBytes)
+                        throw new InvalidDataException("The voice archive unpacks to more than expected.");
+                    outFile.Write(buffer, 0, read);
+                }
+            }
+
+            if (archiveBytes > 0)
+                progress?.Report(Math.Min(1.0, fileStream.Position / (double)archiveBytes));
+        }
+    }
+
+    /// <summary>
+    /// The full path for an archive entry, or null if it would fall outside
+    /// <paramref name="targetDirectory"/> (an absolute path, or one that climbs out with "..").
+    /// </summary>
+    internal static string? ResolveEntryPath(string targetDirectory, string relative)
+    {
+        if (string.IsNullOrWhiteSpace(relative) || Path.IsPathRooted(relative)) return null;
+
+        string root = Path.GetFullPath(targetDirectory);
+        if (!root.EndsWith(Path.DirectorySeparatorChar))
+            root += Path.DirectorySeparatorChar;
+
+        string full = Path.GetFullPath(Path.Combine(root, relative));
+        return full.StartsWith(root, StringComparison.Ordinal) ? full : null;
     }
 
     [RelayCommand]
