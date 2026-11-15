@@ -69,6 +69,12 @@ internal sealed unsafe class VkMaterialDescriptorSet : IDisposable
     internal int RefCount => _refCount;
     internal void AddRef() => _refCount++;
 
+    // The key this instance is registered under in VkViewportControl._sharedMaterialPool, or
+    // null when it is not in the pool. The key is a hash of the content, so the pool moves the
+    // entry whenever the content is changed in place; a stale key would hand this instance to a
+    // face that asked for the old content and holds no reference to the textures bound here.
+    internal ulong? PoolKey { get; set; }
+
     /// <summary>
     /// Allocates the descriptor set and writes all 6 bindings in one call: 5 samplers
     /// (binding order must match prim.frag exactly: albedo=0, normal=1, specular=2,

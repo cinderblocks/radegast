@@ -3201,6 +3201,7 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         }
         var mat = new VkMaterialDescriptorSet(vk, _prim!, albedo, normal, specular, metallicRoughness, emissive, in ubo);
         _sharedMaterialPool[h] = mat;
+        mat.PoolKey = h;
         return mat;
     }
 
@@ -3226,18 +3227,40 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         DescriptorImageInfo albedo, DescriptorImageInfo normal, DescriptorImageInfo specular,
         DescriptorImageInfo metallicRoughness, DescriptorImageInfo emissive, in VkMaterialUbo ubo)
     {
-        if (current.RefCount <= 1) return current;
-
         Span<DescriptorImageInfo> images = stackalloc DescriptorImageInfo[5]
             { albedo, normal, specular, metallicRoughness, emissive };
         ulong h = MaterialHash(images, in ubo);
-        if (_sharedMaterialPool.TryGetValue(h, out var existing) && !existing.IsDisposed && !ReferenceEquals(existing, current))
+        bool otherHoldsKey = _sharedMaterialPool.TryGetValue(h, out var existing)
+                             && !existing.IsDisposed && !ReferenceEquals(existing, current);
+
+        if (current.RefCount <= 1)
         {
-            existing.AddRef();
+            // The caller changes this instance in place, so its pool entry moves to the new
+            // content's key. If another live instance already holds that key, this one stays
+            // out of the pool.
+            if (current.PoolKey is { } oldKey
+                && _sharedMaterialPool.TryGetValue(oldKey, out var pooled) && ReferenceEquals(pooled, current))
+                _sharedMaterialPool.Remove(oldKey);
+            if (otherHoldsKey)
+            {
+                current.PoolKey = null;
+            }
+            else
+            {
+                _sharedMaterialPool[h] = current;
+                current.PoolKey = h;
+            }
+            return current;
+        }
+
+        if (otherHoldsKey)
+        {
+            existing!.AddRef();
             return existing;
         }
         var result = new VkMaterialDescriptorSet(vk, _prim!, albedo, normal, specular, metallicRoughness, emissive, in ubo);
         _sharedMaterialPool[h] = result;
+        result.PoolKey = h;
         return result;
     }
 
@@ -3250,10 +3273,10 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     private void DisposeMaterial(VkMaterialDescriptorSet material)
     {
         material.Dispose();
-        if (!material.IsDisposed) return;
-        ulong h = MaterialHash(material.Images, in material.Ubo);
+        if (!material.IsDisposed || material.PoolKey is not { } h) return;
         if (_sharedMaterialPool.TryGetValue(h, out var pooled) && ReferenceEquals(pooled, material))
             _sharedMaterialPool.Remove(h);
+        material.PoolKey = null;
     }
 
     // Cross-object texture pool, keyed by asset UUID rather than a content hash -- unlike meshes
