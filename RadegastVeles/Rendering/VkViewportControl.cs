@@ -4361,12 +4361,10 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
 
     /// <summary>
     /// Builds the <see cref="VkTexture"/> for a texture patch, preferring the BC3 compressed
-    /// pixel-cache tier over <paramref name="patch"/>'s decoded RGBA8 <see cref="SKBitmap"/>
-    /// when all three are true: this GPU supports BC3 (<see cref="VkContext.SupportsBc3"/>),
-    /// the patch carries a known source UUID (<see cref="SceneTexturePatch.TextureId"/> !=
-    /// zero -- avatar bake patches and previews leave this unset, see that field's own doc
-    /// comment), and it's a full-quality patch (<c>ResolutionLevel == -1</c> -- an LOD preview
-    /// isn't worth a compressed-cache round trip since it will be replaced shortly anyway).
+    /// data the builder attached (<see cref="SceneTexturePatch.CompressedPixels"/>) over
+    /// <paramref name="patch"/>'s decoded RGBA8 <see cref="SKBitmap"/> when this GPU supports
+    /// BC3 (<see cref="VkContext.SupportsBc3"/>). The builder attaches it only to full-quality
+    /// patches with a known source UUID; avatar bakes and LOD previews carry none.
     /// Falls back to the uncompressed <see cref="SceneTexturePatch.Bitmap"/> whenever the
     /// compressed tier misses, or when constructing the compressed texture itself fails (e.g.
     /// a structurally-valid but Vulkan-rejected stale entry) -- this method never surfaces a
@@ -4378,9 +4376,9 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     /// </summary>
     private static VkTexture BuildTextureForPatch(VkContext vk, SceneTexturePatch patch, VkStagedUploadBatch? batch)
     {
-        if (patch.ResolutionLevel == -1 && patch.TextureId != LibreMetaverse.UUID.Zero && vk.SupportsBc3)
+        if (vk.SupportsBc3)
         {
-            var compressed = TextureDiskCache.TryGetCompressedPixels(patch.TextureId);
+            var compressed = patch.CompressedPixels;
             if (compressed != null)
             {
                 try

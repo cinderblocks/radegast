@@ -806,11 +806,16 @@ public sealed record SceneTexturePatch(
     /// <summary>
     /// Asset UUID of the texture <see cref="Bitmap"/> was decoded from.
     /// <see cref="LibreMetaverse.UUID.Zero"/> (default) means "unknown" -- e.g. patches built
-    /// before this field existed, or synthetic bitmaps with no backing asset. Used by
-    /// <c>VkViewportControl.ApplySubmissionPatchIfReady</c> to key a
-    /// <c>TextureDiskCache.TryGetCompressedPixels</c> lookup for the BC3 compressed upload
-    /// path; a zero UUID simply skips that lookup and falls back to the uncompressed
-    /// <see cref="Bitmap"/> already carried here, so leaving this unset is always safe.
+    /// before this field existed, or synthetic bitmaps with no backing asset. Keys the
+    /// viewport's shared texture pool, so faces using the same asset share one GPU texture;
+    /// a zero UUID skips sharing, so leaving this unset is always safe.
     /// </summary>
     public LibreMetaverse.UUID TextureId { get; init; }
+
+    /// <summary>
+    /// The texture's block-compressed form from the disk cache, read by the builder on its own
+    /// thread so the render thread does no file I/O. Null when the cache has none, in which case
+    /// <see cref="Bitmap"/> is uploaded instead.
+    /// </summary>
+    internal Radegast.Veles.Core.CompressedKtx2? CompressedPixels { get; init; }
 }

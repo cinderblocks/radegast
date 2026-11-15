@@ -1025,6 +1025,9 @@ internal sealed class PrimMeshBuilder(GridClient client)
                 // `bmp` would leak; wrapping in try/finally ensures disposal on any exit.
                 if (texturePatch != null)
                 {
+                    var compressed = textureResolutionLevel == -1 && VkApi.IsInitialized && VkApi.Context.SupportsBc3
+                        ? TextureDiskCache.TryGetCompressedPixels(id)
+                        : null;
                     bool bmpOwned = true; // we still own bmp until the last Report succeeds
                     try
                     {
@@ -1041,6 +1044,7 @@ internal sealed class PrimMeshBuilder(GridClient client)
                                     TextureHasAlpha    = texHasAlpha,
                                     ResolutionLevel    = textureResolutionLevel,
                                     TextureId          = id,
+                                    CompressedPixels   = compressed,
                                 });
                             }
                         }
