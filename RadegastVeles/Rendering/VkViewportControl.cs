@@ -4887,15 +4887,16 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
     // ── Delayed-frame diagnostic ─────────────────────────────────────────────────
     //
     // Frames are rendered on request, so a long gap between frames is not by itself a stall.
-    // What matters is how long a requested frame waited to start. When that exceeds
-    // DelayedFrameThresholdMs, one line records where the time could have gone: the previous
-    // frame's own duration and stage timings, and the garbage collector's pause time and
-    // collection counts since that frame started, and how long other work posted to the UI
-    // thread had to wait over the same period (see UiThreadWatch). A long wait with a short
-    // previous frame and no GC pause is then one of three things: one job held the UI thread
-    // (the highest-priority probe waited too), a run of jobs kept render-priority work back
-    // (only that probe waited), or the UI thread was free and the frame callback itself came
-    // late, as it does while the window is hidden or inactive.
+    // A gap is reported when any of three things reached DelayedFrameThresholdMs since the
+    // previous frame started: that frame's own duration, the time this frame waited between
+    // being requested and starting, or the time other work posted to the UI thread had to wait
+    // (see UiThreadWatch). The last one covers a stall that held back the request itself. The
+    // line records where the time could have gone: the previous frame's stage timings, the
+    // garbage collector's pause time and collection counts, and the UI-thread waits. A long gap
+    // with a short previous frame and no GC pause is then one of three things: one job held the
+    // UI thread (the highest-priority probe waited too), a run of jobs kept render-priority work
+    // back (only that probe waited), or the UI thread was free and the frame callback itself
+    // came late, as it does while the window is hidden or inactive.
     private const double DelayedFrameThresholdMs = 100.0;
     private const long   DelayedFrameLogIntervalMs = 500;
     private long     _renderRequestedTimestamp;
@@ -4914,24 +4915,30 @@ public partial class VkViewportControl : Control, ISingleObjectViewport, ISceneV
         long requested = _renderRequestedTimestamp;
         if (requested != 0 && _frameStartTimestamp != 0)
         {
-            double waitedMs = (now - requested) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            double msPerTick = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            double waitedMs = (now - requested) * msPerTick;
+            double intervalMs = (now - _frameStartTimestamp) * msPerTick;
+            var (blockedMs, renderPriorityMs) = UiThreadWatch.LongestWaits(_frameStartTimestamp, now);
+            bool stalled = waitedMs >= DelayedFrameThresholdMs
+                        || _lastFrameDurationMs >= DelayedFrameThresholdMs
+                        || blockedMs >= DelayedFrameThresholdMs;
             long tick = Environment.TickCount64;
-            if (waitedMs >= DelayedFrameThresholdMs && tick - _lastDelayedFrameLogTick >= DelayedFrameLogIntervalMs)
+            if (stalled && tick - _lastDelayedFrameLogTick >= DelayedFrameLogIntervalMs)
             {
                 _lastDelayedFrameLogTick = tick;
-                var (blockedMs, renderPriorityMs) = UiThreadWatch.LongestWaits(requested, now);
                 var window = TopLevel.GetTopLevel(this) as Window;
                 string windowState = window == null ? "unknown"
                     : $"{(window.IsActive ? "active" : "inactive")}, {window.WindowState}";
                 LibreMetaverse.Logger.Debug(
-                    $"[VkViewportControl] Frame started {waitedMs:F0}ms after it was requested. "
+                    $"[VkViewportControl] Frame started {intervalMs:F0}ms after the previous one "
+                    + $"and {waitedMs:F0}ms after it was requested. "
                     + $"Previous frame took {_lastFrameDurationMs:F1}ms "
                     + $"(DrainObj {DrainSceneObjectsMs:F1} DrainPatch {DrainTexturePatchesMs:F1} "
                     + $"Flexi {FlexiDispatchMs:F1} Skin {SkinDispatchMs:F1} Record {MainPassRecordMs:F1} "
                     + $"Submit {MainPassSubmitWaitMs:F1} BeginDraw {BeginDrawMs:F1}). "
                     + $"GC since then: paused {(gcPause - _gcPauseAtFrameStart).TotalMilliseconds:F0}ms, "
                     + $"gen0 +{gen0 - _gen0AtFrameStart} gen1 +{gen1 - _gen1AtFrameStart} gen2 +{gen2 - _gen2AtFrameStart}. "
-                    + $"UI thread while waiting: top-priority work waited up to {blockedMs:F0}ms, "
+                    + $"UI thread since then: top-priority work waited up to {blockedMs:F0}ms, "
                     + $"render-priority work up to {renderPriorityMs:F0}ms. Window {windowState}. "
                     + DescribeMemory());
             }
