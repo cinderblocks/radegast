@@ -243,6 +243,7 @@ public partial class MapViewModel : ClientAwareViewModelBase
     private void Refresh()
     {
         if (!Active || Client.Network.CurrentSim == null) return;
+        MapAvatars.Clear();
         // Request map items (avatar locations) around current position
         Client.Grid.RequestMapItems(
             Client.Network.CurrentSim.Handle,
@@ -761,10 +762,12 @@ public partial class MapViewModel : ClientAwareViewModelBase
                     rx /= 256;
                     ry /= 256;
 
-                    MapAvatars.Add(new MapAvatarEntry(
+                    var entry = new MapAvatarEntry(
                         rx, ry,
                         loc.LocalX, loc.LocalY,
-                        loc.AvatarCount));
+                        loc.AvatarCount);
+                    if (!MapAvatars.Contains(entry))
+                        MapAvatars.Add(entry);
                 }
             }
         });
