@@ -35,7 +35,7 @@ modules:
         path: ../publish/flatpak-source
         dest: publish-source
       - type: file
-        path: ../RadegastVeles/Assets/veles.png
+        path: ../publish/icon/veles.png
       - type: file
         path: life.radegast.RadegastVeles.desktop
       - type: file

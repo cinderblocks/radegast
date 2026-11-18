@@ -56,7 +56,12 @@ jobs:
             $tag = '${{ github.ref_name }}'
             $tagVersion = $tag -replace '^Veles/',''
           }
-          $buildVersion = "$tagVersion.${{ github.run_number }}"
+          # AssemblyVersion/FileVersion only accept plain numeric components (max 4), so a
+          # prerelease tag like 3.0.0-beta.1 can't be used as-is -- strip everything from the
+          # first '-' before appending the run number. InformationalVersion below still gets
+          # the full $tagVersion, prerelease suffix and all.
+          $numericVersion = $tagVersion -replace '-.*$',''
+          $buildVersion = "$numericVersion.${{ github.run_number }}"
           Write-Host "Tag: $tag"
           Write-Host "Tag Version: $tagVersion"
           Write-Host "Build Version: $buildVersion"

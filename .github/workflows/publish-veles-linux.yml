@@ -84,9 +84,19 @@ jobs:
         run: |
           set -e
           sudo apt-get update -qq
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo apt-get install -y flatpak flatpak-builder imagemagick
           flatpak remote-add --user --if-not-exists flathub \
             https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      # veles.png is a 1024x1024 source icon, but the manifest installs it into
+      # hicolor/256x256/apps; flatpak's export-time icon validator rejects a mismatch like that
+      # outright ("Image too large (1024x1024). Max. size 512x512"). Resize a copy for the
+      # manifest to pull in instead of touching the actual asset used elsewhere.
+      - name: Resize app icon for Flatpak
+        run: |
+          set -e
+          mkdir -p publish/icon
+          convert RadegastVeles/Assets/veles.png -resize 256x256 publish/icon/veles.png
 
       - name: Cache Flatpak runtime
         uses: actions/cache@v4
