@@ -81,8 +81,16 @@ jobs:
             -o publish/flatpak-source
 
       - name: Install Flatpak tools
+        timeout-minutes: 5
         run: |
           set -e
+          # A background apt/unattended-upgrades process can hold the dpkg lock for a while
+          # right after an Ubuntu runner boots, hanging apt-get for several minutes with no
+          # output at all. Wait it out instead of blocking on the lock indefinitely.
+          for _ in $(seq 1 60); do
+            sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+            sleep 5
+          done
           sudo apt-get update -qq
           sudo apt-get install -y flatpak flatpak-builder imagemagick
           flatpak remote-add --user --if-not-exists flathub \
