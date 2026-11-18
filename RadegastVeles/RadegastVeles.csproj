@@ -14,6 +14,18 @@
     <ApplicationIcon>Assets\veles.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <!-- Windows CI builds via `dotnet build -p:Platform=x86|x64|ARM64` with no RID of its own
+         (macOS/Linux publish an explicit -r <rid> on the command line, which always wins over
+         this regardless). Without a RuntimeIdentifier, PlatformTarget=x86/ARM64 has no matching
+         Microsoft.NETCore.App.Host.<rid> package to copy the apphost from, which fails the build
+         with MSB3030 ("Could not copy ... apphost.exe ... because it was not found") on any
+         Platform that doesn't match the build agent's own architecture (win-x64 on GitHub's
+         Windows runners). Mirrors Radegast.csproj's identical fix for the same class of bug. -->
+    <RuntimeIdentifier Condition="'$(Platform)'=='AnyCPU' or '$(Platform)'=='x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)'=='x86'">win-x86</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)'=='ARM64'">win-arm64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">

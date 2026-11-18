@@ -71,7 +71,10 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore RadegastVeles\RadegastVeles.csproj
+        # Platform must be passed here too: it drives the csproj's conditional RuntimeIdentifier,
+        # and a restore that doesn't know the target RID won't fetch that RID's apphost pack --
+        # the subsequent Build step runs with --no-restore, so it only ever sees what's restored here.
+        run: dotnet restore RadegastVeles\RadegastVeles.csproj -p:Platform=${{ matrix.platform }}
 
       - name: Build
         shell: pwsh
