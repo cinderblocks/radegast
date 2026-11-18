@@ -219,6 +219,13 @@ jobs:
             fi
           else
             echo "create-dmg failed for $RID; DMG will be missing, tarball still produced below"
+            # create-dmg can fail at the code-signing stage (e.g. no identity available on this
+            # runner) after it has already written an unsigned .dmg under its generic,
+            # RID-less name. Left alone, that stray file skips the rename above, gets picked up
+            # by the upload step's glob anyway, and silently clobbers the other arch's upload of
+            # the exact same filename -- remove it so a failed DMG is actually absent, not a
+            # broken, unlabeled, arch-ambiguous leftover.
+            rm -f "$DIST_DIR"/*.dmg
           fi
           # Always produced, not just a create-dmg fallback: a DMG downloaded via a browser
           # picks up macOS's com.apple.quarantine attribute, and Gatekeeper refuses to launch a
