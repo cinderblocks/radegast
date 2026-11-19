@@ -71,12 +71,16 @@
                     <ControlTheme TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}"
                                   x:DataType="vm:InvTreeNode">
                         <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                        <!-- UIA exposes the TreeViewItem container itself as the "tree item" node
+                             (what NVDA/JAWS enumerate with role + level + expanded state); a Name
+                             set on content inside the ItemTemplate names that content, not the
+                             container, so the item's announced name was always empty (#217). -->
+                        <Setter Property="AutomationProperties.Name" Value="{Binding DisplayText}" />
                     </ControlTheme>
                 </TreeView.ItemContainerTheme>
                 <TreeView.ItemTemplate>
                     <TreeDataTemplate x:DataType="vm:InvTreeNode" ItemsSource="{Binding Children}">
-                        <StackPanel Orientation="Horizontal" Spacing="4"
-                                    AutomationProperties.Name="{Binding DisplayText}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
                             <TextBlock Text="{Binding DisplayName}" TextWrapping="NoWrap"
                                        TextTrimming="CharacterEllipsis" />
                             <TextBlock Text="{Binding WornLabel}" IsVisible="{Binding IsWorn}"
