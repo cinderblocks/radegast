@@ -32,7 +32,16 @@
   <ItemGroup>
     <PackageReference Include="CoreJ2K.Skia" Version="2.4.2.112" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.156.1" />
+    <!-- Must be the plain "with dependencies" package, not .NoDependencies: Avalonia.Skia
+         transitively depends on plain SkiaSharp.NativeAssets.Linux, pinned to an old 3.119.4 that
+         conflicts with everything else here (SkiaSharp 4.156.1). Different package IDs aren't
+         unified by NuGet, so both land in a RadegastVeles linux-x64 publish, each shipping its
+         own runtimes/linux-x64/native/libSkiaSharp.so, and whichever copies last wins, empirically
+         the old 3.119.4 one, which crashes at Avalonia startup with a native/managed version
+         mismatch (#219). Referencing the same package ID here, pinned higher, unifies the two
+         into one correct version instead. This also happens to carry the fontconfig/freetype the
+         NoDependencies variant lacks, which is a separate font-enumeration gap noted in #202. -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.156.1" />
     <PackageReference Include="System.ComponentModel.Composition" Version="11.0.0" />
   </ItemGroup>
   <!-- Bakes every PackageReference's id+version into this assembly's metadata attributes so
