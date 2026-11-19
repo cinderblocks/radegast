@@ -26,24 +26,28 @@
         LogoSideFile="$(var.VelesSetup.ProjectDir)assets\dialog.png" />
     </BootstrapperApplication>
 
-    <!-- .NET 10 Desktop Runtime detection, matching this bundle's own architecture.
+    <!-- .NET 10 Runtime detection, matching this bundle's own architecture. RadegastVeles is a
+         plain Avalonia app and only needs the base Microsoft.NETCore.App shared framework
+         (confirmed via its own runtimeconfig.json), not Microsoft.WindowsDesktop.App: checking
+         RuntimeType="desktop" here reported .NET as missing for users who had a perfectly good
+         base .NET 10 runtime installed but not the separate Desktop Runtime (#218).
          If the runtime is absent the bundle will install it automatically. -->
-    <netfx:DotNetCoreSearch RuntimeType="desktop"
+    <netfx:DotNetCoreSearch RuntimeType="core"
                             Platform="$(var.NetRid)"
                             MajorVersion="10"
-                            Variable="DotNet10DesktopFound" />
+                            Variable="DotNet10Found" />
 
     <Variable Name="InstallFolder" Type="formatted" Value="[$(var.ProgramFilesVar)]$(var.productName)" Persisted="yes" />
     <Variable Name="LaunchAfterInstall" Type="numeric" Value="1" Persisted="yes" />
 
     <Chain>
-      <!-- .NET 10 Desktop Runtime prerequisite, matching this bundle's own architecture.
+      <!-- .NET 10 Runtime prerequisite, matching this bundle's own architecture.
            Downloads the latest 10.0.x runtime when not already installed. -->
-      <ExePackage Id="DotNet100DesktopRuntime"
+      <ExePackage Id="DotNet100Runtime"
                   SourceFile="$(var.DotNet10RuntimeLocalPath)"
-                  DownloadUrl="https://aka.ms/dotnet/10.0/windowsdesktop-runtime-win-$(var.NetRid).exe"
-                  DetectCondition="DotNet10DesktopFound"
-                  InstallCondition="NOT DotNet10DesktopFound"
+                  DownloadUrl="https://aka.ms/dotnet/10.0/dotnet-runtime-win-$(var.NetRid).exe"
+                  DetectCondition="DotNet10Found"
+                  InstallCondition="NOT DotNet10Found"
                   InstallArguments="/install /quiet /norestart"
                   RepairArguments="/repair /quiet /norestart"
                   Permanent="yes"
@@ -58,7 +62,7 @@
                   Vital="yes"
                   ForcePerMachine="yes"
                   EnableFeatureSelection="yes"
-                  After="DotNet100DesktopRuntime">
+                  After="DotNet100Runtime">
         <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
         <MsiProperty Name="ARPSYSTEMCOMPONENT" Value="1" />
       </MsiPackage>
