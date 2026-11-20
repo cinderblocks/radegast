@@ -106,7 +106,7 @@ namespace Radegast.Commands
                 Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
                 foreach (var target in Objects.GetObjects().Where(
                              prim => prim.Properties != null 
-                                     && prim.Properties.Name.IndexOf(cmd, StringComparison.OrdinalIgnoreCase) >= 0))
+                                     && prim.Properties.Name.IndexOf(subarg, StringComparison.OrdinalIgnoreCase) >= 0))
                 {
                     Vector3 heading = StateManager.RotToEuler(
                         Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(target.Position - mypos)));
@@ -128,6 +128,12 @@ namespace Radegast.Commands
                         sb.AppendFormat(", {0:0} meters below our level", -elev);
 
                     sb.AppendLine();
+                }
+
+                if (sb.Length == 0)
+                {
+                    WriteLine("Could not find '{0}' nearby", subarg);
+                    return;
                 }
 
                 wl(sb.ToString());
