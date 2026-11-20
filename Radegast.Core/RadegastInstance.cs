@@ -65,6 +65,15 @@ namespace Radegast
         public Dictionary<UUID, Group> Groups { get; private set; } = new Dictionary<UUID, Group>();
         private readonly object _groupsLock = new object();
 
+        /// <summary>
+        /// A copy of <see cref="Groups"/> that's safe to enumerate while group updates arrive
+        /// on the network thread
+        /// </summary>
+        public List<Group> GetGroups()
+        {
+            lock (_groupsLock) { return Groups.Values.ToList(); }
+        }
+
         #region Managers
         public StateManager State { get; private set; } = null!;
 
