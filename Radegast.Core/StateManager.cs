@@ -26,6 +26,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LibreMetaverse;
+using LibreMetaverse.Packets;
 using Radegast.Automation;
 
 namespace Radegast
@@ -211,14 +212,19 @@ namespace Radegast
             RegisterClientEvents(Client);
         }
 
+        private bool _serverFacingAdopted;
+
         private void RegisterClientEvents(GridClient client)
         {
+            _serverFacingAdopted = false;
             client.Objects.AvatarUpdate += Objects_AvatarUpdate;
             client.Objects.TerseObjectUpdate += Objects_TerseObjectUpdate;
             client.Objects.AvatarSitChanged += Objects_AvatarSitChanged;
             client.Self.AlertMessage += Self_AlertMessage;
             client.Self.TeleportProgress += Self_TeleportProgress;
             client.Network.SimChanged += Network_SimChanged;
+            client.Network.LoginProgress += Network_LoginProgress;
+            client.Network.RegisterCallback(PacketType.AgentMovementComplete, AgentMovementCompleteHandler);
             client.Grid.CoarseLocationUpdate += Grid_CoarseLocationUpdate;
         }
 
@@ -230,7 +236,39 @@ namespace Radegast
             client.Self.AlertMessage -= Self_AlertMessage;
             client.Self.TeleportProgress -= Self_TeleportProgress;
             client.Network.SimChanged -= Network_SimChanged;
+            client.Network.LoginProgress -= Network_LoginProgress;
+            client.Network.UnregisterCallback(PacketType.AgentMovementComplete, AgentMovementCompleteHandler);
             client.Grid.CoarseLocationUpdate -= Grid_CoarseLocationUpdate;
+        }
+
+        /// <summary>
+        /// A new session's body rotation is the identity quaternion, which faces east.
+        /// LibreMetaverse copies the login and movement-complete look-at onto the camera
+        /// only, then the first AgentUpdate publishes that east-facing body and the
+        /// simulator stores it. Adopt the look-at before those updates start.
+        /// </summary>
+        private void Network_LoginProgress(object? sender, LoginProgressEventArgs e)
+        {
+            if (e.Status != LoginStatus.ConnectingToSim) return;
+            // ConnectingToSim is raised after the login reply fills Self.LookAt and
+            // before the simulator circuit exists, so this lands before any AgentUpdate.
+            _serverFacingAdopted = false;
+            AdoptServerFacing(Client.Self.LookAt);
+        }
+
+        private void AgentMovementCompleteHandler(object? sender, PacketReceivedEventArgs e)
+        {
+            if (e.Packet is AgentMovementCompletePacket movement)
+                AdoptServerFacing(movement.Data.LookAt);
+        }
+
+        private void AdoptServerFacing(Vector3 lookAt)
+        {
+            if (_serverFacingAdopted) return;
+            if (!AvatarFacing.TryGetBodyRotation(lookAt, out Quaternion rotation)) return;
+            Client.Self.Movement.BodyRotation = rotation;
+            Client.Self.Movement.HeadRotation = rotation;
+            _serverFacingAdopted = true;
         }
 
         private void Grid_CoarseLocationUpdate(object? sender, CoarseLocationUpdateEventArgs e)
@@ -632,6 +670,7 @@ namespace Radegast
 
         private void Netcom_ClientDisconnected(object? sender, DisconnectedEventArgs e)
         {
+            _serverFacingAdopted = false;
             IsTyping = Away = IsBusy = IsWalking = false;
 
             lookAtTimer?.Dispose();

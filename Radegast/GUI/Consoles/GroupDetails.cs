@@ -604,10 +604,7 @@ namespace Radegast
         {
             if (myGroups.ContainsKey(group.ID))
             {
-                Group g = myGroups[group.ID];
-                // g.AcceptNotices = cbxReceiveNotices.Checked;
-                // g.ListInProfile = cbxListInProfile.Checked;
-                client.Groups.SetGroupAcceptNotices(g.ID, cbxReceiveNotices.Checked, cbxListInProfile.Checked);
+                instance.UpdateGroupNoticeSettings(group.ID, cbxReceiveNotices.Checked, cbxListInProfile.Checked);
                 client.Groups.RequestCurrentGroups();
             }
         }

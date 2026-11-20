@@ -494,13 +494,13 @@ public partial class GroupProfileViewModel : ObservableObject, IDisposable, ICha
     partial void OnAcceptNoticesChanged(bool value)
     {
         if (_suppressSettingsChange || !IsMember) return;
-        Client.Groups.SetGroupAcceptNotices(GroupID, value, ListInProfile);
+        _instance.UpdateGroupNoticeSettings(GroupID, value, ListInProfile);
     }
 
     partial void OnListInProfileChanged(bool value)
     {
         if (_suppressSettingsChange || !IsMember) return;
-        Client.Groups.SetGroupAcceptNotices(GroupID, AcceptNotices, value);
+        _instance.UpdateGroupNoticeSettings(GroupID, AcceptNotices, value);
     }
 
     // ── Commands ──────────────────────────────────────────────────────────────
