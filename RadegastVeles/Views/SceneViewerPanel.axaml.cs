@@ -32,6 +32,7 @@ public partial class SceneViewerPanel : UserControl
     /// <summary>The Vulkan viewport hosted by this panel, exposed through the backend-agnostic
     /// interface <see cref="SceneViewerViewModel.SetViewport"/> consumes.</summary>
     public readonly ISceneViewport Viewport;
+    private SceneViewerViewModel? _subscribedVm;
 
     public SceneViewerPanel()
     {
@@ -75,6 +76,11 @@ public partial class SceneViewerPanel : UserControl
     protected override void OnDataContextChanged(System.EventArgs e)
     {
         base.OnDataContextChanged(e);
+
+        if (_subscribedVm != null)
+            _subscribedVm.PropertyChanged -= OnViewModelPropertyChanged;
+        _subscribedVm = null;
+
         if (DataContext is SceneViewerViewModel vm)
         {
             vm.SetViewport(Viewport);
@@ -82,6 +88,7 @@ public partial class SceneViewerPanel : UserControl
             // Focusing isn't bindable from XAML, so grab it here whenever the chat
             // input box is revealed (Enter in the viewport, or the toolbar button).
             vm.PropertyChanged += OnViewModelPropertyChanged;
+            _subscribedVm = vm;
         }
     }
 
