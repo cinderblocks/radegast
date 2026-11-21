@@ -261,16 +261,16 @@ namespace Radegast
             cbLogIgnoredConferencesToChat.Checked = settings["log_ignored_conferences_to_chat"].AsBoolean();
             cbLogIgnoredConferencesToChat.CheckedChanged += cbLogIgnoredConferencesToChat_CheckedChanged;
 
-            cbRLV.Checked = settings["rlv_enabled"].AsBoolean();
+            cbRLV.Checked = instance.RLV?.Enabled ?? false;
             cbRLV.CheckedChanged += (sender, e) =>
             {
-                settings["rlv_enabled"] = new OSDBoolean(cbRLV.Checked);
+                if (instance.RLV != null) instance.RLV.Enabled = cbRLV.Checked;
             };
 
-            cbRLVDebug.Checked = settings["rlv_debugcommands"].AsBoolean();
+            cbRLVDebug.Checked = instance.RLV?.EnabledDebugCommands ?? false;
             cbRLVDebug.CheckedChanged += (sender, e) =>
             {
-                settings["rlv_debugcommands"] = new OSDBoolean(cbRLVDebug.Checked);
+                if (instance.RLV != null) instance.RLV.EnabledDebugCommands = cbRLVDebug.Checked;
             };
 
             cbMUEmotes.Checked = settings["mu_emotes"].AsBoolean();
