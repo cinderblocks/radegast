@@ -45,7 +45,7 @@ namespace Radegast.Core.RLV
 
             set
             {
-                if (Enabled != instance.GlobalSettings["rlv_enabled"].AsBoolean())
+                if (value != instance.GlobalSettings["rlv_enabled"].AsBoolean())
                 {
                     instance.GlobalSettings["rlv_enabled"] = new OSDBoolean(value);
                 }
@@ -76,7 +76,7 @@ namespace Radegast.Core.RLV
 
             set
             {
-                if (EnabledDebugCommands != instance.GlobalSettings["rlv_debugcommands"].AsBoolean())
+                if (value != instance.GlobalSettings["rlv_debugcommands"].AsBoolean())
                 {
                     instance.GlobalSettings["rlv_debugcommands"] = new OSDBoolean(value);
                 }
