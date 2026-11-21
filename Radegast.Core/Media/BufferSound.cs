@@ -275,7 +275,7 @@ namespace Radegast.Media
                     // upload), not a transient device/channel issue - remember it so repeated
                     // triggers of the same object don't keep hammering FMOD and the log.
                     knownBadSoundIds[Id] = 0;
-                    Logger.Error("Error playing sound", ex);
+                    Logger.Warn("Error playing sound", ex);
                     return;
                 }
 
