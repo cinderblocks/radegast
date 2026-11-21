@@ -207,7 +207,7 @@ jobs:
           fi
           DIST_DIR=dist/$RID
           mkdir -p "$DIST_DIR"
-          if npx --yes create-dmg "$SRC_APP" "$DIST_DIR"; then
+          if npx --yes create-dmg --no-code-sign "$SRC_APP" "$DIST_DIR"; then
             echo "DMG created for $RID"
             # create-dmg names its output from the app's CFBundleName+version alone (e.g.
             # "Radegast 1.9.0.dmg"), with no RID in it -- both matrix legs would otherwise
