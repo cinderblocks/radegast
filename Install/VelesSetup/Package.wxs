@@ -50,14 +50,19 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch $(var.productName)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- .NET 10 Desktop Runtime detection via registry, matching this MSI's own architecture
+    <!-- .NET 10 Runtime detection via registry, matching this MSI's own architecture
          (NetRid, defined in ..\VelesBuildProperties.wxi). A 32-bit MSI only ever sees the
          32-bit-view install under InstalledVersions\x86\...; an ARM64/x64 MSI sees its own
-         native view directly - so no explicit Win64 override is needed here, just the right key. -->
+         native view directly - so no explicit Win64 override is needed here, just the right key.
+         This is a second, independent gate from Bundle.wxs's netfx:DotNetCoreSearch: the bundle
+         controls whether the bootstrapper installs a runtime, but this MSI-level Launch condition
+         fires every time the MSI itself runs, so it has to check for the same framework the app
+         actually needs (Microsoft.NETCore.App) too, not just the bundle (#218 reopened: fixing
+         only Bundle.wxs left this check still looking for Microsoft.WindowsDesktop.App). -->
     <Property Id="DOTNET10INSTALLED">
-      <RegistrySearch Id="DotNet10DesktopSearch"
+      <RegistrySearch Id="DotNet10Search"
                       Root="HKLM"
-                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\$(var.NetRid)\sharedfx\Microsoft.WindowsDesktop.App"
+                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\$(var.NetRid)\sharedfx\Microsoft.NETCore.App"
                       Type="raw" />
     </Property>
     <Launch
