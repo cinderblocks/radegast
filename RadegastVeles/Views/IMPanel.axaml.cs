@@ -35,6 +35,7 @@ namespace Radegast.Veles.Views;
 public partial class IMPanel : UserControl
 {
     private IMViewModel? _vm;
+    private TextBox? _inputBox;
 
     // Typing-indicator debounce: fires StopTyping ~5 s after the last keystroke
     private DispatcherTimer? _typingStopTimer;
@@ -52,28 +53,48 @@ public partial class IMPanel : UserControl
         _vm = DataContext as IMViewModel;
         if (_vm == null) return;
 
-        // Enter key sends message; TextChanged fires typing notifications
-        var inputBox = this.FindControl<TextBox>("IMInputBox");
-        if (inputBox != null)
+        // Enter key sends message; TextChanged fires typing notifications.
+        // Undocking/redocking this panel (see MainWindow's UndockPanel/DockPanel) moves the
+        // same control between windows, re-firing Loaded each time -- pair with OnUnloaded
+        // below or these accumulate and double-fire (e.g. sending a message twice on Enter).
+        _inputBox = this.FindControl<TextBox>("IMInputBox");
+        if (_inputBox != null)
         {
-            inputBox.KeyDown += InputBox_KeyDown;
-            inputBox.TextChanged += InputBox_TextChanged;
+            _inputBox.KeyDown += InputBox_KeyDown;
+            _inputBox.TextChanged += InputBox_TextChanged;
         }
 
         // Auto-scroll IM log when messages arrive
         var imLog = this.FindControl<ListBox>("IMLog");
         if (imLog != null)
         {
-            _vm.PropertyChanged += (_, args) =>
-                {
-                    if (args.PropertyName == nameof(IMViewModel.SelectedSession))
-                    {
-                        StopTypingLocally();
-                        WireAutoScroll(imLog);
-                    }
-                };
+            _vm.PropertyChanged += Vm_PropertyChanged;
             WireAutoScroll(imLog);
         }
+    }
+
+    protected override void OnUnloaded(RoutedEventArgs e)
+    {
+        base.OnUnloaded(e);
+
+        if (_inputBox != null)
+        {
+            _inputBox.KeyDown -= InputBox_KeyDown;
+            _inputBox.TextChanged -= InputBox_TextChanged;
+            _inputBox = null;
+        }
+
+        if (_vm != null)
+            _vm.PropertyChanged -= Vm_PropertyChanged;
+    }
+
+    private void Vm_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName != nameof(IMViewModel.SelectedSession)) return;
+        var imLog = this.FindControl<ListBox>("IMLog");
+        if (imLog == null) return;
+        StopTypingLocally();
+        WireAutoScroll(imLog);
     }
 
     private INotifyCollectionChanged? _currentMessagesCollection;
