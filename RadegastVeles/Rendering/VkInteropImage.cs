@@ -35,6 +35,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Platform;
+using Microsoft.Extensions.Logging;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.DXGI;
@@ -101,6 +102,45 @@ internal sealed unsafe class VkInteropImage : IDisposable
             SType = StructureType.ExternalMemoryImageCreateInfo,
             HandleTypes = handleType
         };
+
+        // On Linux, Avalonia displays our Vulkan image through OpenGL. We pass GL a shared-memory
+        // handle (Opaque FD), and GL creates a texture from it as a plain RGBA rectangle.
+        //
+        // OPTIMAL tiling stores pixels in a driver-private order. Avalonia does not pass a DRM
+        // modifier describing that order, so Mesa/RADV cannot match it to a plain rectangle. The
+        // import failed with GL_OUT_OF_MEMORY and lost the GL context; the visible result was
+        // flickering horizontal streaks in the 3D panels.
+        //
+        // LINEAR tiling stores pixels row by row, which both APIs understand. Use it for Linux
+        // OpaqueFD exports when the device supports the features we need; keep OPTIMAL on
+        // Windows/macOS and on devices that do not.
+        var tiling = ImageTiling.Optimal;
+        var imageCreateFlags = ImageCreateFlags.CreateMutableFormatBit;
+        var shouldUseLinearImport = exportable
+                                    && !isMacOS
+                                    && handleType == ExternalMemoryHandleTypeFlags.OpaqueFDBit;
+        if (shouldUseLinearImport)
+        {
+            const FormatFeatureFlags requiredLinearFeatures =
+                FormatFeatureFlags.ColorAttachmentBit |
+                FormatFeatureFlags.TransferSrcBit |
+                FormatFeatureFlags.TransferDstBit |
+                FormatFeatureFlags.SampledImageBit;
+
+            Api.GetPhysicalDeviceFormatProperties(_physicalDevice, Format, out var formatProperties);
+            if (formatProperties.LinearTilingFeatures.HasFlag(requiredLinearFeatures))
+            {
+                tiling = ImageTiling.Linear;
+                imageCreateFlags = 0;
+            }
+            else
+            {
+                LibreMetaverse.Logger.Log(
+                    "[VkInterop] Linear tiling lacks required features for the GL import image; keeping OPTIMAL tiling",
+                    LogLevel.Warning);
+            }
+        }
+
         // macOS: VK_EXT_metal_objects uses pNext on the image create info instead of
         // ExternalMemoryImageCreateInfo to mark the image for IOSurface export.
         var exportMetalObjectCreateInfo = new ExportMetalObjectCreateInfoEXT
@@ -121,11 +161,11 @@ internal sealed unsafe class VkInteropImage : IDisposable
             MipLevels = MipLevels,
             ArrayLayers = 1,
             Samples = SampleCountFlags.Count1Bit,
-            Tiling = ImageTiling.Optimal,
+            Tiling = tiling,
             Usage = _imageUsageFlags,
             SharingMode = SharingMode.Exclusive,
             InitialLayout = ImageLayout.Undefined,
-            Flags = ImageCreateFlags.CreateMutableFormatBit
+            Flags = imageCreateFlags
         };
 
         Api.CreateImage(_device, in imageCreateInfo, null, out var image).ThrowOnError();
