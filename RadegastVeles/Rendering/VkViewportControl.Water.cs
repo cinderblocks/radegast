@@ -495,7 +495,11 @@ public partial class VkViewportControl
         _underwaterTime += dt;
 
         // ── Copy the just-rendered frame out so it can be sampled as this pass's input ────────
-        swapchainImage.TransitionLayout(cmd, ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit);
+        // Explicit source access, not the cached-state overload: the main pass's CmdEndRenderPass
+        // doesn't update the cache, which still holds BeginDraw's ColorAttachmentReadBit.
+        swapchainImage.TransitionLayout(cmd,
+            ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit,
+            ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit);
         VkMemoryHelper.TransitionLayout(vk.Api, cmd, _underwaterSourceImage,
             _underwaterSourceLayout, _underwaterSourceAccess,
             ImageLayout.TransferDstOptimal, AccessFlags.TransferWriteBit, 1);
