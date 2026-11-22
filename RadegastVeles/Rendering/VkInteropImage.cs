@@ -121,14 +121,38 @@ internal sealed unsafe class VkInteropImage : IDisposable
                                     && handleType == ExternalMemoryHandleTypeFlags.OpaqueFDBit;
         if (shouldUseLinearImport)
         {
-            const FormatFeatureFlags requiredLinearFeatures =
-                FormatFeatureFlags.ColorAttachmentBit |
-                FormatFeatureFlags.TransferSrcBit |
-                FormatFeatureFlags.TransferDstBit |
-                FormatFeatureFlags.SampledImageBit;
+            // Generic format properties can't tell us whether this format/tiling is actually
+            // exportable via this handle type -- query the external-memory-specific variant,
+            // which also validates tiling/usage/flags together instead of just LinearTilingFeatures.
+            var externalFormatInfo = new PhysicalDeviceExternalImageFormatInfo
+            {
+                SType = StructureType.PhysicalDeviceExternalImageFormatInfo,
+                HandleType = handleType
+            };
+            var formatInfo2 = new PhysicalDeviceImageFormatInfo2
+            {
+                SType = StructureType.PhysicalDeviceImageFormatInfo2,
+                PNext = &externalFormatInfo,
+                Format = Format,
+                Type = ImageType.Type2D,
+                Tiling = ImageTiling.Linear,
+                Usage = _imageUsageFlags
+            };
+            var externalFormatProperties = new ExternalImageFormatProperties
+            {
+                SType = StructureType.ExternalImageFormatProperties
+            };
+            var formatProperties2 = new ImageFormatProperties2
+            {
+                SType = StructureType.ImageFormatProperties2,
+                PNext = &externalFormatProperties
+            };
 
-            Api.GetPhysicalDeviceFormatProperties(_physicalDevice, Format, out var formatProperties);
-            if (formatProperties.LinearTilingFeatures.HasFlag(requiredLinearFeatures))
+            var result = Api.GetPhysicalDeviceImageFormatProperties2(_physicalDevice, &formatInfo2, &formatProperties2);
+            var linearIsExportable = result == Result.Success &&
+                (externalFormatProperties.ExternalMemoryProperties.ExternalMemoryFeatures & ExternalMemoryFeatureFlags.ExportableBit) != 0;
+
+            if (linearIsExportable)
             {
                 tiling = ImageTiling.Linear;
                 imageCreateFlags = 0;
@@ -136,7 +160,7 @@ internal sealed unsafe class VkInteropImage : IDisposable
             else
             {
                 LibreMetaverse.Logger.Log(
-                    "[VkInterop] Linear tiling lacks required features for the GL import image; keeping OPTIMAL tiling",
+                    "[VkInterop] Linear tiling is not exportable for this image's format/usage; keeping OPTIMAL tiling",
                     LogLevel.Warning);
             }
         }
