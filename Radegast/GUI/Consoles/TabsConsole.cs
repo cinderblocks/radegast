@@ -515,6 +515,9 @@ namespace Radegast
                 case InstantMessageDialog.GroupNotice:
                     // Is this group muted?
                     if (client.Self.MuteList.Values.Any(me => me.Type == MuteType.Group && me.ID == e.IM.FromAgentID)) break;
+                    // "Receive group notices" is per membership. The simulator still delivers
+                    // notices that were already queued, and sometimes live ones too.
+                    if (!instance.ShouldPresentGroupNotice(e.IM)) break;
 
                     instance.MainForm.AddNotification(new ntfGroupNotice(instance, e.IM));
                     break;

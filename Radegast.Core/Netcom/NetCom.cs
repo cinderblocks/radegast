@@ -416,6 +416,7 @@ namespace Radegast
             {
                 IsLoggedIn = true;
                 Client.Self.RequestBalance();
+                Client.Groups.RequestCurrentGroups();
                 OnClientConnected(EventArgs.Empty);
                 IsLoggingIn = false;
             }

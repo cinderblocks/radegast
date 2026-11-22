@@ -269,11 +269,11 @@ namespace Radegast.Rendering
 
                 if (Client.Self.Movement.TurnLeft)
                 {
-                    Client.Self.Movement.BodyRotation *= Quaternion.CreateFromAxisAngle(Vector3.UnitZ, time);
+                    AvatarFacing.Yaw(Client.Self.Movement, time);
                 }
                 else if (client.Self.Movement.TurnRight)
                 {
-                    Client.Self.Movement.BodyRotation *= Quaternion.CreateFromAxisAngle(Vector3.UnitZ, -time);
+                    AvatarFacing.Yaw(Client.Self.Movement, -time);
                 }
 
                 if (Instance.Keyboard.IsKeyDown(Keys.Escape))
