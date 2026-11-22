@@ -50,31 +50,25 @@
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch $(var.productName)" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
 
-    <!-- .NET 10 Runtime detection via registry, matching this MSI's own architecture
-         (NetRid, defined in ..\VelesBuildProperties.wxi). dotnet's own setup bootstrapper is
-         itself a 32-bit process no matter which runtime architecture it's installing, so it
-         always writes InstalledVersions under the WOW6432Node (32-bit) registry view, verified
-         directly against a real machine's HKLM\SOFTWARE\WOW6432Node\dotnet\Setup\InstalledVersions,
-         which is populated, versus the native HKLM\SOFTWARE\dotnet\Setup\InstalledVersions, which
-         isn't. An x64/ARM64 MSI's RegistrySearch defaults to its own (64-bit) view and so never
-         finds it, regardless of which framework name is searched for: this previously claimed
-         "no override is needed", which was wrong and never actually tested on a real machine.
-         Bitness="always32" forces the 32-bit view WiX maps to WOW6432Node on every architecture.
+    <!-- .NET 10 Runtime detection, matching this MSI's own architecture (NetRid, defined in
+         ..\VelesBuildProperties.wxi). The previous two fixes for #218 (wrong framework name,
+         then wrong registry view) still failed for some users (#218 reopened a third time)
+         because a RegistrySearch with no Name attribute reads a registry key's unnamed/default
+         value, but dotnet records each installed version as its own named value (e.g.
+         "10.0.15"=1) under ...\sharedfx\Microsoft.NETCore.App, with no default value ever set.
+         So the search always found nothing, regardless of what was actually installed.
 
-         This is a second, independent gate from Bundle.wxs's netfx:DotNetCoreSearch: the bundle
-         controls whether the bootstrapper installs a runtime, but this MSI-level Launch condition
-         fires every time the MSI itself runs, so it has to find the same framework correctly too
-         (#218 reopened twice: Bundle.wxs checked the wrong framework, then this checked the right
-         framework in the wrong registry view). -->
-    <Property Id="DOTNET10INSTALLED">
-      <RegistrySearch Id="DotNet10Search"
-                      Root="HKLM"
-                      Key="SOFTWARE\dotnet\Setup\InstalledVersions\$(var.NetRid)\sharedfx\Microsoft.NETCore.App"
-                      Bitness="always32"
-                      Type="raw" />
-    </Property>
+         netfx:DotNetCompatibilityCheck runs the real hostfxr-based resolution (NetCoreCheck.exe)
+         instead of reading the registry ourselves, so it isn't subject to that layout at all.
+         This is the MSI-level equivalent of Bundle.wxs's netfx:DotNetCoreSearch, which already
+         uses the same mechanism and has not had this problem. -->
+    <netfx:DotNetCompatibilityCheck
+      Property="DOTNET10CHECK"
+      RuntimeType="core"
+      Platform="$(var.NetRid)"
+      Version="10.0.0" />
     <Launch
-      Condition="Installed OR DOTNET10INSTALLED"
+      Condition="Installed OR DOTNET10CHECK = 0"
       Message="!(loc.MissingDotNet10)" />
 
     <util:CloseApplication Id="CloseVeles"
