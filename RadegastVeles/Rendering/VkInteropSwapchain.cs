@@ -140,8 +140,11 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
         var buffer = _vk.Pool.CreateCommandBuffer("VkInteropSwapchainImage.BeginDraw");
         buffer.BeginRecording();
 
-        _image.TransitionLayout(buffer.InternalHandle, ImageLayout.Undefined, AccessFlags.None,
-            ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentReadBit);
+        // Avalonia 12.1.2+ (issue #21721 / PR #21787): transition from the image's actual current
+        // layout, not Undefined. After Present() the cached layout is TransferSrcOptimal; declaring
+        // Undefined lets drivers legally discard the contents, which showed up as flickering
+        // corrupt frames. Matches Avalonia's 12.1.6 GpuInterop sample.
+        _image.TransitionLayout(buffer.InternalHandle, ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentReadBit);
 
         if (_image.IsDirectXBacked)
             buffer.Submit(null, null, null, null, new VkCommandBufferPool.VkCommandBuffer.KeyedMutexSubmitInfo
@@ -184,7 +187,13 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
         // ends the image in ColorAttachmentOptimal, and THIS transition (not the render pass)
         // is what moves it to TransferSrcOptimal for the blit the caller's render loop does
         // before calling Present().
-        _image.TransitionLayout(buffer.InternalHandle, ImageLayout.TransferSrcOptimal, AccessFlags.TransferWriteBit);
+        // Unlike Avalonia's sample, which blits into the exported image with transfer writes,
+        // Veles renders into it as a colour attachment. The source access mask must therefore make
+        // those colour-attachment writes available; the compositor consuming it does a transfer
+        // read. Using the cached ColorAttachmentReadBit here loses the frame's actual writes.
+        _image.TransitionLayout(buffer.InternalHandle,
+            ImageLayout.ColorAttachmentOptimal, AccessFlags.ColorAttachmentWriteBit,
+            ImageLayout.TransferSrcOptimal, AccessFlags.TransferReadBit);
 
         if (_image.IsDirectXBacked)
         {
@@ -244,7 +253,14 @@ internal sealed class VkInteropSwapchainImage : ISwapchainImage
                     : PlatformGraphicsExternalImageFormat.R8G8B8A8UNorm,
                 Width = Size.Width,
                 Height = Size.Height,
-                MemorySize = _image.MemorySize
+                MemorySize = _image.MemorySize,
+                // Avalonia 12.1.2+ (PR #21787): tells Avalonia's Vulkan backend the layout of the
+                // imported memory. Ignored by the GL backend used under XWayland today, but correct
+                // for the Vulkan backend and for any future backend switch.
+                VulkanProperties = new PlatformGraphicsExternalImageVulkanProperties
+                {
+                    Layout = (int)ImageLayout.TransferSrcOptimal
+                }
             });
         }
 
