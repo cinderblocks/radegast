@@ -452,7 +452,7 @@ namespace Radegast
             
             Client = new GridClient();
             InitializeClient(Client);
-            lock (_groupsLock) { Groups.Clear(); }
+            lock (_groupsLock) { Groups.Clear(); _pendingNoticeSettings.Clear(); }
 
             try
             {
