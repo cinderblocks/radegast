@@ -45,6 +45,9 @@ namespace Radegast.Core.RLV
 
         public async Task AttachAsync(IReadOnlyList<AttachmentRequest> itemsToAttach, CancellationToken cancellationToken)
         {
+            var wearablesByReplace = new Dictionary<bool, List<InventoryItem>>();
+            var attachmentsToAttach = new List<(InventoryItem Item, AttachmentPoint Point, bool Replace)>();
+
             foreach (var item in itemsToAttach)
             {
                 if (!instance.Client.Inventory.Store!.TryGetValue(new UUID(item.ItemId), out var foundItem))
@@ -59,12 +62,28 @@ namespace Radegast.Core.RLV
 
                 if (inventoryItem.InventoryType == InventoryType.Wearable)
                 {
-                    await instance.COF.AddToOutfitAsync(inventoryItem, item.ReplaceExistingAttachments, cancellationToken);
+                    if (!wearablesByReplace.TryGetValue(item.ReplaceExistingAttachments, out var wearables))
+                    {
+                        wearables = new List<InventoryItem>();
+                        wearablesByReplace[item.ReplaceExistingAttachments] = wearables;
+                    }
+
+                    wearables.Add(inventoryItem);
                 }
                 else
                 {
-                    await instance.COF.AttachAsync(inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments, cancellationToken);
+                    attachmentsToAttach.Add((inventoryItem, (AttachmentPoint)item.AttachmentPoint, item.ReplaceExistingAttachments));
                 }
+            }
+
+            foreach (var kvp in wearablesByReplace)
+            {
+                await instance.COF.AddToOutfitAsync(kvp.Value, kvp.Key, cancellationToken);
+            }
+
+            if (attachmentsToAttach.Count > 0)
+            {
+                await instance.COF.AttachAsync(attachmentsToAttach, cancellationToken);
             }
         }
 
