@@ -500,6 +500,19 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
 
     private void HandleConferenceIM(InstantMessageEventArgs e)
     {
+        bool isNewSession = !Sessions.Any(s => s.SessionId == e.IM.IMSessionID);
+        if (isNewSession && ShouldIgnoreConference(e.IM.FromAgentID))
+        {
+            if (_instance.GlobalSettings["log_ignored_conferences_to_chat"].AsBoolean())
+            {
+                _instance.ShowNotificationInChat(
+                    $"Your settings have prevented an unsolicited conference request from {e.IM.FromAgentName}.",
+                    ChatBufferTextStyle.Alert);
+            }
+            Client.Self.RequestLeaveGroupChat(e.IM.IMSessionID);
+            return;
+        }
+
         var label = Utils.BytesToString(e.IM.BinaryBucket);
         if (string.IsNullOrEmpty(label)) label = "Conference";
 
@@ -508,6 +521,18 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         var (confText, confType) = ParseMessagePose(e.IM.Message);
         AddMessage(session, new ChatLine(DateTime.Now, fromName, confText, confType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
+    }
+
+    private bool ShouldIgnoreConference(UUID fromAgentId)
+    {
+        if (!_instance.GlobalSettings["ignore_conference_chats"].AsBoolean()) return false;
+
+        if (_instance.GlobalSettings["allow_conference_chats_from_friends"].AsBoolean())
+        {
+            return !Client.Friends.FriendList.ContainsKey(fromAgentId);
+        }
+
+        return true;
     }
 
     private void HandleSessionSend(InstantMessageEventArgs e)
