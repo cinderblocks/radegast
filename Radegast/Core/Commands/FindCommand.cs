@@ -58,6 +58,19 @@ namespace Radegast.Commands
             wl("Wrong arguments for \"find\" command. Use {0}{1}", CommandsManager.CmdPrefix, Usage);
         }
 
+        /// <summary>Compass heading from <paramref name="from"/> toward <paramref name="to"/>.
+        /// Normalizing a zero-length vector yields NaN, so returns "right here" instead
+        /// when the two positions coincide.</summary>
+        private static string DescribeHeading(Vector3 from, Vector3 to)
+        {
+            if (Vector3.Distance(from, to) < 0.01f) return "right here";
+
+            Vector3 heading = StateManager.RotToEuler(Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(to - from)));
+            int facing = (int)(57.2957795d * heading.Z);
+            if (facing < 0) facing = 360 + facing;
+            return StateManager.ClosestKnownHeading(facing).ToString();
+        }
+
 
         public override void Execute(string name, string[] cmdArgs, ConsoleWriteLine WriteLine)
         {
@@ -89,34 +102,16 @@ namespace Radegast.Commands
 
             if (subcmd == "object")
             {
-                if (!TC.TabExists("objects"))
-                {
-                    RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole((RadegastInstanceForms)Instance));
-                    tab.AllowClose = true;
-                    tab.AllowDetach = true;
-                    tab.Visible = true;
-                    tab.AllowHide = false;
-                    ((ObjectsConsole)tab.Control).RefreshObjectList();
-                    TC.Tabs["chat"].Select();
-
-                    WriteLine("Objects list was not active. Started getting object names, please try again in a minute.");
+                if (!ObjectCommandHelper.TryGetReadyObjectsConsole(TC, Instance, WriteLine, out Objects))
                     return;
-                }
-
-                Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
                 foreach (var target in Objects.GetObjects().Where(
-                             prim => prim.Properties != null 
+                             prim => prim.Properties != null
                                      && prim.Properties.Name.IndexOf(subarg, StringComparison.OrdinalIgnoreCase) >= 0))
                 {
-                    Vector3 heading = StateManager.RotToEuler(
-                        Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(target.Position - mypos)));
-                    int facing = (int)(57.2957795d * heading.Z);
-                    if (facing < 0) facing = 360 + facing;
-
                     sb.AppendFormat("{0} is {1:0} meters away to the {2}",
                         target.Properties.Name,
                         Vector3.Distance(mypos, target.Position),
-                        StateManager.ClosestKnownHeading(facing)
+                        DescribeHeading(mypos, target.Position)
                         );
 
                     float elev = target.Position.Z - mypos.Z;
@@ -156,6 +151,7 @@ namespace Radegast.Commands
                     string pname = Instance.Names.Get(person);
 
                     Vector3 targetPos = Vector3.Zero;
+                    bool located = false;
 
                     // try to find where they are
                     var kvp = Client.Network.CurrentSim.ObjectsAvatars.FirstOrDefault(
@@ -167,12 +163,14 @@ namespace Radegast.Commands
                         if (avi.ParentID == 0)
                         {
                             targetPos = avi.Position;
+                            located = true;
                         }
                         else
                         {
                             if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(avi.ParentID, out var seatObj))
                             {
                                 targetPos = seatObj.Position + avi.Position;
+                                located = true;
                             }
                         }
                     }
@@ -181,23 +179,20 @@ namespace Radegast.Commands
                         if (Instance.State.TryGetCoarsePosition(Client.Network.CurrentSim, person, out var pos))
                         {
                             targetPos = pos;
+                            located = true;
                         }
                     }
 
-                    if (targetPos.Z < 0.01f)
+                    if (!located)
                     {
                         WriteLine("Could not locate {0}", pname);
-                        return;
+                        continue;
                     }
-
-                    Vector3 heading = StateManager.RotToEuler(Vector3.RotationBetween(Vector3.UnitX, Vector3.Normalize(targetPos - mypos)));
-                    int facing = (int)(57.2957795d * heading.Z);
-                    if (facing < 0) facing = 360 + facing;
 
                     sb.AppendFormat("{0} is {1:0} meters away to the {2}",
                         pname,
                         Vector3.Distance(mypos, targetPos),
-                        StateManager.ClosestKnownHeading(facing)
+                        DescribeHeading(mypos, targetPos)
                         );
 
                     float elev = targetPos.Z - mypos.Z;
@@ -211,7 +206,8 @@ namespace Radegast.Commands
                     sb.AppendLine();
                 }
 
-                wl(sb.ToString());
+                if (sb.Length > 0)
+                    wl(sb.ToString());
             }
         }
     }
