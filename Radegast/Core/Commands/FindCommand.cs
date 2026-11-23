@@ -176,7 +176,9 @@ namespace Radegast.Commands
                     }
                     else
                     {
-                        if (Instance.State.TryGetCoarsePosition(Client.Network.CurrentSim, person, out var pos))
+                        // a coarse altitude of 0 means unknown (above 1020 m), as in StateManager.AvatarPosition
+                        if (Instance.State.TryGetCoarsePosition(Client.Network.CurrentSim, person, out var pos)
+                            && pos.Z > 0.01f)
                         {
                             targetPos = pos;
                             located = true;
