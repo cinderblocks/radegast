@@ -79,7 +79,7 @@ Examples:
 Object mode:
 Turns toward a named object
 Example:
-{0}face object desk chair -- turn toward object whose names begins with ""desk chair""
+{0}face object desk chair -- turn toward object whose name contains ""desk chair""
 
 Person mode:
 Turns toward a person
@@ -159,24 +159,11 @@ Examples:
 
                 case "object":
 
-                    if (!TC.TabExists("objects"))
-                    {
-                        var tab = TC.AddTab("objects", "Objects", new ObjectsConsole((RadegastInstanceForms)Instance));
-                        tab.AllowClose = true;
-                        tab.AllowDetach = true;
-                        tab.Visible = true;
-                        tab.AllowHide = false;
-                        ((ObjectsConsole)tab.Control).RefreshObjectList();
-                        TC.Tabs["chat"].Select();
-
-                        WriteLine("Objects list was not active. Started getting object names, please try again in a minute.");
+                    if (!ObjectCommandHelper.TryGetReadyObjectsConsole(TC, Instance, WriteLine, out Objects))
                         return;
-                    }
-
-                    Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
                     var target = Objects.GetObjects().FirstOrDefault(
                         prim => prim.Properties != null 
-                                && prim.Properties.Name.IndexOf(cmd, StringComparison.OrdinalIgnoreCase) >= 0);
+                                && prim.Properties.Name.IndexOf(subarg, StringComparison.OrdinalIgnoreCase) >= 0);
                     if (target == null)
                     {
                         WriteLine("Could not find '{0}' nearby", subarg);

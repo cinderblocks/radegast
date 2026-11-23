@@ -194,20 +194,8 @@ Examples:
 
                 case "object":
 
-                    if (!TC.TabExists("objects"))
-                    {
-                        RadegastTab tab = TC.AddTab("objects", "Objects", new ObjectsConsole(((RadegastInstanceForms)Instance)));
-                        tab.AllowClose = true;
-                        tab.AllowDetach = true;
-                        tab.Visible = true;
-                        tab.AllowHide = false;
-                        ((ObjectsConsole)tab.Control).RefreshObjectList();
-                        WriteLine("Objects list was not active. Started getting object names, please try again in a minute.");
-                        TC.Tabs["chat"].Select();
+                    if (!ObjectCommandHelper.TryGetReadyObjectsConsole(TC, Instance, WriteLine, out Objects))
                         return;
-                    }
-
-                    Objects = (ObjectsConsole)TC.Tabs["objects"].Control;
                     var target = Objects.GetObjects().FirstOrDefault(
                         prim => prim.Properties != null
                                 && prim.Properties.Name.IndexOf(subarg, StringComparison.OrdinalIgnoreCase) >= 0);
