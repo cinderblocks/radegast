@@ -27,7 +27,8 @@ namespace Radegast
             {":thumbsup:", "👍"}
         };
 
-        private static readonly Regex HtmlTagRegex = new Regex("<.*?>", RegexOptions.Compiled);
+        // Only tag-like text (a letter or / after the <), so vectors such as <128, 64, 22> and "<3" survive
+        private static readonly Regex HtmlTagRegex = new Regex("</?[A-Za-z][^<>]*>", RegexOptions.Compiled);
         private static readonly Regex ControlCharsRegex = new Regex("[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]+", RegexOptions.Compiled);
         private static readonly Regex WwwRegex = new Regex("^www\\.", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         private static readonly Regex BoldRegex = new Regex(@"\*\*(.+?)\*\*", RegexOptions.Compiled);
