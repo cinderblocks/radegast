@@ -356,6 +356,7 @@ namespace Radegast
         private void InitializeClient(GridClient client)
         {
             client.Settings.Agent.MultipleSims = true;
+            client.Settings.Agent.FastRegionCrossing = true;
 
             client.Settings.World.UseInterpolationTimer = false;
             client.Settings.World.AlwaysRequestObjects = true;
