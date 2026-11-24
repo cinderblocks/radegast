@@ -616,6 +616,12 @@ namespace Radegast
                 }
                 catch (Exception) { }
             }
+            else
+            {
+                // Invisible notices (script editor status, compile errors, new notecard prompts...) were only
+                // ever heard through the Speech plugin
+                instance.ScreenReader?.Announce(ScreenReaderAnnouncer.NotificationSetting, msg);
+            }
 
             if (OnChatNotification != null)
             {

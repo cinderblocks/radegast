@@ -936,6 +936,14 @@ namespace Radegast
                 return;
             }
 
+            if (notification is Notification announced
+                && announced.Type != NotificationType.SendLureOffer
+                && announced.Type != NotificationType.SendLureRequest)
+            {
+                instance.ScreenReader?.Announce(ScreenReaderAnnouncer.NotificationSetting,
+                    $"{announced.AccessibleName}. {announced.AccessibleDescription}", important: true);
+            }
+
             // If user prefers toasts, use toast manager
             if (instance.GlobalSettings.TryGetValue("notification_toast_enabled", out var toastEnabled) && toastEnabled.AsBoolean())
             {
