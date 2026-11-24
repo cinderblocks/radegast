@@ -193,6 +193,15 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
         UpdateStatus();
         LoadSessionHistory(session);
         PlayUISound(UISounds.IM);
+
+        // A group/conference session can be created from an incoming message rather than
+        // OpenGroupIMSession, in which case it never becomes SelectedSession and would
+        // otherwise never get its first RefreshParticipants call. LMV may already have
+        // accumulated a roster for this session (e.g. a background-joined group chat) before
+        // the tab ever existed, so read it now instead of waiting on the next ENTER/LEAVE event.
+        if (session.ShowParticipants)
+            RefreshParticipants(session);
+
         return session;
     }
 
@@ -325,13 +334,15 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
                 break;
 
             case IMSessionType.Group:
+                // The simulator echoes group chat back to the sender like everyone else
+                // (SL C++: LLIMModel::sendMessage only locally echoes IM_NOTHING_SPECIAL;
+                // group/conference always go out as IM_SESSION_SEND and come back via
+                // HandleSessionSend), so no local echo here - it would show up twice.
                 Client.Self.InstantMessageGroup(session.SessionId, text);
-                AddOutgoingMessage(session, text);
                 break;
 
             case IMSessionType.Conference:
                 Client.Self.InstantMessageGroup(session.SessionId, text);
-                AddOutgoingMessage(session, text);
                 _instance.Voice?.VoiceSynth.SpeakOutbound(text);
                 break;
         }
@@ -490,7 +501,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
 
         var session = GetOrCreateSession(e.IM.IMSessionID, groupName, IMSessionType.Group, e.IM.IMSessionID);
         var fromName = _instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
-        var (grpText, grpType) = ParseMessagePose(e.IM.Message);
+        var (grpText, grpType) = ParseMessagePose(e.IM.Message, selfEmote: e.IM.FromAgentID == Client.Self.AgentID);
         AddMessage(session, new ChatLine(DateTime.Now, fromName, grpText, grpType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
         if (!IsActive)
@@ -518,7 +529,7 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
 
         var session = GetOrCreateSession(e.IM.IMSessionID, label, IMSessionType.Conference, e.IM.IMSessionID);
         var fromName = _instance.Names.Get(e.IM.FromAgentID, e.IM.FromAgentName);
-        var (confText, confType) = ParseMessagePose(e.IM.Message);
+        var (confText, confType) = ParseMessagePose(e.IM.Message, selfEmote: e.IM.FromAgentID == Client.Self.AgentID);
         AddMessage(session, new ChatLine(DateTime.Now, fromName, confText, confType, e.IM.FromAgentID));
         MarkUnreadIfNotSelected(session);
     }
@@ -577,12 +588,6 @@ public partial class IMViewModel : TabViewModelBase, IChatContext
             var (sentText, sentType) = ParseMessagePose(e.Message, selfEmote: true);
             AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, sentText, sentType, Client.Self.AgentID));
         }
-    }
-
-    private void AddOutgoingMessage(IMSession session, string text)
-    {
-        var (outText, outType) = ParseMessagePose(text, selfEmote: true);
-        AddMessage(session, new ChatLine(DateTime.Now, Client.Self.Name, outText, outType, Client.Self.AgentID));
     }
 
     private static (string text, ChatLineType type) ParseMessagePose(string message, bool selfEmote = false)
