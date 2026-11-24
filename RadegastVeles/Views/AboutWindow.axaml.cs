@@ -43,6 +43,10 @@ public partial class AboutWindow : Window
         PopulateGitHubContributors();
         PopulateSystemInfo();
         PopulateLibraries();
+
+        // Without an explicit focus target, screen readers (e.g. JAWS) never notice this
+        // window opened - keyboard/UIA focus stays on whatever had it in the owner window.
+        Opened += (_, _) => CloseButton.Focus();
     }
 
     private void PopulateVersion()

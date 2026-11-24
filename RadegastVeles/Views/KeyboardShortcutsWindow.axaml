@@ -14,6 +14,10 @@
         AutomationProperties.Name="Keyboard shortcuts window">
 
     <DockPanel Margin="12">
+        <Button x:Name="CloseButton" DockPanel.Dock="Bottom" Content="Close" Click="OnCloseClick"
+                HorizontalAlignment="Right" MinWidth="80" Margin="0,12,0,0"
+                AutomationProperties.Name="Close keyboard shortcuts window" />
+
         <TextBlock DockPanel.Dock="Top"
                    Text="Chat commands (type in the Nearby chat box)"
                    FontSize="13" FontWeight="SemiBold"

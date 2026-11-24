@@ -40,7 +40,7 @@
         </StackPanel>
 
         <!-- Close button -->
-        <Button DockPanel.Dock="Bottom" Content="Close" Click="OnCloseClick"
+        <Button x:Name="CloseButton" DockPanel.Dock="Bottom" Content="Close" Click="OnCloseClick"
                 HorizontalAlignment="Right" MinWidth="80" Margin="0,12,0,0"
                 AutomationProperties.Name="Close about window" />
 

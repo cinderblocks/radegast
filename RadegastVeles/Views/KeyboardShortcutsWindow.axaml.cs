@@ -18,10 +18,20 @@
  */
 
 using Avalonia.Controls;
+using Avalonia.Interactivity;
 
 namespace Radegast.Veles.Views;
 
 public partial class KeyboardShortcutsWindow : Window
 {
-    public KeyboardShortcutsWindow() { InitializeComponent(); }
+    public KeyboardShortcutsWindow()
+    {
+        InitializeComponent();
+
+        // Without an explicit focus target, screen readers (e.g. JAWS) never notice this
+        // window opened - keyboard/UIA focus stays on whatever had it in the owner window.
+        Opened += (_, _) => CloseButton.Focus();
+    }
+
+    private void OnCloseClick(object? sender, RoutedEventArgs e) => Close();
 }

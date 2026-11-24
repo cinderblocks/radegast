@@ -485,7 +485,7 @@ public partial class MainWindow : Window
         var vm = new KeyboardShortcutsViewModel(_session.Instance.CommandsManager);
         _keyboardShortcutsWindow = new KeyboardShortcutsWindow { DataContext = vm };
         _keyboardShortcutsWindow.Closed += (_, _) => _keyboardShortcutsWindow = null;
-        _keyboardShortcutsWindow.Show();
+        _keyboardShortcutsWindow.Show(this);
     }
 
     private void OnExitClick(object? sender, RoutedEventArgs e)
