@@ -47,7 +47,7 @@ public static class GroupMenuBuilder
         });
         menu.Items.Add(new MenuItem
         {
-            Header = "Group IM",
+            Header = "Group Chat",
             Command = new RelayCommand(() => instance.RequestGroupIM(groupId, groupName))
         });
 
