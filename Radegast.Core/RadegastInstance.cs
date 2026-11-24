@@ -69,6 +69,15 @@ namespace Radegast
         // would otherwise put the previous flags back and notices would keep opening.
         private readonly Dictionary<UUID, (bool AcceptNotices, bool ListInProfile)> _pendingNoticeSettings = new Dictionary<UUID, (bool AcceptNotices, bool ListInProfile)>();
 
+        /// <summary>
+        /// A copy of <see cref="Groups"/> that's safe to enumerate while group updates arrive
+        /// on the network thread
+        /// </summary>
+        public List<Group> GetGroups()
+        {
+            lock (_groupsLock) { return Groups.Values.ToList(); }
+        }
+
         #region Managers
         public StateManager State { get; private set; } = null!;
 
