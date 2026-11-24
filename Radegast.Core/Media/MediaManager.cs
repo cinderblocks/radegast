@@ -787,16 +787,29 @@ namespace Radegast.Media
         /// </summary>
         private void UpdateAllVolumes()
         {
-            if (MuteAll)
+            if (!SoundSystemAvailable) return;
+
+            // Object sounds, the parcel/music stream, and speech synth all play into the
+            // same FMOD master channel group (see BufferSound/Stream/Speech), each setting
+            // its own volume (e.g. BufferSound.Volume = volumeSetting * AllObjectVolume)
+            // independently of master/mute. Rather than chase every per-sound call site
+            // (and every one that starts *after* this runs, which the old per-object
+            // multiplier never caught), set the group's own gain once: FMOD multiplies it
+            // into every member channel automatically, current and future alike.
+            float multiplier = MuteAll ? 0f : MasterVolume;
+
+            invoke(delegate
             {
-                // Muted - set all to 0
-                BufferSound.AdjustVolumes(0);
-            }
-            else
-            {
-                // Apply master volume
-                BufferSound.AdjustVolumes(MasterVolume);
-            }
+                try
+                {
+                    system.getMasterChannelGroup(out var masterChannelGroup);
+                    FMODExec(masterChannelGroup.setVolume(multiplier));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error("Failed to apply master volume/mute", ex);
+                }
+            });
         }
 
         public override void Dispose()
