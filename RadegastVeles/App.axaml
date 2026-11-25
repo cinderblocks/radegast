@@ -52,6 +52,18 @@
         <Style Selector="Button.hyperlink > TextBlock">
             <Setter Property="TextDecorations" Value="Underline" />
         </Style>
+
+        <!-- TabControl defaults its tab-strip panel to KeyboardNavigation.TabNavigation="Once":
+             Tab enters the strip at one remembered tab header, then Tab again leaves the strip
+             entirely rather than moving to the next header - and Shift+Tab back out of the first
+             tab's content doesn't return to the strip at all (verified empirically: it does
+             nothing, a dead end). Screen readers (JAWS) expect every tab header to be its own Tab
+             stop in both directions, so override it to "Continue", which also closes that dead
+             end. Applies to every TabControl in the app, not just the preferences window, since
+             they all share this same default. -->
+        <Style Selector="TabControl /template/ ItemsPresenter#PART_ItemsPresenter > WrapPanel">
+            <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue" />
+        </Style>
     </Application.Styles>
 
     <TrayIcon.Icons>
