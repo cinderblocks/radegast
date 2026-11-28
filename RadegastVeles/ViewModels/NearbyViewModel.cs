@@ -474,6 +474,24 @@ public partial class NearbyViewModel : TabViewModelBase, IChatContext
     {
         if (e.Message == null) return;
 
+        // Suppress chat from muted residents/objects, matching SL's mute semantics: for
+        // objects this checks the object itself, its owner, and mute-by-name (for objects
+        // without a stable UUID, e.g. temp-attached scripts).
+        if (e.SourceType == ChatSourceType.Agent &&
+            Client.Self.MuteList.Values.Any(m => m.Type == MuteType.Resident && m.ID == e.SourceID))
+        {
+            return;
+        }
+
+        if (e.SourceType == ChatSourceType.Object &&
+            Client.Self.MuteList.Values.Any(m =>
+                (m.Type == MuteType.Resident && m.ID == e.OwnerID) ||
+                (m.Type == MuteType.Object && m.ID == e.SourceID) ||
+                (m.Type == MuteType.ByName && m.Name == e.FromName)))
+        {
+            return;
+        }
+
         // Process RLV commands from scripted objects — suppress them from the chat display
         if (e.SourceType == ChatSourceType.Object && e.Message.StartsWith("@"))
         {
