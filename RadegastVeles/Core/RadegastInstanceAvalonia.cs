@@ -406,6 +406,18 @@ public sealed class RadegastInstanceAvalonia : RadegastInstance
                 NotificationReceived?.Invoke(this, NotificationViewModel.ForGenericMessage("Message", msg.Message));
                 MediaManager.PlayUISound(UISounds.Alert);
                 break;
+
+            // llInstantMessage() from a scripted object - e.g. a "wishing well" telling only
+            // the toucher their result, rather than broadcasting it as nearby chat. Shown as
+            // a chat line (matching Legacy's HandleIMFromObject) rather than a popup, since
+            // that's what it would have been if the object had used llSay/llOwnerSay instead.
+            case InstantMessageDialog.MessageFromObject:
+                if (Client.Self.MuteList.Values.Any(m =>
+                        (m.Type == MuteType.Object && m.ID == msg.IMSessionID) ||
+                        (m.Type == MuteType.ByName && m.Name == msg.FromAgentName) ||
+                        (m.Type == MuteType.Resident && m.ID == msg.FromAgentID))) return;
+                ShowNotificationInChat($"{msg.FromAgentName}: {msg.Message}");
+                break;
         }
     }
 
