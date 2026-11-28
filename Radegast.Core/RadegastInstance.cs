@@ -191,6 +191,17 @@ namespace Radegast
             State = new StateManager(this);
             MediaManager = new MediaManager(this);
             CommandsManager = new CommandsManager(this);
+
+            // Built-in chat commands (status, etc.) that live in this shared assembly - the UI
+            // projects (Radegast, RadegastVeles) each have their own additional commands loaded
+            // separately (Legacy via PluginManager scanning its own entry assembly; Veles via
+            // whatever registers its plugin-contributed commands), so this only needs to run once
+            // here rather than being duplicated in each.
+            foreach (var type in typeof(RadegastCommand).Assembly.GetTypes())
+            {
+                CommandsManager.LoadType(type);
+            }
+
             Movement = new RadegastMovement(this);
 
             InitializeClient(Client);

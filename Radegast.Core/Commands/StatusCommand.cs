@@ -55,8 +55,8 @@ namespace Radegast.Commands
                 if (Client.Self.SittingOn != 0)
                 {
                     sb.Append("Sitting");
-                    Primitive seat;
-                    if (Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(Client.Self.SittingOn, out seat))
+                    Primitive? seat;
+                    if (Client.Network.CurrentSim!.ObjectsPrimitives.TryGetValue(Client.Self.SittingOn, out seat))
                     {
                         if (seat.Properties != null)
                         {
@@ -100,7 +100,7 @@ namespace Radegast.Commands
             if (arg("region"))
             {
                 sb.AppendLine(string.Format("Region: {0} ({1})",
-                    Client.Network.CurrentSim.Name,
+                    Client.Network.CurrentSim!.Name,
                     Utils.EnumToText(Client.Network.CurrentSim.Access)));
             }
 
@@ -130,9 +130,9 @@ namespace Radegast.Commands
 
             if (arg("location"))
             {
-                Primitive seat = null;
+                Primitive? seat = null;
                 if (Client.Self.SittingOn != 0)
-                    Client.Network.CurrentSim.ObjectsPrimitives.TryGetValue(Client.Self.SittingOn, out seat);
+                    Client.Network.CurrentSim!.ObjectsPrimitives.TryGetValue(Client.Self.SittingOn, out seat);
 
                 Vector3 pos = Client.Self.RelativePosition;
                 if (seat != null) pos = seat.Position + pos;
@@ -163,7 +163,7 @@ namespace Radegast.Commands
             {
                 try
                 {
-                    TimeZoneInfo SLTime = null;
+                    TimeZoneInfo? SLTime = null;
                     foreach (TimeZoneInfo tz in TimeZoneInfo.GetSystemTimeZones())
                     {
                         if (tz.Id == "Pacific Standard Time" || tz.Id == "America/Los_Angeles")
