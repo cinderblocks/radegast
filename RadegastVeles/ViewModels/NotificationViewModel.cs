@@ -47,8 +47,22 @@ public class NotificationViewModel : ObservableObject
     public string Message
     {
         get => _message;
-        set => SetProperty(ref _message, value);
+        set
+        {
+            if (SetProperty(ref _message, value))
+                OnPropertyChanged(nameof(AnnouncementText));
+        }
     }
+
+    /// <summary>
+    /// Title, subtitle and message combined into one string. Bound as the accessible Name of
+    /// a live-region element (see ScriptDialogOverlay.axaml) so a screen reader announces the
+    /// whole notification the moment it appears, instead of requiring the user to tab around
+    /// hunting for each piece - the visible layout still shows them as separate lines.
+    /// </summary>
+    public string AnnouncementText => string.IsNullOrEmpty(Subtitle)
+        ? $"{Title}. {Message}"
+        : $"{Title}. {Subtitle}. {Message}";
 
     /// <summary>Action buttons. Empty for text-box mode.</summary>
     public IReadOnlyList<NotificationButtonViewModel> Buttons { get; }
